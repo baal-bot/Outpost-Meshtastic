@@ -22,13 +22,18 @@ class FederationMailService:
         context = b"outpost-mail-v1\0" + b"\0".join(sorted((first.encode(), second.encode())))
         return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=context).derive(secret)
 
+    @staticmethod
+    def _handle(value: object) -> str:
+        return str(value).strip().removeprefix("@").strip().lower()
+
     async def seal(
         self, peer_id: str, recipient: str, sender: str, subject: str, body: str
     ) -> dict[str, Any]:
         peer = await self.peers.by_mesh_id(peer_id)
         if peer.state != "active" or not peer.relay_mail:
             raise ValueError("mail relay is not enabled for this peer")
-        if not recipient.strip() or len(recipient) > 40 or len(body.encode()) > 1200:
+        recipient = self._handle(recipient)
+        if not recipient or len(recipient) > 40 or len(body.encode()) > 800:
             raise ValueError("invalid federation mail recipient or body size")
         now = int(self.clock.now().timestamp())
         recent = await self.database.read(
@@ -40,7 +45,7 @@ class FederationMailService:
             raise ValueError("peer mail relay quota exceeded")
         relay_id, nonce = secrets.token_hex(16), secrets.token_bytes(12)
         plaintext = json.dumps(
-            {"to": recipient.lower(), "from": sender[:80], "subject": subject[:120], "body": body},
+            {"to": recipient, "from": sender[:80], "subject": subject[:120], "body": body},
             separators=(",", ":"),
         ).encode()
         secret = await self.peers.secret(peer_id)
@@ -50,7 +55,7 @@ class FederationMailService:
         await self.database.write(
             "INSERT INTO fed_mail_delivery(relay_id,peer_id,direction,recipient_handle,state,"
             "created_at,updated_at,expires_at) VALUES(?,?,'out',?,'queued',?,?,?)",
-            (relay_id, peer.id, recipient.lower(), now, now, now + 86_400),
+            (relay_id, peer.id, recipient, now, now, now + 86_400),
         )
         return {
             "relay_id": relay_id,
@@ -80,7 +85,7 @@ class FederationMailService:
         members = await self.database.read(
             "SELECT id,handle FROM member WHERE lower(handle)=lower(?) "
             "AND trust NOT IN ('blocked','guest')",
-            (str(message["to"]),),
+            (self._handle(message["to"]),),
         )
         if not members:
             raise ValueError("local federation mail recipient was not found")
@@ -102,6 +107,14 @@ class FederationMailService:
         await self.database.write(
             "INSERT INTO fed_mail_delivery(relay_id,peer_id,direction,mail_id,recipient_handle,"
             "state,created_at,updated_at,expires_at) VALUES(?,?,'in',?,?,'delivered',?,?,?)",
-            (relay_id, peer.id, mail_id, str(message["to"]), now, now, int(envelope["expires_at"])),
+            (
+                relay_id,
+                peer.id,
+                mail_id,
+                self._handle(message["to"]),
+                now,
+                now,
+                int(envelope["expires_at"]),
+            ),
         )
         return relay_id, "delivered"

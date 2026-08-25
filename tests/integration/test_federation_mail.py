@@ -29,7 +29,7 @@ async def test_encrypted_mail_relay_delivers_to_local_member_once(tmp_path) -> N
     sender = FederationMailService(first_db, first_peers, VirtualClock())
     receiver = FederationMailService(second_db, second_peers, VirtualClock())
 
-    envelope = await sender.seal("!bbbbbbbb", "alex", "sam@Alpha", "Check in", "We are safe.")
+    envelope = await sender.seal("!bbbbbbbb", " @alex ", "sam@Alpha", "Check in", "We are safe.")
     relay_id, state = await receiver.open("!aaaaaaaa", envelope)
 
     assert state == "delivered"

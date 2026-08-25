@@ -212,7 +212,7 @@ class FederationMailBody(BaseModel):
     peer_mesh_id: str
     recipient_handle: str = Field(min_length=1, max_length=40)
     subject: str = Field(default="", max_length=120)
-    body: str = Field(min_length=1, max_length=1200)
+    body: str = Field(min_length=1, max_length=800)
 
 
 def _timestamp(value: int) -> str:
