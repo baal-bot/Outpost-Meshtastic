@@ -64,3 +64,42 @@ async def test_manifest_obeys_peer_policy_and_missing_is_bounded(tmp_path) -> No
             102,
         )
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_export_namespaces_local_ids_with_outpost_identity(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    peers = FederationPeerService(database, VirtualClock(), "!localnode")
+    await peers.discover("!remote", "Remote", 1, {}, "radio")
+    await database.write("UPDATE fed_peer SET state='active' WHERE mesh_id='!remote'")
+    peer = await peers.update_sync_policy(
+        "!remote",
+        boards=["gen"],
+        sync_incidents=False,
+        relay_alerts=False,
+        quota_items_per_hour=20,
+    )
+    await database.write("UPDATE board SET federated=1 WHERE slug='gen'")
+    thread_id = await database.write(
+        "INSERT INTO thread(uid,board_id,subject,origin_node,created_at,last_post_at) "
+        "VALUES('local:1',1,'Test','local',1,1)"
+    )
+    await database.write(
+        "INSERT INTO post(uid,thread_id,seq,author_label,origin_node,body,created_at) "
+        "VALUES('local:1',?,1,'operator','local','Body',1)",
+        (thread_id,),
+    )
+    sync = FederationSyncService(database, "!localnode")
+
+    manifest = await sync.manifest(peer)
+    assert manifest[0].uid == "!localnode:local:1"
+    exported = await sync.export_items(peer, [{"stream": "board:gen", "uid": "!localnode:local:1"}])
+    assert exported[0]["uid"] == "!localnode:local:1"
+    assert exported[0]["payload"]["uid"] == "!localnode:local:1"
+    assert exported[0]["payload"]["thread_uid"] == "!localnode:local:1"
+    assert (
+        await sync.export_items(peer, [{"stream": "board:gen", "uid": "!somewhere-else:local:1"}])
+        == []
+    )
+    await database.close()

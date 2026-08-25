@@ -587,6 +587,7 @@ class OutpostApp:
             if not isinstance(value, dict) or value.get("mesh_id") != sender:
                 raise FrameError("federation identity does not match packet sender")
             self.federation.local_mesh_id = self.radio.local_node_id
+            self.federation_sync.local_mesh_id = self.radio.local_node_id
             if msg_type is MessageType.HELLO:
                 capabilities = value.get("capabilities", {})
                 if not isinstance(capabilities, dict):

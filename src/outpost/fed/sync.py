@@ -21,8 +21,18 @@ class ManifestItem:
 
 
 class FederationSyncService:
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, local_mesh_id: str = "") -> None:
         self.database = database
+        self.local_mesh_id = local_mesh_id
+
+    def _wire_uid(self, uid: str) -> str:
+        return f"{self.local_mesh_id}:{uid}" if self.local_mesh_id else uid
+
+    def _local_uid(self, uid: str) -> str | None:
+        if not self.local_mesh_id:
+            return uid
+        prefix = f"{self.local_mesh_id}:"
+        return uid[len(prefix) :] if uid.startswith(prefix) else None
 
     @staticmethod
     def _digest(*values: Any) -> str:
@@ -46,9 +56,14 @@ class FederationSyncService:
             items.extend(
                 ManifestItem(
                     f"board:{row['slug']}",
-                    row["uid"],
+                    self._wire_uid(row["uid"]),
                     row["edited_at"] or row["created_at"],
-                    self._digest(row["uid"], row["thread_uid"], row["body"], row["author_label"]),
+                    self._digest(
+                        self._wire_uid(row["uid"]),
+                        self._wire_uid(row["thread_uid"]),
+                        row["body"],
+                        row["author_label"],
+                    ),
                 )
                 for row in rows
             )
@@ -59,7 +74,9 @@ class FederationSyncService:
                 (limit,),
             )
             items.extend(
-                ManifestItem("incidents", row["uid"], row["updated_at"], self._digest(*row))
+                ManifestItem(
+                    "incidents", self._wire_uid(row["uid"]), row["updated_at"], self._digest(*row)
+                )
                 for row in rows
             )
         if peer.relay_alerts:
@@ -71,7 +88,7 @@ class FederationSyncService:
             items.extend(
                 ManifestItem(
                     "alerts",
-                    row["uid"],
+                    self._wire_uid(row["uid"]),
                     row["cancelled_at"] or row["raised_at"],
                     self._digest(*row),
                 )
@@ -102,6 +119,9 @@ class FederationSyncService:
         exported: list[dict[str, Any]] = []
         for request in requests[:8]:
             stream, uid = str(request.get("stream", "")), str(request.get("uid", ""))
+            local_uid = self._local_uid(uid)
+            if local_uid is None:
+                continue
             rows: list[Any] = []
             if stream.startswith("board:") and stream[6:] in peer.boards:
                 rows = await self.database.read(
@@ -109,23 +129,26 @@ class FederationSyncService:
                        p.edited_at,t.uid thread_uid,t.subject,b.slug FROM post p
                        JOIN thread t ON t.id=p.thread_id JOIN board b ON b.id=t.board_id
                        WHERE p.uid=? AND p.hidden=0 AND b.federated=1 AND b.slug=?""",
-                    (uid, stream[6:]),
+                    (local_uid, stream[6:]),
                 )
             elif stream == "incidents" and peer.sync_incidents:
                 rows = await self.database.read(
                     "SELECT uid,type,severity,status,title,body,lat,lon,location_text,radius_m,"
                     "reporter_label,origin_node,created_at,updated_at,expires_at,resolved_at,"
                     "resolution_note FROM incident WHERE uid=?",
-                    (uid,),
+                    (local_uid,),
                 )
             elif stream == "alerts" and peer.relay_alerts:
                 rows = await self.database.read(
                     "SELECT uid,severity,headline,body,source,source_ref,raised_by,raised_at,"
                     "effective_at,expires_at,cancelled_at FROM alert WHERE uid=?",
-                    (uid,),
+                    (local_uid,),
                 )
             if rows:
                 payload = dict(rows[0])
+                payload["uid"] = uid
+                if stream.startswith("board:"):
+                    payload["thread_uid"] = self._wire_uid(str(payload["thread_uid"]))
                 exported.append(
                     {
                         "stream": stream,
