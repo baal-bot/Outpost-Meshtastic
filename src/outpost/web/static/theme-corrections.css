@@ -105,6 +105,15 @@ html[data-theme="dark"] .emergency-card [data-add-stage] {
   padding: 0;
   line-height: 1;
 }
+.emergency-card .close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  line-height: 1;
+}
 html[data-theme="daylight"] .current-metrics strong,
 html[data-theme="daylight"] .env-day strong,
 html[data-theme="daylight"] .env-hourly strong,
