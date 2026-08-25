@@ -446,6 +446,32 @@ class OutpostApp:
             }
         raise ValueError("public knowledge provider is not configured")
 
+    @staticmethod
+    def _service_result_to_wire(service: str, result: dict[str, object]) -> dict[str, object]:
+        if service != "weather":
+            return result
+        names = {
+            "temperature_c": "t",
+            "precipitation_mm": "p",
+            "wind_kph": "w",
+            "wind_direction": "d",
+            "weather_code": "c",
+        }
+        return {wire: result[name] for name, wire in names.items() if name in result}
+
+    @staticmethod
+    def _service_result_from_wire(service: str, result: object) -> object:
+        if service != "weather" or not isinstance(result, dict):
+            return result
+        names = {
+            "t": "temperature_c",
+            "p": "precipitation_mm",
+            "w": "wind_kph",
+            "d": "wind_direction",
+            "c": "weather_code",
+        }
+        return {names.get(str(name), str(name)): value for name, value in result.items()}
+
     async def _federation_service_loop(self) -> None:
         while True:
             now = int(self.clock.now().timestamp())
@@ -736,7 +762,7 @@ class OutpostApp:
                 "request_id": request_id,
                 "mesh_id": self.federation.local_mesh_id,
                 "ok": ok,
-                "result": result,
+                "result": self._service_result_to_wire(service, result),
                 "provenance": provenance,
                 "error": error,
             },
@@ -784,7 +810,10 @@ class OutpostApp:
             "completed_at=?,updated_at=? WHERE request_id=?",
             (
                 "complete" if ok else "failed",
-                json.dumps(value.get("result", {}), separators=(",", ":")),
+                json.dumps(
+                    self._service_result_from_wire(rows[0]["service"], value.get("result", {})),
+                    separators=(",", ":"),
+                ),
                 json.dumps(value.get("provenance", {}), separators=(",", ":")),
                 str(value.get("error") or "")[:160] or None,
                 now,

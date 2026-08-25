@@ -4,7 +4,7 @@ import pytest
 
 from outpost.app import OutpostApp
 from outpost.config import Config
-from outpost.fed import MessageType
+from outpost.fed import FrameCodec, MessageType
 from outpost.transport.models import InboundMessage
 
 
@@ -78,3 +78,36 @@ async def test_service_request_requires_active_capable_peer(tmp_path) -> None:
         await app.request_federation_service("alerts", {})
 
     await app.database.close()
+
+
+def test_weather_service_wire_result_stays_below_reliable_radio_size() -> None:
+    result = {
+        "temperature_c": 25.555555555555557,
+        "precipitation_mm": 0.0,
+        "wind_kph": 11.265408,
+        "wind_direction": 270,
+        "weather_code": 0,
+    }
+    wire = OutpostApp._service_result_to_wire("weather", result)
+    codec = FrameCodec()
+    frames = codec.encode(
+        MessageType.SERVICE_RESPONSE,
+        {
+            "request_id": "03ba13dafebbe599be8017b5",
+            "mesh_id": "!699c2f30",
+            "ok": True,
+            "result": wire,
+            "provenance": {
+                "provider": "nws",
+                "fetched_at": 1787680919,
+                "serving_outpost": "!699c2f30",
+            },
+            "error": None,
+        },
+        1,
+        bytes(range(32)),
+    )
+
+    assert len(frames) == 1
+    assert len(frames[0]) < 200
+    assert OutpostApp._service_result_from_wire("weather", wire) == result
