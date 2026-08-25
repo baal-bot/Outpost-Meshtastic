@@ -206,6 +206,33 @@ html[data-theme="daylight"] .solicitation-status {
   background: #fff7e5;
   border-color: #d5ad5d;
 }
+html[data-theme="daylight"] .safety-banner {
+  color: #674100;
+  background: #fff4d9;
+  border-color: #c99736;
+}
+html[data-theme="daylight"] .compose-panel form > button,
+html[data-theme="daylight"] .event-empty form > button,
+html[data-theme="daylight"] .alert-submit button,
+html[data-theme="daylight"] .solicitation-review > button,
+html[data-theme="daylight"] .map-detail [data-alert] {
+  color: #fff;
+  background: #23623f;
+  border-color: #23623f;
+}
+html[data-theme="daylight"] .compose-panel form > button:hover,
+html[data-theme="daylight"] .event-empty form > button:hover,
+html[data-theme="daylight"] .alert-submit button:hover,
+html[data-theme="daylight"] .solicitation-review > button:hover,
+html[data-theme="daylight"] .map-detail [data-alert]:hover { background: #194d31; }
+html[data-theme="daylight"] .compose-panel form > button:disabled,
+html[data-theme="daylight"] .event-empty form > button:disabled,
+html[data-theme="daylight"] .alert-submit button:disabled,
+html[data-theme="daylight"] .solicitation-review > button:disabled {
+  color: #52685e;
+  background: #d6e1db;
+  border-color: #b5c7bd;
+}
 
 html[data-theme="night"] .login-screen { background: rgb(4 3 2 / 94%); }
 html[data-theme="night"] .login-card {
