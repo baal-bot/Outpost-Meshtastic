@@ -255,7 +255,8 @@ def create_web_app(
     async def security_headers(request: Any, call_next: Any) -> Any:
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; img-src 'self' https://tile.openstreetmap.org; object-src 'none'"
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' https://tile.openstreetmap.org; object-src 'none'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -302,6 +303,11 @@ def create_web_app(
         if not manifest.is_file():
             return Response(status_code=404)
         return FileResponse(manifest, media_type="application/json")
+
+    @app.get("/favicon.ico", include_in_schema=False, response_model=None)
+    async def favicon() -> Response:
+        icon = Path(static_dir or "") / "favicon.svg"
+        return FileResponse(icon, media_type="image/svg+xml")
 
     @app.get("/tiles/{zoom}/{x}/{y}.png", response_model=None)
     async def tile_image(zoom: int, x: int, y: int) -> Response:
