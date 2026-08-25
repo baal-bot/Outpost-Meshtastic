@@ -1,0 +1,31 @@
+.federation-toggle {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  padding: 0;
+  border-radius: 7px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.federation-toggle.enable {
+  color: #bdfbd2;
+  background: #145c36;
+  border: 1px solid #31a866;
+}
+
+.federation-toggle.disable {
+  color: #ffd4d0;
+  background: #6d2525;
+  border: 1px solid #bd5550;
+}
+
+.remote-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--green);
+  font-size: .58rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+}

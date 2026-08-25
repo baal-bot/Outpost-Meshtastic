@@ -1464,7 +1464,10 @@ def create_web_app(
             rows = await database.read(
                 """
                 SELECT t.id,t.subject,t.author_id,COALESCE(m.handle,'anon') AS author,
-                       t.post_count,t.created_at,t.last_post_at,t.pinned,t.locked
+                       t.post_count,t.created_at,t.last_post_at,t.pinned,t.locked,t.origin_node,
+                       t.uid LIKE '!%:%' AS remote,
+                       (SELECT node_name FROM fed_peer p WHERE t.uid LIKE p.mesh_id || ':%'
+                        LIMIT 1) AS origin_name
                 FROM thread t LEFT JOIN member m ON m.id=t.author_id
                 WHERE t.board_id=? AND t.hidden=0
                 ORDER BY t.pinned DESC,t.last_post_at DESC LIMIT ? OFFSET ?
@@ -1484,7 +1487,10 @@ def create_web_app(
         async def thread(thread_id: int) -> dict[str, Any]:
             thread_rows = await database.read(
                 """
-                SELECT t.id,t.subject,t.pinned,t.locked,t.hidden,b.id AS board_id,b.slug
+                SELECT t.id,t.subject,t.pinned,t.locked,t.hidden,t.origin_node,
+                       t.uid LIKE '!%:%' AS remote,
+                       (SELECT node_name FROM fed_peer p WHERE t.uid LIKE p.mesh_id || ':%'
+                        LIMIT 1) AS origin_name,b.id AS board_id,b.slug
                 FROM thread t JOIN board b ON b.id=t.board_id WHERE t.id=?
                 """,
                 (thread_id,),
@@ -1493,7 +1499,10 @@ def create_web_app(
                 return {"id": thread_id, "posts": []}
             rows = await database.read(
                 """
-                SELECT p.id,p.seq,p.author_label,p.body,p.created_at,p.hidden,p.hidden_reason
+                SELECT p.id,p.seq,p.author_label,p.body,p.created_at,p.hidden,p.hidden_reason,
+                       p.origin_node,p.uid LIKE '!%:%' AS remote,
+                       (SELECT node_name FROM fed_peer peer WHERE p.uid LIKE peer.mesh_id || ':%'
+                        LIMIT 1) AS origin_name
                 FROM post p WHERE p.thread_id=? ORDER BY p.seq
                 """,
                 (thread_id,),

@@ -151,6 +151,7 @@ class FederationSyncService:
                 payload["uid"] = uid
                 if stream.startswith("board:"):
                     payload["thread_uid"] = self._wire_uid(str(payload["thread_uid"]))
+                    payload["origin_node"] = uid.split(":", 1)[0]
                 exported.append(
                     {
                         "stream": stream,
@@ -195,7 +196,8 @@ class FederationSyncService:
 
     async def import_inbox(self, item_id: int, operator: str, now: int) -> str:
         rows = await self.database.read(
-            "SELECT i.*,p.boards,p.sync_incidents,p.relay_alerts FROM fed_inbox_item i "
+            "SELECT i.*,p.mesh_id,p.node_name,p.boards,p.sync_incidents,p.relay_alerts "
+            "FROM fed_inbox_item i "
             "JOIN fed_peer p ON p.id=i.peer_id WHERE i.id=? AND i.state='pending'",
             (item_id,),
         )
@@ -224,7 +226,7 @@ class FederationSyncService:
                         thread_uid,
                         boards[0]["id"],
                         str(payload["subject"])[:160],
-                        str(payload.get("origin_node") or "federation"),
+                        row["mesh_id"],
                         int(payload["created_at"]),
                         int(payload["created_at"]),
                     ),
@@ -240,7 +242,7 @@ class FederationSyncService:
                     thread_id,
                     sequence[0]["value"],
                     str(payload["author_label"])[:80],
-                    str(payload.get("origin_node") or "federation"),
+                    row["mesh_id"],
                     str(payload["body"])[:4000],
                     int(payload["created_at"]),
                     payload.get("edited_at"),
