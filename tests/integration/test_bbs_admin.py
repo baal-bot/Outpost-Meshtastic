@@ -19,9 +19,15 @@ async def test_bbs_admin_lifecycle_validates_and_audits(tmp_path) -> None:
             "title": "Garden",
             "description": "Plants and produce",
             "min_post_trust": "member",
+            "federated": True,
         }
     )
-    assert await admin.update_board(board_id, {"min_post_trust": "trusted"}) is True
+    assert (
+        await admin.update_board(board_id, {"min_post_trust": "trusted", "federated": False})
+        is True
+    )
+    board = await database.read("SELECT federated FROM board WHERE id=?", (board_id,))
+    assert board[0]["federated"] == 0
     thread_id = await admin.create_thread(board_id, "Seed exchange", "Bring labeled seeds.")
     post_id = await admin.reply(thread_id, "Operator will provide envelopes.")
     assert await admin.update_thread(thread_id, {"pinned": True, "locked": True}) is True

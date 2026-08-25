@@ -17,6 +17,7 @@ BOARD_FIELDS = {
     "retention_days",
     "sort_order",
     "archived",
+    "federated",
 }
 THREAD_FIELDS = {"pinned", "locked", "hidden"}
 
@@ -53,8 +54,9 @@ class BBSAdmin:
         board_id = await self.database.write(
             """
             INSERT INTO board(
-              slug,title,description,min_read_trust,min_post_trust,retention_days,sort_order,created_at
-            ) VALUES(?,?,?,?,?,?,?,?)
+              slug,title,description,min_read_trust,min_post_trust,retention_days,sort_order,
+              federated,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?)
             """,
             (
                 slug,
@@ -64,6 +66,7 @@ class BBSAdmin:
                 values.get("min_post_trust", "member"),
                 values.get("retention_days"),
                 values.get("sort_order", 100),
+                int(bool(values.get("federated", False))),
                 int(self.clock.now().timestamp()),
             ),
         )

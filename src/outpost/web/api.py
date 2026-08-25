@@ -76,6 +76,7 @@ class BoardCreateBody(BaseModel):
     min_post_trust: str = "member"
     retention_days: int | None = None
     sort_order: int = 100
+    federated: bool = False
 
 
 class BoardPatchBody(BaseModel):
@@ -86,6 +87,7 @@ class BoardPatchBody(BaseModel):
     retention_days: int | None = None
     sort_order: int | None = None
     archived: bool | None = None
+    federated: bool | None = None
 
 
 class ThreadCreateBody(BaseModel):
@@ -1362,7 +1364,8 @@ def create_web_app(
             rows = await database.read(
                 """
                 SELECT b.id,b.slug,b.title,b.description,b.min_read_trust,b.min_post_trust,
-                       b.retention_days,b.sort_order,b.archived,COUNT(t.id) AS thread_count
+                       b.retention_days,b.sort_order,b.archived,b.federated,
+                       COUNT(t.id) AS thread_count
                 FROM board b LEFT JOIN thread t ON t.board_id=b.id AND t.hidden=0
                 WHERE b.archived=0 GROUP BY b.id ORDER BY b.sort_order,b.id LIMIT ? OFFSET ?
                 """,
