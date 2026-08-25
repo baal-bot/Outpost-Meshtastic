@@ -227,46 +227,51 @@ class OutpostApp:
 
     async def _federation_hello_loop(self) -> None:
         while True:
-            local_id = self.radio.local_node_id
-            if self.config.modules.fed.enabled and local_id:
-                self.federation.local_mesh_id = local_id
-                capabilities = {
-                    "internet": True,
-                    "weather": self.config.modules.env.enabled,
-                    "alerts": self.config.modules.watch.enabled,
-                    "bbs": self.config.modules.bbs.enabled,
-                    "ai": self.config.modules.ai.enabled,
-                }
-                counter = int(self.clock.now().timestamp()) & 0xFFFFFFFF
-                frames = self.federation_codec.encode(
-                    MessageType.HELLO,
-                    {
-                        "mesh_id": local_id,
-                        "name": self.config.node.name,
-                        "protocol": 1,
-                        "capabilities": capabilities,
-                    },
-                    counter,
-                    None,
-                )
-                self.governor.enqueue_many(
-                    [
-                        OutboundItem(
-                            text="",
-                            binary_payload=frame,
-                            portnum=self.config.radio.federation_portnum,
-                            dest="^all",
-                            channel=0,
-                            traffic_class=TrafficClass.FEDERATION,
-                            want_ack=False,
-                            multipart=len(frames) > 1,
-                        )
-                        for frame in frames
-                    ]
-                )
+            if self.config.modules.fed.enabled and self._queue_federation_hello("^all"):
                 await self.clock.sleep(self.config.fed.hello_interval_hours * 3_600)
             else:
                 await self.clock.sleep(30)
+
+    def _queue_federation_hello(self, destination: str) -> bool:
+        local_id = self.radio.local_node_id
+        if not local_id:
+            return False
+        self.federation.local_mesh_id = local_id
+        capabilities = {
+            "internet": True,
+            "weather": self.config.modules.env.enabled,
+            "alerts": self.config.modules.watch.enabled,
+            "bbs": self.config.modules.bbs.enabled,
+            "ai": self.config.modules.ai.enabled,
+        }
+        counter = int(self.clock.now().timestamp()) & 0xFFFFFFFF
+        frames = self.federation_codec.encode(
+            MessageType.HELLO,
+            {
+                "mesh_id": local_id,
+                "name": self.config.node.name,
+                "protocol": 1,
+                "capabilities": capabilities,
+            },
+            counter,
+            None,
+        )
+        admitted = self.governor.enqueue_many(
+            [
+                OutboundItem(
+                    text="",
+                    binary_payload=frame,
+                    portnum=self.config.radio.federation_portnum,
+                    dest=destination,
+                    channel=0,
+                    traffic_class=TrafficClass.FEDERATION,
+                    want_ack=destination != "^all",
+                    multipart=len(frames) > 1,
+                )
+                for frame in frames
+            ]
+        )
+        return admitted is not None
 
     def _queue_federation_frames(
         self, frames: list[bytes], destination: str, *, want_ack: bool
@@ -543,6 +548,11 @@ class OutpostApp:
                     capabilities,
                     "mqtt" if getattr(message, "via_mqtt", False) else "radio",
                 )
+                # A node may have joined just after our infrequent broadcast HELLO.
+                # Answer broadcasts directly so both peer directories converge without
+                # another broadcast or an endless HELLO response loop.
+                if not getattr(message, "is_direct", False):
+                    self._queue_federation_hello(sender)
             elif msg_type is MessageType.PAIR_REQ:
                 _, acknowledgement, _ = await self.federation.accept_pairing_request(
                     sender, bytes(value["public_key"]), bytes(value["nonce"])

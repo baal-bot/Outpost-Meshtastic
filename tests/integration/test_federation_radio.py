@@ -15,6 +15,7 @@ async def test_radio_hello_creates_pending_peer(tmp_path) -> None:
     )
     app = OutpostApp(config)
     await app.database.open()
+    app.radio._local_id = "!local"
     frame = app.federation_codec.encode(
         MessageType.HELLO,
         {
@@ -44,6 +45,41 @@ async def test_radio_hello_creates_pending_peer(tmp_path) -> None:
     peer = await app.federation.by_mesh_id("!remote")
     assert peer.state == "pending"
     assert peer.discovery_transports == ["mqtt"]
+    queued = app.governor.queued_items()
+    assert len(queued) == 1
+    assert queued[0].dest == "!remote"
+    assert queued[0].portnum == config.radio.federation_portnum
+    await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_hello_does_not_trigger_response_loop(tmp_path) -> None:
+    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    frame = app.federation_codec.encode(
+        MessageType.HELLO,
+        {"mesh_id": "!remote", "name": "Remote", "protocol": 1, "capabilities": {}},
+        1,
+        None,
+    )[0]
+
+    await app._handle_federation_discovery(
+        InboundMessage(
+            1,
+            "!remote",
+            "!local",
+            0,
+            config.radio.federation_portnum,
+            True,
+            None,
+            frame,
+            datetime.now(UTC),
+        )
+    )
+
+    assert app.governor.queued_items() == []
     await app.database.close()
 
 
