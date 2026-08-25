@@ -294,6 +294,22 @@ html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-det
 .alert-footprint:not(:disabled):active { transform: translate(-50%, -50%); }
 .map-point.node:not(:disabled):active,
 .map-point.quake:not(:disabled):active { transform: translate(-50%, -50%) rotate(45deg); }
+.map-point:not(.quake):is(:hover, .selected) {
+  width: 22px;
+  height: 22px;
+  outline: 2px solid rgb(255 255 255 / 88%);
+  outline-offset: 3px;
+  z-index: 4;
+}
+.map-point.quake:is(:hover, .selected) {
+  width: 13px;
+  height: 13px;
+  outline: 2px solid rgb(255 255 255 / 88%);
+  outline-offset: 3px;
+  z-index: 4;
+}
+.map-point.quake.significant:is(:hover, .selected) { width: 18px; height: 18px; }
+html[data-theme="daylight"] .map-point:is(:hover, .selected) { outline-color: rgb(22 60 44 / 88%); }
 
 /* Semantic action system: neutral by default, explicit primary and danger intent. */
 button,
