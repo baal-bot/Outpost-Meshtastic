@@ -1,6 +1,6 @@
 const storageKey = "outpost.appearance.theme";
 if (!document.querySelector('link[href^="/theme-corrections.css"]')) {
-  document.head.insertAdjacentHTML("beforeend", '<link rel="stylesheet" href="/theme-corrections.css?v=11">');
+  document.head.insertAdjacentHTML("beforeend", '<link rel="stylesheet" href="/theme-corrections.css?v=12">');
 }
 const allowed = new Set(["system", "dark", "daylight", "night"]);
 const media = window.matchMedia("(prefers-color-scheme: light)");
