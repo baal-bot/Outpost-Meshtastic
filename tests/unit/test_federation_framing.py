@@ -52,6 +52,18 @@ def test_fragment_ceiling_is_enforced() -> None:
         FrameCodec(max_fragments=2).encode(MessageType.ITEM, os.urandom(900), 1, SECRET)
 
 
+def test_frames_stay_under_live_radio_payload_ceiling() -> None:
+    frames = FrameCodec().encode(
+        MessageType.MAIL_RELAY,
+        {"mesh_id": "!remote", "ciphertext": os.urandom(700)},
+        1,
+        SECRET,
+    )
+
+    assert len(frames) > 1
+    assert max(map(len, frames)) <= 188
+
+
 def test_incomplete_message_expires() -> None:
     codec = FrameCodec()
     frames = codec.encode(MessageType.ITEM, os.urandom(600), 10, SECRET)

@@ -19,9 +19,10 @@ observed over live radios, not only in automated tests.
 - [ ] Partition both transports, reconnect, and verify bounded catch-up respects airtime policy.
 
 Live testing found that 225–233-byte application payloads were not reliably acknowledged by the
-test radios, while payloads at 188 bytes were. Routine weather responses therefore use compact
-wire keys and restore descriptive keys after receipt. Multipart retry remains an open resilience
-test rather than being assumed reliable from nominal packet limits.
+test radios, while payloads at 188 bytes were. Routine weather responses use compact wire keys and
+restore descriptive keys after receipt, and all federation fragments are capped at 188 bytes.
+Multipart retry remains an open resilience test rather than being assumed reliable from nominal
+packet limits.
 
 ## Data and mail
 

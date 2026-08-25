@@ -13,7 +13,10 @@ import cbor2
 MAGIC = 0x4F
 VERSION = 1
 HEADER_SIZE = 18
-FRAGMENT_BODY_SIZE = 215
+# Live two-node acceptance found that nominally valid 225-233 byte application
+# payloads were not reliably delivered by the test radios. Keep the complete
+# private-app frame at the proven 188-byte ceiling (18-byte header + body).
+FRAGMENT_BODY_SIZE = 170
 FLAG_MORE = 0x01
 FLAG_COMPRESSED = 0x02
 
