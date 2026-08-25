@@ -131,6 +131,82 @@ html[data-theme="daylight"] .forecast-hours span {
 }
 html[data-theme="daylight"] .forecast-day div b { color: #286b45; }
 
+/* Watch has dense operational components with legacy dark-mode surfaces. */
+html[data-theme="daylight"] .watch-kpis article,
+html[data-theme="daylight"] .operation-grid > div,
+html[data-theme="daylight"] .cap-summary span,
+html[data-theme="daylight"] .cap-card,
+html[data-theme="daylight"] .quake-review-card,
+html[data-theme="daylight"] .roster-counts article,
+html[data-theme="daylight"] .roster-person,
+html[data-theme="daylight"] .solicitation-review,
+html[data-theme="daylight"] .solicitation-message,
+html[data-theme="daylight"] .active-alert {
+  color: var(--ink);
+  background: #f6faf7;
+  border-color: #c2d2ca;
+}
+html[data-theme="daylight"] .watch-kpis small,
+html[data-theme="daylight"] .watch-kpis p,
+html[data-theme="daylight"] .operation-grid small,
+html[data-theme="daylight"] .operation-grid span,
+html[data-theme="daylight"] .operations-alert footer,
+html[data-theme="daylight"] .cap-summary span,
+html[data-theme="daylight"] .cap-card header > span,
+html[data-theme="daylight"] .cap-card footer > span,
+html[data-theme="daylight"] .cap-card p,
+html[data-theme="daylight"] .quake-review-card p,
+html[data-theme="daylight"] .roster-counts span,
+html[data-theme="daylight"] .roster-person span,
+html[data-theme="daylight"] .solicitation-recipient code,
+html[data-theme="daylight"] .solicitation-message small,
+html[data-theme="daylight"] .active-alert p,
+html[data-theme="daylight"] .active-alert small,
+html[data-theme="daylight"] #event-result:not(:empty) { color: #587066; }
+html[data-theme="daylight"] .cap-summary,
+html[data-theme="daylight"] .monitoring-list {
+  background: #dce8e1;
+  border-color: #b7cbc1;
+}
+html[data-theme="daylight"] .cap-summary b,
+html[data-theme="daylight"] .solicitation-message p,
+html[data-theme="daylight"] .map-timeline strong { color: #183d2e; }
+html[data-theme="daylight"] .alert-location-fields,
+html[data-theme="daylight"] .alert-delivery {
+  color: #36584a;
+  background: #edf6f0;
+  border-color: #a9c8b7;
+}
+html[data-theme="daylight"] .alert-location-fields label,
+html[data-theme="daylight"] .alert-delivery,
+html[data-theme="daylight"] .map-timeline div { color: #587066; }
+html[data-theme="daylight"] .delivery-state { color: #145b37; }
+html[data-theme="daylight"] .alert-delivery.delayed {
+  color: #704900;
+  background: #fff7e5;
+  border-color: #d5ad5d;
+}
+html[data-theme="daylight"] .alert-delivery.attention {
+  color: #8b3025;
+  background: #fbe8e3;
+  border-color: #cc877b;
+}
+html[data-theme="daylight"] .alert-location-fields input { color: var(--ink); background: #fff; }
+html[data-theme="daylight"] .ack-progress { background: #d8e5de; }
+html[data-theme="daylight"] .stage-pill { color: #36584a; border-color: #9fb8ac; }
+html[data-theme="daylight"] .cap-card button.secondary,
+html[data-theme="daylight"] .quake-review-card button.secondary {
+  color: #264c3c;
+  background: #e4eee8;
+}
+html[data-theme="daylight"] .active-alert { background: #fff5f1; }
+html[data-theme="daylight"] .roster-person.need_help { background: #fce9e6; }
+html[data-theme="daylight"] .solicitation-status {
+  color: #704900;
+  background: #fff7e5;
+  border-color: #d5ad5d;
+}
+
 html[data-theme="night"] .login-screen { background: rgb(4 3 2 / 94%); }
 html[data-theme="night"] .login-card {
   color: var(--ink);
