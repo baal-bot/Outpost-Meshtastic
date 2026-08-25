@@ -52,6 +52,13 @@ html[data-theme="daylight"] .env-hero-stats {
 html[data-theme="daylight"] .env-hero-stats div { background: #e5eee9; }
 html[data-theme="daylight"] .env-hero-stats span { color: #526d61; }
 html[data-theme="daylight"] .env-hero-stats strong { color: #163c2c; }
+html[data-theme="daylight"] .trust-note {
+  color: #55482d;
+  background: #fff4d9;
+  border-color: #c99736;
+}
+html[data-theme="daylight"] .trust-note strong { color: #674100; }
+html[data-theme="daylight"] .trust-note span { color: #55482d; }
 
 /* Compact indicators need their own semantic surfaces in light mode. */
 html[data-theme="daylight"] .status,
