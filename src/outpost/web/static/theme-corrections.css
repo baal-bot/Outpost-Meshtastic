@@ -213,7 +213,7 @@ html[data-theme="daylight"] .solicitation-status {
   background: #fff7e5;
   border-color: #d5ad5d;
 }
-.incident-panel .filters { column-gap: 9px; }
+.incident-panel .filters { display: flex; align-items: center; column-gap: 9px; }
 html[data-theme="daylight"] .safety-banner {
   color: #674100;
   background: #fff4d9;
