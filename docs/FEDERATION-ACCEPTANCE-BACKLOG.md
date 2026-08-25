@@ -26,6 +26,9 @@ packet limits.
 
 ## Data and mail
 
+- [x] Sync an approved board bidirectionally, including replies to local and remote threads,
+  without duplicate posts. Verified over live radios between `!699c2f30` and `!3136b053`;
+  durable item receipts/retries and automatic Web UI refresh were also observed.
 - [ ] Sync allowed items while excluded or over-radius data remains private.
 - [x] Relay encrypted mail in both directions and verify receipts, routing, and deduplication.
   Web operator mail to a named remote member and the member's `RR` back to the originating
