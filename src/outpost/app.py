@@ -212,17 +212,40 @@ class OutpostApp:
     async def _send_federated_operator_reply(self, peer_id: str, body: str) -> None:
         await self.send_federation_mail(peer_id, "operator", "Mesh reply", body)
 
-    async def _notify_board_change(self, slug: str) -> None:
-        if not self.config.modules.fed.enabled or not self.radio.local_node_id:
+    async def _notify_board_change(self, slug: str, post_id: int) -> None:
+        if not self.config.modules.fed.enabled:
             return
+        posts = await self.database.read("SELECT uid FROM post WHERE id=?", (post_id,))
+        if not posts:
+            return
+        now = int(self.clock.now().timestamp())
         for peer in await self.federation.list("active"):
             if slug not in peer.boards:
+                continue
+            uid = self.federation_sync.wire_uid(str(posts[0]["uid"]))
+            await self.database.write(
+                "INSERT INTO fed_post_delivery(peer_id,post_id,uid,stream,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(peer_id,post_id) DO UPDATE SET "
+                "uid=excluded.uid,stream=excluded.stream,updated_at=excluded.updated_at",
+                (peer.id, post_id, uid, f"board:{slug}", now, now),
+            )
+            if not self.radio.local_node_id:
                 continue
             try:
                 await self._send_federation_value(
                     peer.mesh_id, MessageType.SYNC_NOTIFY, {"stream": f"board:{slug}"}
                 )
-            except (FrameError, ValueError):
+                await self.database.write(
+                    "UPDATE fed_post_delivery SET state='sent',attempts=attempts+1,"
+                    "updated_at=?,error=NULL WHERE peer_id=? AND post_id=?",
+                    (now, peer.id, post_id),
+                )
+            except (FrameError, ValueError) as error:
+                await self.database.write(
+                    "UPDATE fed_post_delivery SET attempts=attempts+1,updated_at=?,error=? "
+                    "WHERE peer_id=? AND post_id=?",
+                    (now, str(error)[:120], peer.id, post_id),
+                )
                 continue
 
     async def startup(self) -> None:
@@ -247,6 +270,7 @@ class OutpostApp:
             asyncio.create_task(self._federation_hello_loop(), name="federation-discovery"),
             asyncio.create_task(self._federation_service_loop(), name="federation-services"),
             asyncio.create_task(self._federation_sync_loop(), name="federation-sync"),
+            asyncio.create_task(self._federation_delivery_loop(), name="federation-delivery"),
         ]
 
     async def _federation_hello_loop(self) -> None:
@@ -569,6 +593,46 @@ class OutpostApp:
                         continue
             await self.clock.sleep(self.config.fed.sync_interval_minutes * 60)
 
+    async def _federation_delivery_loop(self) -> None:
+        while True:
+            if self.config.modules.fed.enabled and self.radio.local_node_id:
+                now = int(self.clock.now().timestamp())
+                rows = await self.database.read(
+                    "SELECT d.peer_id,d.post_id,d.uid,d.stream,p.mesh_id,post.uid local_uid "
+                    "FROM fed_post_delivery d JOIN fed_peer p ON p.id=d.peer_id "
+                    "JOIN post ON post.id=d.post_id WHERE d.state<>'delivered' "
+                    "AND d.updated_at<=? AND p.state='active' ORDER BY d.updated_at LIMIT 20",
+                    (now - 120,),
+                )
+                for row in rows:
+                    uid = self.federation_sync.wire_uid(str(row["local_uid"]))
+                    await self.database.write(
+                        "UPDATE fed_post_delivery SET uid=? WHERE peer_id=? AND post_id=?",
+                        (uid, row["peer_id"], row["post_id"]),
+                    )
+                    try:
+                        peer = await self.federation.by_mesh_id(str(row["mesh_id"]))
+                        items = await self.federation_sync.export_items(
+                            peer, [{"stream": str(row["stream"]), "uid": uid}]
+                        )
+                        if not items:
+                            raise ValueError("durable federation post could not be exported")
+                        await self._send_federation_value(
+                            str(row["mesh_id"]), MessageType.ITEM, {"item": items[0]}
+                        )
+                        await self.database.write(
+                            "UPDATE fed_post_delivery SET state='sent',attempts=attempts+1,"
+                            "updated_at=?,error=NULL WHERE peer_id=? AND post_id=?",
+                            (now, row["peer_id"], row["post_id"]),
+                        )
+                    except (FrameError, ValueError) as error:
+                        await self.database.write(
+                            "UPDATE fed_post_delivery SET attempts=attempts+1,updated_at=?,error=? "
+                            "WHERE peer_id=? AND post_id=?",
+                            (now, str(error)[:120], row["peer_id"], row["post_id"]),
+                        )
+            await self.clock.sleep(30)
+
     async def _handle_federation_discovery(self, message: object) -> None:
         payload = getattr(message, "payload", None)
         sender = getattr(message, "from_id", "")
@@ -590,6 +654,7 @@ class OutpostApp:
                 MessageType.ITEM,
                 MessageType.SYNC_DONE,
                 MessageType.SYNC_NOTIFY,
+                MessageType.ITEM_RECEIPT,
                 MessageType.MAIL_RELAY,
                 MessageType.MAIL_RECEIPT,
             }:
@@ -719,9 +784,7 @@ class OutpostApp:
                     "DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at",
                     (peer.id, str(item.get("stream", "")), str(item.get("uid", ""))),
                 )
-                if not received:
-                    return
-                if str(item.get("stream", "")).startswith("board:"):
+                if received and str(item.get("stream", "")).startswith("board:"):
                     payload = item.get("payload")
                     if isinstance(payload, dict):
                         slug = str(item["stream"])[6:]
@@ -739,6 +802,29 @@ class OutpostApp:
                                     "federation:auto-thread",
                                     int(self.clock.now().timestamp()),
                                 )
+                receipt = await self.database.read(
+                    "SELECT state FROM fed_inbox_item WHERE peer_id=? AND stream=? AND uid=?",
+                    (peer.id, str(item.get("stream", "")), str(item.get("uid", ""))),
+                )
+                if receipt:
+                    await self._send_federation_value(
+                        sender,
+                        MessageType.ITEM_RECEIPT,
+                        {
+                            "uid": str(item.get("uid", "")),
+                            "state": str(receipt[0]["state"]),
+                        },
+                    )
+            elif msg_type is MessageType.ITEM_RECEIPT:
+                state = str(value.get("state", ""))
+                if state not in {"pending", "imported", "rejected"}:
+                    raise ValueError("invalid federation item receipt state")
+                peer = await self.federation.by_mesh_id(sender)
+                await self.database.write(
+                    "UPDATE fed_post_delivery SET state='delivered',delivered_at=unixepoch(),"
+                    "updated_at=unixepoch(),error=NULL WHERE peer_id=? AND uid=?",
+                    (peer.id, str(value.get("uid", ""))),
+                )
             elif msg_type is MessageType.SYNC_DONE:
                 await self.database.write(
                     "UPDATE fed_peer SET last_sync_at=unixepoch() WHERE mesh_id=?",

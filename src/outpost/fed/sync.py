@@ -30,6 +30,9 @@ class FederationSyncService:
             return uid
         return f"{self.local_mesh_id}:{uid}" if self.local_mesh_id else uid
 
+    def wire_uid(self, uid: str) -> str:
+        return self._wire_uid(uid)
+
     def _local_uid(self, uid: str) -> str | None:
         if not self.local_mesh_id:
             return uid

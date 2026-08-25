@@ -30,7 +30,7 @@ class BBSAdmin:
         clock: Clock,
         reserved_slugs: set[str],
         origin: str = "local",
-        federation_notify: Callable[[str], Awaitable[None]] | None = None,
+        federation_notify: Callable[[str, int], Awaitable[None]] | None = None,
     ) -> None:
         self.database, self.clock, self.reserved_slugs, self.origin = (
             database,
@@ -40,14 +40,14 @@ class BBSAdmin:
         )
         self.federation_notify = federation_notify
 
-    async def _notify_board(self, board_id: int) -> None:
+    async def _notify_board(self, board_id: int, post_id: int) -> None:
         if self.federation_notify is None:
             return
         rows = await self.database.read(
             "SELECT slug FROM board WHERE id=? AND federated=1", (board_id,)
         )
         if rows:
-            await self.federation_notify(str(rows[0]["slug"]))
+            await self.federation_notify(str(rows[0]["slug"]), post_id)
 
     async def _audit(self, action: str, target: str, detail: object) -> None:
         await self.database.write(
@@ -137,7 +137,7 @@ class BBSAdmin:
             "UPDATE post SET uid=? WHERE id=?", (f"{self.origin}:{post_id}", post_id)
         )
         await self._audit("thread.create", f"thread:{thread_id}", {"board_id": board_id})
-        await self._notify_board(board_id)
+        await self._notify_board(board_id, post_id)
         return thread_id
 
     async def reply(self, thread_id: int, body: str) -> int:
@@ -168,7 +168,7 @@ class BBSAdmin:
             "UPDATE thread SET post_count=?,last_post_at=? WHERE id=?", (seq, now, thread_id)
         )
         await self._audit("post.create", f"post:{post_id}", {"thread_id": thread_id})
-        await self._notify_board(int(rows[0]["board_id"]))
+        await self._notify_board(int(rows[0]["board_id"]), post_id)
         return post_id
 
     async def update_thread(self, thread_id: int, values: dict[str, Any]) -> bool:
