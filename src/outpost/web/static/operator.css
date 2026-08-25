@@ -1,0 +1,22 @@
+.back-link { padding: 8px 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; font-size: .7rem; }
+.operator-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 0 0 14px; }
+.operator-stats article { padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; }
+.operator-stats small { color: var(--muted); font: 650 .57rem ui-monospace, monospace; }
+.operator-stats strong { display: block; margin-top: 4px; font-size: 1.8rem; }
+.operator-panel { margin-top: 14px; }
+.member-controls { display: flex; align-items: center; gap: 12px; }
+.discovered-note { margin: -4px 0 15px; padding: 10px 12px; color: var(--muted); background: #efbd620d; border: 1px solid #efbd6233; border-radius: 7px; font-size: .7rem; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .72rem; }
+th { padding: 10px; color: var(--muted); border-bottom: 1px solid var(--line); text-align: left; font: 650 .56rem ui-monospace, monospace; }
+td { padding: 12px 10px; border-bottom: 1px solid var(--soft); }
+td code { color: var(--muted); font-size: .64rem; }
+td small { display: block; color: var(--muted); margin-top: 3px; }
+select { padding: 7px 25px 7px 8px; color: var(--ink); background: var(--raised); border: 1px solid var(--line); border-radius: 5px; font: 650 .66rem Figtree, sans-serif; }
+.audit-list { display: grid; }
+.audit-event { display: grid; grid-template-columns: 135px 1fr auto; gap: 15px; padding: 12px 0; border-top: 1px solid var(--soft); font-size: .7rem; }
+.audit-event:first-child { border-top: 0; }
+.audit-event code { color: var(--green); }
+.audit-event p { color: var(--muted); }
+.audit-event time { color: var(--muted); font: .58rem ui-monospace, monospace; }
+@media (max-width: 650px) { .operator-stats { grid-template-columns: 1fr 1fr; } .operator-stats article { padding: 12px; } .operator-stats strong { font-size: 1.35rem; } .audit-event { grid-template-columns: 100px 1fr; } .audit-event time { display: none; } .member-controls { align-items: end; flex-direction: column; } }

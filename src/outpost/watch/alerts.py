@@ -1,0 +1,354 @@
+from __future__ import annotations
+
+import json
+import uuid
+from dataclasses import asdict, dataclass
+from typing import Any
+
+from outpost.clock import Clock
+from outpost.config import Config, EscalationPolicy, EscalationStage
+from outpost.store import Database
+from outpost.store.members import Member
+from outpost.transport.governor import AirtimeGovernor, OutboundItem
+from outpost.transport.models import Severity, TrafficClass
+
+
+@dataclass(frozen=True)
+class Alert:
+    id: int
+    incident_id: int | None
+    incident_ref: int | None
+    severity: str
+    headline: str
+    source: str
+    channels: str
+    raised_by: str
+    raised_at: int
+    expires_at: int | None
+    cancelled_at: int | None
+    escalation_stage: int
+    next_escalation_at: int | None
+    ack_required: int
+    broadcast_count: int
+    ack_count: int
+    lat: float | None
+    lon: float | None
+    radius_m: int | None
+
+    def json(self) -> dict[str, Any]:
+        value = asdict(self)
+        value["channels"] = json.loads(self.channels)
+        return value
+
+
+class AlertService:
+    def __init__(
+        self, database: Database, governor: AirtimeGovernor, clock: Clock, config: Config
+    ) -> None:
+        self.database, self.governor, self.clock, self.config = database, governor, clock, config
+
+    def _row(self, row: Any) -> Alert:
+        return Alert(**{key: row[key] for key in Alert.__dataclass_fields__})
+
+    def render(self, severity: str, headline: str) -> str:
+        marker = {"caution": "!", "urgent": "⚠", "critical": "⚠⚠"}[severity]
+        return f"{marker}{severity.upper()} {headline} {self.config.node.short_name}"
+
+    def _policy(self, severity: str) -> EscalationPolicy:
+        return getattr(self.config.watch.escalation, severity)
+
+    async def operational_json(self, alert: Alert) -> dict[str, Any]:
+        value = alert.json()
+        policy = self._policy(alert.severity)
+        next_stage = (
+            policy.stages[alert.escalation_stage]
+            if alert.escalation_stage < len(policy.stages)
+            else None
+        )
+        rows = await self.database.read(
+            """SELECT m.mesh_id,m.handle,aa.acked_at,aa.note FROM alert_ack aa
+               JOIN member m ON m.id=aa.member_id WHERE aa.alert_id=? ORDER BY aa.acked_at""",
+            (alert.id,),
+        )
+        value.update(
+            {
+                "stage_total": len(policy.stages),
+                "next_action": next_stage.model_dump() if next_stage else None,
+                "acknowledgements": [dict(row) for row in rows],
+            }
+        )
+        return value
+
+    async def raise_alert(
+        self,
+        severity: str,
+        headline: str,
+        raised_by: str,
+        *,
+        incident_ref: int | None = None,
+        channels: list[int] | None = None,
+        source: str = "operator",
+        lat: float | None = None,
+        lon: float | None = None,
+        radius_km: float = 1.0,
+        supersedes_alert_id: int | None = None,
+    ) -> Alert:
+        if severity not in {"caution", "urgent", "critical"}:
+            raise ValueError("Alert severity must be caution, urgent, or critical.")
+        if source not in {"operator", "incident", "cap", "same"}:
+            raise ValueError("Alert source is not permitted.")
+        headline = headline.strip()
+        if not headline or len(headline.encode()) > 140:
+            raise ValueError("Alert headline must be 1-140 UTF-8 bytes.")
+        incident_id = None
+        if incident_ref is not None:
+            rows = await self.database.read(
+                """SELECT id,lat,lon FROM incident
+                   WHERE local_ref=? AND status IN ('open','monitoring')""",
+                (incident_ref,),
+            )
+            if not rows:
+                raise ValueError("No active incident at that reference.")
+            incident_id = int(rows[0]["id"])
+            lat = lat if lat is not None else rows[0]["lat"]
+            lon = lon if lon is not None else rows[0]["lon"]
+        if (lat is None) != (lon is None):
+            raise ValueError("Alert center requires both latitude and longitude.")
+        if lat is not None:
+            assert lon is not None
+        if lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise ValueError("Alert center is outside valid coordinate bounds.")
+        if not 0.1 <= radius_km <= 100:
+            raise ValueError("Alert radius must be between 0.1 and 100 km.")
+        radius_m = round(radius_km * 1000) if lat is not None else None
+        policy = self._policy(severity)
+        selected = channels or sorted(
+            {channel for stage in policy.stages for channel in stage.channels}
+        )
+        if any(channel not in self.config.channels for channel in selected):
+            raise ValueError("Alert channel is not configured.")
+        if not policy.stages:
+            raise ValueError("Alert escalation policy must contain at least one stage.")
+        previous = None
+        if supersedes_alert_id is not None:
+            previous = await self.by_id(supersedes_alert_id)
+            if previous is None or previous.cancelled_at is not None:
+                raise ValueError("Superseded alert is not active.")
+        now = int(self.clock.now().timestamp())
+        ack_required = policy.ack_threshold
+        alert_id = await self.database.write(
+            """INSERT INTO alert(uid,incident_id,severity,headline,source,channels,raised_by,
+               raised_at,effective_at,expires_at,escalation_stage,next_escalation_at,ack_required,
+               lat,lon,radius_m) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(uuid.uuid4()),
+                incident_id,
+                severity,
+                headline,
+                source,
+                json.dumps(selected, separators=(",", ":")),
+                raised_by,
+                now,
+                now,
+                now + 6 * 3600,
+                0,
+                now,
+                ack_required,
+                lat,
+                lon,
+                radius_m,
+            ),
+        )
+        if supersedes_alert_id is not None:
+            await self.database.write(
+                "UPDATE alert SET cancelled_at=?,next_escalation_at=NULL WHERE id=?",
+                (now, supersedes_alert_id),
+            )
+        await self._advance_alert(
+            alert_id,
+            override_channels=channels,
+            supersedes=(
+                f"alert:{supersedes_alert_id}:repeat" if supersedes_alert_id is not None else None
+            ),
+        )
+        alert = await self.by_id(alert_id)
+        assert alert is not None
+        return await self.by_id(alert_id) or alert
+
+    async def _destinations(self, notify: str) -> list[str]:
+        if notify == "all":
+            return ["^all"]
+        roles = (
+            ("responder", "operator")
+            if notify == "responders"
+            else ("trusted", "responder", "operator")
+        )
+        placeholders = ",".join("?" for _ in roles)
+        rows = await self.database.read(
+            f"SELECT mesh_id FROM member WHERE trust IN ({placeholders})",  # noqa: S608
+            roles,
+        )
+        return [str(row["mesh_id"]) for row in rows]
+
+    async def _broadcast(
+        self,
+        alert: Alert,
+        stage: EscalationStage,
+        channels: list[int] | None = None,
+        supersedes: str | None = None,
+    ) -> int:
+        text = self.render(alert.severity, alert.headline)
+        severity = Severity(alert.severity)
+        admitted = 0
+        destinations = await self._destinations(stage.notify)
+        for destination in destinations:
+            for channel in channels or stage.channels:
+                item_id = self.governor.enqueue(
+                    OutboundItem(
+                        text=text,
+                        dest=destination,
+                        channel=int(channel),
+                        traffic_class=TrafficClass.ALERT,
+                        severity=severity,
+                        want_ack=destination != "^all",
+                        queue_key=f"alert:{alert.id}:repeat",
+                        supersedes=supersedes,
+                    )
+                )
+                supersedes = None
+                admitted += int(item_id is not None)
+        if admitted:
+            await self.database.write(
+                "UPDATE alert SET broadcast_count=broadcast_count+? WHERE id=?",
+                (admitted, alert.id),
+            )
+        return admitted
+
+    async def _advance_alert(
+        self,
+        alert_id: int,
+        *,
+        override_channels: list[int] | None = None,
+        supersedes: str | None = None,
+    ) -> bool:
+        alert = await self.by_id(alert_id)
+        if alert is None or alert.cancelled_at is not None:
+            return False
+        policy = self._policy(alert.severity)
+        if alert.ack_required and alert.ack_count >= alert.ack_required:
+            await self.database.write(
+                "UPDATE alert SET next_escalation_at=NULL WHERE id=?", (alert.id,)
+            )
+            return False
+        stage_index = alert.escalation_stage
+        if stage_index >= len(policy.stages):
+            await self.database.write(
+                "UPDATE alert SET next_escalation_at=NULL WHERE id=?", (alert.id,)
+            )
+            return False
+        await self._broadcast(alert, policy.stages[stage_index], override_channels, supersedes)
+        next_stage = stage_index + 1
+        next_at = (
+            alert.raised_at + policy.stages[next_stage].after_minutes * 60
+            if next_stage < len(policy.stages)
+            else None
+        )
+        await self.database.write(
+            "UPDATE alert SET escalation_stage=?,next_escalation_at=? WHERE id=?",
+            (next_stage, next_at, alert.id),
+        )
+        return True
+
+    async def by_id(self, alert_id: int) -> Alert | None:
+        rows = await self.database.read(
+            """SELECT a.*,i.local_ref AS incident_ref,COUNT(aa.member_id) AS ack_count
+               FROM alert a LEFT JOIN incident i ON i.id=a.incident_id
+               LEFT JOIN alert_ack aa ON aa.alert_id=a.id WHERE a.id=? GROUP BY a.id""",
+            (alert_id,),
+        )
+        return self._row(rows[0]) if rows else None
+
+    async def list(self, active_only: bool = True) -> list[Alert]:
+        where = (
+            "WHERE a.cancelled_at IS NULL AND (a.expires_at IS NULL OR a.expires_at>?)"
+            if active_only
+            else ""
+        )
+        params = (int(self.clock.now().timestamp()),) if active_only else ()
+        rows = await self.database.read(
+            f"""SELECT a.*,i.local_ref AS incident_ref,COUNT(aa.member_id) AS ack_count
+                FROM alert a LEFT JOIN incident i ON i.id=a.incident_id
+                LEFT JOIN alert_ack aa ON aa.alert_id=a.id {where}
+                GROUP BY a.id ORDER BY a.raised_at DESC""",  # noqa: S608
+            params,
+        )
+        return [self._row(row) for row in rows]
+
+    async def acknowledge(self, incident_ref: int, member: Member, note: str = "") -> Alert:
+        rows = await self.database.read(
+            """SELECT a.id FROM alert a JOIN incident i ON i.id=a.incident_id
+               WHERE i.local_ref=? AND a.cancelled_at IS NULL
+               AND (a.expires_at IS NULL OR a.expires_at>?) ORDER BY a.id DESC LIMIT 1""",
+            (incident_ref, int(self.clock.now().timestamp())),
+        )
+        if not rows:
+            raise ValueError("No active alert for that incident.")
+        alert_id = int(rows[0]["id"])
+        await self.database.write(
+            "INSERT OR IGNORE INTO alert_ack(alert_id,member_id,acked_at,note) VALUES(?,?,?,?)",
+            (alert_id, member.id, int(self.clock.now().timestamp()), note or None),
+        )
+        alert = await self.by_id(alert_id)
+        assert alert is not None
+        if alert.ack_required and alert.ack_count >= alert.ack_required:
+            await self.database.write(
+                "UPDATE alert SET next_escalation_at=NULL WHERE id=?", (alert.id,)
+            )
+        return await self.by_id(alert_id) or alert
+
+    async def cancel(self, alert_id: int, resolution: str, actor: str) -> Alert:
+        alert = await self.by_id(alert_id)
+        if alert is None or alert.cancelled_at is not None:
+            raise ValueError("No active alert.")
+        now = int(self.clock.now().timestamp())
+        await self.database.write(
+            "UPDATE alert SET cancelled_at=?,next_escalation_at=NULL WHERE id=?", (now, alert.id)
+        )
+        self.governor.enqueue(
+            OutboundItem(
+                text=f"ALL CLEAR {resolution[:120]} {self.config.node.short_name}",
+                dest="^all",
+                channel=json.loads(alert.channels)[0],
+                traffic_class=TrafficClass.ALERT,
+                severity=Severity(alert.severity),
+                want_ack=False,
+                supersedes=f"alert:{alert.id}:repeat",
+            )
+        )
+        if alert.incident_id:
+            await self.database.write(
+                """UPDATE incident SET status='resolved',resolved_at=?,resolved_by=?,
+                   resolution_note=?,updated_at=? WHERE id=?""",
+                (now, actor, resolution[:500], now, alert.incident_id),
+            )
+        return await self.by_id(alert.id) or alert
+
+    async def halt_escalation(self, alert_id: int) -> Alert:
+        alert = await self.by_id(alert_id)
+        if alert is None or alert.cancelled_at is not None:
+            raise ValueError("No active alert.")
+        await self.database.write(
+            "UPDATE alert SET next_escalation_at=NULL WHERE id=?", (alert.id,)
+        )
+        return await self.by_id(alert.id) or alert
+
+    async def advance_due(self) -> int:
+        rows = await self.database.read(
+            """SELECT id FROM alert WHERE cancelled_at IS NULL AND next_escalation_at<=?
+               AND (expires_at IS NULL OR expires_at>?) ORDER BY next_escalation_at,id""",
+            (int(self.clock.now().timestamp()), int(self.clock.now().timestamp())),
+        )
+        advanced = 0
+        for row in rows:
+            advanced += int(await self._advance_alert(int(row["id"])))
+        return advanced

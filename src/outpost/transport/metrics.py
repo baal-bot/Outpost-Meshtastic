@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+from prometheus_client import Counter, Gauge, Histogram
+
+RADIO_RECONNECTS = Counter("outpost_radio_reconnects_total", "Radio reconnect attempts")
+INBOUND = Counter(
+    "outpost_inbound_messages_total",
+    "Normalised inbound messages",
+    ("portnum", "channel", "direct"),
+)
+INBOUND_DROPPED = Counter("outpost_inbound_dropped_total", "Dropped inbound messages", ("reason",))
+OUTBOUND_ENQUEUED = Counter(
+    "outpost_outbound_enqueued_total", "Queued outbound messages", ("class",)
+)
+OUTBOUND_SENT = Counter(
+    "outpost_outbound_sent_total", "Sent outbound messages", ("class", "dest_type")
+)
+OUTBOUND_DROPPED = Counter(
+    "outpost_outbound_dropped_total", "Dropped outbound messages", ("class", "reason")
+)
+QUEUE_DEPTH = Gauge("outpost_outbound_queue_depth", "Outbound queue depth", ("class",))
+AIRTIME_USED = Gauge("outpost_airtime_used_ratio", "Own rolling one-hour airtime ratio")
+CHANNEL_UTIL = Gauge("outpost_channel_utilisation_ratio", "Radio channel utilisation ratio")
+AIR_UTIL_TX = Gauge("outpost_air_util_tx_ratio", "Radio-reported transmit airtime ratio")
+TOA_SECONDS = Histogram("outpost_toa_seconds", "Estimated packet time on air")
+ACK_OUTCOME = Counter(
+    "outpost_ack_outcome_total", "Outbound acknowledgement outcomes", ("outcome",)
+)

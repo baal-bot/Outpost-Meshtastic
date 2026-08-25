@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "outpost"
+version = "0.1.0"
+description = "Offline-first community services over Meshtastic"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "argon2-cffi>=25.1,<26",
+  "cbor2>=5.7,<6",
+  "cryptography>=45,<47",
+  "fastapi>=0.116,<1",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.10,<3",
+  "PyYAML>=6.0,<7",
+  "prometheus-client>=0.22,<1",
+  "structlog>=25.4,<26",
+  "uvicorn>=0.35,<1",
+]
+
+[project.optional-dependencies]
+radio = ["meshtastic>=2.7,<3"]
+dev = [
+  "astral>=3.2,<4",
+  "httpx>=0.28,<1",
+  "hypothesis>=6.138,<7",
+  "mypy>=1.17,<2",
+  "pip-audit>=2.9,<3",
+  "pytest>=9.0.3,<10",
+  "pytest-asyncio>=1.1,<2",
+  "pytest-cov>=6.2,<7",
+  "pyshp>=3.0,<4",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+outpost = "outpost.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/outpost"]
+artifacts = ["src/outpost/web/static/**"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["outpost.transport", "outpost.router", "outpost.store", "outpost.security"]

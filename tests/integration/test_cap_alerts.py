@@ -1,0 +1,135 @@
+import pytest
+
+from outpost.clock import VirtualClock
+from outpost.config import AirtimeConfig, Config, EnvConfig
+from outpost.env import CapAlertService
+from outpost.store import Database
+from outpost.transport.governor import AirtimeGovernor
+from outpost.transport.simulated import SimulatedRadioLink
+from outpost.watch import AlertService
+
+
+def feature(identifier: str, *, severity: str = "Severe", status: str = "Actual") -> dict:
+    return {
+        "id": identifier,
+        "properties": {
+            "id": identifier,
+            "sender": "w-nws.webmaster@noaa.gov",
+            "sent": "2026-01-01T00:00:00Z",
+            "messageType": "Alert",
+            "status": status,
+            "event": "Tornado Warning",
+            "headline": "Tornado Warning issued for the local area",
+            "description": "Take shelter now.",
+            "areaDesc": "Allegheny County",
+            "severity": severity,
+            "urgency": "Immediate",
+            "certainty": "Observed",
+            "effective": "2026-01-01T00:00:00Z",
+            "expires": "2026-01-01T01:00:00Z",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_cap_gate_dedupe_and_review_inbox(tmp_path, monkeypatch) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    payload = {"features": [feature("cap-1"), feature("cap-2", severity="Moderate")]}
+
+    async def request(*args, **kwargs):
+        return payload
+
+    monkeypatch.setattr("outpost.env.cap._request_json", request)
+    service = CapAlertService(database, VirtualClock(), EnvConfig())
+
+    result = await service.poll(40.4406, -79.9959)
+    assert result == {"seen": 2, "accepted": 1, "withheld": 1}
+    await service.poll(40.4406, -79.9959)
+    items = await service.list()
+    assert len(items) == 2
+    assert items[0]["decision"] in {"accepted", "withheld"}
+    withheld = next(item for item in items if item["decision"] == "withheld")
+    assert "severity is below Severe" in withheld["gate_reasons"]
+
+    await service.dismiss(withheld["id"])
+    assert (
+        next(item for item in await service.list() if item["id"] == withheld["id"])["review_state"]
+        == "dismissed"
+    )
+    await database.close()
+
+
+def test_cap_gate_rejects_expired_test_and_unlikely() -> None:
+    clock = VirtualClock()
+    value = feature("cap-test", status="Test")["properties"]
+    value["certainty"] = "Unlikely"
+    value["expires"] = "2025-12-31T23:00:00Z"
+
+    decision, reasons = CapAlertService._gate(value, clock.now())
+
+    assert decision == "withheld"
+    assert "status is not Actual" in reasons
+    assert "certainty is Unlikely" in reasons
+    assert "alert is expired" in reasons
+
+
+@pytest.mark.asyncio
+async def test_cap_update_supersedes_and_cancel_issues_all_clear(tmp_path, monkeypatch) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    payload = {"features": [feature("cap-original")]}
+
+    async def request(*args, **kwargs):
+        return payload
+
+    monkeypatch.setattr("outpost.env.cap._request_json", request)
+    cap = CapAlertService(database, clock, EnvConfig())
+    config = Config.model_validate({"channels": {0: {"name": "public"}, 3: {"name": "watch"}}})
+    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    alerts = AlertService(database, governor, clock, config)
+
+    await cap.poll(40.4406, -79.9959)
+    original_cap = (await cap.list())[0]
+    original = await cap.approve(original_cap["id"], alerts)
+
+    update = feature("cap-update")
+    update["properties"]["messageType"] = "Update"
+    update["properties"]["references"] = (
+        "w-nws.webmaster@noaa.gov,cap-original,2026-01-01T00:00:00Z"
+    )
+    update["properties"]["headline"] = "Updated Tornado Warning"
+    payload["features"] = [update]
+    await cap.poll(40.4406, -79.9959)
+    update_cap = next(item for item in await cap.list() if item["identifier"] == "cap-update")
+    replacement = await cap.approve(update_cap["id"], alerts)
+    assert (await alerts.by_id(original["id"])).cancelled_at is not None
+    assert replacement["id"] != original["id"]
+    assert all(
+        item.queue_key != f"alert:{original['id']}:repeat" for item in governor.queued_items()
+    )
+
+    cancel = feature("cap-cancel")
+    cancel["properties"]["messageType"] = "Cancel"
+    cancel["properties"]["references"] = "w-nws.webmaster@noaa.gov,cap-update,2026-01-01T00:00:00Z"
+    payload["features"] = [cancel]
+    await cap.poll(40.4406, -79.9959)
+    cancel_cap = next(item for item in await cap.list() if item["identifier"] == "cap-cancel")
+    await cap.approve(cancel_cap["id"], alerts)
+    assert (await alerts.by_id(replacement["id"])).cancelled_at is not None
+    assert any(item.text.startswith("ALL CLEAR") for item in governor.queued_items())
+    await database.close()
+
+
+def test_cap_polygon_must_contain_outpost() -> None:
+    properties = feature("cap-polygon")["properties"]
+    geometry = {
+        "type": "Polygon",
+        "coordinates": [[[-80.1, 40.3], [-80.0, 40.3], [-80.0, 40.4], [-80.1, 40.3]]],
+    }
+    decision, reasons = CapAlertService._gate(
+        properties, VirtualClock().now(), geometry, (40.4406, -79.9959)
+    )
+    assert decision == "withheld"
+    assert "alert polygon does not contain the Outpost" in reasons

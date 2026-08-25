@@ -1,0 +1,11 @@
+.waypoint-map-card{position:absolute;z-index:8;top:12px;right:12px;width:min(310px,calc(100% - 70px));box-sizing:border-box;padding:16px;background:#071411f2;border:1px solid #537367;border-radius:10px;box-shadow:0 12px 38px #000b;cursor:default}
+.waypoint-map-card h3{margin:2px 28px 8px 0;color:#d1e5de;font-size:1rem}
+.waypoint-map-card p{margin:6px 0;color:#9aafa7;font-size:.72rem;line-height:1.45}
+.waypoint-map-card .eyebrow{color:#72a98e;font-size:.56rem}
+.waypoint-map-card .waypoint-card-coordinates{color:#c1d5cd;font-family:ui-monospace,monospace}
+.waypoint-map-card .waypoint-card-empty{color:#71847d;font-style:italic}
+.waypoint-card-close{position:absolute;top:8px;right:8px;width:26px;height:26px;padding:0}
+.waypoint-card-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:13px}
+.waypoint-card-actions button{padding:7px 10px;font-size:.64rem}
+.waypoint-card-actions .secondary{background:#17231f;color:#98aaa3}
+@media(max-width:620px){.waypoint-map-card{top:8px;right:8px}}

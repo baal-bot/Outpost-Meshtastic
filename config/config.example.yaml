@@ -1,0 +1,128 @@
+node:
+  name: "Outpost"
+  short_name: "OUT"
+  operator_contact: "operator@example.org"
+  emergency_number: "911"
+  timezone: "America/New_York"
+  locale: "en_US"
+  units: metric
+  disclaimer: "Community system. Not 911."
+radio:
+  transport: serial
+  serial: {port: "/dev/ttyUSB0"}
+  tcp: {host: "192.168.1.50", port: 4403}
+  ble: {address: "AA:BB:CC:DD:EE:FF"}
+  reconnect: {initial_s: 2, max_s: 120, jitter: 0.2}
+  liveness_timeout_s: 300
+  federation_portnum: 260
+  bridge_node_ids: []
+airtime:
+  budget_percent: 8.0
+  utilisation_ceiling: 25.0
+  emergency_reserve_percent: 4.0
+  min_gap_s: 2.0
+  interpart_delay_s: 12
+  queue_max_items: 500
+  dedupe_window_s: 300
+  coalesce_window_s: 15
+  broadcast_max_per_hour: 6
+  quiet_hours: {start: "22:00", end: "06:00", classes: [digest, bulletin, federation]}
+  class_shares: {alert: 0.30, reply: 0.30, ai: 0.15, bulletin: 0.05, digest: 0.10, federation: 0.10}
+  max_parts: {reply: 3, ai: 2, digest: 4, alert: 2, bulletin: 2}
+channels:
+  0: {name: public, ai: false, bbs: read_only, alerts: true, accept_reports: true}
+  2: {name: outpost, ai: true, bbs: full, alerts: true, accept_reports: true}
+  3: {name: watch, ai: false, bbs: none, alerts: true, accept_reports: true}
+router:
+  prefix: "!"
+  session_idle_minutes: 30
+  page_ttl_minutes: 15
+  inbound_workers: 4
+  member_lock_timeout_s: 60
+  page_sizes: {boards: 6, threads: 5, posts: 3, mail: 5, incidents: 5, members: 8}
+  intents_file: /etc/outpost/intents.yaml
+modules:
+  bbs: {enabled: true}
+  ai: {enabled: false}
+  watch: {enabled: true}
+  env: {enabled: true}
+  fed: {enabled: true}
+ai:
+  provider: hailo
+  model: "qwen2.5-instruct:1.5b"
+  hailo: {base_url: "http://127.0.0.1:8000"}
+  llamacpp: {base_url: "http://127.0.0.1:8080"}
+  ollama: {base_url: "http://127.0.0.1:11434"}
+  openai_compat: {base_url: ""}
+env:
+  user_agent: "Outpost/0.1 (operator: operator@example.org)"
+  refresh_minutes: 15
+  max_age_hours: 6
+  request_timeout_s: 10
+  same:
+    enabled: false
+    frequency_mhz: 162.550
+    county_codes: []
+    silence_alarm_minutes: 720
+fed:
+  max_fragments: 8
+  reassembly_timeout_s: 300
+  hello_interval_hours: 12
+  sync_interval_minutes: 60
+  max_items_per_cycle: 20
+  peer_stale_hours: 72
+  incident_radius_km: 25
+  mqtt:
+    enabled: false
+    discovery_enabled: false
+    server: "mqtt.meshtastic.org"
+    port: 1883
+    topic_root: "msh"
+    use_radio_module: true
+security:
+  require_approval: false
+  coarse_precision_m: 500
+  global_rate_ceiling: 60
+  handle_change_per_hours: 24
+  handle_reserve_days: 30
+bbs:
+  immediate_max_per_hour: 3
+  immediate_enabled: true
+  self_delete_minutes: 30
+mail:
+  hold_unknown_days: 14
+  notify_window_hours: 12
+watch:
+  position_max_age_minutes: 30
+  dedupe_radius_m: 500
+  dedupe_window_minutes: 120
+  self_resolve_hours: 24
+  emergency_keywords_enabled: false
+  emergency_keywords: [sos, mayday, emergency, "help me", "911"]
+  emergency_cooldown_minutes: 10
+  alert_repeat_max: 3
+  alert_repeat_interval_minutes: 20
+  escalation:
+    caution:
+      ack_threshold: 0
+      stages: [{after_minutes: 0, notify: all, channels: [3]}]
+    urgent:
+      ack_threshold: 2
+      stages:
+        - {after_minutes: 0, notify: responders, channels: [3]}
+        - {after_minutes: 10, notify: trusted, channels: [3]}
+        - {after_minutes: 20, notify: all, channels: [0, 3]}
+    critical:
+      ack_threshold: 3
+      stages:
+        - {after_minutes: 0, notify: all, channels: [0, 3]}
+        - {after_minutes: 10, notify: all, channels: [0, 3], repeat: true}
+web:
+  bind: "0.0.0.0"
+  port: 8080
+  auth: {mode: password, session_hours: 12}
+store:
+  path: "/var/lib/outpost/outpost.db"
+  maintenance_hour: 3
+  retention: {posts_days: 90, mail_days: 180, message_log_days: 30, message_log_max_rows: 500000}
+  backup: {enabled: true, keep: 14}

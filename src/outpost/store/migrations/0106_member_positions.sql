@@ -1,0 +1,15 @@
+CREATE TABLE member_position (
+  member_id INTEGER PRIMARY KEY REFERENCES member(id) ON DELETE CASCADE,
+  lat REAL NOT NULL CHECK(lat BETWEEN -90 AND 90),
+  lon REAL NOT NULL CHECK(lon BETWEEN -180 AND 180),
+  received_at INTEGER NOT NULL,
+  source TEXT NOT NULL DEFAULT 'position_app'
+);
+
+CREATE TABLE pending_incident_location (
+  member_id INTEGER PRIMARY KEY REFERENCES member(id) ON DELETE CASCADE,
+  lat REAL NOT NULL CHECK(lat BETWEEN -90 AND 90),
+  lon REAL NOT NULL CHECK(lon BETWEEN -180 AND 180),
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);

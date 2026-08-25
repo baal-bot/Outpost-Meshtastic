@@ -1,0 +1,101 @@
+.path-grid {
+  margin-top: 0;
+}
+
+.content-panel:has(> .path-grid) {
+  margin-top: 14px;
+}
+
+.mqtt-panel {
+  margin-top: 14px;
+}
+
+.service-panel { margin-top: 14px; }
+.inbox-panel { margin-top: 14px; }
+.sync-panel { margin-top: 14px; }
+.policy-panel,.relay-mail-panel { margin-top:14px; }
+.policy-form { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px; }
+.policy-form label { display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid var(--soft);border-radius:6px;color:var(--muted);font-size:.68rem; }
+.policy-form input:not([type="checkbox"]),.policy-form select { width:55%;padding:7px;border:1px solid var(--line);border-radius:5px;background:var(--raised);color:var(--ink); }
+.policy-form button,.relay-mail-form button { width:max-content;padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:var(--raised);color:var(--ink); }
+.policy-form p { align-self:center;color:var(--muted);font-size:.66rem; }
+.relay-mail-form { display:grid;grid-template-columns:1fr 1fr;gap:9px; }
+.relay-mail-form select,.relay-mail-form input,.relay-mail-form textarea { padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--raised);color:var(--ink); }
+.relay-mail-form textarea { grid-column:1/-1;min-height:90px;resize:vertical; }
+.relay-mail-form p { align-self:center;color:var(--muted);font-size:.66rem; }
+.relay-mail-history { display:grid;margin-top:14px; }
+.relay-mail-history article { display:grid;grid-template-columns:110px 1fr 1fr auto;gap:10px;padding:9px;border-top:1px solid var(--soft);font-size:.62rem; }
+.relay-mail-history span,.relay-mail-history code,.relay-mail-history time { color:var(--muted); }
+.sync-row { display: grid; grid-template-columns: minmax(180px,1fr) repeat(3,80px) minmax(150px,1fr); gap: 12px; align-items: center; padding: 12px; border-top: 1px solid var(--soft); }
+.sync-row code,.sync-row span,.sync-row p { display:block;color:var(--muted);font-size:.61rem; }
+.sync-row b { font-size:1rem; }
+.inbox-card { display: grid; grid-template-columns: 220px 1fr auto; gap: 12px; align-items: center; padding: 11px; border-top: 1px solid var(--soft); }
+.inbox-card code { display: block; color: var(--muted); font-size: .58rem; }
+.inbox-card p { color: var(--muted); font-size: .68rem; }
+.inbox-card button { padding: 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--raised); color: var(--ink); }
+.inbox-card .danger { color: var(--red); }
+.service-form { display: grid; grid-template-columns: 180px 1fr auto; gap: 8px; }
+.service-form select, .service-form input, .service-form button {
+  padding: 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--raised); color: var(--ink);
+}
+.service-form span { grid-column: 1 / -1; color: var(--muted); font-size: .68rem; }
+.service-history { display: grid; gap: 8px; margin-top: 14px; }
+.service-history article { display: grid; grid-template-columns: 190px 1fr auto; gap: 12px; padding: 11px; border: 1px solid var(--soft); border-radius: 7px; }
+.service-history strong, .service-history code { display: block; font-size: .66rem; }
+.service-history code, .service-history p, .service-history small { color: var(--muted); font-size: .62rem; }
+
+.mqtt-note {
+  margin: -4px 0 16px;
+  color: var(--muted);
+  font-size: .7rem;
+}
+
+.mqtt-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mqtt-form label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--soft);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: .68rem;
+}
+
+.mqtt-form input:not([type="checkbox"]), .mqtt-form select {
+  min-width: 0;
+  width: 58%;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--raised);
+  color: var(--ink);
+}
+
+.mqtt-form button {
+  width: max-content;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--ink);
+}
+
+#mqtt-result {
+  align-self: center;
+  color: var(--muted);
+  font-size: .68rem;
+}
+
+@media (max-width: 700px) {
+  .mqtt-form { grid-template-columns: 1fr; }
+  .service-form, .service-history article { grid-template-columns: 1fr; }
+  .policy-form,.relay-mail-form,.relay-mail-history article { grid-template-columns:1fr; }
+}

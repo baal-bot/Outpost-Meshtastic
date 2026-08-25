@@ -1,0 +1,5 @@
+- pattern: "^(help|what can you do|commands)$"
+  command: HELP
+- pattern: "^where am i$"
+  command: WHERE
+
