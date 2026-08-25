@@ -90,6 +90,35 @@ async def test_counters_persist_and_replays_are_rejected(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_unpair_returns_peer_to_pending_and_revokes_trust(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    service = FederationPeerService(database, VirtualClock(), "!local")
+    await service.discover("!remote", "Remote", 1, {}, "radio")
+    await database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,pairing_nonce=?,"
+        "local_approved=1,remote_approved=1,tx_counter=4,rx_counter=7,"
+        "approved_by='operator',approved_at=1 WHERE mesh_id='!remote'",
+        (bytes(range(32)), bytes(range(16))),
+    )
+
+    peer = await service.set_state("!remote", "pending")
+    row = (
+        await database.read(
+            "SELECT shared_secret,pairing_nonce,tx_counter,rx_counter,approved_by,approved_at "
+            "FROM fed_peer WHERE mesh_id='!remote'"
+        )
+    )[0]
+
+    assert peer.state == "pending"
+    assert not peer.local_approved and not peer.remote_approved
+    assert row["shared_secret"] is None and row["pairing_nonce"] is None
+    assert row["tx_counter"] == 0 and row["rx_counter"] == 0
+    assert row["approved_by"] is None and row["approved_at"] is None
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_peer_api_lists_and_operator_rejects_without_exposing_secret(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()

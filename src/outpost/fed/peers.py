@@ -266,14 +266,35 @@ class FederationPeerService:
         if state not in {"pending", "paused", "rejected"}:
             raise ValueError("unsupported operator peer state")
         peer = await self.by_mesh_id(mesh_id)
+        revoke_trust = peer.state == "active" and state == "pending"
         await self.database.write(
-            "UPDATE fed_peer SET state=?, shared_secret=CASE WHEN ?='rejected' "
-            "THEN NULL ELSE shared_secret END, pairing_private=CASE WHEN ?='rejected' "
-            "THEN NULL ELSE pairing_private END, pairing_nonce=CASE WHEN ?='rejected' "
-            "THEN NULL ELSE pairing_nonce END, local_approved=CASE WHEN ?='rejected' "
-            "THEN 0 ELSE local_approved END, remote_approved=CASE WHEN ?='rejected' "
-            "THEN 0 ELSE remote_approved END WHERE id=?",
-            (state, state, state, state, state, state, peer.id),
+            "UPDATE fed_peer SET state=?, shared_secret=CASE WHEN ? OR ?='rejected' "
+            "THEN NULL ELSE shared_secret END, pairing_private=CASE WHEN ? OR ?='rejected' "
+            "THEN NULL ELSE pairing_private END, pairing_nonce=CASE WHEN ? OR ?='rejected' "
+            "THEN NULL ELSE pairing_nonce END, local_approved=CASE WHEN ? OR ?='rejected' "
+            "THEN 0 ELSE local_approved END, remote_approved=CASE WHEN ? OR ?='rejected' "
+            "THEN 0 ELSE remote_approved END, tx_counter=CASE WHEN ? THEN 0 ELSE tx_counter END, "
+            "rx_counter=CASE WHEN ? THEN 0 ELSE rx_counter END, approved_by=CASE WHEN ? "
+            "THEN NULL ELSE approved_by END, approved_at=CASE WHEN ? THEN NULL "
+            "ELSE approved_at END WHERE id=?",
+            (
+                state,
+                revoke_trust,
+                state,
+                revoke_trust,
+                state,
+                revoke_trust,
+                state,
+                revoke_trust,
+                state,
+                revoke_trust,
+                state,
+                revoke_trust,
+                revoke_trust,
+                revoke_trust,
+                revoke_trust,
+                peer.id,
+            ),
         )
         return await self.by_mesh_id(mesh_id)
 
