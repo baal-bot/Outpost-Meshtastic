@@ -46,6 +46,91 @@ html[data-theme="daylight"] .env-provider-health span { color: #4c665a; backgrou
 html[data-theme="daylight"] .env-provider-health .up,
 html[data-theme="daylight"] .env-provider-health .cached { color: #1d6845; }
 
+/* Compact indicators need their own semantic surfaces in light mode. */
+html[data-theme="daylight"] .status,
+html[data-theme="daylight"] .chip,
+html[data-theme="daylight"] .pill,
+html[data-theme="daylight"] .lifecycle-badge,
+html[data-theme="daylight"] .review-state,
+html[data-theme="daylight"] .gate-pill,
+html[data-theme="daylight"] .provider-health span,
+html[data-theme="daylight"] .env-provider-health span {
+  color: #36584a;
+  background: #e3ece7;
+  border-color: #9fb8ac;
+}
+html[data-theme="daylight"] .status.up,
+html[data-theme="daylight"] .chip.active,
+html[data-theme="daylight"] .pill.live,
+html[data-theme="daylight"] .phase.now,
+html[data-theme="daylight"] .gate-pill.accepted,
+html[data-theme="daylight"] .provider-health .up,
+html[data-theme="daylight"] .provider-health .cached,
+html[data-theme="daylight"] .env-provider-health .up,
+html[data-theme="daylight"] .env-provider-health .cached {
+  color: #145b37;
+  background: #d9eee1;
+  border-color: #78ab8d;
+}
+html[data-theme="daylight"] .chip.warn,
+html[data-theme="daylight"] .chip.pending,
+html[data-theme="daylight"] .gate-pill.withheld,
+html[data-theme="daylight"] .gate-reasons span,
+html[data-theme="daylight"] .provider-health .unknown {
+  color: #704900;
+  background: #fff0ce;
+  border-color: #c89b44;
+}
+html[data-theme="daylight"] .chip.bad,
+html[data-theme="daylight"] .status.down,
+html[data-theme="daylight"] .provider-health .down {
+  color: #8b3025;
+  background: #fbe0da;
+  border-color: #c2786d;
+}
+html[data-theme="daylight"] .phase.later {
+  color: #593a87;
+  background: #ebe3f6;
+  border-color: #a58cc7;
+}
+html[data-theme="daylight"] .lifecycle-badge.monitoring {
+  color: #225c69;
+  background: #dceef2;
+  border-color: #7faab3;
+}
+html[data-theme="daylight"] .kpis em,
+html[data-theme="daylight"] .direction {
+  background: #dcebe3;
+  border: 1px solid #b5cabf;
+}
+html[data-theme="daylight"] .badge,
+html[data-theme="daylight"] .live,
+html[data-theme="daylight"] .monitoring-heading span,
+html[data-theme="daylight"] .safety-note { color: #225f40; }
+html[data-theme="daylight"] .provider-health i { box-shadow: 0 0 0 2px rgb(255 255 255 / 80%); }
+
+/* Weather components predate theme tokens and otherwise retain pale dark-mode type. */
+html[data-theme="daylight"] .weather-reading strong,
+html[data-theme="daylight"] .weather-details b,
+html[data-theme="daylight"] .forecast-day > strong,
+html[data-theme="daylight"] .forecast-hours strong {
+  color: #183d2e;
+}
+html[data-theme="daylight"] .weather-panel p,
+html[data-theme="daylight"] .weather-reading span,
+html[data-theme="daylight"] .weather-details span,
+html[data-theme="daylight"] .weather-details em,
+html[data-theme="daylight"] .forecast-heading > span,
+html[data-theme="daylight"] .forecast-day > span,
+html[data-theme="daylight"] .forecast-day p,
+html[data-theme="daylight"] .forecast-day div,
+html[data-theme="daylight"] .forecast-day > strong small,
+html[data-theme="daylight"] .forecast-hours time,
+html[data-theme="daylight"] .forecast-hours span {
+  color: #587066;
+}
+html[data-theme="daylight"] .forecast-day div b { color: #286b45; }
+
 html[data-theme="night"] .login-screen { background: rgb(4 3 2 / 94%); }
 html[data-theme="night"] .login-card {
   color: var(--ink);
