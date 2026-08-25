@@ -67,6 +67,34 @@ html[data-theme="daylight"] .emergency-card [data-add-stage] {
   background: #edf4f0;
   border-color: #9eb8ac;
 }
+html[data-theme="dark"] .emergency-card {
+  background: linear-gradient(145deg, #132a23, #0b1d18);
+  border-color: #355448;
+}
+html[data-theme="dark"] .emergency-card .escalation-editor {
+  background: #10231d;
+  border-color: #355448;
+}
+html[data-theme="dark"] .emergency-card .policy-card {
+  background: #142c24;
+  border-top-color: #2d4b40;
+  border-right-color: #2d4b40;
+  border-bottom-color: #2d4b40;
+}
+html[data-theme="dark"] .emergency-card .stage-row {
+  background: #0f211c;
+  border-color: #29473c;
+}
+html[data-theme="dark"] .emergency-card .advanced-policy textarea {
+  color: #c6dbd3;
+  background: #091713;
+  border-color: #355448;
+}
+html[data-theme="dark"] .emergency-card [data-add-stage] {
+  color: #b8d1c7;
+  background: #18342b;
+  border-color: #355448;
+}
 html[data-theme="daylight"] .current-metrics strong,
 html[data-theme="daylight"] .env-day strong,
 html[data-theme="daylight"] .env-hourly strong,
