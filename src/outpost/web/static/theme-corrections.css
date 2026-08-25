@@ -45,6 +45,13 @@ html[data-theme="daylight"] .map-credit { color: #587066; }
 html[data-theme="daylight"] .env-provider-health span { color: #4c665a; background: #e3ece7; }
 html[data-theme="daylight"] .env-provider-health .up,
 html[data-theme="daylight"] .env-provider-health .cached { color: #1d6845; }
+html[data-theme="daylight"] .env-hero-stats {
+  background: #b9ccc2;
+  border: 1px solid #b9ccc2;
+}
+html[data-theme="daylight"] .env-hero-stats div { background: #e5eee9; }
+html[data-theme="daylight"] .env-hero-stats span { color: #526d61; }
+html[data-theme="daylight"] .env-hero-stats strong { color: #163c2c; }
 
 /* Compact indicators need their own semantic surfaces in light mode. */
 html[data-theme="daylight"] .status,
