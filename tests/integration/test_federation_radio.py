@@ -110,3 +110,29 @@ async def test_radio_hello_cannot_claim_another_sender(tmp_path) -> None:
 
     assert await app.federation.list() == []
     await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_rejected_federation_frame_records_safe_reason(tmp_path) -> None:
+    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    app = OutpostApp(config)
+    await app.database.open()
+    message = InboundMessage(
+        42,
+        "!remote",
+        "!local",
+        0,
+        config.radio.federation_portnum,
+        True,
+        None,
+        bytes((0x4F, 1, int(MessageType.SERVICE_RESPONSE))) + bytes(20),
+        datetime.now(UTC),
+    )
+    await app.message_log.record_inbound(message)
+
+    await app._handle_federation_discovery(message)
+
+    row = (await app.database.read("SELECT outcome,drop_reason FROM message_log"))[0]
+    assert row["outcome"] == "rejected"
+    assert row["drop_reason"] == "active federation secret unavailable"
+    await app.database.close()

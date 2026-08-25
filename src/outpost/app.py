@@ -660,7 +660,14 @@ class OutpostApp:
                         "WHERE relay_id=? AND direction='out'",
                         (str(value["relay_id"]),),
                     )
-        except (FrameError, KeyError, TypeError, ValueError):
+        except (FrameError, KeyError, TypeError, ValueError) as error:
+            packet_id = getattr(message, "packet_id", None)
+            if packet_id is not None:
+                await self.database.write(
+                    "UPDATE message_log SET outcome='rejected',drop_reason=? "
+                    "WHERE direction='in' AND packet_id=?",
+                    (str(error)[:120], packet_id),
+                )
             return
 
     async def _handle_service_query(self, sender: str, value: dict[str, object]) -> None:
