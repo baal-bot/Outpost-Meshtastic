@@ -216,7 +216,9 @@ class FederationSyncService:
             if not boards:
                 raise ValueError("destination board is not federated")
             thread_uid = str(payload["thread_uid"])
-            threads = await self.database.read("SELECT id FROM thread WHERE uid=?", (thread_uid,))
+            threads = await self.database.read(
+                "SELECT id FROM thread WHERE uid=? AND board_id=?", (thread_uid, boards[0]["id"])
+            )
             if threads:
                 thread_id = int(threads[0]["id"])
             else:

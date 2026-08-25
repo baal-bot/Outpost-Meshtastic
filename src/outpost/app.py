@@ -150,7 +150,9 @@ class OutpostApp:
             for spec in self.router.registry.commands()
             for value in (spec.name, *spec.aliases)
         }
-        self.bbs_admin = BBSAdmin(self.database, self.clock, reserved_slugs)
+        self.bbs_admin = BBSAdmin(
+            self.database, self.clock, reserved_slugs, federation_notify=self._notify_board_change
+        )
         self.web_auth = WebAuthService(self.database, self.config.web.auth.session_hours)
         self.runtime_settings = RuntimeSettings(self.database, self.config)
         self.backups = BackupService(self.database)
@@ -209,6 +211,19 @@ class OutpostApp:
 
     async def _send_federated_operator_reply(self, peer_id: str, body: str) -> None:
         await self.send_federation_mail(peer_id, "operator", "Mesh reply", body)
+
+    async def _notify_board_change(self, slug: str) -> None:
+        if not self.config.modules.fed.enabled or not self.radio.local_node_id:
+            return
+        for peer in await self.federation.list("active"):
+            if slug not in peer.boards:
+                continue
+            try:
+                await self._send_federation_value(
+                    peer.mesh_id, MessageType.SYNC_NOTIFY, {"stream": f"board:{slug}"}
+                )
+            except (FrameError, ValueError):
+                continue
 
     async def startup(self) -> None:
         await self.database.open()
@@ -566,6 +581,7 @@ class OutpostApp:
                 MessageType.ITEM_REQ,
                 MessageType.ITEM,
                 MessageType.SYNC_DONE,
+                MessageType.SYNC_NOTIFY,
                 MessageType.MAIL_RELAY,
                 MessageType.MAIL_RECEIPT,
             }:
@@ -633,6 +649,12 @@ class OutpostApp:
                     MessageType.SYNC_MANIFEST,
                     {"mesh_id": self.federation.local_mesh_id, "items": manifest},
                 )
+            elif msg_type is MessageType.SYNC_NOTIFY:
+                stream = str(value.get("stream", ""))
+                peer = await self.federation.by_mesh_id(sender)
+                if not stream.startswith("board:") or stream[6:] not in peer.boards:
+                    raise ValueError("federation change notification is outside peer policy")
+                await self._send_federation_value(sender, MessageType.SYNC_REQ, {"limit": 8})
             elif msg_type is MessageType.SYNC_MANIFEST:
                 manifest = value.get("items", [])
                 if not isinstance(manifest, list):
@@ -688,6 +710,27 @@ class OutpostApp:
                 )
                 if not received:
                     return
+                if str(item.get("stream", "")).startswith("board:"):
+                    payload = item.get("payload")
+                    if isinstance(payload, dict):
+                        slug = str(item["stream"])[6:]
+                        existing = await self.database.read(
+                            "SELECT t.id FROM thread t JOIN board b ON b.id=t.board_id "
+                            "WHERE t.uid=? AND b.slug=? AND b.federated=1",
+                            (str(payload.get("thread_uid", "")), slug),
+                        )
+                        if existing:
+                            inbox = await self.database.read(
+                                "SELECT id FROM fed_inbox_item WHERE peer_id=? AND stream=? "
+                                "AND uid=? AND state='pending'",
+                                (peer.id, str(item["stream"]), str(item.get("uid", ""))),
+                            )
+                            if inbox:
+                                await self.federation_sync.import_inbox(
+                                    int(inbox[0]["id"]),
+                                    "federation:auto-thread",
+                                    int(self.clock.now().timestamp()),
+                                )
             elif msg_type is MessageType.SYNC_DONE:
                 await self.database.write(
                     "UPDATE fed_peer SET last_sync_at=unixepoch() WHERE mesh_id=?",

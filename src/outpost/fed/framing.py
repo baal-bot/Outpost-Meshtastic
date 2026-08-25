@@ -32,6 +32,7 @@ class MessageType(IntEnum):
     ITEM_REQ = 0x12
     ITEM = 0x13
     SYNC_DONE = 0x14
+    SYNC_NOTIFY = 0x15
     MAIL_RELAY = 0x20
     MAIL_RECEIPT = 0x21
     INCIDENT = 0x30
