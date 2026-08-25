@@ -102,4 +102,16 @@ async def test_export_namespaces_local_ids_with_outpost_identity(tmp_path) -> No
         await sync.export_items(peer, [{"stream": "board:gen", "uid": "!somewhere-else:local:1"}])
         == []
     )
+
+    remote_thread = await database.write(
+        "INSERT INTO thread(uid,board_id,subject,origin_node,created_at,last_post_at) "
+        "VALUES('!remote:local:9',1,'Remote','!remote',2,2)"
+    )
+    await database.write(
+        "INSERT INTO post(uid,thread_id,seq,author_label,origin_node,body,created_at) "
+        "VALUES('local:2',?,2,'operator','local','Local reply',2)",
+        (remote_thread,),
+    )
+    reply = await sync.export_items(peer, [{"stream": "board:gen", "uid": "!localnode:local:2"}])
+    assert reply[0]["payload"]["thread_uid"] == "!remote:local:9"
     await database.close()

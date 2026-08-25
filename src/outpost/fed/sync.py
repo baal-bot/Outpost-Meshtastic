@@ -26,6 +26,8 @@ class FederationSyncService:
         self.local_mesh_id = local_mesh_id
 
     def _wire_uid(self, uid: str) -> str:
+        if uid.startswith("!") and ":" in uid:
+            return uid
         return f"{self.local_mesh_id}:{uid}" if self.local_mesh_id else uid
 
     def _local_uid(self, uid: str) -> str | None:
