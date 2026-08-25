@@ -27,6 +27,9 @@ packet limits.
 ## Data and mail
 
 - [ ] Sync allowed items while excluded or over-radius data remains private.
-- [ ] Relay encrypted mail in both directions and verify receipts, quotas, and deduplication.
+- [x] Relay encrypted mail in both directions and verify receipts, routing, and deduplication.
+  Web operator mail to a named remote member and the member's `RR` back to the originating
+  Outpost's web-only `@operator` mailbox passed over live radios. Per-peer quota enforcement
+  remains covered by automated tests; a destructive live quota-exhaustion run is deferred.
 - [ ] Reject tampered, expired, unauthenticated, and replayed frames.
 - [ ] Remove peer trust and confirm subsequent synchronization and relay attempts fail closed.
