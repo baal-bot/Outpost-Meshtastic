@@ -517,6 +517,11 @@ class OutpostApp:
     async def _send_federation_value(
         self, peer_id: str, msg_type: MessageType, value: dict[str, object]
     ) -> None:
+        local_id = self.radio.local_node_id
+        if not local_id:
+            raise ValueError("radio identity is not available")
+        self.federation.local_mesh_id = local_id
+        value = {**value, "mesh_id": local_id}
         secret = await self.federation.secret(peer_id)
         counter = await self.federation.next_counter(peer_id)
         frames = self.federation_codec.encode(msg_type, value, counter, secret)
