@@ -299,8 +299,8 @@ class OutpostApp:
 
     def _queue_federation_frames(
         self, frames: list[bytes], destination: str, *, want_ack: bool
-    ) -> None:
-        self.governor.enqueue_many(
+    ) -> list[int]:
+        admitted = self.governor.enqueue_many(
             [
                 OutboundItem(
                     text="",
@@ -315,6 +315,9 @@ class OutpostApp:
                 for frame in frames
             ]
         )
+        if admitted is None:
+            raise ValueError("federation queue rejected the complete message")
+        return admitted
 
     async def initiate_federation_pairing(self, mesh_id: str) -> object:
         local_id = self.radio.local_node_id
