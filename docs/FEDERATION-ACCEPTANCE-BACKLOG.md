@@ -17,7 +17,9 @@ observed over live radios, not only in automated tests.
 - [x] Disconnect one node from the internet and route its agent request through the online peer.
   With Outpost01's WAN unavailable but its LAN and Meshtastic radio intact, a peer weather
   request completed through the online `!699c2f30` Outpost over the radio federation path.
-- [ ] Restore connectivity and confirm queued frames are deduplicated rather than replayed.
+- [x] Restore connectivity and confirm queued frames are deduplicated rather than replayed.
+  After Outpost01's WAN was restored, local weather and a new peer weather request each produced
+  one current result; the earlier offline request was neither replayed nor duplicated.
 - [ ] Partition both transports, reconnect, and verify bounded catch-up respects airtime policy.
 
 Live testing found that 225–233-byte application payloads were not reliably acknowledged by the
