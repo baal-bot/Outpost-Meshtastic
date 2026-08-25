@@ -35,4 +35,6 @@ packet limits.
   Outpost's web-only `@operator` mailbox passed over live radios. Per-peer quota enforcement
   remains covered by automated tests; a destructive live quota-exhaustion run is deferred.
 - [ ] Reject tampered, expired, unauthenticated, and replayed frames.
-- [ ] Remove peer trust and confirm subsequent synchronization and relay attempts fail closed.
+- [x] Remove peer trust and confirm subsequent synchronization and relay attempts fail closed.
+  Live revocation of `!3136b053` erased the shared secret, cleared both approvals, reset replay
+  counters, and returned the peer to pending; subsequent trusted traffic was not admitted.
