@@ -95,6 +95,16 @@ html[data-theme="dark"] .emergency-card [data-add-stage] {
   background: #18342b;
   border-color: #355448;
 }
+.emergency-card [data-remove-stage] {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  line-height: 1;
+}
 html[data-theme="daylight"] .current-metrics strong,
 html[data-theme="daylight"] .env-day strong,
 html[data-theme="daylight"] .env-hourly strong,
