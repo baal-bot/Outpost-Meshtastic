@@ -37,7 +37,24 @@ sudo ./deploy/install.sh
 | Database/runtime files | `/var/lib/outpost` |
 | Service unit | `/etc/systemd/system/outpost.service` |
 
-Later installer runs preserve active configuration and refresh the `.dist` comparison copy.
+Later installer runs preserve active configuration, refresh the `.dist` comparison copy, reinstall
+the checked-out revision into `/opt/outpost/venv`, and restart the production service. `git pull`
+alone does not update the running installation.
+
+## Federation acceptance host
+
+Keep development tools separate from the minimal production environment. From the repository
+checkout on a test host:
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev,radio]'
+.venv/bin/pip check
+```
+
+The checkout-local `.venv` runs tests and linting. The systemd service continues to use
+`/opt/outpost/venv`. After pulling application changes, rerun `sudo ./deploy/install.sh`; running
+tests from `.venv` does not upgrade or restart the production service.
 
 ## First configuration
 
@@ -86,7 +103,8 @@ used interactively; the local USGS pack is the fallback.
 
 1. Create and download a validated backup.
 2. Review release and configuration changes.
-3. Pull the desired revision and rerun `sudo ./deploy/install.sh`.
+3. Pull the desired revision and rerun `sudo ./deploy/install.sh`. A pull by itself does not update
+   `/opt/outpost/venv` or the running process.
 4. Compare active config with `/etc/outpost/config.yaml.dist`.
 5. Verify health, login, radio connectivity, and a mesh `PING`.
 

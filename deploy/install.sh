@@ -28,7 +28,7 @@ if ! getent group outpost >/dev/null 2>&1; then
   groupadd --system outpost
 fi
 if ! getent passwd outpost >/dev/null 2>&1; then
-  useradd --system --home /var/lib/outpost --shell /usr/sbin/nologin outpost
+  useradd --system --gid outpost --home /var/lib/outpost --shell /usr/sbin/nologin outpost
 fi
 if getent group dialout >/dev/null 2>&1; then
   usermod -a -G dialout outpost
@@ -38,7 +38,7 @@ install -d -m 0750 -o outpost -g outpost /var/lib/outpost /var/lib/outpost/.data
 install -d -m 0755 /opt/outpost
 install -d -m 0750 -o root -g outpost /etc/outpost
 python3 -m venv /opt/outpost/venv
-/opt/outpost/venv/bin/pip install "$PROJECT_DIR[radio]"
+/opt/outpost/venv/bin/pip install --upgrade --force-reinstall "$PROJECT_DIR[radio]"
 
 # Keep local settings intact on upgrades. The .dist file shows the current defaults.
 install -m 0640 -o root -g outpost "$PROJECT_DIR/config/config.example.yaml" \
@@ -73,6 +73,9 @@ fi
 
 install -m 0644 "$SCRIPT_DIR/outpost.service" /etc/systemd/system/outpost.service
 systemctl daemon-reload
-systemctl enable --now outpost.service
+systemctl enable outpost.service
+# `enable --now` does not restart an already-running service after a package
+# upgrade. An explicit restart guarantees the process uses the installed code.
+systemctl restart outpost.service
 
-echo "Outpost installed. Check status with: systemctl status outpost"
+echo "Outpost installed or upgraded and restarted. Check status with: systemctl status outpost"
