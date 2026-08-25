@@ -234,6 +234,52 @@ html[data-theme="daylight"] .solicitation-review > button:disabled {
   border-color: #b5c7bd;
 }
 
+/* Shared map controls use one compact vertical instrument across every map. */
+:is(.map-controls, .environment-map-controls, .member-map-controls) {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 7px 22px rgb(0 0 0 / 28%);
+}
+:is(.map-controls, .environment-map-controls, .member-map-controls) button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  font: 700 1rem/1 Figtree, sans-serif;
+}
+:is(.map-controls, .environment-map-controls, .member-map-controls) button:last-child { border-bottom: 0; }
+:is(.map-controls, .environment-map-controls, .member-map-controls) button:hover { background: var(--raised); }
+html[data-theme="daylight"] :is(.map-controls, .environment-map-controls, .member-map-controls) {
+  background: rgb(255 255 255 / 96%);
+  border-color: #76988a;
+  box-shadow: 0 7px 22px rgb(32 67 51 / 18%);
+}
+html[data-theme="daylight"] :is(.map-controls, .environment-map-controls, .member-map-controls) button {
+  color: #163c2c;
+  border-color: #b6c9c0;
+}
+html[data-theme="daylight"] :is(.map-controls, .environment-map-controls, .member-map-controls) button:hover { background: #e1eee7; }
+html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-detail) {
+  color: #163c2c;
+  background: rgb(255 255 255 / 97%);
+  border-color: #78998b;
+  box-shadow: 0 14px 38px rgb(32 67 51 / 22%);
+}
+html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-detail) h3,
+html[data-theme="daylight"] .waypoint-map-card .waypoint-card-coordinates { color: #163c2c; }
+html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-detail) p { color: #526d61; }
+
 html[data-theme="night"] .login-screen { background: rgb(4 3 2 / 94%); }
 html[data-theme="night"] .login-card {
   color: var(--ink);
