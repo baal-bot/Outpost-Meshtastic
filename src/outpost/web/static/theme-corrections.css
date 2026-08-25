@@ -280,6 +280,132 @@ html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-det
 html[data-theme="daylight"] .waypoint-map-card .waypoint-card-coordinates { color: #163c2c; }
 html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-detail) p { color: #526d61; }
 
+/* Semantic action system: neutral by default, explicit primary and danger intent. */
+button,
+.action,
+.primary-button,
+.small-button {
+  color: var(--ink);
+  background: var(--raised);
+  border: 1px solid var(--line);
+}
+:is(button, .action, .primary-button, .small-button):not(:disabled):hover { filter: brightness(1.1); }
+:is(
+  button[type="submit"],
+  .button-primary,
+  .primary-button,
+  #open-emergency,
+  #save-watch-settings,
+  #create-backup,
+  #create-backup-page,
+  #save-board,
+  #save-thread,
+  #approve-solicitation,
+  [data-pair],
+  [data-approve],
+  [data-import],
+  [data-quake-approve],
+  [data-cap-approve]
+) {
+  color: #102016;
+  background: var(--green);
+  border-color: transparent;
+  font-weight: 750;
+}
+:is(
+  .secondary,
+  .button-secondary,
+  .small-button,
+  [value="cancel"],
+  [data-waypoint-focus],
+  [data-waypoint-edit],
+  [data-waypoint-card-center],
+  [data-waypoint-card-edit],
+  [data-center]
+) {
+  color: var(--ink);
+  background: var(--raised);
+  border-color: var(--line);
+}
+:is(
+  .danger,
+  .restore,
+  .button-danger,
+  #close-event,
+  [data-waypoint-delete],
+  [data-reject],
+  [data-state="rejected"],
+  [data-remove-stage],
+  [data-halt-alert],
+  [data-cancel-alert]
+) {
+  color: #f3a092;
+  background: #351d19;
+  border-color: #75473d;
+}
+:is(button, .action, .primary-button, .small-button):disabled {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--raised) 75%, var(--bg));
+  border-color: var(--line);
+}
+html[data-theme="daylight"] :is(
+  button[type="submit"],
+  .button-primary,
+  .primary-button,
+  #open-emergency,
+  #save-watch-settings,
+  #create-backup,
+  #create-backup-page,
+  #save-board,
+  #save-thread,
+  #approve-solicitation,
+  [data-pair],
+  [data-approve],
+  [data-import],
+  [data-quake-approve],
+  [data-cap-approve]
+) {
+  color: #fff;
+  background: #23623f;
+  border-color: #23623f;
+}
+html[data-theme="daylight"] :is(
+  .secondary,
+  .button-secondary,
+  .small-button,
+  [value="cancel"],
+  [data-waypoint-focus],
+  [data-waypoint-edit],
+  [data-waypoint-card-center],
+  [data-waypoint-card-edit],
+  [data-center]
+) {
+  color: #264c3c;
+  background: #edf4f0;
+  border-color: #9eb8ac;
+}
+html[data-theme="daylight"] :is(
+  .danger,
+  .restore,
+  .button-danger,
+  #close-event,
+  [data-waypoint-delete],
+  [data-reject],
+  [data-state="rejected"],
+  [data-remove-stage],
+  [data-halt-alert],
+  [data-cancel-alert]
+) {
+  color: #8b3025;
+  background: #fbe7e2;
+  border-color: #c98276;
+}
+html[data-theme="daylight"] :is(button, .action, .primary-button, .small-button):disabled {
+  color: #64786f;
+  background: #dfe8e3;
+  border-color: #b9cbc2;
+}
+
 html[data-theme="night"] .login-screen { background: rgb(4 3 2 / 94%); }
 html[data-theme="night"] .login-card {
   color: var(--ink);
