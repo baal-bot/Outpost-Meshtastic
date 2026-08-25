@@ -59,6 +59,13 @@ html[data-theme="daylight"] .trust-note {
 }
 html[data-theme="daylight"] .trust-note strong { color: #674100; }
 html[data-theme="daylight"] .trust-note span { color: #55482d; }
+.backup-actions :is(a, button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  line-height: 1;
+}
 
 /* Compact indicators need their own semantic surfaces in light mode. */
 html[data-theme="daylight"] .status,
