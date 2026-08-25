@@ -381,6 +381,7 @@ button,
   .secondary,
   .button-secondary,
   .small-button,
+  [id^="refresh-"],
   [value="cancel"],
   [data-waypoint-focus],
   [data-waypoint-edit],
@@ -447,7 +448,7 @@ html[data-theme="daylight"] :is(
 ) {
   color: #264c3c;
   background: #edf4f0;
-  border-color: #9eb8ac;
+  border: 1px solid #9eb8ac !important;
 }
 html[data-theme="daylight"] :is(
   .danger,
