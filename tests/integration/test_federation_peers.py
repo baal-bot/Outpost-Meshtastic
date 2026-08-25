@@ -134,6 +134,9 @@ async def test_peer_api_lists_and_operator_rejects_without_exposing_secret(tmp_p
     assert "shared_secret" not in listing.text
     rejected = client.patch("/api/v1/federation/peers/!remote", json={"state": "rejected"})
     assert rejected.status_code == 200 and rejected.json()["state"] == "rejected"
+    forgotten = client.delete("/api/v1/federation/peers/!remote")
+    assert forgotten.status_code == 200
+    assert client.get("/api/v1/federation/peers").json()["items"] == []
     await database.close()
 
 

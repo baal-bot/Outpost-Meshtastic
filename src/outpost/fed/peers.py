@@ -298,6 +298,12 @@ class FederationPeerService:
         )
         return await self.by_mesh_id(mesh_id)
 
+    async def forget(self, mesh_id: str) -> None:
+        peer = await self.by_mesh_id(mesh_id)
+        if peer.state != "rejected":
+            raise ValueError("only rejected peers can be forgotten")
+        await self.database.write("DELETE FROM fed_peer WHERE id=?", (peer.id,))
+
     async def update_sync_policy(
         self,
         mesh_id: str,

@@ -438,6 +438,24 @@ def create_web_app(
                 )
             return peer.__dict__
 
+        @app.delete("/api/v1/federation/peers/{mesh_id}", response_model=None)
+        async def federation_peer_forget(mesh_id: str) -> dict[str, bool] | Response:
+            try:
+                peer = await federation.by_mesh_id(mesh_id)
+                await federation.forget(mesh_id)
+            except ValueError as error:
+                return JSONResponse(
+                    {"error": {"code": "peer_forget_failed", "message": str(error)}},
+                    status_code=409,
+                )
+            if database is not None:
+                await database.write(
+                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                    "VALUES('web','operator','federation.peer_forget',?,?,unixepoch())",
+                    (f"fed_peer:{peer.mesh_id}", peer.node_name),
+                )
+            return {"ok": True}
+
         @app.get("/api/v1/federation/peers/{mesh_id}/pairing-code", response_model=None)
         async def federation_pairing_code(mesh_id: str) -> dict[str, str] | Response:
             try:
