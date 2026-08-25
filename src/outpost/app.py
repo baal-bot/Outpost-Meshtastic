@@ -529,6 +529,9 @@ class OutpostApp:
 
     async def _federation_sync_loop(self) -> None:
         while True:
+            if self.config.modules.fed.enabled and not self.radio.local_node_id:
+                await self.clock.sleep(30)
+                continue
             if self.config.modules.fed.enabled:
                 for peer in await self.federation.list("active"):
                     if not (peer.boards or peer.sync_incidents or peer.relay_alerts):
