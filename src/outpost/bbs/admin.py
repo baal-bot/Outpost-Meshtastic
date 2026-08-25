@@ -126,14 +126,15 @@ class BBSAdmin:
     async def reply(self, thread_id: int, body: str) -> int:
         if not body.strip() or len(body) > 1_000:
             raise ValueError("Reply is 1-1000 characters.")
-        rows = await self.database.read(
-            "SELECT post_count,locked,hidden FROM thread WHERE id=?", (thread_id,)
-        )
+        rows = await self.database.read("SELECT locked,hidden FROM thread WHERE id=?", (thread_id,))
         if not rows or rows[0]["hidden"]:
             raise ValueError("Thread not found.")
         if rows[0]["locked"]:
             raise ValueError("Thread is locked.")
-        now, seq = int(self.clock.now().timestamp()), int(rows[0]["post_count"]) + 1
+        sequence = await self.database.read(
+            "SELECT COALESCE(MAX(seq),0)+1 value FROM post WHERE thread_id=?", (thread_id,)
+        )
+        now, seq = int(self.clock.now().timestamp()), int(sequence[0]["value"])
         post_id = await self.database.write(
             """
             INSERT INTO post(uid,thread_id,seq,author_label,origin_node,body,created_at)

@@ -164,8 +164,10 @@ class BBSService:
         if not body or len(body.encode()) > 200:
             raise ValueError("Reply must be 1-200 bytes.")
         now = int(self.clock.now().timestamp())
-        rows = await self.database.read("SELECT post_count FROM thread WHERE id=?", (thread_id,))
-        seq = int(rows[0]["post_count"]) + 1
+        sequence = await self.database.read(
+            "SELECT COALESCE(MAX(seq),0)+1 value FROM post WHERE thread_id=?", (thread_id,)
+        )
+        seq = int(sequence[0]["value"])
         post_id = await self.database.write(
             """
             INSERT INTO post(uid,thread_id,seq,author_id,author_label,origin_node,body,created_at)

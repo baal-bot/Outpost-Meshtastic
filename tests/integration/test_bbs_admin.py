@@ -30,17 +30,21 @@ async def test_bbs_admin_lifecycle_validates_and_audits(tmp_path) -> None:
     assert board[0]["federated"] == 0
     thread_id = await admin.create_thread(board_id, "Seed exchange", "Bring labeled seeds.")
     post_id = await admin.reply(thread_id, "Operator will provide envelopes.")
+    await database.write("UPDATE thread SET post_count=0 WHERE id=?", (thread_id,))
+    second_post_id = await admin.reply(thread_id, "Cached counts do not allocate sequences.")
     assert await admin.update_thread(thread_id, {"pinned": True, "locked": True}) is True
     rows = await database.read(
         "SELECT pinned,locked,post_count FROM thread WHERE id=?", (thread_id,)
     )
-    assert dict(rows[0]) == {"pinned": 1, "locked": 1, "post_count": 2}
+    assert dict(rows[0]) == {"pinned": 1, "locked": 1, "post_count": 3}
     assert await database.read("SELECT 1 FROM post WHERE id=?", (post_id,))
+    assert await database.read("SELECT seq FROM post WHERE id=? AND seq=3", (second_post_id,))
     actions = [row["action"] for row in await database.read("SELECT action FROM audit_log")]
     assert actions == [
         "board.create",
         "board.update",
         "thread.create",
+        "post.create",
         "post.create",
         "thread.update",
     ]

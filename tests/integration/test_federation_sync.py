@@ -34,6 +34,7 @@ async def test_manifest_obeys_peer_policy_and_missing_is_bounded(tmp_path) -> No
         [item.json() for item in manifest] + [{"stream": "alerts", "uid": "remote:alert:1"}]
     )
     assert missing == [{"stream": "alerts", "uid": "remote:alert:1"}]
+    assert set(manifest[0].json()) == {"s", "u", "v", "d"}
 
     exported = await sync.export_items(peer, [{"stream": "incidents", "uid": "local:inc:1"}])
     assert exported[0]["payload"]["title"] == "Road closed"

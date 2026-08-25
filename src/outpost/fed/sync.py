@@ -17,7 +17,7 @@ class ManifestItem:
     digest: str
 
     def json(self) -> dict[str, str | int]:
-        return self.__dict__
+        return {"s": self.stream, "u": self.uid, "v": self.version, "d": self.digest}
 
 
 class FederationSyncService:
@@ -102,7 +102,8 @@ class FederationSyncService:
         requested: list[dict[str, str]] = []
         tables = {"incidents": "incident", "alerts": "alert"}
         for item in manifest[:100]:
-            stream, uid = str(item.get("stream", "")), str(item.get("uid", ""))
+            stream = str(item.get("stream", item.get("s", "")))
+            uid = str(item.get("uid", item.get("u", "")))
             if not uid or len(uid) > 160:
                 continue
             table = tables.get(stream, "post" if stream.startswith("board:") else None)
