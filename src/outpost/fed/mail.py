@@ -82,16 +82,23 @@ class FederationMailService:
             bytes(envelope["nonce"]), bytes(envelope["ciphertext"]), relay_id.encode()
         )
         message = json.loads(plaintext)
-        members = await self.database.read(
-            "SELECT id,handle FROM member WHERE lower(handle)=lower(?) "
-            "AND trust NOT IN ('blocked','guest')",
-            (self._handle(message["to"]),),
-        )
+        recipient = self._handle(message["to"])
+        if recipient == "operator":
+            members = await self.database.read(
+                "SELECT id,handle FROM member WHERE trust='operator' AND handle IS NOT NULL "
+                "ORDER BY id LIMIT 1"
+            )
+        else:
+            members = await self.database.read(
+                "SELECT id,handle FROM member WHERE lower(handle)=lower(?) "
+                "AND trust NOT IN ('blocked','guest')",
+                (recipient,),
+            )
         if not members:
             raise ValueError("local federation mail recipient was not found")
         mail_id = await self.database.write(
             "INSERT INTO mail(uid,from_label,to_id,to_label,subject,body,created_at,delivered_at,"
-            "state,expires_at) VALUES(?,?,?,?,?,?,?,?,'delivered',?)",
+            "state,expires_at,reply_peer_mesh_id) VALUES(?,?,?,?,?,?,?,?,'delivered',?,?)",
             (
                 f"fed:{relay_id}",
                 str(message["from"]),
@@ -102,6 +109,7 @@ class FederationMailService:
                 now,
                 now,
                 now + 180 * 86400,
+                peer_id,
             ),
         )
         await self.database.write(
@@ -111,7 +119,7 @@ class FederationMailService:
                 relay_id,
                 peer.id,
                 mail_id,
-                self._handle(message["to"]),
+                recipient,
                 now,
                 now,
                 int(envelope["expires_at"]),

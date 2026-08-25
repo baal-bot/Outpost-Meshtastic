@@ -99,6 +99,7 @@ class OutpostApp:
             self.clock,
             "local",
             self.config.mail.hold_unknown_days,
+            self._send_federated_operator_reply,
         )
         self.digests = DigestService(self.database, self.clock, self.config)
         self.incidents = IncidentService(self.database, self.clock, "local")
@@ -205,6 +206,9 @@ class OutpostApp:
             (envelope["relay_id"],),
         )
         return {"relay_id": str(envelope["relay_id"]), "state": "sent"}
+
+    async def _send_federated_operator_reply(self, peer_id: str, body: str) -> None:
+        await self.send_federation_mail(peer_id, "operator", "Mesh reply", body)
 
     async def startup(self) -> None:
         await self.database.open()

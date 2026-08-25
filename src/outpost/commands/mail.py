@@ -61,7 +61,12 @@ def specs(service: MailService) -> list[CommandSpec]:
             return Response(ResponseKind.ERROR, [Line("Read mail first, or use SEND.")])
         body = ctx.args.strip()
         try:
-            await service.send(ctx.member, ctx.session.last_mail_sender, body)
+            await service.reply(
+                ctx.member,
+                ctx.session.last_mail_id or 0,
+                ctx.session.last_mail_sender,
+                body,
+            )
         except (ValueError, PermissionError) as error:
             return Response(ResponseKind.ERROR, [Line(str(error))])
         return Response(
