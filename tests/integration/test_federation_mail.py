@@ -58,7 +58,7 @@ async def test_mail_relay_requires_peer_permission(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_operator_mailbox_routes_to_local_operator_and_preserves_reply_peer(tmp_path) -> None:
+async def test_operator_mailbox_does_not_require_radio_member(tmp_path) -> None:
     first_db, second_db = Database(tmp_path / "first.db"), Database(tmp_path / "second.db")
     await first_db.open()
     await second_db.open()
@@ -74,10 +74,6 @@ async def test_operator_mailbox_routes_to_local_operator_and_preserves_reply_pee
             "UPDATE fed_peer SET state='active',shared_secret=?,relay_mail=1 WHERE mesh_id=?",
             (secret, remote),
         )
-    await second_db.write(
-        "INSERT INTO member(mesh_id,mesh_num,handle,trust,first_seen,last_seen) "
-        "VALUES('!00000001',1,'lead','operator',1,1)"
-    )
     sender = FederationMailService(first_db, first_peers, VirtualClock())
     receiver = FederationMailService(second_db, second_peers, VirtualClock())
 
@@ -89,9 +85,13 @@ async def test_operator_mailbox_routes_to_local_operator_and_preserves_reply_pee
     assert state == "delivered"
     mail = (
         await second_db.read(
-            "SELECT to_label,reply_peer_mesh_id FROM mail WHERE uid=?", (f"fed:{relay_id}",)
+            "SELECT to_id,to_label,reply_peer_mesh_id FROM mail WHERE uid=?", (f"fed:{relay_id}",)
         )
     )[0]
-    assert dict(mail) == {"to_label": "lead", "reply_peer_mesh_id": "!aaaaaaaa"}
+    assert dict(mail) == {
+        "to_id": None,
+        "to_label": "operator",
+        "reply_peer_mesh_id": "!aaaaaaaa",
+    }
     await first_db.close()
     await second_db.close()

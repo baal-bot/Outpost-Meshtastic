@@ -685,7 +685,22 @@ class OutpostApp:
                     (sender,),
                 )
             elif msg_type is MessageType.MAIL_RELAY:
-                relay_id, state = await self.federation_mail.open(sender, value)
+                try:
+                    relay_id, state = await self.federation_mail.open(sender, value)
+                except (KeyError, TypeError, ValueError) as error:
+                    relay_id = str(value.get("relay_id", ""))
+                    if relay_id and len(relay_id) <= 64:
+                        await self._send_federation_value(
+                            sender,
+                            MessageType.MAIL_RECEIPT,
+                            {
+                                "mesh_id": self.federation.local_mesh_id,
+                                "relay_id": relay_id,
+                                "state": "failed",
+                                "error": str(error)[:80],
+                            },
+                        )
+                    raise
                 await self._send_federation_value(
                     sender,
                     MessageType.MAIL_RECEIPT,
@@ -696,11 +711,16 @@ class OutpostApp:
                     },
                 )
             elif msg_type is MessageType.MAIL_RECEIPT:
-                if value.get("state") == "delivered":
+                state = str(value.get("state", ""))
+                if state in {"delivered", "failed"}:
                     await self.database.write(
-                        "UPDATE fed_mail_delivery SET state='delivered',updated_at=unixepoch() "
+                        "UPDATE fed_mail_delivery SET state=?,error=?,updated_at=unixepoch() "
                         "WHERE relay_id=? AND direction='out'",
-                        (str(value["relay_id"]),),
+                        (
+                            state,
+                            str(value.get("error") or "")[:120] or None,
+                            str(value["relay_id"]),
+                        ),
                     )
         except (FrameError, KeyError, TypeError, ValueError) as error:
             packet_id = getattr(message, "packet_id", None)

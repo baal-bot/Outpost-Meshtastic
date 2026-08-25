@@ -88,22 +88,26 @@ class FederationMailService:
                 "SELECT id,handle FROM member WHERE trust='operator' AND handle IS NOT NULL "
                 "ORDER BY id LIMIT 1"
             )
+            recipient_id = members[0]["id"] if members else None
+            recipient_label = "operator"
         else:
             members = await self.database.read(
                 "SELECT id,handle FROM member WHERE lower(handle)=lower(?) "
                 "AND trust NOT IN ('blocked','guest')",
                 (recipient,),
             )
-        if not members:
-            raise ValueError("local federation mail recipient was not found")
+            if not members:
+                raise ValueError("local federation mail recipient was not found")
+            recipient_id = members[0]["id"]
+            recipient_label = members[0]["handle"]
         mail_id = await self.database.write(
             "INSERT INTO mail(uid,from_label,to_id,to_label,subject,body,created_at,delivered_at,"
             "state,expires_at,reply_peer_mesh_id) VALUES(?,?,?,?,?,?,?,?,'delivered',?,?)",
             (
                 f"fed:{relay_id}",
                 str(message["from"]),
-                members[0]["id"],
-                members[0]["handle"],
+                recipient_id,
+                recipient_label,
                 str(message.get("subject") or "")[:120],
                 str(message["body"]),
                 now,

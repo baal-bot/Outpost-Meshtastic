@@ -97,6 +97,35 @@ async def test_reply_uses_preserved_federation_peer_route(tmp_path) -> None:
     await database.close()
 
 
+@pytest.mark.asyncio
+async def test_operator_can_read_and_reply_to_catch_all_mail(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    members = MemberRepo(database, clock)
+    operator = await members.resolve("!00000001")
+    operator = await members.claim_handle(operator.mesh_id, "lead")
+    await database.write("UPDATE member SET trust='operator' WHERE id=?", (operator.id,))
+    operator = await members.resolve(operator.mesh_id)
+    replies: list[tuple[str, str]] = []
+
+    async def relay(peer_id: str, body: str) -> None:
+        replies.append((peer_id, body))
+
+    service = MailService(database, members, clock, "local", federated_reply=relay)
+    mail_id = await database.write(
+        "INSERT INTO mail(uid,from_label,to_label,body,created_at,state,expires_at,"
+        "reply_peer_mesh_id) VALUES('fed:operator','operator@ALPHA','operator','Check in',1,"
+        "'delivered',999999,'!aaaaaaaa')"
+    )
+
+    assert [item.id for item in await service.inbox(operator)] == [mail_id]
+    assert await service.read(operator, mail_id) is not None
+    await service.reply(operator, mail_id, "operator@ALPHA", "All clear.")
+    assert replies == [("!aaaaaaaa", "All clear.")]
+    await database.close()
+
+
 def test_subject_uses_word_boundary() -> None:
     subject = derive_subject(
         "This is a deliberately long subject that must stop at a word boundary here"
