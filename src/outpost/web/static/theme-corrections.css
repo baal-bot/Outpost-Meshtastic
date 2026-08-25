@@ -32,6 +32,41 @@ html[data-theme="daylight"] .temperature-units label:has(input:checked) {
   background: #d9eee1;
   border-color: #78ab8d;
 }
+html[data-theme="daylight"] .emergency-card { background: linear-gradient(145deg, #fff, #f2f7f4); }
+html[data-theme="daylight"] .emergency-card .risk-copy {
+  color: #674f20;
+  background: #fff7e5;
+  border-color: #d5ad5d;
+}
+html[data-theme="daylight"] .emergency-card .escalation-editor {
+  color: #163c2c;
+  background: #f5f9f7;
+  border-color: #b9ccc2;
+}
+html[data-theme="daylight"] .emergency-card .policy-card {
+  color: #163c2c;
+  background: #fff;
+  border-top-color: #c5d5cd;
+  border-right-color: #c5d5cd;
+  border-bottom-color: #c5d5cd;
+}
+html[data-theme="daylight"] .emergency-card .stage-row {
+  color: #163c2c;
+  background: #edf4f0;
+  border-color: #c5d5cd;
+}
+html[data-theme="daylight"] .emergency-card :is(.policy-card header small, .policy-card header label, .stage-row label span, .stage-row label small, .advanced-toggle small) { color: #587066; }
+html[data-theme="daylight"] .emergency-card .advanced-toggle { border-top-color: #c5d5cd; }
+html[data-theme="daylight"] .emergency-card .advanced-policy textarea {
+  color: #163c2c;
+  background: #fff;
+  border-color: #91aa9e;
+}
+html[data-theme="daylight"] .emergency-card [data-add-stage] {
+  color: #264c3c;
+  background: #edf4f0;
+  border-color: #9eb8ac;
+}
 html[data-theme="daylight"] .current-metrics strong,
 html[data-theme="daylight"] .env-day strong,
 html[data-theme="daylight"] .env-hourly strong,
