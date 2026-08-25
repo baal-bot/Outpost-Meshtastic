@@ -1,0 +1,54 @@
+/* Loaded after page-specific styles to bridge legacy hard-coded colors. */
+.theme-options button {
+  width: auto;
+  margin-top: 0;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border: 1px solid var(--line);
+}
+.theme-options button.selected {
+  color: var(--ink);
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 10%, var(--surface));
+}
+
+html[data-theme="daylight"] .login-screen { background: rgb(225 236 230 / 88%); }
+html[data-theme="daylight"] .login-card {
+  color: var(--ink);
+  background: linear-gradient(145deg, #fff, #edf4f0);
+  border-color: #8eaa9d;
+  box-shadow: 0 28px 80px rgb(28 59 45 / 22%);
+}
+html[data-theme="daylight"] .appearance-settings { border-color: #bdcec6; }
+html[data-theme="daylight"] .location-settings,
+html[data-theme="daylight"] .temperature-units { background: #f5f9f7; border-color: #bdcec6; }
+html[data-theme="daylight"] .current-metrics strong,
+html[data-theme="daylight"] .env-day strong,
+html[data-theme="daylight"] .env-hourly strong,
+html[data-theme="daylight"] .environment-counts strong,
+html[data-theme="daylight"] .daylight-values strong,
+html[data-theme="daylight"] .moon-row strong,
+html[data-theme="daylight"] .env-event strong,
+html[data-theme="daylight"] .waypoint-row h3 { color: #183d2e; }
+html[data-theme="daylight"] .current-metrics span,
+html[data-theme="daylight"] .env-day > span,
+html[data-theme="daylight"] .env-day p,
+html[data-theme="daylight"] .env-day div,
+html[data-theme="daylight"] .env-hourly time,
+html[data-theme="daylight"] .env-hourly span,
+html[data-theme="daylight"] .daylight-values span,
+html[data-theme="daylight"] .moon-row span,
+html[data-theme="daylight"] .moon-row b,
+html[data-theme="daylight"] .waypoint-row p,
+html[data-theme="daylight"] .credit,
+html[data-theme="daylight"] .map-credit { color: #587066; }
+html[data-theme="daylight"] .env-provider-health span { color: #4c665a; background: #e3ece7; }
+html[data-theme="daylight"] .env-provider-health .up,
+html[data-theme="daylight"] .env-provider-health .cached { color: #1d6845; }
+
+html[data-theme="night"] .login-screen { background: rgb(4 3 2 / 94%); }
+html[data-theme="night"] .login-card {
+  color: var(--ink);
+  background: linear-gradient(145deg, #1d100c, #0d0806);
+  border-color: #63372c;
+}

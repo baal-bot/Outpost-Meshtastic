@@ -1,3 +1,6 @@
+import {initTheme} from "/theme.js";
+
+initTheme();
 const path = window.location.pathname;
 if (!document.querySelector('link[rel="icon"]')) {
   document.head.insertAdjacentHTML("beforeend", '<link rel="icon" href="/favicon.svg">');

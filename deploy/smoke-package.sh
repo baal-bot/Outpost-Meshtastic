@@ -26,9 +26,12 @@ required = {
     "outpost/store/migrations/0104_digests.sql",
     "outpost/web/static/Figtree-Variable.ttf",
     "outpost/web/static/app.js",
+    "outpost/web/static/favicon.svg",
     "outpost/web/static/index.html",
     "outpost/web/static/nav.js",
     "outpost/web/static/radio.html",
+    "outpost/web/static/theme-corrections.css",
+    "outpost/web/static/theme.js",
 }
 with zipfile.ZipFile(wheel) as archive:
     names = set(archive.namelist())

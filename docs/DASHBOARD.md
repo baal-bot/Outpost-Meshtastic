@@ -25,6 +25,13 @@ The first login requires the generated journal password and then a replacement o
 characters. Sessions expire according to `web.auth.session_hours`. State-changing requests require
 the session's CSRF token. Do not share browser sessions among operators.
 
+## Appearance
+
+Settings → Appearance offers Outpost Dark, high-contrast Daylight, low-light Night Ops, and a
+Follow System option. The preference is stored in the current browser rather than the Outpost
+database so a wall display, phone, and operator workstation can each use the appropriate mode.
+Night Ops reduces map brightness; it does not change incident severity or provider data.
+
 ## API
 
 The JSON API is rooted at `/api/v1`. Important read surfaces include:
