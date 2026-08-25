@@ -98,7 +98,7 @@ async def test_reply_uses_preserved_federation_peer_route(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_operator_can_read_and_reply_to_catch_all_mail(tmp_path) -> None:
+async def test_operator_catch_all_mail_is_not_exposed_to_radio_members(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()
     clock = VirtualClock()
@@ -107,22 +107,16 @@ async def test_operator_can_read_and_reply_to_catch_all_mail(tmp_path) -> None:
     operator = await members.claim_handle(operator.mesh_id, "lead")
     await database.write("UPDATE member SET trust='operator' WHERE id=?", (operator.id,))
     operator = await members.resolve(operator.mesh_id)
-    replies: list[tuple[str, str]] = []
-
-    async def relay(peer_id: str, body: str) -> None:
-        replies.append((peer_id, body))
-
-    service = MailService(database, members, clock, "local", federated_reply=relay)
+    service = MailService(database, members, clock, "local")
     mail_id = await database.write(
         "INSERT INTO mail(uid,from_label,to_label,body,created_at,state,expires_at,"
         "reply_peer_mesh_id) VALUES('fed:operator','operator@ALPHA','operator','Check in',1,"
         "'delivered',999999,'!aaaaaaaa')"
     )
 
-    assert [item.id for item in await service.inbox(operator)] == [mail_id]
-    assert await service.read(operator, mail_id) is not None
-    await service.reply(operator, mail_id, "operator@ALPHA", "All clear.")
-    assert replies == [("!aaaaaaaa", "All clear.")]
+    assert await service.inbox(operator) == []
+    assert await service.read(operator, mail_id) is None
+    assert await service.delete(operator, mail_id) is False
     await database.close()
 
 

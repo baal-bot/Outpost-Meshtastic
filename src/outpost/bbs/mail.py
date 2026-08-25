@@ -74,26 +74,23 @@ class MailService:
         return len(rows)
 
     async def inbox(self, member: Member, limit: int = 5) -> list[MailView]:
-        operator = member.trust == "operator"
         rows = await self.database.read(
             """
             SELECT id,from_label,to_label,body,created_at,read_at,reply_peer_mesh_id FROM mail
-            WHERE (to_id=? OR (? AND to_label='operator'))
-              AND state NOT IN ('expired','undeliverable')
+            WHERE to_id=? AND state NOT IN ('expired','undeliverable')
             ORDER BY created_at DESC LIMIT ?
             """,
-            (member.id, operator, limit),
+            (member.id, limit),
         )
         return [MailView(**dict(row)) for row in rows]
 
     async def read(self, member: Member, mail_id: int) -> MailView | None:
-        operator = member.trust == "operator"
         rows = await self.database.read(
             """
             SELECT id,from_label,to_label,body,created_at,read_at,reply_peer_mesh_id
-            FROM mail WHERE id=? AND (to_id=? OR (? AND to_label='operator'))
+            FROM mail WHERE id=? AND to_id=?
             """,
-            (mail_id, member.id, operator),
+            (mail_id, member.id),
         )
         if not rows:
             return None
@@ -106,11 +103,8 @@ class MailService:
         return MailView(**row)
 
     async def reply(self, sender: Member, mail_id: int, fallback_handle: str, body: str) -> None:
-        operator = sender.trust == "operator"
         rows = await self.database.read(
-            "SELECT reply_peer_mesh_id FROM mail WHERE id=? "
-            "AND (to_id=? OR (? AND to_label='operator'))",
-            (mail_id, sender.id, operator),
+            "SELECT reply_peer_mesh_id FROM mail WHERE id=? AND to_id=?", (mail_id, sender.id)
         )
         peer_id = str(rows[0]["reply_peer_mesh_id"] or "") if rows else ""
         if peer_id:
@@ -121,10 +115,9 @@ class MailService:
         await self.send(sender, fallback_handle, body)
 
     async def delete(self, member: Member, mail_id: int) -> bool:
-        operator = member.trust == "operator"
         rows = await self.database.read(
-            "SELECT id FROM mail WHERE id=? AND (to_id=? OR (? AND to_label='operator'))",
-            (mail_id, member.id, operator),
+            "SELECT id FROM mail WHERE id=? AND to_id=?",
+            (mail_id, member.id),
         )
         if not rows:
             return False
