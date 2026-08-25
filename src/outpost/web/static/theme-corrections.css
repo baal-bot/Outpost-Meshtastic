@@ -105,6 +105,7 @@ html[data-theme="dark"] .emergency-card [data-add-stage] {
   padding: 0;
   line-height: 1;
 }
+.settings-card .close,
 .emergency-card .close {
   display: grid;
   place-items: center;
