@@ -280,6 +280,7 @@ html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-det
 html[data-theme="daylight"] .waypoint-map-card .waypoint-card-coordinates { color: #163c2c; }
 html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-detail) p { color: #526d61; }
 :is(.environment-marker, .member-map-point, .map-point, .alert-footprint) { min-height: 0; }
+.member-map-empty[hidden] { display: none; }
 .member-map-point:not(:disabled):active { transform: translate(-50%, -50%); }
 .map-point:not(:disabled):active,
 .alert-footprint:not(:disabled):active { transform: translate(-50%, -50%); }
