@@ -111,7 +111,7 @@ html[data-theme="daylight"] .trust-note span { color: #55482d; }
   min-height: 32px;
   line-height: 1;
 }
-.capability-grid :is(.action, button) {
+.capability-grid :is(.action, button, #create-backup, #open-emergency) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -121,7 +121,7 @@ html[data-theme="daylight"] .trust-note span { color: #55482d; }
   background: var(--raised) !important;
   border: 1px solid var(--line) !important;
 }
-html[data-theme="daylight"] .capability-grid :is(.action, button) {
+html[data-theme="daylight"] .capability-grid :is(.action, button, #create-backup, #open-emergency) {
   color: #264c3c !important;
   background: #edf4f0 !important;
   border-color: #9eb8ac !important;
