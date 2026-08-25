@@ -1,0 +1,55 @@
+# Federation
+
+Federation connects independently operated Outposts without one central administrator. It remains
+experimental until the two-node hardware backlog is complete.
+
+## Trust model
+
+- Radio and Meshtastic MQTT are transports for one peer trust record.
+- Discovery creates a pending directory entry only.
+- Pairing uses X25519 and a six-digit out-of-band confirmation code.
+- Paired frames use canonical CBOR, bounded fragments, HMAC, and persistent replay counters.
+- Per-peer policy controls boards, incidents, alerts, mail, quotas, and transport.
+- Imported items can be quarantined for operator review.
+
+## Before pairing
+
+Both nodes should pass independent health, backup, dashboard, and radio checks. Verify the other
+operator outside the mesh pairing path. Agree on shared data, incident radius, retention, transport
+cost, and revocation.
+
+## Pairing workflow
+
+1. Enable federation on both nodes.
+2. Discover or identify the peer by mesh node ID.
+3. Initiate pairing from one dashboard.
+4. Review the pending request on the other.
+5. Compare the six-digit code over an independent trusted channel.
+6. Approve only when codes and node identities match.
+7. Configure least-privilege sync/mail policy.
+8. Send one small test and inspect status, inbox, audit, and airtime.
+
+Never approve based only on a claimed Outpost name.
+
+## MQTT
+
+Meshtastic's default MQTT infrastructure may improve reach but is not a new trust domain. Discovery
+is untrusted and paired payload authentication is still required. Broker availability/retention,
+topic visibility, and radio uplink/downlink settings affect behavior. Keep it off unless understood.
+
+## Peer services and mail
+
+An offline node may request a bounded allowlisted service such as weather or public alerts from a
+capable peer. IDs, expiry, limits, origin, and TTL prevent loops. Peers cannot invoke arbitrary
+tools, shell commands, operator controls, private positions, or unconstrained prompts.
+
+Federated mail uses a mail-specific key derived from peer trust material, with receipts, quotas,
+expiry, and duplicate suppression. Both features have automated coverage but need two-node testing.
+
+## Revocation
+
+If identity, keys, or operation are in doubt, disable transports and remove trust. Confirm sync and
+relay fail closed. Re-pair with fresh material only after investigation. Never publish pairing
+secrets in screenshots, issues, logs, or peer exports.
+
+Run the [acceptance backlog](FEDERATION-ACCEPTANCE-BACKLOG.md) when a second node is available.
