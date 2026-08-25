@@ -404,10 +404,22 @@ class OutpostApp:
             if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                 raise ValueError("invalid weather coordinates")
             snapshot = await self.weather.current(lat, lon)
-            return snapshot.json(), {
+            # Keep the routine peer weather response inside one Meshtastic frame.
+            # The full local snapshot remains available on the Environment dashboard;
+            # federation carries the core conditions needed by a disconnected peer.
+            result = snapshot.json()
+            return {
+                key: result[key]
+                for key in (
+                    "temperature_c",
+                    "precipitation_mm",
+                    "wind_kph",
+                    "wind_direction",
+                    "weather_code",
+                )
+            }, {
                 "provider": snapshot.provider,
                 "fetched_at": snapshot.fetched_at,
-                "cache_age_seconds": snapshot.age_seconds,
                 "serving_outpost": self.federation.local_mesh_id,
             }
         if service == "alerts":
