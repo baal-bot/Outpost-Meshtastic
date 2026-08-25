@@ -36,6 +36,31 @@ class FederationSyncService:
         prefix = f"{self.local_mesh_id}:"
         return uid[len(prefix) :] if uid.startswith(prefix) else None
 
+    def local_thread_uid(self, uid: str) -> str:
+        return self._local_uid(uid) or uid
+
+    async def approved_thread(self, slug: str, uid: str) -> bool:
+        rows = await self.database.read(
+            "SELECT t.id FROM thread t JOIN board b ON b.id=t.board_id "
+            "WHERE t.uid=? AND b.slug=? AND b.federated=1",
+            (self.local_thread_uid(uid), slug),
+        )
+        return bool(rows)
+
+    async def import_approved_replies(self, operator: str, now: int) -> int:
+        rows = await self.database.read(
+            "SELECT id,stream,payload_json FROM fed_inbox_item "
+            "WHERE state='pending' AND stream LIKE 'board:%' ORDER BY id"
+        )
+        imported = 0
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            slug = str(row["stream"])[6:]
+            if await self.approved_thread(slug, str(payload.get("thread_uid", ""))):
+                await self.import_inbox(int(row["id"]), operator, now)
+                imported += 1
+        return imported
+
     @staticmethod
     def _digest(*values: Any) -> str:
         joined = "\x1f".join("" if value is None else str(value) for value in values)
@@ -216,6 +241,7 @@ class FederationSyncService:
             if not boards:
                 raise ValueError("destination board is not federated")
             thread_uid = str(payload["thread_uid"])
+            thread_uid = self.local_thread_uid(thread_uid)
             threads = await self.database.read(
                 "SELECT id FROM thread WHERE uid=? AND board_id=?", (thread_uid, boards[0]["id"])
             )

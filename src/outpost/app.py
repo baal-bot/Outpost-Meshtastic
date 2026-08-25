@@ -228,6 +228,11 @@ class OutpostApp:
     async def startup(self) -> None:
         await self.database.open()
         await self.runtime_settings.load()
+        self.federation_sync.local_mesh_id = self.radio.local_node_id
+        if self.radio.local_node_id:
+            await self.federation_sync.import_approved_replies(
+                "federation:auto-thread", int(self.clock.now().timestamp())
+            )
         initial_password = await self.web_auth.ensure_credential()
         if initial_password:
             print(f"OUTPOST INITIAL OPERATOR PASSWORD: {initial_password}", flush=True)
@@ -604,6 +609,9 @@ class OutpostApp:
                 raise FrameError("federation identity does not match packet sender")
             self.federation.local_mesh_id = self.radio.local_node_id
             self.federation_sync.local_mesh_id = self.radio.local_node_id
+            await self.federation_sync.import_approved_replies(
+                "federation:auto-thread", int(self.clock.now().timestamp())
+            )
             if msg_type is MessageType.HELLO:
                 capabilities = value.get("capabilities", {})
                 if not isinstance(capabilities, dict):
@@ -714,12 +722,9 @@ class OutpostApp:
                     payload = item.get("payload")
                     if isinstance(payload, dict):
                         slug = str(item["stream"])[6:]
-                        existing = await self.database.read(
-                            "SELECT t.id FROM thread t JOIN board b ON b.id=t.board_id "
-                            "WHERE t.uid=? AND b.slug=? AND b.federated=1",
-                            (str(payload.get("thread_uid", "")), slug),
-                        )
-                        if existing:
+                        if await self.federation_sync.approved_thread(
+                            slug, str(payload.get("thread_uid", ""))
+                        ):
                             inbox = await self.database.read(
                                 "SELECT id FROM fed_inbox_item WHERE peer_id=? AND stream=? "
                                 "AND uid=? AND state='pending'",

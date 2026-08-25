@@ -92,6 +92,7 @@ async def test_export_namespaces_local_ids_with_outpost_identity(tmp_path) -> No
         (thread_id,),
     )
     sync = FederationSyncService(database, "!localnode")
+    assert await sync.approved_thread("gen", "!localnode:local:1")
 
     manifest = await sync.manifest(peer)
     assert manifest[0].uid == "!localnode:local:1"
