@@ -95,3 +95,48 @@ async def test_operator_mailbox_does_not_require_radio_member(tmp_path) -> None:
     }
     await first_db.close()
     await second_db.close()
+
+
+@pytest.mark.asyncio
+async def test_named_operator_member_mail_remains_member_mail(tmp_path) -> None:
+    first_db, second_db = Database(tmp_path / "sender.db"), Database(tmp_path / "receiver.db")
+    await first_db.open()
+    await second_db.open()
+    first_peers = FederationPeerService(first_db, VirtualClock(), "!aaaaaaaa")
+    second_peers = FederationPeerService(second_db, VirtualClock(), "!bbbbbbbb")
+    secret = bytes(range(32))
+    for database, peers, remote in (
+        (first_db, first_peers, "!bbbbbbbb"),
+        (second_db, second_peers, "!aaaaaaaa"),
+    ):
+        await peers.discover(remote, "Peer", 1, {}, "radio")
+        await database.write(
+            "UPDATE fed_peer SET state='active',shared_secret=?,relay_mail=1 WHERE mesh_id=?",
+            (secret, remote),
+        )
+    operator_id = await second_db.write(
+        "INSERT INTO member(mesh_id,mesh_num,handle,trust,first_seen,last_seen) "
+        "VALUES('!00000666',1638,'666','operator',1,1)"
+    )
+    sender = FederationMailService(first_db, first_peers, VirtualClock())
+    receiver = FederationMailService(second_db, second_peers, VirtualClock())
+
+    envelope = await sender.seal(
+        "!bbbbbbbb", "@666", "operator@ALPHA", "Moderation", "Please review this issue."
+    )
+    relay_id, state = await receiver.open("!aaaaaaaa", envelope)
+
+    assert state == "delivered"
+    mail = (
+        await second_db.read(
+            "SELECT to_id,to_label,reply_peer_mesh_id FROM mail WHERE uid=?",
+            (f"fed:{relay_id}",),
+        )
+    )[0]
+    assert dict(mail) == {
+        "to_id": operator_id,
+        "to_label": "666",
+        "reply_peer_mesh_id": "!aaaaaaaa",
+    }
+    await first_db.close()
+    await second_db.close()

@@ -76,8 +76,8 @@ async def test_reply_uses_preserved_federation_peer_route(tmp_path) -> None:
     await database.open()
     clock = VirtualClock()
     members = MemberRepo(database, clock)
-    operator = await members.resolve("!00000001")
-    operator = await members.claim_handle(operator.mesh_id, "lead")
+    recipient = await members.resolve("!00000001")
+    recipient = await members.claim_handle(recipient.mesh_id, "lead")
     replies: list[tuple[str, str]] = []
 
     async def relay(peer_id: str, body: str) -> None:
@@ -88,10 +88,10 @@ async def test_reply_uses_preserved_federation_peer_route(tmp_path) -> None:
         "INSERT INTO mail(uid,from_label,to_id,to_label,body,created_at,state,expires_at,"
         "reply_peer_mesh_id) VALUES('fed:test','operator@ALPHA',?,'lead','Check in',1,"
         "'delivered',999999,'!aaaaaaaa')",
-        (operator.id,),
+        (recipient.id,),
     )
 
-    await service.reply(operator, mail_id, "operator@ALPHA", "All clear.")
+    await service.reply(recipient, mail_id, "operator@ALPHA", "All clear.")
 
     assert replies == [("!aaaaaaaa", "All clear.")]
     await database.close()
