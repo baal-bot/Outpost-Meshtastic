@@ -14,7 +14,9 @@ observed over live radios, not only in automated tests.
 
 - [ ] Exchange federation traffic over radio only, MQTT only, and automatic fallback.
   Radio-only authenticated alert and weather services passed. MQTT paths remain open.
-- [ ] Disconnect one node from the internet and route its agent request through the online peer.
+- [x] Disconnect one node from the internet and route its agent request through the online peer.
+  With Outpost01's WAN unavailable but its LAN and Meshtastic radio intact, a peer weather
+  request completed through the online `!699c2f30` Outpost over the radio federation path.
 - [ ] Restore connectivity and confirm queued frames are deduplicated rather than replayed.
 - [ ] Partition both transports, reconnect, and verify bounded catch-up respects airtime policy.
 
