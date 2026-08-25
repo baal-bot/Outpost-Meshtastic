@@ -291,6 +291,11 @@ html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-det
   min-height: 0;
   padding: 0;
 }
+:is(.environment-marker.environment-marker, .member-map-point.member-map-point, .map-point.map-point) {
+  border-width: 2px;
+  border-style: solid;
+  border-color: rgb(235 249 241 / 94%);
+}
 .member-map-empty[hidden] { display: none; }
 .member-map-point:not(:disabled):active { transform: translate(-50%, -50%); }
 .map-point:not(:disabled):active,
@@ -306,6 +311,7 @@ html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-det
   outline-offset: 3px;
   transition: filter .15s ease, outline-color .15s ease, outline-width .15s ease;
 }
+.map-point.status-monitoring:not(:hover):not(.selected) { outline: 0 solid transparent; }
 :is(.environment-marker, .member-map-point, .map-point, .alert-footprint):hover {
   filter: brightness(1.14);
   outline: 2px solid rgb(235 249 241 / 92%);
