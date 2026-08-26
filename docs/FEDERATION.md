@@ -9,6 +9,8 @@ experimental until the two-node hardware backlog is complete.
 - Discovery creates a pending directory entry only.
 - Pairing uses X25519 and a six-digit out-of-band confirmation code.
 - Paired frames use canonical CBOR, bounded fragments, HMAC, and persistent replay counters.
+- Federation frames use an RF/MQTT-compatible channel broadcast carrier; pair-specific encryption,
+  authentication, replay protection, and application receipts provide confidentiality and delivery.
 - Per-peer policy controls boards, incidents, alerts, mail, quotas, and transport.
 - Enabling federation on a board automatically adds its slug to every currently paired peer's
   policy; disabling it removes the slug. Per-peer settings can still narrow that selection.

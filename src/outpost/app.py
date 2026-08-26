@@ -348,6 +348,12 @@ class OutpostApp:
             raise ValueError("federation queue rejected the complete message")
         return admitted
 
+    def _queue_trusted_federation_frames(self, frames: list[bytes]) -> list[int]:
+        # Meshtastic direct custom-app packets can be radio-ACKed without being surfaced to the
+        # destination client. Federation already authenticates and encrypts each peer's frames,
+        # so use the same RF/MQTT-compatible carrier as pairing and rely on application receipts.
+        return self._queue_federation_frames(frames, "^all", want_ack=False)
+
     async def initiate_federation_pairing(self, mesh_id: str) -> object:
         local_id = self.radio.local_node_id
         if not local_id:
@@ -453,7 +459,7 @@ class OutpostApp:
             counter,
             secret,
         )
-        self._queue_federation_frames(frames, peer_id, want_ack=True)
+        self._queue_trusted_federation_frames(frames)
 
     async def _execute_peer_service(
         self, service: str, args: dict[str, object]
@@ -583,7 +589,7 @@ class OutpostApp:
         secret = await self.federation.secret(peer_id)
         counter = await self.federation.next_counter(peer_id)
         frames = self.federation_codec.encode(msg_type, value, counter, secret)
-        self._queue_federation_frames(frames, peer_id, want_ack=True)
+        self._queue_trusted_federation_frames(frames)
 
     async def _federation_sync_loop(self) -> None:
         while True:
@@ -997,7 +1003,7 @@ class OutpostApp:
             counter,
             secret,
         )
-        self._queue_federation_frames(frames, sender, want_ack=True)
+        self._queue_trusted_federation_frames(frames)
 
     async def _handle_service_response(self, sender: str, value: dict[str, object]) -> None:
         request_id = str(value["request_id"])
