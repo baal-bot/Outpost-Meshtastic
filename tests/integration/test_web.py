@@ -53,6 +53,7 @@ async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp
     navigation = client.get("/nav.js").text
     federation_script = client.get("/federation.js").text
     assert "LoRa observed" in federation_script and "MQTT observed" in federation_script
+    assert "Radio + MQTT" in federation_script
     assert 'directory.insertAdjacentElement("afterend", panel)' in federation_script
     for label in (
         "Overview",

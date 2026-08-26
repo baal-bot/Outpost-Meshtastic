@@ -13,6 +13,11 @@ async function loadMqtt() {
   const response = await api("/api/v1/federation/mqtt");
   if (!response.ok) return;
   const mqtt = await response.json();
+  const radioUp = document.querySelector(".path-grid article:first-child .pill")?.classList.contains("live");
+  const mqttUp = mqtt.available && mqtt.enabled;
+  const transportKpi = document.querySelector(".fed-kpis article:last-child");
+  transportKpi.querySelector("strong").textContent = radioUp && mqttUp ? "Radio + MQTT" : mqttUp ? "MQTT" : "Radio";
+  transportKpi.querySelector("p").textContent = mqttUp ? "Redundant mesh paths enabled" : mqtt.available ? "MQTT available but disabled" : "Radio transport available";
   const transportCards = document.querySelectorAll(".path-grid article");
   const mqttPolicy = transportCards[1]?.querySelector(".pill");
   if (mqttPolicy) {
