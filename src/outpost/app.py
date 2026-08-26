@@ -616,6 +616,10 @@ class OutpostApp:
         while True:
             if self.config.modules.fed.enabled and self.radio.local_node_id:
                 now = int(self.clock.now().timestamp())
+                self.federation_sync.local_mesh_id = self.radio.local_node_id
+                await self.federation_sync.import_approved_replies(
+                    "federation:auto-thread", now
+                )
                 pending_approvals = await self.database.read(
                     "SELECT mesh_id,shared_secret FROM fed_peer WHERE state='pairing' "
                     "AND local_approved=1 AND remote_approved=0 AND shared_secret IS NOT NULL"
