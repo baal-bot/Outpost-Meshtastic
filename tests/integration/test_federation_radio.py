@@ -47,8 +47,11 @@ async def test_radio_hello_creates_pending_peer(tmp_path) -> None:
     assert peer.discovery_transports == ["mqtt"]
     queued = app.governor.queued_items()
     assert len(queued) == 1
-    assert queued[0].dest == "!remote"
+    assert queued[0].dest == "^all"
     assert queued[0].portnum == config.radio.federation_portnum
+    response = app.federation_codec.decode_fragment(queued[0].binary_payload, None)
+    value = app.federation_reassembler.add("!local", response)
+    assert value["target_mesh_id"] == "!remote"
     await app.database.close()
 
 

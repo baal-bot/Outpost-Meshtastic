@@ -280,7 +280,9 @@ class OutpostApp:
             else:
                 await self.clock.sleep(30)
 
-    def _queue_federation_hello(self, destination: str) -> bool:
+    def _queue_federation_hello(
+        self, destination: str, *, target_mesh_id: str | None = None
+    ) -> bool:
         local_id = self.radio.local_node_id
         if not local_id:
             return False
@@ -293,14 +295,17 @@ class OutpostApp:
             "ai": self.config.modules.ai.enabled,
         }
         counter = int(self.clock.now().timestamp()) & 0xFFFFFFFF
+        hello = {
+            "mesh_id": local_id,
+            "name": self.config.node.name,
+            "protocol": 1,
+            "capabilities": capabilities,
+        }
+        if target_mesh_id is not None:
+            hello["target_mesh_id"] = target_mesh_id
         frames = self.federation_codec.encode(
             MessageType.HELLO,
-            {
-                "mesh_id": local_id,
-                "name": self.config.node.name,
-                "protocol": 1,
-                "capabilities": capabilities,
-            },
+            hello,
             counter,
             None,
         )
@@ -700,8 +705,11 @@ class OutpostApp:
                 # A node may have joined just after our infrequent broadcast HELLO.
                 # Answer broadcasts directly so both peer directories converge without
                 # another broadcast or an endless HELLO response loop.
-                if not getattr(message, "is_direct", False):
-                    self._queue_federation_hello(sender)
+                if not getattr(message, "is_direct", False) and target is None:
+                    if getattr(message, "via_mqtt", False):
+                        self._queue_federation_hello("^all", target_mesh_id=sender)
+                    else:
+                        self._queue_federation_hello(sender)
             elif msg_type is MessageType.PAIR_REQ:
                 _, acknowledgement, _ = await self.federation.accept_pairing_request(
                     sender, bytes(value["public_key"]), bytes(value["nonce"])
