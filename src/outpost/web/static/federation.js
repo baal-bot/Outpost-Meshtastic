@@ -110,6 +110,23 @@ async function loadRelayMail() {
   await refreshRelayMail();
 }
 async function refreshRelayMail() { const target = $("relay-mail-history"); if (!target) return; const response = await api("/api/v1/federation/mail"); if (!response.ok) return; const items = (await response.json()).items; target.innerHTML = items.map(item => `<article><strong>${safe(item.direction)} · ${safe(item.state)}</strong><span>${safe(item.node_name || item.mesh_id)} → ${safe(item.recipient_handle)}</span><code>${safe(item.relay_id)}</code><time>${new Date(item.created_at*1000).toLocaleString()}</time></article>`).join("") || `<p class="empty">No federated mail deliveries yet.</p>`; }
+async function loadOriginHistory() {
+  const policy = document.querySelector(".path-grid").closest(".panel");
+  const panel = document.createElement("section"); panel.className = "panel content-panel origin-panel";
+  panel.innerHTML = `<div class="heading"><div><p class="eyebrow">CONTENT IDENTITY</p><h2>Former Outpost history</h2></div><button id="refresh-origins" class="small-button">Refresh</button></div><p class="mqtt-note">Retained content is never deleted when trust ends. Assign a paired successor only after verifying that its operator controls the former Outpost.</p><div id="origin-history"><p class="empty">Loading retained origins…</p></div>`;
+  policy.parentElement.insertBefore(panel, policy);
+  $("refresh-origins").addEventListener("click", refreshOriginHistory);
+  await refreshOriginHistory();
+}
+async function refreshOriginHistory() {
+  const target = $("origin-history"); if (!target) return;
+  const [originResponse, peerResponse] = await Promise.all([api("/api/v1/federation/origins"), api("/api/v1/federation/peers?state=active")]);
+  if (!originResponse.ok || !peerResponse.ok) return;
+  const origins = (await originResponse.json()).items;
+  const peers = (await peerResponse.json()).items;
+  target.innerHTML = origins.map(origin => `<article class="sync-row origin-row"><div><strong>${safe(origin.node_name || origin.mesh_id)}</strong><code>${safe(origin.mesh_id)} · ${safe(origin.status)}</code></div><div><b>${origin.thread_count}</b><span>Threads</span></div><div><b>${origin.post_count}</b><span>Posts</span></div>${origin.successor_mesh_id?`<p>Successor: ${safe(origin.successor_name || origin.successor_mesh_id)}<br><code>${safe(origin.successor_mesh_id)}</code></p>`:origin.status==="former"&&peers.length?`<div class="origin-adopt"><select data-origin-peer="${safe(origin.mesh_id)}">${peers.map(peer=>`<option value="${safe(peer.mesh_id)}">${safe(peer.node_name||peer.mesh_id)}</option>`).join("")}</select><button data-adopt-origin="${safe(origin.mesh_id)}">Adopt history</button></div>`:`<p>${origin.status==="former"?"Former peer · retained read-only":"Current peer identity"}</p>`}</article>`).join("") || `<p class="empty">No retained remote board history.</p>`;
+  document.querySelectorAll("[data-adopt-origin]").forEach(button=>button.addEventListener("click",async()=>{const oldId=button.dataset.adoptOrigin;const select=document.querySelector(`[data-origin-peer="${oldId}"]`);if(!window.confirm(`Assign retained content from ${oldId} to ${select.options[select.selectedIndex].text}? Trust is not transferred.`))return;const response=await api(`/api/v1/federation/peers/${encodeURIComponent(select.value)}/adopt-origin`,{method:"POST",body:JSON.stringify({old_mesh_id:oldId})});if(!response.ok){window.alert((await response.json()).error.message);return;}await refreshOriginHistory();}));
+}
 async function refresh() {
   const filter = $("peer-filter").value;
   const response = await api(`/api/v1/federation/peers${filter ? `?state=${filter}` : ""}`);
@@ -145,5 +162,5 @@ async function refresh() {
   }
   document.querySelectorAll("[data-approve]").forEach(button => button.addEventListener("click", async () => { const input = button.parentElement.querySelector("input"); button.disabled = true; const result = await api(`/api/v1/federation/peers/${encodeURIComponent(button.dataset.approve)}/approve`, {method:"POST", body:JSON.stringify({confirmation_code:input.value})}); if (!result.ok) { button.disabled = false; return; } await refresh(); }));
 }
-async function initialize() { const response = await fetch("/api/v1/auth/session"); if (!response.ok) { location.href = "/"; return; } csrf = (await response.json()).csrf_token; await refresh(); await loadMqtt(); await loadServices(); await loadInbox(); await loadSyncStatus(); await loadPeerPolicy(); await loadRelayMail(); }
+async function initialize() { const response = await fetch("/api/v1/auth/session"); if (!response.ok) { location.href = "/"; return; } csrf = (await response.json()).csrf_token; await refresh(); await loadMqtt(); await loadServices(); await loadInbox(); await loadSyncStatus(); await loadOriginHistory(); await loadPeerPolicy(); await loadRelayMail(); }
 $("refresh-fed").addEventListener("click", refresh); $("peer-filter").addEventListener("change", refresh); initialize(); setInterval(() => { refresh(); refreshServices(); refreshSyncStatus(); }, 15000);

@@ -117,3 +117,35 @@ async def test_export_namespaces_local_ids_with_outpost_identity(tmp_path) -> No
     reply = await sync.export_items(peer, [{"stream": "board:gen", "uid": "!localnode:local:2"}])
     assert reply[0]["payload"]["thread_uid"] == "!remote:local:9"
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_successor_identity_deduplicates_retained_posts_and_threads(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    peers = FederationPeerService(database, VirtualClock(), "!local")
+    await peers.discover("!newpeer", "New Peer", 1, {}, "mqtt")
+    await database.write("UPDATE fed_peer SET state='active' WHERE mesh_id='!newpeer'")
+    peer = await peers.by_mesh_id("!newpeer")
+    await database.write(
+        "INSERT INTO fed_peer_successor(old_mesh_id,successor_peer_id,old_node_name,"
+        "adopted_at,adopted_by) "
+        "VALUES('!oldpeer',?,'Old Peer',1,'test')",
+        (peer.id,),
+    )
+    thread_id = await database.write(
+        "INSERT INTO thread(uid,board_id,subject,origin_node,created_at,last_post_at) "
+        "VALUES('!oldpeer:local:4',1,'Retained','!oldpeer',1,1)"
+    )
+    await database.write(
+        "INSERT INTO post(uid,thread_id,seq,author_label,origin_node,body,created_at) "
+        "VALUES('!oldpeer:local:9',?,1,'operator','!oldpeer','Retained post',1)",
+        (thread_id,),
+    )
+    sync = FederationSyncService(database, "!local")
+
+    assert await sync.missing(
+        [{"stream": "board:gen", "uid": "!newpeer:local:9"}]
+    ) == []
+    assert await sync.canonical_remote_uid("!newpeer:local:4") == "!oldpeer:local:4"
+    await database.close()

@@ -42,6 +42,17 @@ class FederationSyncService:
     def local_thread_uid(self, uid: str) -> str:
         return self._local_uid(uid) or uid
 
+    async def canonical_remote_uid(self, uid: str) -> str:
+        if not uid.startswith("!") or ":" not in uid:
+            return uid
+        mesh_id, suffix = uid.split(":", 1)
+        rows = await self.database.read(
+            "SELECT s.old_mesh_id FROM fed_peer_successor s JOIN fed_peer p "
+            "ON p.id=s.successor_peer_id WHERE p.mesh_id=?",
+            (mesh_id,),
+        )
+        return f"{rows[0]['old_mesh_id']}:{suffix}" if rows else uid
+
     async def approved_thread(self, slug: str, uid: str) -> bool:
         rows = await self.database.read(
             "SELECT t.id FROM thread t JOIN board b ON b.id=t.board_id "
@@ -137,7 +148,11 @@ class FederationSyncService:
             table = tables.get(stream, "post" if stream.startswith("board:") else None)
             if table is None:
                 continue
-            rows = await self.database.read(f"SELECT uid FROM {table} WHERE uid=?", (uid,))  # noqa: S608
+            canonical_uid = await self.canonical_remote_uid(uid)
+            rows = await self.database.read(
+                f"SELECT uid FROM {table} WHERE uid IN (?,?)",  # noqa: S608
+                (uid, canonical_uid),
+            )
             if not rows:
                 requested.append({"stream": stream, "uid": uid})
         return requested
@@ -243,7 +258,7 @@ class FederationSyncService:
             )
             if not boards:
                 raise ValueError("destination board is not federated")
-            thread_uid = str(payload["thread_uid"])
+            thread_uid = await self.canonical_remote_uid(str(payload["thread_uid"]))
             thread_uid = self.local_thread_uid(thread_uid)
             threads = await self.database.read(
                 "SELECT id FROM thread WHERE uid=? AND board_id=?", (thread_uid, boards[0]["id"])

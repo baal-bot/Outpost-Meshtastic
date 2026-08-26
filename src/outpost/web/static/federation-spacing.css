@@ -94,6 +94,11 @@
   font-size: .68rem;
 }
 
+.origin-row { grid-template-columns: minmax(190px,1.3fr) 80px 80px minmax(220px,1fr); }
+.origin-adopt { display:flex; gap:8px; align-items:center; }
+.origin-adopt select { min-width:140px; }
+.origin-adopt button { white-space:nowrap; }
+
 @media (max-width: 700px) {
   .mqtt-form { grid-template-columns: 1fr; }
   .service-form, .service-history article { grid-template-columns: 1fr; }

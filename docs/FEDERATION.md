@@ -53,3 +53,16 @@ relay fail closed. Re-pair with fresh material only after investigation. Never p
 secrets in screenshots, issues, logs, or peer exports.
 
 Run the [acceptance backlog](FEDERATION-ACCEPTANCE-BACKLOG.md) when a second node is available.
+
+## Content identity and radio replacement
+
+Federated content is retained when a peer disconnects, is unpaired, or is forgotten. Trust removal
+must not erase community records. Threads from an identity that is no longer in the peer directory
+are labelled as former-peer content and remain readable.
+
+Replacing a radio creates a new cryptographic peer identity. After pairing that identity normally,
+an operator may use **Content identity → Adopt history** on the Federation page to declare it the
+successor to a former content origin. This action is explicit and audited; matching Outpost names
+never trigger an automatic merge. Original mesh IDs remain on stored records for provenance, while
+the successor relationship supplies current attribution and prevents re-exported historical items
+from being imported as duplicates. Trust and replay counters are never inherited.

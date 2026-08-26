@@ -179,6 +179,11 @@ class FederationApproveBody(BaseModel):
     confirmation_code: str = Field(pattern=r"^[0-9]{6}$")
 
 
+class FederationSuccessorBody(BaseModel):
+    old_mesh_id: str = Field(pattern=r"^![0-9a-fA-F]{8}$")
+    old_node_name: str | None = Field(default=None, max_length=80)
+
+
 class FederationMqttBody(BaseModel):
     enabled: bool
     address: str = Field(max_length=253)
@@ -455,6 +460,110 @@ def create_web_app(
                     (f"fed_peer:{peer.mesh_id}", peer.node_name),
                 )
             return {"ok": True}
+
+        if database is not None:
+
+            @app.get("/api/v1/federation/origins")
+            async def federation_origins() -> dict[str, Any]:
+                thread_rows = await database.read(
+                    "SELECT uid FROM thread WHERE uid LIKE '!%:%'"
+                )
+                post_rows = await database.read("SELECT uid FROM post WHERE uid LIKE '!%:%'")
+                origins: dict[str, dict[str, Any]] = {}
+                for kind, rows in (("thread_count", thread_rows), ("post_count", post_rows)):
+                    for row in rows:
+                        mesh_id = str(row["uid"]).split(":", 1)[0]
+                        item = origins.setdefault(
+                            mesh_id, {"mesh_id": mesh_id, "thread_count": 0, "post_count": 0}
+                        )
+                        item[kind] += 1
+                peers = {
+                    str(row["mesh_id"]): dict(row)
+                    for row in await database.read(
+                        "SELECT id,mesh_id,node_name,state,last_seen_at FROM fed_peer"
+                    )
+                }
+                successors = {
+                    str(row["old_mesh_id"]): dict(row)
+                    for row in await database.read(
+                        "SELECT s.old_mesh_id,s.old_node_name,s.adopted_at,"
+                        "p.mesh_id successor_mesh_id,p.node_name successor_name,"
+                        "p.state successor_state FROM fed_peer_successor s "
+                        "JOIN fed_peer p ON p.id=s.successor_peer_id"
+                    )
+                }
+                items = []
+                for mesh_id, item in origins.items():
+                    peer, successor = peers.get(mesh_id), successors.get(mesh_id)
+                    item.update(
+                        {
+                            "node_name": (peer or {}).get("node_name")
+                            or (successor or {}).get("old_node_name"),
+                            "status": (peer or {}).get("state")
+                            or ("successor" if successor else "former"),
+                            "successor_mesh_id": (successor or {}).get("successor_mesh_id"),
+                            "successor_name": (successor or {}).get("successor_name"),
+                            "successor_state": (successor or {}).get("successor_state"),
+                        }
+                    )
+                    items.append(item)
+                return {"items": sorted(items, key=lambda item: item["mesh_id"])}
+
+            @app.post("/api/v1/federation/peers/{mesh_id}/adopt-origin", response_model=None)
+            async def federation_adopt_origin(
+                mesh_id: str, body: FederationSuccessorBody
+            ) -> dict[str, Any] | Response:
+                try:
+                    peer = await federation.by_mesh_id(mesh_id)
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "peer_not_found", "message": str(error)}},
+                        status_code=404,
+                    )
+                if peer.state != "active":
+                    return JSONResponse(
+                        {"error": {"code": "peer_not_active", "message": (
+                            "Pair the successor before adopting history."
+                        )}},
+                        status_code=409,
+                    )
+                if body.old_mesh_id.lower() == mesh_id.lower():
+                    return JSONResponse(
+                        {"error": {"code": "same_identity", "message": (
+                            "The predecessor and successor must differ."
+                        )}},
+                        status_code=409,
+                    )
+                content = await database.read(
+                    "SELECT (SELECT COUNT(*) FROM thread WHERE uid LIKE ?)+"
+                    "(SELECT COUNT(*) FROM post WHERE uid LIKE ?) count",
+                    (body.old_mesh_id + ":%", body.old_mesh_id + ":%"),
+                )
+                if not content or int(content[0]["count"]) == 0:
+                    return JSONResponse(
+                        {"error": {"code": "origin_not_found", "message": (
+                            "No retained content uses that predecessor identity."
+                        )}},
+                        status_code=404,
+                    )
+                await database.write(
+                    "INSERT INTO fed_peer_successor(old_mesh_id,successor_peer_id,"
+                    "old_node_name,adopted_at,adopted_by) VALUES(?,?,?,unixepoch(),"
+                    "'web:operator') ON CONFLICT(old_mesh_id) DO UPDATE SET "
+                    "successor_peer_id=excluded.successor_peer_id,old_node_name=excluded.old_node_name,"
+                    "adopted_at=excluded.adopted_at,adopted_by=excluded.adopted_by",
+                    (body.old_mesh_id.lower(), peer.id, body.old_node_name),
+                )
+                await database.write(
+                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                    "VALUES('web','operator','federation.origin_adopt',?,?,unixepoch())",
+                    (f"fed_peer:{peer.id}", body.old_mesh_id.lower()),
+                )
+                return {
+                    "ok": True,
+                    "old_mesh_id": body.old_mesh_id.lower(),
+                    "successor_mesh_id": mesh_id,
+                }
 
         @app.get("/api/v1/federation/peers/{mesh_id}/pairing-code", response_model=None)
         async def federation_pairing_code(mesh_id: str) -> dict[str, str] | Response:
@@ -1484,8 +1593,23 @@ def create_web_app(
                 SELECT t.id,t.subject,t.author_id,COALESCE(m.handle,'anon') AS author,
                        t.post_count,t.created_at,t.last_post_at,t.pinned,t.locked,t.origin_node,
                        t.uid LIKE '!%:%' AS remote,
-                       (SELECT node_name FROM fed_peer p WHERE t.uid LIKE p.mesh_id || ':%'
-                        LIMIT 1) AS origin_name
+                       COALESCE(
+                         (SELECT node_name FROM fed_peer p
+                          WHERE t.uid LIKE p.mesh_id || ':%' LIMIT 1),
+                         (SELECT COALESCE(s.old_node_name,p.node_name) ||
+                           ' · successor paired' FROM fed_peer_successor s
+                          JOIN fed_peer p ON p.id=s.successor_peer_id
+                          WHERE t.uid LIKE s.old_mesh_id || ':%' LIMIT 1),
+                         substr(t.uid,1,instr(t.uid,':')-1) || ' · former peer'
+                       ) AS origin_name,
+                       COALESCE(
+                         (SELECT state FROM fed_peer p WHERE t.uid LIKE p.mesh_id || ':%' LIMIT 1),
+                         (SELECT 'successor' FROM fed_peer_successor s
+                          WHERE t.uid LIKE s.old_mesh_id || ':%' LIMIT 1),'former'
+                       ) AS origin_status,
+                       (SELECT p.mesh_id FROM fed_peer_successor s JOIN fed_peer p
+                        ON p.id=s.successor_peer_id WHERE t.uid LIKE s.old_mesh_id || ':%'
+                        LIMIT 1) AS successor_mesh_id
                 FROM thread t LEFT JOIN member m ON m.id=t.author_id
                 WHERE t.board_id=? AND t.hidden=0
                 ORDER BY t.pinned DESC,t.last_post_at DESC LIMIT ? OFFSET ?
@@ -1507,8 +1631,23 @@ def create_web_app(
                 """
                 SELECT t.id,t.subject,t.pinned,t.locked,t.hidden,t.origin_node,
                        t.uid LIKE '!%:%' AS remote,
-                       (SELECT node_name FROM fed_peer p WHERE t.uid LIKE p.mesh_id || ':%'
-                        LIMIT 1) AS origin_name,b.id AS board_id,b.slug
+                       COALESCE(
+                         (SELECT node_name FROM fed_peer p
+                          WHERE t.uid LIKE p.mesh_id || ':%' LIMIT 1),
+                         (SELECT COALESCE(s.old_node_name,p.node_name) ||
+                           ' · successor paired' FROM fed_peer_successor s
+                          JOIN fed_peer p ON p.id=s.successor_peer_id
+                          WHERE t.uid LIKE s.old_mesh_id || ':%' LIMIT 1),
+                         substr(t.uid,1,instr(t.uid,':')-1) || ' · former peer'
+                       ) AS origin_name,
+                       COALESCE(
+                         (SELECT state FROM fed_peer p WHERE t.uid LIKE p.mesh_id || ':%' LIMIT 1),
+                         (SELECT 'successor' FROM fed_peer_successor s
+                          WHERE t.uid LIKE s.old_mesh_id || ':%' LIMIT 1),'former'
+                       ) AS origin_status,
+                       (SELECT p.mesh_id FROM fed_peer_successor s JOIN fed_peer p
+                        ON p.id=s.successor_peer_id WHERE t.uid LIKE s.old_mesh_id || ':%'
+                        LIMIT 1) AS successor_mesh_id,b.id AS board_id,b.slug
                 FROM thread t JOIN board b ON b.id=t.board_id WHERE t.id=?
                 """,
                 (thread_id,),
@@ -1519,8 +1658,21 @@ def create_web_app(
                 """
                 SELECT p.id,p.seq,p.author_label,p.body,p.created_at,p.hidden,p.hidden_reason,
                        p.origin_node,p.uid LIKE '!%:%' AS remote,
-                       (SELECT node_name FROM fed_peer peer WHERE p.uid LIKE peer.mesh_id || ':%'
-                        LIMIT 1) AS origin_name
+                       COALESCE(
+                         (SELECT node_name FROM fed_peer peer
+                          WHERE p.uid LIKE peer.mesh_id || ':%' LIMIT 1),
+                         (SELECT COALESCE(s.old_node_name,peer.node_name) ||
+                           ' · successor paired' FROM fed_peer_successor s
+                          JOIN fed_peer peer ON peer.id=s.successor_peer_id
+                          WHERE p.uid LIKE s.old_mesh_id || ':%' LIMIT 1),
+                         substr(p.uid,1,instr(p.uid,':')-1) || ' · former peer'
+                       ) AS origin_name,
+                       COALESCE(
+                         (SELECT state FROM fed_peer peer
+                          WHERE p.uid LIKE peer.mesh_id || ':%' LIMIT 1),
+                         (SELECT 'successor' FROM fed_peer_successor s
+                          WHERE p.uid LIKE s.old_mesh_id || ':%' LIMIT 1),'former'
+                       ) AS origin_status
                 FROM post p WHERE p.thread_id=? ORDER BY p.seq
                 """,
                 (thread_id,),
