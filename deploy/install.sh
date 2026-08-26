@@ -7,7 +7,7 @@ PREFIX=${OUTPOST_PREFIX:-/opt/outpost}
 STATE_DIR=${OUTPOST_STATE_DIR:-/var/lib/outpost}
 CONFIG_DIR=${OUTPOST_CONFIG_DIR:-/etc/outpost}
 SERVICE_NAME=${OUTPOST_SERVICE_NAME:-outpost.service}
-HEALTH_URL=${OUTPOST_HEALTH_URL:-http://127.0.0.1:8080/api/v1/health}
+HEALTH_URL=${OUTPOST_HEALTH_URL:-}
 NONINTERACTIVE=${OUTPOST_NONINTERACTIVE:-0}
 
 fail() { echo "Outpost install: $*" >&2; exit 1; }
@@ -63,6 +63,13 @@ else
   echo "First-run wizard skipped; edit $CONFIG_DIR/config.yaml before production use."
 fi
 OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" -c 'from outpost.config import load_config; load_config(); print("Configuration validated")'
+if [ -z "$HEALTH_URL" ]; then
+  HEALTH_URL=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
+from outpost.config import load_config
+print(f"http://127.0.0.1:{load_config().web.port}/api/v1/health")
+PY
+  )
+fi
 
 if [ ! -f "$STATE_DIR/.data/tiles/manifest.json" ] && \
   "$RELEASE_DIR/bin/python" -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])) or {}; raise SystemExit(0 if d.get("node",{}).get("location") else 1)' "$CONFIG_DIR/config.yaml"; then

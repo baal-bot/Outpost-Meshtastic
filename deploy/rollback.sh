@@ -2,8 +2,9 @@
 set -eu
 
 PREFIX=${OUTPOST_PREFIX:-/opt/outpost}
+CONFIG_DIR=${OUTPOST_CONFIG_DIR:-/etc/outpost}
 SERVICE_NAME=${OUTPOST_SERVICE_NAME:-outpost.service}
-HEALTH_URL=${OUTPOST_HEALTH_URL:-http://127.0.0.1:8080/api/v1/health}
+HEALTH_URL=${OUTPOST_HEALTH_URL:-}
 CURRENT=$PREFIX/current
 PREVIOUS=$PREFIX/previous
 
@@ -11,6 +12,13 @@ PREVIOUS=$PREFIX/previous
 [ -L "$CURRENT" ] && [ -L "$PREVIOUS" ] || { echo "No previous versioned Outpost release is available." >&2; exit 1; }
 old=$(readlink "$CURRENT")
 target=$(readlink "$PREVIOUS")
+if [ -z "$HEALTH_URL" ]; then
+  HEALTH_URL=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$target/bin/python" - <<'PY'
+from outpost.config import load_config
+print(f"http://127.0.0.1:{load_config().web.port}/api/v1/health")
+PY
+  )
+fi
 echo "Rolling back code from $old to $target"
 systemctl stop "$SERVICE_NAME"
 ln -sfn "$target" "$CURRENT.next"
