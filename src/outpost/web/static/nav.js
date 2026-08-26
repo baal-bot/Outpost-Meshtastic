@@ -59,3 +59,67 @@ if (navigation) {
     return `<a ${active ? 'class="active"' : ""} href="${href}" aria-label="${label}" title="${label}"><i aria-hidden="true">${icon}</i><span>${label}</span></a>`;
   }).join("");
 }
+
+const reviewTargets = {
+  "/bbs.html": new Set(["board"]),
+  "/watch.html": new Set(["incidents", "alerts"]),
+  "/federation.html": null,
+};
+
+const reviewArea = (stream) => stream.startsWith("board:") ? "board" : stream;
+const reviewLabel = (count) => count > 99 ? "99+" : String(count);
+
+function setReviewBadge(href, count) {
+  const link = navigation?.querySelector(`a[href="${href}"]`);
+  if (!link) return;
+  let badge = link.querySelector(".nav-review-badge");
+  if (!count) {
+    badge?.remove();
+    link.classList.remove("needs-review");
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement("b");
+    badge.className = "nav-review-badge";
+    link.appendChild(badge);
+  }
+  badge.textContent = reviewLabel(count);
+  badge.setAttribute("aria-label", `${count} pending review${count === 1 ? "" : "s"}`);
+  link.classList.add("needs-review");
+}
+
+function renderReviewCallout(count, kinds) {
+  document.querySelector(".federation-review-callout")?.remove();
+  if (!count || !["/bbs.html", "/watch.html"].includes(path)) return;
+  const main = document.querySelector("main");
+  if (!main) return;
+  const noun = kinds.length === 1 ? kinds[0] : "federated records";
+  main.insertAdjacentHTML("afterbegin", `<a class="federation-review-callout" href="/federation.html#federation-inbox"><span><b>${reviewLabel(count)}</b><i>Operator review required</i></span><strong>${count} ${noun} ${count === 1 ? "is" : "are"} waiting in the federation approval queue.</strong><em>Review now →</em></a>`);
+}
+
+async function refreshFederationReviews() {
+  try {
+    const response = await fetch("/api/v1/federation/inbox?state=pending");
+    if (!response.ok) return;
+    const items = (await response.json()).items || [];
+    const counts = {board: 0, incidents: 0, alerts: 0};
+    for (const item of items) {
+      const area = reviewArea(String(item.stream || ""));
+      if (area in counts) counts[area] += 1;
+    }
+    setReviewBadge("/federation.html", items.length);
+    setReviewBadge("/bbs.html", counts.board);
+    setReviewBadge("/watch.html", counts.incidents + counts.alerts);
+    const target = reviewTargets[path];
+    if (target) {
+      const kinds = [...target].filter(kind => counts[kind]).map(kind => kind === "incidents" ? "incident" : kind === "alerts" ? "alert" : "BBS item");
+      renderReviewCallout([...target].reduce((total, kind) => total + counts[kind], 0), kinds);
+    }
+  } catch (_) {
+    // Navigation remains usable while the backend reconnects.
+  }
+}
+
+refreshFederationReviews();
+setInterval(refreshFederationReviews, 30000);
+window.addEventListener("outpost:federation-reviewed", refreshFederationReviews);

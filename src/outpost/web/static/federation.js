@@ -66,6 +66,7 @@ async function refreshServices() {
 async function loadInbox() {
   const policy = document.querySelector(".path-grid").closest(".panel");
   const panel = document.createElement("section");
+  panel.id = "federation-inbox";
   panel.className = "panel content-panel inbox-panel";
   panel.innerHTML = `<div class="heading"><div><p class="eyebrow">FEDERATION INBOX</p><h2>Quarantined records</h2></div><button id="refresh-inbox" class="small-button">Refresh</button></div><p class="mqtt-note">Review remote records before they enter local boards, incidents, or alerts. Imported alerts are not automatically broadcast.</p><div id="fed-inbox"><p class="empty">No records awaiting review.</p></div>`;
   policy.parentElement.insertBefore(panel, policy);
@@ -80,7 +81,7 @@ async function refreshInbox() {
   document.querySelectorAll("[data-import]").forEach(button => button.addEventListener("click", async () => { await reviewInbox(button.dataset.import, "imported"); }));
   document.querySelectorAll("[data-reject]").forEach(button => button.addEventListener("click", async () => { await reviewInbox(button.dataset.reject, "rejected"); }));
 }
-async function reviewInbox(id, state) { await api(`/api/v1/federation/inbox/${id}`, {method:"PATCH", body:JSON.stringify({state, reason:"Rejected by operator"})}); await refreshInbox(); }
+async function reviewInbox(id, state) { await api(`/api/v1/federation/inbox/${id}`, {method:"PATCH", body:JSON.stringify({state, reason:"Rejected by operator"})}); window.dispatchEvent(new Event("outpost:federation-reviewed")); await refreshInbox(); }
 async function loadSyncStatus() {
   const policy = document.querySelector(".path-grid").closest(".panel");
   const panel = document.createElement("section");
