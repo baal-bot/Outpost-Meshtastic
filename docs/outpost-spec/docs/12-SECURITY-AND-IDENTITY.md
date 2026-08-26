@@ -124,6 +124,14 @@ keyword handler; REQ-WATCH-022a) — logs, and raises a dashboard alarm. A mesh 
 flooding attack must not be amplified by the node replying to everything, but neither may
 the defence silence the one message that matters.
 
+Safety-floor attempts still count toward member and node defensive telemetry. The first
+`REPORT`, `REPORT!`, `OK`, or `HELPME` fingerprint is admitted even when ordinary limits are
+exhausted; an equivalent normalized command, details, and current position is then silently
+coalesced for `security.safety_repeat_window_seconds` (default 120 seconds). Changed details,
+status, or position remain admissible. Fingerprints and aggregate counts are persisted in
+`safety_floor_attempt`, shown in the operator workspace, and retained for
+`security.safety_attempt_retention_hours` (default 72 hours).
+
 **REQ-SEC-018** — Repeated rate-limit violations (default 20 in an hour) **MUST**
 auto-mute the member for an escalating duration (15 m → 1 h → 6 h → 24 h) with an audit entry
 and a dashboard notification.

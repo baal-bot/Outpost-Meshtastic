@@ -111,6 +111,7 @@ class OutpostApp:
             self.clock,
             self.config.security.global_rate_ceiling,
             self.database,
+            safety_repeat_window_seconds=self.config.security.safety_repeat_window_seconds,
         )
         self.router = Router(self.config, members, sessions, limiter)
         bbs = BBSService(self.database, self.clock, "local")

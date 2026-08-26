@@ -2163,6 +2163,31 @@ def create_web_app(
                 item["created_at"] = _timestamp(item["created_at"])
             return {"items": items, "next_cursor": cursor + limit if len(rows) > limit else None}
 
+        @app.get("/api/v1/security/safety-floor")
+        async def safety_floor_activity() -> dict[str, Any]:
+            summary = (
+                await database.read(
+                    "SELECT COALESCE(SUM(attempt_count),0) attempts,"
+                    "COALESCE(SUM(accepted_count),0) accepted,"
+                    "COALESCE(SUM(coalesced_count),0) coalesced,"
+                    "COUNT(DISTINCT member_mesh_id) members,MAX(last_seen_at) last_seen_at "
+                    "FROM safety_floor_attempt"
+                )
+            )[0]
+            rows = await database.read(
+                "SELECT member_mesh_id,command,attempt_count,accepted_count,coalesced_count,"
+                "last_seen_at FROM safety_floor_attempt WHERE coalesced_count>0 "
+                "ORDER BY last_seen_at DESC LIMIT 20"
+            )
+            items = [dict(row) for row in rows]
+            for item in items:
+                item["last_seen_at"] = _timestamp(item["last_seen_at"])
+            value = dict(summary)
+            value["last_seen_at"] = (
+                _timestamp(value["last_seen_at"]) if value["last_seen_at"] is not None else None
+            )
+            return {"summary": value, "items": items}
+
     app.mount("/metrics", make_asgi_app())
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():

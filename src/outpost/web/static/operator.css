@@ -19,4 +19,5 @@ select { padding: 7px 25px 7px 8px; color: var(--ink); background: var(--raised)
 .audit-event code { color: var(--green); }
 .audit-event p { color: var(--muted); }
 .audit-event time { color: var(--muted); font: .58rem ui-monospace, monospace; }
+.safety-floor-summary { color: var(--muted); font: .62rem ui-monospace, monospace; }
 @media (max-width: 650px) { .operator-stats { grid-template-columns: 1fr 1fr; } .operator-stats article { padding: 12px; } .operator-stats strong { font-size: 1.35rem; } .audit-event { grid-template-columns: 100px 1fr; } .audit-event time { display: none; } .member-controls { align-items: end; flex-direction: column; } }

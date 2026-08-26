@@ -11,6 +11,11 @@ INBOUND = Counter(
 INBOUND_DROPPED = Counter("outpost_inbound_dropped_total", "Dropped inbound messages", ("reason",))
 INBOUND_QUEUE_DEPTH = Gauge("outpost_inbound_queue_depth", "Inbound queue depth", ("lane",))
 INBOUND_WORKERS_BUSY = Gauge("outpost_inbound_workers_busy", "Busy inbound workers")
+SAFETY_FLOOR_ATTEMPTS = Counter(
+    "outpost_safety_floor_attempts_total",
+    "Safety-floor command decisions",
+    ("command", "outcome"),
+)
 OUTBOUND_ENQUEUED = Counter(
     "outpost_outbound_enqueued_total", "Queued outbound messages", ("class",)
 )

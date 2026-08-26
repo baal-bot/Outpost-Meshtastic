@@ -9,7 +9,7 @@ from outpost import __version__
 from outpost.commands.core import specs as core_specs
 from outpost.config import Config
 from outpost.render.catalogue import message
-from outpost.security.rate_limit import RateLimiter
+from outpost.security.rate_limit import SAFETY_FLOOR, RateLimiter
 from outpost.store.members import MemberRepo
 from outpost.transport.models import InboundMessage
 
@@ -85,6 +85,12 @@ class Router:
             return Response(ResponseKind.ERROR, [Line(message("unknown"))])
         if TrustLevel.parse(member.trust) < spec.min_trust:
             return Response(ResponseKind.ERROR, [Line(message("unknown"))])
+        safety_decision = None
+        if token.upper() in SAFETY_FLOOR:
+            decision = await self.rate_limiter.safety_floor_decision(member.mesh_id, token, args)
+            safety_decision = decision
+            if not decision.accepted:
+                return Response(ResponseKind.NONE)
         ctx = CommandContext(
             message=inbound,
             member=member,
@@ -100,6 +106,15 @@ class Router:
             ),
         )
         try:
-            return await spec.handler(ctx)
+            response = await spec.handler(ctx)
         except Exception:
+            if safety_decision is not None and safety_decision.accepted:
+                await self.rate_limiter.release_safety_floor(
+                    member.mesh_id, token, safety_decision.fingerprint
+                )
             return Response(ResponseKind.ERROR, [Line(message("internal_error"))])
+        if response.kind == ResponseKind.ERROR and safety_decision is not None:
+            await self.rate_limiter.release_safety_floor(
+                member.mesh_id, token, safety_decision.fingerprint
+            )
+        return response

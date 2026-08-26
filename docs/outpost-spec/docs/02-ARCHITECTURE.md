@@ -349,6 +349,8 @@ security:
   require_approval: false      # handle claims need operator approval before `member`
   coarse_precision_m: 500
   global_rate_ceiling: 60      # inbound commands/min before the circuit breaker
+  safety_repeat_window_seconds: 120
+  safety_attempt_retention_hours: 72
   handle_change_per_hours: 24
   handle_reserve_days: 30
 

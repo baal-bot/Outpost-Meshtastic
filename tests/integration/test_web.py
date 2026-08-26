@@ -32,6 +32,16 @@ async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp
     await MemberRepo(database, VirtualClock()).resolve("!00000002")
     client = TestClient(create_web_app(lambda: {"radio": "up"}, database))
 
+    await database.write(
+        "INSERT INTO safety_floor_attempt(member_mesh_id,command,fingerprint,first_seen_at,"
+        "last_seen_at,accepted_at,attempt_count,coalesced_count) "
+        "VALUES('!00000001','HELPME','test',unixepoch(),unixepoch(),unixepoch(),3,2)"
+    )
+    safety = client.get("/api/v1/security/safety-floor").json()
+    assert safety["summary"]["attempts"] == 3
+    assert safety["summary"]["coalesced"] == 2
+    assert safety["items"][0]["member_mesh_id"] == "!00000001"
+
     boards = client.get("/api/v1/boards?limit=2").json()
     assert len(boards["items"]) == 2 and boards["next_cursor"] == 2
     channels = client.get("/api/v1/channels").json()

@@ -43,6 +43,11 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
         """,
         (old,),
     )
+    await database.write(
+        "INSERT INTO safety_floor_attempt(member_mesh_id,command,fingerprint,first_seen_at,"
+        "last_seen_at,accepted_at) VALUES('!00000001','HELPME','old',?,?,?)",
+        (old, old, old),
+    )
     config = Config.model_validate(
         {"store": {"path": str(tmp_path / "outpost.db"), "maintenance_hour": 3}}
     )
@@ -52,6 +57,8 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
     assert await service.due() is True
     result = await service.run()
     assert result.threads == 1 and result.messages == 1 and result.kv == 1
+    assert result.safety_floor == 1
+    assert await database.read("SELECT 1 FROM safety_floor_attempt") == []
     assert [row["uid"] for row in await database.read("SELECT uid FROM thread")] == ["pinned"]
     assert backups.list()
     assert await service.due() is False

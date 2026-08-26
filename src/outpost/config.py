@@ -246,6 +246,8 @@ class SecurityConfig(StrictModel):
     require_approval: bool = False
     coarse_precision_m: int = Field(default=500, gt=0)
     global_rate_ceiling: int = Field(default=60, gt=0)
+    safety_repeat_window_seconds: int = Field(default=120, ge=10, le=3600)
+    safety_attempt_retention_hours: int = Field(default=72, ge=1, le=720)
     handle_change_per_hours: int = Field(default=24, gt=0)
     handle_reserve_days: int = Field(default=30, ge=0)
 

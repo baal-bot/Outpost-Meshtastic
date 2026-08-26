@@ -29,3 +29,17 @@ def test_unsafe_no_auth_is_rejected() -> None:
         Config.model_validate(
             {"web": {"bind": "0.0.0.0", "auth": {"mode": "none"}}}  # noqa: S104
         )
+
+
+@pytest.mark.parametrize(
+    "security",
+    [
+        {"safety_repeat_window_seconds": 9},
+        {"safety_repeat_window_seconds": 3601},
+        {"safety_attempt_retention_hours": 0},
+        {"safety_attempt_retention_hours": 721},
+    ],
+)
+def test_safety_floor_policy_has_safe_bounds(security: dict[str, int]) -> None:
+    with pytest.raises(ValidationError):
+        Config.model_validate({"security": security})

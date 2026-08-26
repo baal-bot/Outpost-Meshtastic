@@ -17,6 +17,7 @@ class MaintenanceResult:
     mail: int
     messages: int
     kv: int
+    safety_floor: int
     backups_removed: int
 
 
@@ -41,6 +42,7 @@ class MaintenanceService:
         thread_cutoff = now - retention.posts_days * 86_400
         mail_cutoff = now - retention.mail_days * 86_400
         message_cutoff = now - retention.message_log_days * 86_400
+        safety_cutoff = now - self.config.security.safety_attempt_retention_hours * 3_600
         counts = {}
         queries = {
             "threads": (
@@ -55,6 +57,10 @@ class MaintenanceService:
             "kv": (
                 "SELECT COUNT(*) AS count FROM kv WHERE expires_at IS NOT NULL AND expires_at<?",
                 now,
+            ),
+            "safety_floor": (
+                "SELECT COUNT(*) AS count FROM safety_floor_attempt WHERE last_seen_at<?",
+                safety_cutoff,
             ),
         }
         for key, (sql, value) in queries.items():
@@ -76,6 +82,9 @@ class MaintenanceService:
         await self.database.write(
             "DELETE FROM kv WHERE expires_at IS NOT NULL AND expires_at<?", (now,)
         )
+        await self.database.write(
+            "DELETE FROM safety_floor_attempt WHERE last_seen_at<?", (safety_cutoff,)
+        )
         await self.database.write("INSERT INTO post_fts(post_fts) VALUES('optimize')")
         await self.database.write("PRAGMA optimize")
         await self.database.write("PRAGMA incremental_vacuum")
@@ -93,7 +102,12 @@ class MaintenanceService:
             (json.dumps(local_date), now),
         )
         result = MaintenanceResult(
-            counts["threads"], counts["mail"], counts["messages"], counts["kv"], removed
+            threads=counts["threads"],
+            mail=counts["mail"],
+            messages=counts["messages"],
+            kv=counts["kv"],
+            safety_floor=counts["safety_floor"],
+            backups_removed=removed,
         )
         await self.database.write(
             """
