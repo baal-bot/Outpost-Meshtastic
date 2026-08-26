@@ -154,6 +154,30 @@ class BrowserHealth:
 
 
 def route_shared_operator_api(page: object) -> None:
+    # Keep functional browser flows independent of runner network access and a
+    # warm favicon/tile cache. Expected offline fallbacks must not dilute the
+    # console-error gate used for application failures.
+    empty_png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000d49444154789c6360606060000000050001a5f645400000000049454e44ae426082"
+    )
+
+    def local_tiles(route: object) -> None:
+        if route.request.url.endswith("/tiles/manifest.json"):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"source":"browser-test"}',
+            )
+        else:
+            route.fulfill(status=200, content_type="image/png", body=empty_png)
+
+    page.route("**/favicon.ico", lambda route: route.fulfill(status=204))
+    page.route("**/tiles/**", local_tiles)
+    page.route(
+        "https://tile.openstreetmap.org/**",
+        lambda route: route.fulfill(status=200, content_type="image/png", body=empty_png),
+    )
     page.route(
         "**/api/v1/modules",
         lambda route: route.fulfill(
