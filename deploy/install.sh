@@ -28,6 +28,7 @@ RELEASE_ID=$(date -u +%Y%m%dT%H%M%SZ)-$REVISION
 RELEASE_DIR=$PREFIX/releases/$RELEASE_ID
 CURRENT_LINK=$PREFIX/current
 PREVIOUS_LINK=$PREFIX/previous
+OLD_TARGET=$(readlink "$CURRENT_LINK" 2>/dev/null || true)
 
 getent group outpost >/dev/null 2>&1 || groupadd --system outpost
 getent passwd outpost >/dev/null 2>&1 || useradd --system --gid outpost --home "$STATE_DIR" --shell /usr/sbin/nologin outpost
@@ -85,6 +86,15 @@ else
 fi
 
 BACKUP_PATH=
+PRE_UPGRADE_SCHEMA=
+PREVIOUS_SCHEMA_CAP=
+UPGRADE_SCHEMA_CAP=$("$RELEASE_DIR/bin/python" - <<'PY'
+from pathlib import Path
+import outpost.store
+migrations = Path(outpost.store.__file__).parent / "migrations"
+print(max(int(path.name[:4]) for path in migrations.glob("[0-9][0-9][0-9][0-9]_*.sql")))
+PY
+)
 DATABASE_PATH=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
 from outpost.config import load_config
 print(load_config().store.path)
@@ -92,25 +102,38 @@ PY
 )
 if [ -f "$DATABASE_PATH" ]; then
   BACKUP_PATH="$STATE_DIR/backups/pre-upgrade-$RELEASE_ID.db"
-  "$RELEASE_DIR/bin/python" - "$DATABASE_PATH" "$BACKUP_PATH" <<'PY'
-import sqlite3, sys
-source = sqlite3.connect(sys.argv[1])
-target = sqlite3.connect(sys.argv[2])
-with target:
-    source.backup(target)
-assert target.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-source.close(); target.close()
-PY
+  python3 "$SCRIPT_DIR/release_recovery.py" snapshot \
+    --source "$DATABASE_PATH" --destination "$BACKUP_PATH" >/dev/null
+  PRE_UPGRADE_SCHEMA=$(python3 "$SCRIPT_DIR/release_recovery.py" schema \
+    --database "$BACKUP_PATH")
   chown outpost:outpost "$BACKUP_PATH"
   chmod 0640 "$BACKUP_PATH"
   echo "Created verified pre-upgrade backup: $BACKUP_PATH"
 fi
 
-OLD_TARGET=$(readlink "$CURRENT_LINK" 2>/dev/null || true)
+if [ -n "$OLD_TARGET" ] && [ -n "$BACKUP_PATH" ]; then
+  PREVIOUS_SCHEMA_CAP=$("$OLD_TARGET/bin/python" - <<'PY'
+from pathlib import Path
+import outpost.store
+migrations = Path(outpost.store.__file__).parent / "migrations"
+print(max(int(path.name[:4]) for path in migrations.glob("[0-9][0-9][0-9][0-9]_*.sql")))
+PY
+  )
+  python3 "$SCRIPT_DIR/release_recovery.py" record \
+    --output "$RELEASE_DIR/rollback.json" \
+    --upgrade-release "$RELEASE_DIR" --previous-release "$OLD_TARGET" \
+    --database "$DATABASE_PATH" --backup "$BACKUP_PATH" \
+    --pre-upgrade-schema "$PRE_UPGRADE_SCHEMA" \
+    --previous-schema-cap "$PREVIOUS_SCHEMA_CAP" \
+    --upgrade-schema-cap "$UPGRADE_SCHEMA_CAP" >/dev/null
+  chmod 0644 "$RELEASE_DIR/rollback.json"
+fi
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK.next"
 mv -Tf "$CURRENT_LINK.next" "$CURRENT_LINK"
 install -m 0644 "$SCRIPT_DIR/outpost.service" /etc/systemd/system/outpost.service
 install -m 0755 "$SCRIPT_DIR/rollback.sh" /usr/local/sbin/outpost-rollback
+install -d -m 0755 /usr/local/lib/outpost
+install -m 0755 "$SCRIPT_DIR/release_recovery.py" /usr/local/lib/outpost/release_recovery.py
 printf '%s\n' "$PROJECT_DIR" > "$CONFIG_DIR/install-source"
 chmod 0640 "$CONFIG_DIR/install-source"
 systemctl daemon-reload

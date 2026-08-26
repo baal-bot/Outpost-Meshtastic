@@ -126,10 +126,12 @@ successful upgrade, explicitly return to the previous code with:
 sudo outpost-rollback
 ```
 
-That command swaps versioned code and verifies health; it intentionally does not replace the
-database. If the earlier binary rejects a newer schema, stop and restore the matching verified
-`/var/lib/outpost/backups/pre-upgrade-*.db` through the documented backup/restore workflow. Keep
-the failed database for diagnosis rather than overwriting it casually.
+The command first verifies that the current release, previous release, live database, schema
+capacity, and recorded pre-upgrade snapshot form one compatible rollback plan. It does not stop the
+healthy service if that dry run fails. After stopping, it creates another safety snapshot, restores
+the matching pre-upgrade database only when a migration requires it, swaps code, and verifies
+health. If verification fails, it automatically returns both code and data to their pre-attempt
+state. Keep the generated safety snapshots until the result has been independently verified.
 
 ## Releases and dependency lock
 
