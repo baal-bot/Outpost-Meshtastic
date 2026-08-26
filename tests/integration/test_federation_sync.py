@@ -158,9 +158,9 @@ async def test_newer_incident_version_returns_to_approval_and_updates_existing(t
     inbox = await database.read("SELECT id FROM fed_inbox_item WHERE uid=?", (item["uid"],))
     await sync.import_inbox(int(inbox[0]["id"]), "operator", 31)
 
-    assert await sync.missing(
-        [{"s": "incidents", "u": item["uid"], "v": 40, "d": "second"}]
-    ) == [{"stream": "incidents", "uid": item["uid"]}]
+    assert await sync.missing([{"s": "incidents", "u": item["uid"], "v": 40, "d": "second"}]) == [
+        {"stream": "incidents", "uid": item["uid"]}
+    ]
     item["digest"] = "second"
     item["payload"] = {
         **item["payload"],
@@ -170,23 +170,21 @@ async def test_newer_incident_version_returns_to_approval_and_updates_existing(t
         "expires_at": 100,
     }
     assert await sync.quarantine(peer, item, 41)
-    pending = await database.read(
-        "SELECT id,state FROM fed_inbox_item WHERE uid=?", (item["uid"],)
-    )
+    pending = await database.read("SELECT id,state FROM fed_inbox_item WHERE uid=?", (item["uid"],))
     assert len(pending) == 1 and pending[0]["state"] == "pending"
     await sync.import_inbox(int(pending[0]["id"]), "operator", 42)
-    incident = (await database.read(
-        "SELECT status,title,updated_at,expires_at FROM incident WHERE uid=?", (item["uid"],)
-    ))[0]
+    incident = (
+        await database.read(
+            "SELECT status,title,updated_at,expires_at FROM incident WHERE uid=?", (item["uid"],)
+        )
+    )[0]
     assert dict(incident) == {
         "status": "monitoring",
         "title": "Current condition",
         "updated_at": 40,
         "expires_at": 100,
     }
-    assert await sync.missing(
-        [{"s": "incidents", "u": item["uid"], "v": 40, "d": "second"}]
-    ) == []
+    assert await sync.missing([{"s": "incidents", "u": item["uid"], "v": 40, "d": "second"}]) == []
     await database.close()
 
 
@@ -318,8 +316,6 @@ async def test_successor_identity_deduplicates_retained_posts_and_threads(tmp_pa
     )
     sync = FederationSyncService(database, "!local")
 
-    assert await sync.missing(
-        [{"stream": "board:gen", "uid": "!newpeer:local:9"}]
-    ) == []
+    assert await sync.missing([{"stream": "board:gen", "uid": "!newpeer:local:9"}]) == []
     assert await sync.canonical_remote_uid("!newpeer:local:4") == "!oldpeer:local:4"
     await database.close()

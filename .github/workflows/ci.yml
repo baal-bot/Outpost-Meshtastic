@@ -17,6 +17,7 @@ jobs:
       - run: ruff check src tests
       - run: mypy
       - run: pytest --cov=outpost --cov-report=term
-      - run: sh -n deploy/install.sh deploy/smoke-package.sh
+      - run: sh -n deploy/install.sh deploy/rollback.sh deploy/update.sh deploy/smoke-package.sh
+      - run: python -m py_compile deploy/configure.py
       - run: sh deploy/smoke-package.sh
       - run: pip-audit

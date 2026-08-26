@@ -692,9 +692,7 @@ class OutpostApp:
             if self.config.modules.fed.enabled and self.radio.local_node_id:
                 now = int(self.clock.now().timestamp())
                 self.federation_sync.local_mesh_id = self.radio.local_node_id
-                await self.federation_sync.import_approved_replies(
-                    "federation:auto-thread", now
-                )
+                await self.federation_sync.import_approved_replies("federation:auto-thread", now)
                 pending_approvals = await self.database.read(
                     "SELECT mesh_id,shared_secret FROM fed_peer WHERE state='pairing' "
                     "AND local_approved=1 AND remote_approved=0 AND shared_secret IS NOT NULL"
@@ -921,9 +919,7 @@ class OutpostApp:
                     raise ValueError("invalid sync manifest")
                 peer = await self.federation.by_mesh_id(sender)
                 raw_next = value.get("next_before")
-                if raw_next is not None and (
-                    not isinstance(raw_next, list) or len(raw_next) != 3
-                ):
+                if raw_next is not None and (not isinstance(raw_next, list) or len(raw_next) != 3):
                     raise ValueError("invalid federation reconciliation cursor")
                 remaining = max(0, min(int(value.get("remaining", 0)), 100))
                 checkpoint = {

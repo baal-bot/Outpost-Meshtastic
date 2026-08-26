@@ -29,9 +29,11 @@ displayed confirmation phrase, and verify afterward. Restore creates a safety ba
 
 ## Upgrades
 
-Prefer a tag or known commit over a moving branch. Back up, review changes, rerun the installer,
-compare `/etc/outpost/config.yaml` with `.dist`, and perform a dashboard and mesh round trip. Retain
-the prior source revision and backup until verification is complete.
+Prefer a tag or known commit over a moving branch. `deploy/update.sh` stages an isolated release;
+the installer takes a verified database snapshot and rolls back automatically if health fails.
+Compare `/etc/outpost/config.yaml` with `.dist`, then perform dashboard and mesh round trips. Retain
+the prior release and backup until verification is complete. Use `sudo outpost-rollback` for a
+schema-compatible code rollback; database rollback requires the matching pre-upgrade snapshot.
 
 ## Radio maintenance
 

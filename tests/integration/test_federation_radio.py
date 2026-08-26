@@ -169,9 +169,12 @@ async def test_trusted_federation_uses_authenticated_broadcast_carrier(tmp_path)
         "!remote", MessageType.SYNC_REQ, {"limit": 8}, counter=counter
     )
     assert reused == counter
-    assert app.federation_codec.decode_fragment(
-        app.governor.queued_items()[1].binary_payload, secret
-    ).counter == counter
+    assert (
+        app.federation_codec.decode_fragment(
+            app.governor.queued_items()[1].binary_payload, secret
+        ).counter
+        == counter
+    )
     assert (await app.federation.by_mesh_id("!remote")).tx_counter == 1
     await app.database.close()
 

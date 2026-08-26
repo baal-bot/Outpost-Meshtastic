@@ -468,9 +468,7 @@ def create_web_app(
 
             @app.get("/api/v1/federation/origins")
             async def federation_origins() -> dict[str, Any]:
-                thread_rows = await database.read(
-                    "SELECT uid FROM thread WHERE uid LIKE '!%:%'"
-                )
+                thread_rows = await database.read("SELECT uid FROM thread WHERE uid LIKE '!%:%'")
                 post_rows = await database.read("SELECT uid FROM post WHERE uid LIKE '!%:%'")
                 origins: dict[str, dict[str, Any]] = {}
                 for kind, rows in (("thread_count", thread_rows), ("post_count", post_rows)):
@@ -525,16 +523,22 @@ def create_web_app(
                     )
                 if peer.state != "active":
                     return JSONResponse(
-                        {"error": {"code": "peer_not_active", "message": (
-                            "Pair the successor before adopting history."
-                        )}},
+                        {
+                            "error": {
+                                "code": "peer_not_active",
+                                "message": ("Pair the successor before adopting history."),
+                            }
+                        },
                         status_code=409,
                     )
                 if body.old_mesh_id.lower() == mesh_id.lower():
                     return JSONResponse(
-                        {"error": {"code": "same_identity", "message": (
-                            "The predecessor and successor must differ."
-                        )}},
+                        {
+                            "error": {
+                                "code": "same_identity",
+                                "message": ("The predecessor and successor must differ."),
+                            }
+                        },
                         status_code=409,
                     )
                 content = await database.read(
@@ -544,9 +548,12 @@ def create_web_app(
                 )
                 if not content or int(content[0]["count"]) == 0:
                     return JSONResponse(
-                        {"error": {"code": "origin_not_found", "message": (
-                            "No retained content uses that predecessor identity."
-                        )}},
+                        {
+                            "error": {
+                                "code": "origin_not_found",
+                                "message": ("No retained content uses that predecessor identity."),
+                            }
+                        },
                         status_code=404,
                     )
                 await database.write(
@@ -674,9 +681,7 @@ def create_web_app(
                         "paths": {
                             "radio": path_map.get("radio", {"count_24h": 0, "last_at": None}),
                             "mqtt": path_map.get("mqtt", {"count_24h": 0, "last_at": None}),
-                            "unknown": path_map.get(
-                                "unknown", {"count_24h": 0, "last_at": None}
-                            ),
+                            "unknown": path_map.get("unknown", {"count_24h": 0, "last_at": None}),
                         },
                         "deliveries": dict(deliveries),
                         "security": {

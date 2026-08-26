@@ -33,13 +33,18 @@ sudo ./deploy/install.sh
 | Active configuration | `/etc/outpost/config.yaml` |
 | Distributed defaults | `/etc/outpost/config.yaml.dist` |
 | Command intents | `/etc/outpost/intents.yaml` |
-| Python environment | `/opt/outpost/venv` |
+| Active Python release | `/opt/outpost/current` |
+| Versioned releases | `/opt/outpost/releases/` |
+| Previous release | `/opt/outpost/previous` |
 | Database/runtime files | `/var/lib/outpost` |
 | Service unit | `/etc/systemd/system/outpost.service` |
 
-Later installer runs preserve active configuration, refresh the `.dist` comparison copy, reinstall
-the checked-out revision into `/opt/outpost/venv`, and restart the production service. `git pull`
-alone does not update the running installation.
+The first interactive install opens a guided identity, units, radio, and optional location wizard.
+Set `OUTPOST_NONINTERACTIVE=1` for automated provisioning. Later runs preserve active configuration
+and stage a new, isolated release under `/opt/outpost/releases`. The installer validates the
+package and configuration, creates an integrity-checked pre-upgrade database backup, switches the
+`current` symlink atomically, and waits for health. Failed health verification restores both the
+previous code and pre-upgrade database. `git pull` alone never updates the running installation.
 
 ## Federation acceptance host
 
@@ -52,8 +57,8 @@ python3 -m venv .venv
 .venv/bin/pip check
 ```
 
-The checkout-local `.venv` runs tests and linting. The systemd service continues to use
-`/opt/outpost/venv`. After pulling application changes, rerun `sudo ./deploy/install.sh`; running
+The checkout-local `.venv` runs tests and linting. The systemd service uses
+`/opt/outpost/current`. After pulling application changes, rerun `sudo ./deploy/install.sh`; running
 tests from `.venv` does not upgrade or restart the production service.
 
 ## First configuration
@@ -91,7 +96,7 @@ shows the intended local node, transport, firmware information, utilization, and
 When `node.location` exists at installation, the installer seeds a bounded USGS pack. Later:
 
 ```sh
-sudo -u outpost /opt/outpost/venv/bin/python tools/build_tile_pack.py \
+sudo -u outpost /opt/outpost/current/bin/python tools/build_tile_pack.py \
   --config /etc/outpost/config.yaml --output /var/lib/outpost/.data/tiles
 ```
 
@@ -101,15 +106,37 @@ used interactively; the local USGS pack is the fallback.
 
 ## Upgrade
 
-1. Create and download a validated backup.
+1. Create and download a validated off-device backup in addition to the installer's local snapshot.
 2. Review release and configuration changes.
-3. Pull the desired revision and rerun `sudo ./deploy/install.sh`. A pull by itself does not update
-   `/opt/outpost/venv` or the running process.
+3. From a clean checkout, run `./deploy/update.sh origin/main`, or pass a release tag such as
+   `./deploy/update.sh v0.2.0`. It fetches the target, installs it, and returns the source checkout
+   to its prior revision if installation fails. A pull by itself does not update the running process.
 4. Compare active config with `/etc/outpost/config.yaml.dist`.
 5. Verify health, login, radio connectivity, and a mesh `PING`.
 
 Migrations run forward at startup. Do not downgrade a production database without a specific
 recovery plan.
+
+## Roll back
+
+The installer automatically rolls back a release that fails its startup health check. After a
+successful upgrade, explicitly return to the previous code with:
+
+```sh
+sudo outpost-rollback
+```
+
+That command swaps versioned code and verifies health; it intentionally does not replace the
+database. If the earlier binary rejects a newer schema, stop and restore the matching verified
+`/var/lib/outpost/backups/pre-upgrade-*.db` through the documented backup/restore workflow. Keep
+the failed database for diagnosis rather than overwriting it casually.
+
+## Releases and dependency lock
+
+Production installation constrains runtime packages with `requirements.lock`. Tagged `v*`
+revisions run the package smoke test, build a wheel and checksum, and publish both to the matching
+GitHub release. Update the project version and lock intentionally in the same reviewed release PR;
+do not regenerate the lock as an incidental upgrade step.
 
 ## A second Outpost
 

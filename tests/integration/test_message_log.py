@@ -44,9 +44,7 @@ async def test_inbound_and_outbound_messages_are_durable(tmp_path) -> None:
     assert await repo.resolve_ack(8, "acked") is True
     assert (await repo.recent())[0].outcome == "acked"
     assert await repo.resolve_ack(999, "acked") is False
-    transports = await database.read(
-        "SELECT direction,transport FROM message_log ORDER BY id"
-    )
+    transports = await database.read("SELECT direction,transport FROM message_log ORDER BY id")
     assert [dict(row) for row in transports] == [
         {"direction": "in", "transport": "mqtt"},
         {"direction": "out", "transport": "mesh"},

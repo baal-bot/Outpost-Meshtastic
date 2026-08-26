@@ -163,9 +163,7 @@ class FederationSyncService:
         if snapshot is not None:
             items = [item for item in items if item.version <= snapshot]
         if before is not None:
-            items = [
-                item for item in items if (item.version, item.stream, item.uid) < before
-            ]
+            items = [item for item in items if (item.version, item.stream, item.uid) < before]
         return items[:limit]
 
     async def missing(self, manifest: list[dict[str, Any]]) -> list[dict[str, str]]:

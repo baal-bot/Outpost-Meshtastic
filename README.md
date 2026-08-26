@@ -87,6 +87,11 @@ sudo systemctl restart outpost
 sudo journalctl -u outpost -f
 ```
 
+Interactive first install includes a guided setup. Upgrades are staged as versioned releases with
+a verified database snapshot, atomic activation, health-gated automatic rollback, and an explicit
+`sudo outpost-rollback` command. Use `./deploy/update.sh <tag-or-ref>` from a clean checkout for a
+safe GitHub update.
+
 Open `http://<outpost-address>:8080/`. First startup writes a one-time operator password to the
 service journal; sign in and replace it immediately. Follow the complete
 [installation guide](docs/INSTALLATION.md) for prerequisites, upgrades, and verification.

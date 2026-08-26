@@ -363,8 +363,7 @@ class FederationPeerService:
             ),
         )
         await self.database.write(
-            "DELETE FROM fed_cursor WHERE peer_id=? AND stream='_reconcile' "
-            "AND direction='recv'",
+            "DELETE FROM fed_cursor WHERE peer_id=? AND stream='_reconcile' AND direction='recv'",
             (peer.id,),
         )
         return await self.by_mesh_id(mesh_id)

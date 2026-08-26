@@ -158,12 +158,8 @@ async def test_sync_policy_requires_pairing_and_is_bounded(tmp_path) -> None:
             quota_items_per_hour=20,
         )
     await database.write("UPDATE fed_peer SET state='active' WHERE mesh_id='!remote'")
-    await database.write(
-        "UPDATE fed_peer SET last_sync_at=123 WHERE mesh_id='!remote'"
-    )
-    peer_id = int((await database.read(
-        "SELECT id FROM fed_peer WHERE mesh_id='!remote'"
-    ))[0]["id"])
+    await database.write("UPDATE fed_peer SET last_sync_at=123 WHERE mesh_id='!remote'")
+    peer_id = int((await database.read("SELECT id FROM fed_peer WHERE mesh_id='!remote'"))[0]["id"])
     await database.write(
         "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
         "VALUES(?,'_reconcile','recv','{}',123)",
@@ -179,13 +175,10 @@ async def test_sync_policy_requires_pairing_and_is_bounded(tmp_path) -> None:
     assert peer.boards == ["mutual-aid", "public"]
     assert peer.sync_incidents and peer.relay_alerts
     assert peer.quota_items_per_hour == 30
-    row = (await database.read(
-        "SELECT last_sync_at FROM fed_peer WHERE id=?", (peer.id,)
-    ))[0]
+    row = (await database.read("SELECT last_sync_at FROM fed_peer WHERE id=?", (peer.id,)))[0]
     assert row["last_sync_at"] is None
     assert not await database.read(
-        "SELECT 1 FROM fed_cursor WHERE peer_id=? AND stream='_reconcile' "
-        "AND direction='recv'",
+        "SELECT 1 FROM fed_cursor WHERE peer_id=? AND stream='_reconcile' AND direction='recv'",
         (peer.id,),
     )
     await database.close()
