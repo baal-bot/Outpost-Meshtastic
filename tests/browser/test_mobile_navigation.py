@@ -43,6 +43,12 @@ OPERATOR_PAGES = tuple(
     dict.fromkeys(target.split("#", 1)[0] for _label, target in DESTINATIONS[:-1])
 )
 THEMES = ("dark", "daylight", "night")
+ACTION_SECTIONS = (
+    ("/federation.html", "Nearby and paired Outposts"),
+    ("/operator.html", "Community members"),
+    ("/radio.html", "Message log"),
+    ("/watch.html", "Open incidents"),
+)
 
 
 def wait_for_navigation(page: object) -> None:
@@ -368,5 +374,88 @@ def test_weather_forecast_provenance_and_unavailable_values_are_visible(
             "Precipitation unavailable",
             "Wind direction unavailable",
         ]
+    finally:
+        page.close()
+
+
+def heading_action_layout(heading: object) -> dict[str, object]:
+    return heading.evaluate(
+        """heading => {
+          const actions = heading.querySelector('.heading-actions');
+          if (!actions) return {enhanced: false};
+          const box = actions.getBoundingClientRect();
+          const children = [...actions.children].map(child => {
+            const childBox = child.getBoundingClientRect();
+            return {
+              left: childBox.left,
+              right: childBox.right,
+              clippedText: child.scrollWidth > child.clientWidth + 1
+                || child.scrollHeight > child.clientHeight + 1,
+            };
+          });
+          return {
+            enhanced: true,
+            left: box.left,
+            right: box.right,
+            viewport: window.innerWidth,
+            clippedContent: actions.scrollWidth > actions.clientWidth + 1,
+            children,
+          };
+        }"""
+    )
+
+
+@pytest.mark.parametrize("theme", THEMES)
+@pytest.mark.parametrize("width", VIEWPORTS)
+def test_federation_heading_actions_have_visual_coverage_without_clipping(
+    browser: object, dashboard_url: str, theme: str, width: int
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme=theme)
+    try:
+        page.goto(f"{dashboard_url}/federation.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        heading = page.locator(".heading").filter(has_text="Nearby and paired Outposts").first
+        heading.locator(".heading-actions").wait_for()
+        layout = heading_action_layout(heading)
+
+        assert layout["enhanced"] is True
+        assert layout["left"] >= 0 and layout["right"] <= layout["viewport"]
+        assert layout["clippedContent"] is False
+        assert all(
+            child["left"] >= 0
+            and child["right"] <= layout["viewport"]
+            and child["clippedText"] is False
+            for child in layout["children"]
+        )
+        screenshot = heading.screenshot(animations="disabled")
+        assert screenshot.startswith(b"\x89PNG") and len(screenshot) > 1_000
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize(("path", "title"), ACTION_SECTIONS)
+def test_action_heavy_sections_reflow_at_320px_and_200_percent_text(
+    browser: object, dashboard_url: str, path: str, title: str
+) -> None:
+    page = prepare_page(browser, 320, dashboard_url, theme="daylight")
+    try:
+        page.goto(f"{dashboard_url}{path}", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.add_style_tag(content="html { font-size: 200% !important; }")
+        heading = page.locator(".heading").filter(has_text=title).first
+        heading.locator(".heading-actions").wait_for()
+        layout = heading_action_layout(heading)
+
+        assert layout["enhanced"] is True
+        assert layout["left"] >= 0 and layout["right"] <= layout["viewport"]
+        assert layout["clippedContent"] is False
+        assert all(
+            child["left"] >= 0
+            and child["right"] <= layout["viewport"]
+            and child["clippedText"] is False
+            for child in layout["children"]
+        )
+        screenshot = heading.screenshot(animations="disabled")
+        assert screenshot.startswith(b"\x89PNG") and len(screenshot) > 1_000
     finally:
         page.close()

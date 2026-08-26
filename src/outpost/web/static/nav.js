@@ -36,8 +36,22 @@ const applyAccessibleNames = () => {
     document.getElementById(id)?.setAttribute("aria-label", label);
   }
 };
-applyAccessibleNames();
-new MutationObserver(applyAccessibleNames).observe(document.body, {childList: true, subtree: true});
+const applyHeadingActions = () => {
+  for (const heading of document.querySelectorAll(".heading")) {
+    [...heading.children].slice(1).forEach(actions => {
+      actions.classList.add("heading-actions");
+    });
+  }
+};
+const applySharedEnhancements = () => {
+  applyAccessibleNames();
+  applyHeadingActions();
+};
+applySharedEnhancements();
+new MutationObserver(applySharedEnhancements).observe(document.body, {
+  childList: true,
+  subtree: true,
+});
 const links = [
   ["/", "⌂", "Overview"],
   ["/operator.html", "♙", "Members"],

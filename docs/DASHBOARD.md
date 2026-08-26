@@ -43,6 +43,11 @@ Follow System option. The preference is stored in the current browser rather tha
 database so a wall display, phone, and operator workstation can each use the appropriate mode.
 Night Ops reduces map brightness; it does not change incident severity or provider data.
 
+Section headings share one responsive action-bar treatment. Filters come first, status follows,
+and action buttons remain in their authored primary/secondary order. The action bar wraps on
+intermediate widths and stacks below its heading on narrow or enlarged-text displays rather than
+clipping controls at the viewport edge.
+
 ## API
 
 The JSON API is rooted at `/api/v1`. Important read surfaces include:
