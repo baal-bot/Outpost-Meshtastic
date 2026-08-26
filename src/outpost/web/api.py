@@ -211,6 +211,13 @@ class FederationSyncPolicyBody(BaseModel):
     quota_items_per_hour: int = Field(default=20, ge=1, le=500)
     relay_mail: bool = False
     quota_mail_per_hour: int = Field(default=20, ge=1, le=100)
+    service_permissions: list[Literal["weather", "alerts", "knowledge"]] = Field(
+        default_factory=list, max_length=3
+    )
+    quota_services_per_hour: int = Field(default=6, ge=1, le=60)
+    service_concurrency: int = Field(default=1, ge=1, le=4)
+    service_max_response_bytes: int = Field(default=1200, ge=256, le=1600)
+    service_airtime_seconds_per_hour: float = Field(default=15, ge=1, le=120)
 
 
 class FederationInboxBody(BaseModel):
@@ -610,7 +617,9 @@ def create_web_app(
                 peers = await database.read(
                     """SELECT p.id,p.mesh_id,p.node_name,p.state,p.last_sync_at,
                        p.tx_counter,p.rx_counter,p.last_seen_at,
-                       p.quota_items_per_hour,
+                       p.quota_items_per_hour,p.service_permissions,
+                       p.quota_services_per_hour,p.service_concurrency,
+                       p.service_max_response_bytes,p.service_airtime_seconds_per_hour,
                        COUNT(CASE WHEN i.state='pending' THEN 1 END) pending_items,
                        COUNT(CASE WHEN i.state='imported' THEN 1 END) imported_items,
                        COUNT(CASE WHEN i.state='rejected' THEN 1 END) rejected_items
@@ -681,6 +690,27 @@ def create_web_app(
                            ORDER BY created_at DESC LIMIT 5""",
                         (peer["mesh_id"],),
                     )
+                    service_usage_rows = await database.read(
+                        "SELECT * FROM fed_service_usage WHERE peer_id=? "
+                        "ORDER BY window_start DESC LIMIT 1",
+                        (peer_id,),
+                    )
+                    service_usage = (
+                        dict(service_usage_rows[0])
+                        if service_usage_rows
+                        else {
+                            "window_start": None,
+                            "requests": 0,
+                            "denied": 0,
+                            "response_bytes": 0,
+                            "response_airtime_seconds": 0.0,
+                        }
+                    )
+                    service_circuits = await database.read(
+                        "SELECT service,consecutive_failures,open_until,updated_at "
+                        "FROM fed_service_circuit WHERE peer_id=? ORDER BY service",
+                        (peer_id,),
+                    )
                     transfer_map[peer_id] = {
                         "paths": {
                             "radio": path_map.get("radio", {"count_24h": 0, "last_at": None}),
@@ -707,6 +737,17 @@ def create_web_app(
                                 "updated_at": None,
                             },
                         ),
+                        "services": {
+                            "permissions": json.loads(peer["service_permissions"]),
+                            "request_limit": int(peer["quota_services_per_hour"]),
+                            "concurrency_limit": int(peer["service_concurrency"]),
+                            "response_byte_limit": int(peer["service_max_response_bytes"]),
+                            "airtime_limit_seconds": float(
+                                peer["service_airtime_seconds_per_hour"]
+                            ),
+                            "usage": service_usage,
+                            "circuits": [dict(row) for row in service_circuits],
+                        },
                     }
                 outbound = (
                     await database.read(
@@ -719,6 +760,7 @@ def create_web_app(
                     "items": [
                         {
                             **dict(peer),
+                            "service_permissions": json.loads(peer["service_permissions"]),
                             "cursors": cursor_map.get(int(peer["id"]), []),
                             "transfers": transfer_map[int(peer["id"])],
                         }
@@ -1657,6 +1699,11 @@ def create_web_app(
                         quota_items_per_hour=peer.quota_items_per_hour,
                         relay_mail=peer.relay_mail,
                         quota_mail_per_hour=peer.quota_mail_per_hour,
+                        service_permissions=peer.service_permissions,
+                        quota_services_per_hour=peer.quota_services_per_hour,
+                        service_concurrency=peer.service_concurrency,
+                        service_max_response_bytes=peer.service_max_response_bytes,
+                        service_airtime_seconds_per_hour=peer.service_airtime_seconds_per_hour,
                     )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "

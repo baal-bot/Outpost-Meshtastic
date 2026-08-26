@@ -553,6 +553,19 @@ CREATE TABLE cap_point_cache (
   fetched_at INTEGER NOT NULL
 );
 
+-- Per-peer service policy lives on fed_peer: service_permissions (JSON),
+-- quota_services_per_hour, service_concurrency, service_max_response_bytes,
+-- and service_airtime_seconds_per_hour. All permissions default to denied.
+CREATE TABLE fed_service_usage (
+  peer_id INTEGER NOT NULL REFERENCES fed_peer(id) ON DELETE CASCADE,
+  window_start INTEGER NOT NULL,
+  requests INTEGER NOT NULL DEFAULT 0,
+  denied INTEGER NOT NULL DEFAULT 0,
+  response_bytes INTEGER NOT NULL DEFAULT 0,
+  response_airtime_seconds REAL NOT NULL DEFAULT 0,
+  PRIMARY KEY(peer_id,window_start)
+);
+
 CREATE TABLE waypoint (
   id         INTEGER PRIMARY KEY,
   name       TEXT NOT NULL,

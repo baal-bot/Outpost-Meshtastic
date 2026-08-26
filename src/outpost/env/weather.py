@@ -17,6 +17,8 @@ from outpost.store import Database
 OPEN_METEO_HOST = "api.open-meteo.com"
 NWS_HOST = "api.weather.gov"
 _HTTP_CACHE: dict[str, tuple[dict[str, Any], str | None, str | None]] = {}
+ENV_CACHE_MAX = 1_000
+HTTP_CACHE_MAX = 1_000
 
 
 async def _request_json(url: str, host: str, config: EnvConfig) -> dict[str, Any]:
@@ -49,6 +51,8 @@ async def _request_json(url: str, host: str, config: EnvConfig) -> dict[str, Any
                     response.headers.get("ETag"),
                     response.headers.get("Last-Modified"),
                 )
+                while len(_HTTP_CACHE) > HTTP_CACHE_MAX:
+                    _HTTP_CACHE.pop(next(iter(_HTTP_CACHE)))
                 return value
         except urllib.error.HTTPError as error:
             if error.code == 304 and cached:
@@ -225,6 +229,8 @@ class NWSProvider:
             if any(urllib.parse.urlparse(url).hostname != NWS_HOST for url in urls.values()):
                 raise ValueError("NWS returned a forecast host outside the allowlist")
             self._forecast_urls[key] = urls
+            while len(self._forecast_urls) > HTTP_CACHE_MAX:
+                self._forecast_urls.pop(next(iter(self._forecast_urls)))
         return urls
 
     @staticmethod
@@ -448,6 +454,11 @@ class WeatherService:
                 now + self.config.refresh_minutes * 60,
             ),
         )
+        await self.database.write(
+            "DELETE FROM env_cache WHERE cache_key IN (SELECT cache_key FROM env_cache "
+            "ORDER BY fetched_at DESC LIMIT -1 OFFSET ?)",
+            (ENV_CACHE_MAX,),
+        )
         return self._snapshot(
             payload, getattr(self.provider, "last_provider", self.provider.name), now, now
         )
@@ -479,6 +490,11 @@ class WeatherService:
                 now,
                 now + self.config.refresh_minutes * 60,
             ),
+        )
+        await self.database.write(
+            "DELETE FROM env_cache WHERE cache_key IN (SELECT cache_key FROM env_cache "
+            "ORDER BY fetched_at DESC LIMIT -1 OFFSET ?)",
+            (ENV_CACHE_MAX,),
         )
         return self._forecast_snapshot(payload, provider, now, now)
 

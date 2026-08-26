@@ -40,6 +40,11 @@ class Peer:
     quota_mail_per_hour: int
     quota_items_per_hour: int
     policy_configured: bool
+    service_permissions: list[str]
+    quota_services_per_hour: int
+    service_concurrency: int
+    service_max_response_bytes: int
+    service_airtime_seconds_per_hour: float
 
 
 class FederationPeerService:
@@ -81,6 +86,11 @@ class FederationPeerService:
             quota_mail_per_hour=int(row["quota_mail_per_hour"]),
             quota_items_per_hour=int(row["quota_items_per_hour"]),
             policy_configured=bool(row["policy_configured"]),
+            service_permissions=json.loads(row["service_permissions"]),
+            quota_services_per_hour=int(row["quota_services_per_hour"]),
+            service_concurrency=int(row["service_concurrency"]),
+            service_max_response_bytes=int(row["service_max_response_bytes"]),
+            service_airtime_seconds_per_hour=float(row["service_airtime_seconds_per_hour"]),
         )
 
     def _derive_secret(
@@ -327,6 +337,11 @@ class FederationPeerService:
         incident_radius_km: float = 25,
         relay_mail: bool = False,
         quota_mail_per_hour: int = 20,
+        service_permissions: list[str] | None = None,
+        quota_services_per_hour: int | None = None,
+        service_concurrency: int | None = None,
+        service_max_response_bytes: int | None = None,
+        service_airtime_seconds_per_hour: float | None = None,
     ) -> Peer:
         peer = await self.by_mesh_id(mesh_id)
         if peer.state not in {"active", "paused"}:
@@ -338,6 +353,37 @@ class FederationPeerService:
             raise ValueError("item quota must be 1-500 per hour")
         if not 1 <= quota_mail_per_hour <= 100:
             raise ValueError("mail quota must be 1-100 per hour")
+        permissions = sorted(
+            set(peer.service_permissions if service_permissions is None else service_permissions)
+        )
+        if any(service not in {"weather", "alerts", "knowledge"} for service in permissions):
+            raise ValueError("peer service permission is not supported")
+        service_quota = (
+            peer.quota_services_per_hour
+            if quota_services_per_hour is None
+            else quota_services_per_hour
+        )
+        concurrency = (
+            peer.service_concurrency if service_concurrency is None else service_concurrency
+        )
+        response_bytes = (
+            peer.service_max_response_bytes
+            if service_max_response_bytes is None
+            else service_max_response_bytes
+        )
+        airtime_seconds = (
+            peer.service_airtime_seconds_per_hour
+            if service_airtime_seconds_per_hour is None
+            else service_airtime_seconds_per_hour
+        )
+        if not 1 <= service_quota <= 60:
+            raise ValueError("peer service quota must be 1-60 per hour")
+        if not 1 <= concurrency <= 4:
+            raise ValueError("peer service concurrency must be 1-4")
+        if not 256 <= response_bytes <= 1600:
+            raise ValueError("peer service response limit must be 256-1600 bytes")
+        if not 1 <= airtime_seconds <= 120:
+            raise ValueError("peer service airtime limit must be 1-120 seconds per hour")
         if (incident_lat is None) != (incident_lon is None):
             raise ValueError("incident boundary requires both latitude and longitude")
         if incident_lat is not None and not -90 <= incident_lat <= 90:
@@ -350,6 +396,8 @@ class FederationPeerService:
             "UPDATE fed_peer SET boards=?,sync_incidents=?,incident_lat=?,incident_lon=?,"
             "incident_radius_km=?,relay_alerts=?,"
             "quota_items_per_hour=?,relay_mail=?,quota_mail_per_hour=?,last_sync_at=NULL,"
+            "service_permissions=?,quota_services_per_hour=?,service_concurrency=?,"
+            "service_max_response_bytes=?,service_airtime_seconds_per_hour=?,"
             "policy_configured=1 "
             "WHERE id=?",
             (
@@ -362,6 +410,11 @@ class FederationPeerService:
                 quota_items_per_hour,
                 int(relay_mail),
                 quota_mail_per_hour,
+                json.dumps(permissions, separators=(",", ":")),
+                service_quota,
+                concurrency,
+                response_bytes,
+                airtime_seconds,
                 peer.id,
             ),
         )
@@ -398,3 +451,191 @@ class FederationPeerService:
                 (counter, mesh_id, counter),
             )
         return bool(rows)
+
+    async def admit_service_request(
+        self,
+        mesh_id: str,
+        request_id: str,
+        service: str,
+        args_json: str,
+        args_fingerprint: str,
+        now: int,
+        expires_at: int,
+    ) -> tuple[Peer, str, dict[str, Any] | None]:
+        """Atomically authorize and account for one inbound peer-service request."""
+        window_start = now - now % 3_600
+        async with self.database.transaction() as transaction:
+            peer_rows = await transaction.read(
+                "SELECT * FROM fed_peer WHERE mesh_id=? AND state='active'", (mesh_id,)
+            )
+            if not peer_rows:
+                raise ValueError("peer service requires an active peer")
+            peer = self._peer(peer_rows[0])
+            existing = await transaction.read(
+                "SELECT * FROM fed_service_request WHERE request_id=?", (request_id,)
+            )
+            if existing:
+                value = dict(existing[0])
+                if value["peer_mesh_id"] != mesh_id or value["direction"] != "in":
+                    raise ValueError("peer service request id collides with another request")
+                return peer, "replay", value
+            await transaction.write(
+                "INSERT INTO fed_service_usage(peer_id,window_start) VALUES(?,?) "
+                "ON CONFLICT(peer_id,window_start) DO NOTHING",
+                (peer.id, window_start),
+            )
+            usage = (
+                await transaction.read(
+                    "SELECT * FROM fed_service_usage WHERE peer_id=? AND window_start=?",
+                    (peer.id, window_start),
+                )
+            )[0]
+            pending = await transaction.read(
+                "SELECT COUNT(*) count FROM fed_service_request WHERE direction='in' "
+                "AND peer_mesh_id=? AND status='pending' AND expires_at>?",
+                (mesh_id, now),
+            )
+            circuit = await transaction.read(
+                "SELECT open_until FROM fed_service_circuit WHERE peer_id=? AND service=?",
+                (peer.id, service),
+            )
+            outcome = "admitted"
+            if service not in peer.service_permissions:
+                outcome = "permission_denied"
+            elif circuit and int(circuit[0]["open_until"] or 0) > now:
+                outcome = "circuit_open"
+            elif int(usage["requests"]) >= peer.quota_services_per_hour:
+                outcome = "request_quota"
+            elif int(pending[0]["count"]) >= peer.service_concurrency:
+                outcome = "concurrency_quota"
+            if outcome != "admitted":
+                await transaction.write(
+                    "UPDATE fed_service_usage SET denied=denied+1 "
+                    "WHERE peer_id=? AND window_start=?",
+                    (peer.id, window_start),
+                )
+                await transaction.write(
+                    "INSERT INTO fed_service_request(request_id,direction,peer_mesh_id,service,"
+                    "args_json,args_fingerprint,status,created_at,updated_at,expires_at,"
+                    "completed_at,error) VALUES(?,'in',?,?,?,?, 'failed',?,?,?,?,?)",
+                    (
+                        request_id,
+                        mesh_id,
+                        service,
+                        args_json,
+                        args_fingerprint,
+                        now,
+                        now,
+                        expires_at,
+                        now,
+                        outcome,
+                    ),
+                )
+                await transaction.write(
+                    "DELETE FROM fed_service_request WHERE request_id IN ("
+                    "SELECT request_id FROM fed_service_request WHERE peer_mesh_id=? "
+                    "AND direction='in' AND status<>'pending' ORDER BY updated_at DESC "
+                    "LIMIT -1 OFFSET 500)",
+                    (mesh_id,),
+                )
+                return peer, outcome, None
+            await transaction.write(
+                "UPDATE fed_service_usage SET requests=requests+1 "
+                "WHERE peer_id=? AND window_start=?",
+                (peer.id, window_start),
+            )
+            await transaction.write(
+                "INSERT INTO fed_service_request(request_id,direction,peer_mesh_id,service,"
+                "args_json,args_fingerprint,status,created_at,updated_at,expires_at) "
+                "VALUES(?,'in',?,?,?,?,'pending',?,?,?)",
+                (
+                    request_id,
+                    mesh_id,
+                    service,
+                    args_json,
+                    args_fingerprint,
+                    now,
+                    now,
+                    expires_at,
+                ),
+            )
+            await transaction.write(
+                "DELETE FROM fed_service_request WHERE request_id IN ("
+                "SELECT request_id FROM fed_service_request WHERE peer_mesh_id=? "
+                "AND direction='in' AND status<>'pending' ORDER BY updated_at DESC "
+                "LIMIT -1 OFFSET 500)",
+                (mesh_id,),
+            )
+        return peer, "admitted", None
+
+    async def record_service_provider_outcome(
+        self, peer: Peer, service: str, failed: bool, now: int
+    ) -> None:
+        """Open a five-minute circuit after three consecutive provider failures."""
+        async with self.database.transaction() as transaction:
+            if not failed:
+                await transaction.write(
+                    "INSERT INTO fed_service_circuit(peer_id,service,consecutive_failures,"
+                    "open_until,updated_at) VALUES(?,?,0,NULL,?) "
+                    "ON CONFLICT(peer_id,service) DO UPDATE SET consecutive_failures=0,"
+                    "open_until=NULL,updated_at=excluded.updated_at",
+                    (peer.id, service, now),
+                )
+                return
+            rows = await transaction.read(
+                "SELECT consecutive_failures FROM fed_service_circuit "
+                "WHERE peer_id=? AND service=?",
+                (peer.id, service),
+            )
+            failures = (int(rows[0]["consecutive_failures"]) if rows else 0) + 1
+            await transaction.write(
+                "INSERT INTO fed_service_circuit(peer_id,service,consecutive_failures,"
+                "open_until,updated_at) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(peer_id,service) DO UPDATE SET "
+                "consecutive_failures=excluded.consecutive_failures,"
+                "open_until=excluded.open_until,updated_at=excluded.updated_at",
+                (peer.id, service, failures, now + 300 if failures >= 3 else None, now),
+            )
+
+    async def reserve_service_response(
+        self, peer: Peer, response_bytes: int, airtime_seconds: float, now: int
+    ) -> str | None:
+        """Reserve a response against the peer's byte and rolling hourly airtime policy."""
+        window_start = now - now % 3_600
+        async with self.database.transaction() as transaction:
+            await transaction.write(
+                "INSERT INTO fed_service_usage(peer_id,window_start) VALUES(?,?) "
+                "ON CONFLICT(peer_id,window_start) DO NOTHING",
+                (peer.id, window_start),
+            )
+            usage = (
+                await transaction.read(
+                    "SELECT response_airtime_seconds FROM fed_service_usage "
+                    "WHERE peer_id=? AND window_start=?",
+                    (peer.id, window_start),
+                )
+            )[0]
+            if response_bytes > peer.service_max_response_bytes:
+                await transaction.write(
+                    "UPDATE fed_service_usage SET denied=denied+1 "
+                    "WHERE peer_id=? AND window_start=?",
+                    (peer.id, window_start),
+                )
+                return "response_byte_quota"
+            if (
+                float(usage["response_airtime_seconds"]) + airtime_seconds
+                > peer.service_airtime_seconds_per_hour
+            ):
+                await transaction.write(
+                    "UPDATE fed_service_usage SET denied=denied+1 "
+                    "WHERE peer_id=? AND window_start=?",
+                    (peer.id, window_start),
+                )
+                return "airtime_quota"
+            await transaction.write(
+                "UPDATE fed_service_usage SET response_bytes=response_bytes+?,"
+                "response_airtime_seconds=response_airtime_seconds+? "
+                "WHERE peer_id=? AND window_start=?",
+                (response_bytes, airtime_seconds, peer.id, window_start),
+            )
+        return None

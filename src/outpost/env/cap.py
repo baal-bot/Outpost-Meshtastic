@@ -14,6 +14,7 @@ from outpost.watch import AlertService
 
 CAP_POINT_FRESH_SECONDS = 300
 CAP_POINT_STALE_SECONDS = 1_800
+CAP_POINT_CACHE_MAX = 1_000
 
 
 class CapAlertService:
@@ -236,6 +237,11 @@ class CapAlertService:
                     now,
                 ),
             )
+            await self.database.write(
+                "DELETE FROM cap_point_cache WHERE cache_key IN (SELECT cache_key "
+                "FROM cap_point_cache ORDER BY fetched_at DESC LIMIT -1 OFFSET ?)",
+                (CAP_POINT_CACHE_MAX,),
+            )
             return self._point_response(row, now)
         except Exception as error:  # Provider failures are returned as an explicit result state.
             return self._point_failure(cached, query_lat, query_lon, now, error)
@@ -274,6 +280,11 @@ class CapAlertService:
                 provider_timestamp,
                 now,
             ),
+        )
+        await self.database.write(
+            "DELETE FROM cap_point_cache WHERE cache_key IN (SELECT cache_key "
+            "FROM cap_point_cache ORDER BY fetched_at DESC LIMIT -1 OFFSET ?)",
+            (CAP_POINT_CACHE_MAX,),
         )
         return self._point_response(
             {

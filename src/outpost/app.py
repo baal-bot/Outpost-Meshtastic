@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import secrets
 from collections import defaultdict, deque
@@ -41,6 +42,7 @@ from outpost.fed import (
     FrameCodec,
     FrameError,
     MessageType,
+    Peer,
     Reassembler,
 )
 from outpost.radio_operations import RadioOperations
@@ -67,6 +69,7 @@ from outpost.transport.metrics import (
 from outpost.transport.models import InboundMessage, Severity, TrafficClass
 from outpost.transport.radio_link import MeshtasticRadioLink
 from outpost.transport.supervisor import RadioSupervisor
+from outpost.transport.toa import toa
 from outpost.watch import AlertService, CheckinService, IncidentService
 from outpost.watch.incidents import Incident
 from outpost.web.api import create_web_app
@@ -511,26 +514,53 @@ class OutpostApp:
             if location is None:
                 raise ValueError("Outpost coordinates are required for this peer service")
             args.update({"lat": location.lat, "lon": location.lon})
+        args, _ = self._normalized_service_args(service, args)
         now = int(self.clock.now().timestamp())
         request_id = secrets.token_hex(12)
         candidates = [peer.mesh_id for peer in peers]
-        await self.database.write(
-            "INSERT INTO fed_service_request(request_id,direction,peer_mesh_id,service,args_json,"
-            "status,candidate_peers,created_at,updated_at,expires_at) "
-            "VALUES(?,'out',?,?,?,'pending',?,?,?,?)",
-            (
-                request_id,
-                candidates[0],
-                service,
-                json.dumps(args, separators=(",", ":")),
-                json.dumps(candidates, separators=(",", ":")),
-                now,
-                now,
-                now + 180,
-            ),
-        )
+        async with self.database.transaction() as transaction:
+            await transaction.write(
+                "INSERT INTO fed_service_request(request_id,direction,peer_mesh_id,service,"
+                "args_json,status,candidate_peers,created_at,updated_at,expires_at) "
+                "VALUES(?,'out',?,?,?,'pending',?,?,?,?)",
+                (
+                    request_id,
+                    candidates[0],
+                    service,
+                    json.dumps(args, separators=(",", ":")),
+                    json.dumps(candidates, separators=(",", ":")),
+                    now,
+                    now,
+                    now + 180,
+                ),
+            )
+            await transaction.write(
+                "DELETE FROM fed_service_request WHERE request_id IN ("
+                "SELECT request_id FROM fed_service_request WHERE direction='out' "
+                "AND status<>'pending' ORDER BY updated_at DESC LIMIT -1 OFFSET 500)"
+            )
         await self._send_service_query(request_id, candidates[0], service, args, now + 180)
         return (await self.federation_service_requests())[0]
+
+    @staticmethod
+    def _normalized_service_args(
+        service: str, args: dict[str, object]
+    ) -> tuple[dict[str, object], str]:
+        if service in {"weather", "alerts"}:
+            try:
+                lat, lon = round(float(args["lat"]), 4), round(float(args["lon"]), 4)
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"{service} coordinates are required") from error
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise ValueError(f"invalid {service} coordinates")
+            normalized: dict[str, object] = {"lat": lat, "lon": lon}
+        else:
+            query = str(args.get("query") or "").strip()
+            if not query or len(query) > 200:
+                raise ValueError("knowledge query must be 1-200 characters")
+            normalized = {"query": query}
+        encoded = json.dumps(normalized, separators=(",", ":"), sort_keys=True)
+        return normalized, hashlib.sha256(f"{service}:{encoded}".encode()).hexdigest()[:32]
 
     async def _send_service_query(
         self,
@@ -1163,6 +1193,79 @@ class OutpostApp:
                 )
             return
 
+    async def _queue_service_response(
+        self,
+        peer: Peer,
+        request_id: str,
+        service: str,
+        ok: bool,
+        result: dict[str, object],
+        provenance: dict[str, object],
+        error: str | None,
+        now: int,
+    ) -> tuple[bool, dict[str, object], dict[str, object], str | None, int, float]:
+        async def encode_response(
+            response_ok: bool,
+            response_result: dict[str, object],
+            response_provenance: dict[str, object],
+            response_error: str | None,
+        ) -> tuple[list[bytes], int, float]:
+            value = {
+                "request_id": request_id,
+                "mesh_id": self.federation.local_mesh_id,
+                "ok": response_ok,
+                "result": self._service_result_to_wire(service, response_result),
+                "provenance": response_provenance,
+                "error": response_error,
+            }
+            content_bytes = len(json.dumps(value, separators=(",", ":"), sort_keys=True).encode())
+            if content_bytes > peer.service_max_response_bytes:
+                return [], content_bytes, 0.0
+            secret = await self.federation.secret(peer.mesh_id)
+            counter = await self.federation.next_counter(peer.mesh_id)
+            try:
+                frames = self.federation_codec.encode(
+                    MessageType.SERVICE_RESPONSE, value, counter, secret
+                )
+            except FrameError:
+                return [], peer.service_max_response_bytes + 1, 0.0
+            return (
+                frames,
+                content_bytes,
+                sum(toa(len(frame), self.governor.preset) for frame in frames),
+            )
+
+        frames, response_bytes, airtime_seconds = await encode_response(
+            ok, result, provenance, error
+        )
+        denied = await self.federation.reserve_service_response(
+            peer, response_bytes, airtime_seconds, now
+        )
+        if denied is not None:
+            ok = False
+            result = {}
+            provenance = {"serving_outpost": self.federation.local_mesh_id}
+            error = (
+                "peer service response exceeds byte policy"
+                if denied == "response_byte_quota"
+                else "peer service airtime quota exceeded"
+            )
+            frames, response_bytes, airtime_seconds = await encode_response(
+                ok, result, provenance, error
+            )
+            if (
+                await self.federation.reserve_service_response(
+                    peer, response_bytes, airtime_seconds, now
+                )
+                is not None
+            ):
+                return ok, result, provenance, error, 0, 0.0
+        try:
+            self._queue_trusted_federation_frames(frames)
+        except ValueError as caught:
+            return False, {}, provenance, str(caught)[:160], 0, 0.0
+        return ok, result, provenance, error, response_bytes, airtime_seconds
+
     async def _handle_service_query(self, sender: str, value: dict[str, object]) -> None:
         request_id = str(value["request_id"])
         service = str(value["service"])
@@ -1173,35 +1276,97 @@ class OutpostApp:
             raise ValueError("invalid service request")
         if not isinstance(args, dict) or expires_at <= now or int(value.get("ttl", 0)) < 0:
             raise ValueError("expired or invalid service request")
-        existing = await self.database.read(
-            "SELECT request_id FROM fed_service_request WHERE request_id=?", (request_id,)
+        normalized_args, fingerprint = self._normalized_service_args(service, args)
+        args_json = json.dumps(normalized_args, separators=(",", ":"), sort_keys=True)
+        peer, outcome, existing = await self.federation.admit_service_request(
+            sender,
+            request_id,
+            service,
+            args_json,
+            fingerprint,
+            now,
+            expires_at,
         )
-        if existing:
-            return
-        await self.database.write(
-            "INSERT INTO fed_service_request(request_id,direction,peer_mesh_id,service,args_json,"
-            "status,created_at,updated_at,expires_at) VALUES(?,'in',?,?,?,'pending',?,?,?)",
-            (
+        if outcome == "replay":
+            assert existing is not None
+            if existing["status"] == "pending" or int(existing["response_count"]) >= 3:
+                return
+            stored_result = json.loads(existing["result_json"] or "{}")
+            stored_provenance = json.loads(existing["provenance_json"] or "{}")
+            replay = await self._queue_service_response(
+                peer,
                 request_id,
-                sender,
                 service,
-                json.dumps(args, separators=(",", ":")),
+                existing["status"] == "complete",
+                stored_result,
+                stored_provenance,
+                existing["error"],
                 now,
+            )
+            if replay[4]:
+                await self.database.write(
+                    "UPDATE fed_service_request SET response_bytes=response_bytes+?,"
+                    "response_airtime_seconds=response_airtime_seconds+?,"
+                    "response_count=response_count+1,updated_at=? WHERE request_id=?",
+                    (replay[4], replay[5], now, request_id),
+                )
+            return
+        if outcome != "admitted":
+            errors = {
+                "permission_denied": "peer service is not permitted by operator policy",
+                "request_quota": "peer service request quota exceeded",
+                "concurrency_quota": "peer service concurrency quota exceeded",
+                "circuit_open": "peer service provider circuit is temporarily open",
+            }
+            denied = await self._queue_service_response(
+                peer,
+                request_id,
+                service,
+                False,
+                {},
+                {"serving_outpost": self.federation.local_mesh_id},
+                errors[outcome],
                 now,
-                expires_at,
-            ),
-        )
-        ok, result, provenance, error = True, {}, {}, None
+            )
+            await self.database.write(
+                "UPDATE fed_service_request SET result_json='{}',provenance_json=?,error=?,"
+                "response_bytes=?,response_airtime_seconds=?,response_count=?,updated_at=? "
+                "WHERE request_id=?",
+                (
+                    json.dumps(denied[2], separators=(",", ":")),
+                    denied[3],
+                    denied[4],
+                    denied[5],
+                    int(denied[4] > 0),
+                    now,
+                    request_id,
+                ),
+            )
+            return
+        ok, result, provenance, error, provider_failed = True, {}, {}, None, False
         try:
-            result, provenance = await self._execute_peer_service(service, args)
+            result, provenance = await self._execute_peer_service(service, normalized_args)
             if service == "alerts" and result.get("status") == "provider_failure":
                 ok = False
+                provider_failed = True
                 error = str(result.get("error") or "public alert provider failed")[:160]
-        except (OSError, ValueError) as caught:
-            ok, error = False, str(caught)[:160]
+        except (OSError, RuntimeError, ValueError) as caught:
+            ok, provider_failed, error = False, True, str(caught)[:160]
+        await self.federation.record_service_provider_outcome(peer, service, provider_failed, now)
+        (
+            ok,
+            result,
+            provenance,
+            error,
+            response_bytes,
+            airtime_seconds,
+        ) = await self._queue_service_response(
+            peer, request_id, service, ok, result, provenance, error, now
+        )
         await self.database.write(
             "UPDATE fed_service_request SET status=?,result_json=?,provenance_json=?,error=?,"
-            "completed_at=?,updated_at=? WHERE request_id=?",
+            "completed_at=?,updated_at=?,response_bytes=?,response_airtime_seconds=?,"
+            "response_count=? WHERE request_id=?",
             (
                 "complete" if ok else "failed",
                 json.dumps(result, separators=(",", ":")),
@@ -1209,25 +1374,12 @@ class OutpostApp:
                 error,
                 now,
                 now,
+                response_bytes,
+                airtime_seconds,
+                int(response_bytes > 0),
                 request_id,
             ),
         )
-        secret = await self.federation.secret(sender)
-        counter = await self.federation.next_counter(sender)
-        frames = self.federation_codec.encode(
-            MessageType.SERVICE_RESPONSE,
-            {
-                "request_id": request_id,
-                "mesh_id": self.federation.local_mesh_id,
-                "ok": ok,
-                "result": self._service_result_to_wire(service, result),
-                "provenance": provenance,
-                "error": error,
-            },
-            counter,
-            secret,
-        )
-        self._queue_trusted_federation_frames(frames)
 
     async def _handle_service_response(self, sender: str, value: dict[str, object]) -> None:
         request_id = str(value["request_id"])

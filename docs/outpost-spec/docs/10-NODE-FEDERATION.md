@@ -277,6 +277,16 @@ return the query point, service area, provider timestamp, fetch time, cache age,
 Outpost identity. `empty`, `stale`, `unsupported_region`, and `provider_failure` are distinct
 results. Exact-point caches **MUST NOT** cross location keys or serve an expired alert.
 
+**REQ-FED-044** — Peer use of this Outpost's weather, public-alert, or knowledge providers
+**MUST** be authorized independently for each paired peer and service; pairing alone grants
+none. The serving Outpost **MUST** enforce an hourly request count, concurrent-request limit,
+maximum encoded response size, and hourly admitted-airtime budget before provider work or
+egress. Duplicate request IDs replay the stored result at most three times without repeating
+provider work; new IDs still consume the peer's request budget. Three consecutive provider
+failures open a five-minute circuit. Current usage, denials, and open circuits **MUST** be
+visible to the operator, and service history/provider caches **MUST** have bounded retention
+and cardinality.
+
 ---
 
 ## 10. Metrics
