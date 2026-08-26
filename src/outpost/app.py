@@ -355,10 +355,9 @@ class OutpostApp:
         self.federation.local_mesh_id = local_id
         peer, payload = await self.federation.create_pairing_request(mesh_id)
         frames = self.federation_codec.encode(MessageType.PAIR_REQ, payload, 0, None)
-        mqtt_only = "mqtt" in peer.discovery_transports and "radio" not in peer.discovery_transports
-        self._queue_federation_frames(
-            frames, "^all" if mqtt_only else mesh_id, want_ack=not mqtt_only
-        )
+        # Pre-trust directed packets are not consistently bridged by Meshtastic MQTT.
+        # The application-level target makes this broadcast safe for mixed RF/MQTT paths.
+        self._queue_federation_frames(frames, "^all", want_ack=False)
         return peer
 
     async def approve_federation_pairing(self, mesh_id: str, code: str) -> object:
