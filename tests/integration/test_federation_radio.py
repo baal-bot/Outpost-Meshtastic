@@ -268,5 +268,78 @@ async def test_rejected_federation_frame_records_safe_reason(tmp_path) -> None:
 
     row = (await app.database.read("SELECT outcome,drop_reason FROM message_log"))[0]
     assert row["outcome"] == "rejected"
-    assert row["drop_reason"] == "active federation secret unavailable"
+    assert row["drop_reason"] == "unauthenticated peer"
+    await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_tampered_replayed_and_expired_frames_fail_without_side_effects(tmp_path) -> None:
+    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    secret = bytes(range(32))
+    await app.federation.discover("!remote", "Remote", 1, {}, "radio")
+    await app.database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,local_approved=1,remote_approved=1 "
+        "WHERE mesh_id='!remote'",
+        (secret,),
+    )
+
+    async def receive(packet_id: int, frame: bytes) -> None:
+        message = InboundMessage(
+            packet_id,
+            "!remote",
+            "^all",
+            0,
+            config.radio.federation_portnum,
+            False,
+            None,
+            frame,
+            datetime.now(UTC),
+        )
+        await app.message_log.record_inbound(message)
+        await app._handle_federation_discovery(message)
+
+    tampered = bytearray(
+        app.federation_codec.encode(
+            MessageType.SYNC_DONE, {"mesh_id": "!remote", "sent": 1}, 1, secret
+        )[0]
+    )
+    tampered[-1] ^= 1
+    await receive(50, bytes(tampered))
+
+    valid = app.federation_codec.encode(
+        MessageType.SYNC_DONE, {"mesh_id": "!remote", "sent": 1}, 1, secret
+    )[0]
+    await receive(51, valid)
+    await receive(52, valid)
+
+    expired = app.federation_codec.encode(
+        MessageType.SERVICE_QUERY,
+        {
+            "mesh_id": "!remote",
+            "request_id": "expired-test",
+            "service": "weather",
+            "args": {},
+            "expires_at": 1,
+            "ttl": 1,
+        },
+        2,
+        secret,
+    )[0]
+    await receive(53, expired)
+
+    rows = await app.database.read(
+        "SELECT packet_id,outcome,drop_reason FROM message_log ORDER BY packet_id"
+    )
+    assert [dict(row) for row in rows] == [
+        {"packet_id": 50, "outcome": "rejected", "drop_reason": "authentication failed"},
+        {"packet_id": 51, "outcome": "received", "drop_reason": None},
+        {"packet_id": 52, "outcome": "rejected", "drop_reason": "replay detected"},
+        {"packet_id": 53, "outcome": "rejected", "drop_reason": "expired message"},
+    ]
+    assert await app.database.read("SELECT 1 FROM fed_service_request") == []
+    assert await app.database.read("SELECT 1 FROM fed_inbox_item") == []
+    assert await app.database.read("SELECT 1 FROM fed_mail_delivery") == []
     await app.database.close()

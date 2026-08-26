@@ -355,6 +355,23 @@ class OutpostApp:
         # so use the same RF/MQTT-compatible carrier as pairing and rely on application receipts.
         return self._queue_federation_frames(frames, "^all", want_ack=False)
 
+    @staticmethod
+    def _federation_rejection_reason(error: Exception) -> str:
+        reason = str(error).lower()
+        if "hmac" in reason or "authentication" in reason:
+            return "authentication failed"
+        if "secret" in reason or "paired peer" in reason:
+            return "unauthenticated peer"
+        if "replay" in reason:
+            return "replay detected"
+        if "expired" in reason:
+            return "expired message"
+        if "identity" in reason:
+            return "identity mismatch"
+        if "outside peer" in reason or "outside peer sync policy" in reason:
+            return "policy denied"
+        return "invalid federation frame"
+
     async def initiate_federation_pairing(self, mesh_id: str) -> object:
         local_id = self.radio.local_node_id
         if not local_id:
@@ -689,7 +706,7 @@ class OutpostApp:
             self.federation_sync.local_mesh_id = self.radio.local_node_id
         try:
             if len(payload) < 3:
-                return
+                raise FrameError("frame is shorter than federation header")
             msg_type = MessageType(payload[2])
             secret = None
             if msg_type is MessageType.PAIR_CONFIRM:
@@ -952,7 +969,7 @@ class OutpostApp:
                 await self.database.write(
                     "UPDATE message_log SET outcome='rejected',drop_reason=? "
                     "WHERE direction='in' AND packet_id=?",
-                    (str(error)[:120], packet_id),
+                    (self._federation_rejection_reason(error), packet_id),
                 )
             return
 

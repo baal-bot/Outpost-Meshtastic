@@ -620,6 +620,7 @@ def create_web_app(
                         """SELECT transport,COUNT(*) count,MAX(created_at) last_at
                            FROM message_log WHERE airtime_class='federation'
                            AND direction='in' AND peer_mesh_id=?
+                           AND outcome<>'rejected'
                            AND created_at>=unixepoch()-86400 GROUP BY transport""",
                         (peer["mesh_id"],),
                     )
@@ -648,6 +649,14 @@ def create_web_app(
                             (peer_id,),
                         )
                     )[0]
+                    rejected = await database.read(
+                        """SELECT drop_reason,created_at,COUNT(*) OVER() total FROM message_log
+                           WHERE airtime_class='federation' AND direction='in'
+                           AND peer_mesh_id=? AND outcome='rejected'
+                           AND created_at>=unixepoch()-86400
+                           ORDER BY created_at DESC LIMIT 5""",
+                        (peer["mesh_id"],),
+                    )
                     transfer_map[peer_id] = {
                         "paths": {
                             "radio": path_map.get("radio", {"count_24h": 0, "last_at": None}),
@@ -657,6 +666,16 @@ def create_web_app(
                             ),
                         },
                         "deliveries": dict(deliveries),
+                        "security": {
+                            "rejected_24h": int(rejected[0]["total"]) if rejected else 0,
+                            "recent": [
+                                {
+                                    "reason": row["drop_reason"],
+                                    "created_at": row["created_at"],
+                                }
+                                for row in rejected
+                            ],
+                        },
                     }
                 outbound = (
                     await database.read(

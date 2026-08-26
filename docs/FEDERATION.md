@@ -15,6 +15,9 @@ experimental until the two-node hardware backlog is complete.
   MQTT), authenticated counters, durable queue state, retries, recovered deliveries, and last
   successful activity. Outbound frames are labelled as mesh broadcasts because radio firmware may
   carry the same frame over RF, MQTT, or both.
+- Tampered authentication tags, unknown peer secrets, replayed counters, expired messages, identity
+  mismatches, and policy violations are rejected before import. The transfer panel reports bounded
+  counts and fixed safe reason labels; it never displays payloads, keys, or raw exception details.
 - Per-peer policy controls boards, incidents, alerts, mail, quotas, and transport.
 - Enabling federation on a board automatically adds its slug to every currently paired peer's
   policy; disabling it removes the slug. Per-peer settings can still narrow that selection.

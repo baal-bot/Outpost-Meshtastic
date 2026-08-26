@@ -226,6 +226,12 @@ async def test_sync_status_reports_transport_and_delivery_health(tmp_path) -> No
         "airtime_class,outcome,transport,created_at) "
         "VALUES('in','!remote',0,260,0,40,'federation','received','mqtt',unixepoch())"
     )
+    await database.write(
+        "INSERT INTO message_log(direction,peer_mesh_id,channel,portnum,is_direct,byte_len,"
+        "airtime_class,outcome,drop_reason,transport,created_at) "
+        "VALUES('in','!remote',0,260,0,40,'federation','rejected','replay detected',"
+        "'radio',unixepoch())"
+    )
     client = TestClient(
         create_web_app(lambda: {"radio": "up"}, database=database, federation=service)
     )
@@ -237,4 +243,6 @@ async def test_sync_status_reports_transport_and_delivery_health(tmp_path) -> No
     assert transfer["deliveries"]["delivered"] == 1
     assert transfer["deliveries"]["retries"] == 2
     assert transfer["deliveries"]["recovered"] == 1
+    assert transfer["security"]["rejected_24h"] == 1
+    assert transfer["security"]["recent"][0]["reason"] == "replay detected"
     await database.close()
