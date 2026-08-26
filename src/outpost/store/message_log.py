@@ -29,8 +29,8 @@ class MessageLogRepo:
             """
             INSERT INTO message_log(
               direction,peer_mesh_id,channel,portnum,is_direct,packet_id,text,byte_len,
-              outcome,rx_snr,rx_rssi,hops,created_at
-            ) VALUES('in',?,?,?,?,?,?,?,?,?,?,?,?)
+              outcome,rx_snr,rx_rssi,hops,transport,created_at
+            ) VALUES('in',?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 message.from_id,
@@ -44,6 +44,7 @@ class MessageLogRepo:
                 message.rx_snr,
                 message.rx_rssi,
                 message.hops_away,
+                "mqtt" if message.via_mqtt else "radio",
                 int(self.clock.now().timestamp()),
             ),
         )
@@ -66,8 +67,8 @@ class MessageLogRepo:
             """
             INSERT INTO message_log(
               direction,peer_mesh_id,channel,portnum,is_direct,packet_id,text,byte_len,
-              toa_ms,airtime_class,outcome,created_at
-            ) VALUES('out',?,?,?,?,?,?,?,?,?,?,?)
+              toa_ms,airtime_class,outcome,transport,created_at
+            ) VALUES('out',?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 peer_mesh_id,
@@ -80,6 +81,7 @@ class MessageLogRepo:
                 toa_ms,
                 airtime_class,
                 outcome,
+                "mesh",
                 int(self.clock.now().timestamp()),
             ),
         )

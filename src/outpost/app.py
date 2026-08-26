@@ -680,6 +680,11 @@ class OutpostApp:
         sender = getattr(message, "from_id", "")
         if not isinstance(payload, bytes) or not sender:
             return
+        await self.database.write(
+            "UPDATE message_log SET airtime_class='federation' "
+            "WHERE direction='in' AND packet_id=? AND peer_mesh_id=?",
+            (getattr(message, "packet_id", None), sender),
+        )
         if self.radio.local_node_id:
             self.federation_sync.local_mesh_id = self.radio.local_node_id
         try:

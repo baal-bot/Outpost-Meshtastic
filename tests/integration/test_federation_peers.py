@@ -198,3 +198,43 @@ async def test_board_federation_toggle_updates_active_peer_policies(tmp_path) ->
     assert disabled.status_code == 200
     assert (await service.by_mesh_id("!remote")).boards == []
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_status_reports_transport_and_delivery_health(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    service = FederationPeerService(database, VirtualClock(), "!local")
+    peer = await service.discover("!remote", "Remote", 1, {}, "mqtt")
+    await database.write("UPDATE fed_peer SET state='active' WHERE id=?", (peer.id,))
+    thread_id = await database.write(
+        "INSERT INTO thread(uid,board_id,subject,origin_node,created_at,last_post_at) "
+        "VALUES('local:telemetry',1,'Telemetry','local',1,1)"
+    )
+    post_id = await database.write(
+        "INSERT INTO post(uid,thread_id,seq,author_label,origin_node,body,created_at) "
+        "VALUES('local:telemetry',?,1,'operator','local','Test',1)",
+        (thread_id,),
+    )
+    await database.write(
+        "INSERT INTO fed_post_delivery(peer_id,post_id,uid,stream,state,attempts,created_at,"
+        "updated_at,delivered_at) VALUES(?,?,?,'board:gen','delivered',3,1,2,2)",
+        (peer.id, post_id, "!local:local:telemetry"),
+    )
+    await database.write(
+        "INSERT INTO message_log(direction,peer_mesh_id,channel,portnum,is_direct,byte_len,"
+        "airtime_class,outcome,transport,created_at) "
+        "VALUES('in','!remote',0,260,0,40,'federation','received','mqtt',unixepoch())"
+    )
+    client = TestClient(
+        create_web_app(lambda: {"radio": "up"}, database=database, federation=service)
+    )
+
+    result = client.get("/api/v1/federation/sync-status").json()
+    transfer = result["items"][0]["transfers"]
+    assert transfer["paths"]["mqtt"]["count_24h"] == 1
+    assert transfer["paths"]["radio"]["count_24h"] == 0
+    assert transfer["deliveries"]["delivered"] == 1
+    assert transfer["deliveries"]["retries"] == 2
+    assert transfer["deliveries"]["recovered"] == 1
+    await database.close()

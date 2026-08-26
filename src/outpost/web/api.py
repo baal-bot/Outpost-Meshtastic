@@ -595,6 +595,7 @@ def create_web_app(
             async def federation_sync_status() -> dict[str, Any]:
                 peers = await database.read(
                     """SELECT p.id,p.mesh_id,p.node_name,p.state,p.last_sync_at,
+                       p.tx_counter,p.rx_counter,p.last_seen_at,
                        p.quota_items_per_hour,
                        COUNT(CASE WHEN i.state='pending' THEN 1 END) pending_items,
                        COUNT(CASE WHEN i.state='imported' THEN 1 END) imported_items,
@@ -609,11 +610,68 @@ def create_web_app(
                 cursor_map: dict[int, list[dict[str, Any]]] = {}
                 for cursor in cursors:
                     cursor_map.setdefault(int(cursor["peer_id"]), []).append(dict(cursor))
+                transfer_map: dict[int, dict[str, Any]] = {}
+                for peer in peers:
+                    peer_id = int(peer["id"])
+                    paths = await database.read(
+                        """SELECT transport,COUNT(*) count,MAX(created_at) last_at
+                           FROM message_log WHERE airtime_class='federation'
+                           AND direction='in' AND peer_mesh_id=?
+                           AND created_at>=unixepoch()-86400 GROUP BY transport""",
+                        (peer["mesh_id"],),
+                    )
+                    path_map = {
+                        str(path["transport"] or "unknown"): {
+                            "count_24h": int(path["count"]),
+                            "last_at": path["last_at"],
+                        }
+                        for path in paths
+                    }
+                    deliveries = (
+                        await database.read(
+                            """SELECT COUNT(*) total,
+                               COALESCE(SUM(CASE WHEN state<>'delivered' THEN 1 ELSE 0 END),0)
+                                 pending,
+                               COALESCE(SUM(CASE WHEN state='delivered' THEN 1 ELSE 0 END),0)
+                                 delivered,
+                               COALESCE(SUM(CASE WHEN attempts>1 THEN attempts-1 ELSE 0 END),0)
+                                 retries,
+                               COALESCE(SUM(CASE WHEN state='delivered' AND attempts>1
+                                 THEN 1 ELSE 0 END),0) recovered,
+                               MAX(updated_at) last_attempt_at,MAX(delivered_at) last_delivered_at,
+                               COALESCE(SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END),0)
+                                 errors
+                               FROM fed_post_delivery WHERE peer_id=?""",
+                            (peer_id,),
+                        )
+                    )[0]
+                    transfer_map[peer_id] = {
+                        "paths": {
+                            "radio": path_map.get("radio", {"count_24h": 0, "last_at": None}),
+                            "mqtt": path_map.get("mqtt", {"count_24h": 0, "last_at": None}),
+                            "unknown": path_map.get(
+                                "unknown", {"count_24h": 0, "last_at": None}
+                            ),
+                        },
+                        "deliveries": dict(deliveries),
+                    }
+                outbound = (
+                    await database.read(
+                        """SELECT COUNT(*) frames_24h,MAX(created_at) last_at
+                           FROM message_log WHERE airtime_class='federation'
+                           AND direction='out' AND created_at>=unixepoch()-86400"""
+                    )
+                )[0]
                 return {
                     "items": [
-                        {**dict(peer), "cursors": cursor_map.get(int(peer["id"]), [])}
+                        {
+                            **dict(peer),
+                            "cursors": cursor_map.get(int(peer["id"]), []),
+                            "transfers": transfer_map[int(peer["id"])],
+                        }
                         for peer in peers
-                    ]
+                    ],
+                    "outbound": dict(outbound),
                 }
 
             @app.get("/api/v1/federation/inbox")

@@ -12,7 +12,8 @@ phones and desktops and uses bundled assets so its interface remains available w
 - **Environment:** separate environmental map, weather/forecast, official alerts, earthquakes,
   astronomy, and editable waypoints.
 - **Radio:** connection state, firmware/node details, telemetry, queue, airtime, reconnect, MQTT.
-- **Federation:** peer directory, pairing, transport policy, sync policy/inbox, services, relay mail.
+- **Federation:** peer directory, pairing, transport policy, per-path transfer telemetry, durable
+  retry/recovery health, sync policy/inbox, services, and relay mail.
 - **Backups/System/Settings:** health, retention, backup/restore, identity, emergency policy, AI, and
   other operator controls.
 

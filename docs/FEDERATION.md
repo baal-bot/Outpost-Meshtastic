@@ -11,6 +11,10 @@ experimental until the two-node hardware backlog is complete.
 - Paired frames use canonical CBOR, bounded fragments, HMAC, and persistent replay counters.
 - Federation frames use an RF/MQTT-compatible channel broadcast carrier; pair-specific encryption,
   authentication, replay protection, and application receipts provide confidentiality and delivery.
+- The Federation transfer panel reports the path actually observed on inbound frames (LoRa or
+  MQTT), authenticated counters, durable queue state, retries, recovered deliveries, and last
+  successful activity. Outbound frames are labelled as mesh broadcasts because radio firmware may
+  carry the same frame over RF, MQTT, or both.
 - Per-peer policy controls boards, incidents, alerts, mail, quotas, and transport.
 - Enabling federation on a board automatically adds its slug to every currently paired peer's
   policy; disabling it removes the slug. Per-peer settings can still narrow that selection.
