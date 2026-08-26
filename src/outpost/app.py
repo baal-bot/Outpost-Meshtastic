@@ -52,7 +52,7 @@ from outpost.router.router import Router
 from outpost.router.session import SessionStore
 from outpost.security.rate_limit import RateLimiter
 from outpost.store import Database
-from outpost.store.backups import BackupService
+from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.store.maintenance import MaintenanceService
 from outpost.store.members import MemberRepo
 from outpost.store.message_log import MessageLogRepo
@@ -85,6 +85,7 @@ class OutpostApp:
         self._tasks: list[asyncio.Task[None]] = []
         self._task_health: dict[str, dict[str, object]] = {}
         self._task_failure = asyncio.Event()
+        self._restart_requested = asyncio.Event()
         self._fatal_task_error: str | None = None
         self._shutting_down = False
         self._inbound_pending: dict[str, deque[tuple[InboundMessage, int]]] = defaultdict(deque)
@@ -182,6 +183,9 @@ class OutpostApp:
         self.web_auth = WebAuthService(self.database, self.config.web.auth.session_hours)
         self.runtime_settings = RuntimeSettings(self.database, self.config)
         self.backups = BackupService(self.database)
+        self.restore_coordinator = RestoreCoordinator(
+            self.backups, self._restore_database, self._request_restart
+        )
         self.maintenance = MaintenanceService(self.database, self.backups, self.clock, self.config)
         self.web = create_web_app(
             self.status,
@@ -209,6 +213,7 @@ class OutpostApp:
             self.request_federation_service,
             self.import_federation_inbox,
             self.send_federation_mail,
+            self.restore_coordinator,
         )
 
     def _start_background_task(
@@ -259,6 +264,21 @@ class OutpostApp:
     async def wait_for_task_failure(self) -> str:
         await self._task_failure.wait()
         return self._fatal_task_error or "background task failed"
+
+    async def wait_for_restart(self) -> None:
+        await self._restart_requested.wait()
+
+    def _request_restart(self) -> None:
+        self._restart_requested.set()
+
+    async def _restore_database(self, name: str) -> dict[str, object]:
+        self._shutting_down = True
+        await self.supervisor.stop()
+        for task in self._tasks:
+            task.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks = []
+        return await self.backups.restore_quiesced(name)
 
     async def import_federation_inbox(self, item_id: int) -> str:
         return await self.federation_sync.import_inbox(
@@ -1725,6 +1745,7 @@ class OutpostApp:
             "alert_delivery": self.governor.alert_delivery_status(),
             "tasks_healthy": self.background_tasks_healthy(),
             "task_failure": self._fatal_task_error,
+            "recovery": self.restore_coordinator.maintenance_status(),
             "tasks": {name: dict(health) for name, health in self._task_health.items()},
             "inbound": {
                 "workers": self.config.router.inbound_workers,

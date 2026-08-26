@@ -29,17 +29,24 @@ def main() -> None:
         failure_task = asyncio.create_task(
             application.wait_for_task_failure(), name="background-task-failure"
         )
+        restart_task = asyncio.create_task(
+            application.wait_for_restart(), name="recovery-restart"
+        )
         try:
             done, _ = await asyncio.wait(
-                {server_task, failure_task}, return_when=asyncio.FIRST_COMPLETED
+                {server_task, failure_task, restart_task}, return_when=asyncio.FIRST_COMPLETED
             )
             if failure_task in done:
                 reason = failure_task.result()
                 server.should_exit = True
                 await server_task
                 raise RuntimeError(f"critical Outpost task failed: {reason}")
-            failure_task.cancel()
-            await asyncio.gather(failure_task, return_exceptions=True)
+            if restart_task in done:
+                server.should_exit = True
+            for task in (failure_task, restart_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(failure_task, restart_task, return_exceptions=True)
             await server_task
         finally:
             if not server_task.done():
@@ -48,6 +55,9 @@ def main() -> None:
             if not failure_task.done():
                 failure_task.cancel()
                 await asyncio.gather(failure_task, return_exceptions=True)
+            if not restart_task.done():
+                restart_task.cancel()
+                await asyncio.gather(restart_task, return_exceptions=True)
             watchdog_task.cancel()
             await asyncio.gather(watchdog_task, return_exceptions=True)
             await application.shutdown()

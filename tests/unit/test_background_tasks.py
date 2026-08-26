@@ -50,3 +50,33 @@ async def test_expected_background_task_cancellation_is_not_fatal(tmp_path) -> N
     assert health["state"] == "stopped"
     assert health["last_ok_at"] is not None
     assert app._task_failure.is_set() is False
+
+
+@pytest.mark.asyncio
+async def test_restore_quiesces_background_work_before_database_replacement(tmp_path) -> None:
+    app = OutpostApp(Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}}))
+    await app.database.open()
+    candidate = await app.backups.create()
+    await app.database.write(
+        "INSERT INTO runtime_setting(key,value,updated_at) VALUES('after.backup','yes',1)"
+    )
+    drained = asyncio.Event()
+
+    async def writer() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            drained.set()
+
+    app._tasks = [app._start_background_task("test-writer", writer())]
+    await asyncio.sleep(0)
+    result = await app._restore_database(candidate.name)
+
+    assert drained.is_set()
+    assert app._tasks == []
+    assert result["restored"] == candidate.name
+    assert not await app.database.read(
+        "SELECT 1 FROM runtime_setting WHERE key='after.backup'"
+    )
+    assert app._task_failure.is_set() is False
+    await app.database.close()

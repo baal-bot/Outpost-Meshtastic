@@ -24,7 +24,7 @@ from outpost.env import (
 from outpost.fed import FederationPeerService
 from outpost.radio_operations import RadioOperations
 from outpost.store import Database
-from outpost.store.backups import BackupService
+from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.watch import AlertService, CheckinService, IncidentService
 from outpost.web.auth import WebAuthService
 from outpost.web.settings import RuntimeSettings
@@ -265,6 +265,7 @@ def create_web_app(
     federation_mail_send: (
         Callable[[str, str, str, str], Awaitable[dict[str, object]]] | None
     ) = None,
+    restore_coordinator: RestoreCoordinator | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Outpost API", version=__version__, docs_url="/api/docs")
 
@@ -285,7 +286,9 @@ def create_web_app(
     @app.middleware("http")
     async def authentication(request: Request, call_next: Any) -> Response:
         path = request.url.path
-        public = path in {"/api/v1/health", "/api/v1/auth/login"}
+        public = path in {"/api/v1/health", "/api/v1/auth/login"} or path.startswith(
+            "/api/v1/recovery/restores/"
+        )
         if auth is not None and path.startswith("/api/v1/") and not public:
             session = await auth.session(request.cookies.get("outpost_session"))
             if session is None:
@@ -311,6 +314,53 @@ def create_web_app(
                         status_code=403,
                     )
         return await call_next(request)
+
+    if restore_coordinator is not None:
+
+        @app.middleware("http")
+        async def recovery_maintenance(request: Request, call_next: Any) -> Response:
+            path = request.url.path
+            restore_request = (
+                request.method == "POST"
+                and path.startswith("/api/v1/backups/")
+                and path.endswith("/restore")
+            )
+            recovery_request = path.startswith("/api/v1/recovery/restores/")
+            if restore_request and restore_coordinator.maintenance_status()["active"]:
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "maintenance",
+                            "message": "Another restore is already in progress.",
+                        }
+                    },
+                    status_code=503,
+                    headers={"Retry-After": "15"},
+                )
+            gated_request = (
+                path.startswith("/api/v1/")
+                and path != "/api/v1/health"
+                and not recovery_request
+                and not restore_request
+            )
+            if gated_request and not await restore_coordinator.enter_mutation():
+                status = restore_coordinator.maintenance_status()
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "maintenance",
+                            "message": "Outpost is restoring a backup; mutations are paused.",
+                        },
+                        "recovery": status,
+                    },
+                    status_code=503,
+                    headers={"Retry-After": "15"},
+                )
+            try:
+                return await call_next(request)
+            finally:
+                if gated_request:
+                    await restore_coordinator.leave_mutation()
 
     tile_root = Path(".data/tiles").resolve()
 
@@ -389,15 +439,32 @@ def create_web_app(
                 )
             return JSONResponse({"ok": True})
 
-    @app.get("/api/v1/health", response_class=JSONResponse)
-    async def health() -> dict[str, str]:
+    @app.get("/api/v1/health", response_class=JSONResponse, response_model=None)
+    async def health() -> dict[str, str] | Response:
         status = status_provider()
+        recovery = status.get("recovery")
+        if isinstance(recovery, dict) and recovery.get("active") is True:
+            return JSONResponse(
+                {"status": "maintenance", "version": __version__}, status_code=503
+            )
         radio = status.get("radio", "down")
         tasks_healthy = status.get("tasks_healthy", True) is not False
         return {
             "status": "ok" if radio == "up" and tasks_healthy else "degraded",
             "version": __version__,
         }
+
+    if restore_coordinator is not None:
+
+        @app.get("/api/v1/recovery/restores/{job_id}", response_model=None)
+        async def restore_status(job_id: str) -> dict[str, Any] | Response:
+            job = restore_coordinator.status(job_id)
+            if job is None:
+                return JSONResponse(
+                    {"error": {"code": "not_found", "message": "Restore job not found."}},
+                    status_code=404,
+                )
+            return job
 
     if federation is not None:
         if federation_mail_send is not None and database is not None:
@@ -1157,6 +1224,31 @@ def create_web_app(
                     )
                 return FileResponse(path, filename=path.name, media_type="application/x-sqlite3")
 
+            @app.get("/api/v1/backups/{name}/validate", response_model=None)
+            async def backup_validate(name: str) -> dict[str, object] | Response:
+                try:
+                    return await backups.validate(name)
+                except (ValueError, RuntimeError) as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_backup", "message": str(error)}},
+                        status_code=422,
+                    )
+
+            if restore_coordinator is not None:
+
+                @app.post("/api/v1/backups/{name}/restore", response_model=None)
+                async def backup_restore(
+                    name: str, body: RestoreBody
+                ) -> dict[str, object] | Response:
+                    try:
+                        job = await restore_coordinator.schedule(name, body.confirmation)
+                    except (ValueError, RuntimeError) as error:
+                        return JSONResponse(
+                            {"error": {"code": "restore_rejected", "message": str(error)}},
+                            status_code=422,
+                        )
+                    return JSONResponse(job, status_code=202)
+
         if incidents is not None:
 
             async def incident_origins(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1631,26 +1723,6 @@ def create_web_app(
                     (f"event:{event_id}", f"recipients:{result['recipient_count']}"),
                 )
                 return result
-
-            @app.get("/api/v1/backups/{name}/validate", response_model=None)
-            async def backup_validate(name: str) -> dict[str, object] | Response:
-                try:
-                    return await backups.validate(name)
-                except (ValueError, RuntimeError) as error:
-                    return JSONResponse(
-                        {"error": {"code": "invalid_backup", "message": str(error)}},
-                        status_code=422,
-                    )
-
-            @app.post("/api/v1/backups/{name}/restore", response_model=None)
-            async def backup_restore(name: str, body: RestoreBody) -> dict[str, object] | Response:
-                try:
-                    return await backups.restore(name, body.confirmation)
-                except (ValueError, RuntimeError) as error:
-                    return JSONResponse(
-                        {"error": {"code": "restore_rejected", "message": str(error)}},
-                        status_code=422,
-                    )
 
         @app.get("/api/v1/boards")
         async def boards(

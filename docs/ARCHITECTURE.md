@@ -35,7 +35,9 @@ are not blindly converted to incidents.
 
 SQLite is authoritative. Ordered SQL under `src/outpost/store/migrations` covers members, messages,
 BBS/mail, incidents/alerts, environment caches, welfare, web auth, settings, audit, and federation.
-Online backup supports validation and guarded restore with a pre-restore safety copy.
+Online backup supports validation and a controlled recovery coordinator: maintenance gating,
+in-flight request drain, transport/background-task quiescence, a verified pre-restore safety copy,
+atomic database replacement, durable sidecar progress, and a supervisor-driven process restart.
 
 ## Offline behavior
 

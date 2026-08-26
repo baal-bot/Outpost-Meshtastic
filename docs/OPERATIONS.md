@@ -24,8 +24,11 @@ The dashboard can create, validate, download, and restore backups. Rotation prot
 local copies do not protect against device loss. Periodically store a validated backup in encrypted
 off-device storage.
 
-Before restore, validate the exact file, understand newer data loss, notify operators, use the
-displayed confirmation phrase, and verify afterward. Restore creates a safety backup and audit row.
+Before restore, validate the exact file, understand newer data loss, notify operators, and use the
+displayed confirmation phrase. Outpost then enters visible maintenance mode, blocks and drains API,
+radio, transport, and scheduled work, creates a verified safety snapshot, restores, and restarts.
+The Backups page tracks the recovery through restart even if the restored snapshot invalidates the
+operator's session. A failed restore automatically returns to the pre-restore snapshot.
 
 ## Upgrades
 
@@ -33,7 +36,9 @@ Prefer a tag or known commit over a moving branch. `deploy/update.sh` stages an 
 the installer takes a verified database snapshot and rolls back automatically if health fails.
 Compare `/etc/outpost/config.yaml` with `.dist`, then perform dashboard and mesh round trips. Retain
 the prior release and backup until verification is complete. Use `sudo outpost-rollback` for a
-schema-compatible code rollback; database rollback requires the matching pre-upgrade snapshot.
+compatibility-checked rollback. The command verifies its release metadata before downtime and
+automatically restores the matching pre-upgrade database when the older code cannot read the live
+schema. It also keeps a pre-attempt safety snapshot and restores it if rollback health checks fail.
 
 ## Radio maintenance
 

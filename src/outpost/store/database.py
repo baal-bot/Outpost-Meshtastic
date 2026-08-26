@@ -226,6 +226,25 @@ class Database:
         async with self._transaction_lock:
             return await self._writer_call(operation)
 
+    async def validate_current(self) -> dict[str, int | str]:
+        def operation() -> dict[str, int | str]:
+            if self._writer is None:
+                raise StoreError("database is not open")
+            integrity = str(self._writer.execute("PRAGMA integrity_check").fetchone()[0])
+            if integrity != "ok":
+                raise StoreError(f"database integrity check failed: {integrity}")
+            value = self._writer.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+            if value is None:
+                raise StoreError("database schema version is empty")
+            return {
+                "integrity": integrity,
+                "schema_version": int(value),
+                "size_bytes": self.path.stat().st_size,
+            }
+
+        async with self._transaction_lock:
+            return await self._writer_call(operation)
+
     async def restore_from(self, source: str | Path) -> None:
         source_path = Path(source)
 
