@@ -98,6 +98,7 @@ class AirtimeGovernor:
         }
         self.history: deque[tuple[float, float, TrafficClass, Severity]] = deque()
         self._recent: dict[tuple[str, int, str], float] = {}
+        self._held_ids: set[int] = set()
         self._next_id = 1
         self._next_tx_at = 0.0
         self._last_toa = 0.0
@@ -141,7 +142,7 @@ class AirtimeGovernor:
         QUEUE_DEPTH.labels(item.traffic_class.value).set(len(self.queues[item.traffic_class]))
         return item.item_id
 
-    def enqueue_many(self, items: list[OutboundItem]) -> list[int] | None:
+    def enqueue_many(self, items: list[OutboundItem], *, hold: bool = False) -> list[int] | None:
         """Atomically admit a complete multi-part response (REQ-TRANSPORT-035)."""
         superseded = {item.supersedes for item in items if item.supersedes is not None}
         retained = sum(
@@ -175,7 +176,10 @@ class AirtimeGovernor:
         ids = [self.enqueue(item) for item in items]
         if any(item_id is None for item_id in ids):
             raise AssertionError("atomic enqueue preflight diverged")
-        return [item_id for item_id in ids if item_id is not None]
+        admitted = [item_id for item_id in ids if item_id is not None]
+        if hold:
+            self._held_ids.update(admitted)
+        return admitted
 
     def queued_items(self) -> list[OutboundItem]:
         return sorted(
@@ -194,6 +198,40 @@ class AirtimeGovernor:
                 OUTBOUND_DROPPED.labels(traffic_class.value, "operator_cancel").inc()
                 return True
         return False
+
+    def retract_many(self, item_ids: list[int]) -> None:
+        """Undo an admitted batch when its associated database transaction rolls back."""
+        remaining = set(item_ids)
+        self._held_ids.difference_update(remaining)
+        for traffic_class, queue in self.queues.items():
+            for item in tuple(queue):
+                if item.item_id not in remaining:
+                    continue
+                queue.remove(item)
+                remaining.remove(item.item_id)
+                payload = (
+                    item.dedupe_token.encode()
+                    if item.dedupe_token is not None
+                    else item.binary_payload
+                    if item.binary_payload is not None
+                    else item.text.encode()
+                )
+                digest = hashlib.sha256(payload).hexdigest()
+                self._recent.pop((item.dest, item.channel, digest), None)
+                self.metrics.enqueued[traffic_class] = max(
+                    0, self.metrics.enqueued[traffic_class] - 1
+                )
+                self.metrics.dropped[(traffic_class, "transaction_rollback")] += 1
+                OUTBOUND_DROPPED.labels(traffic_class.value, "transaction_rollback").inc()
+            QUEUE_DEPTH.labels(traffic_class.value).set(len(queue))
+        if remaining:
+            raise ValueError("cannot retract queue items that are no longer pending")
+
+    def release_many(self, item_ids: list[int]) -> None:
+        item_set = set(item_ids)
+        if not item_set <= self._held_ids:
+            raise ValueError("cannot release queue items that are not held")
+        self._held_ids.difference_update(item_set)
 
     def airtime_breakdown(self) -> dict[str, float]:
         self._prune_history(self.clock.monotonic())
@@ -238,26 +276,42 @@ class AirtimeGovernor:
 
     def _eligible_class(self, *, only_critical: bool, high_util: bool) -> TrafficClass | None:
         alerts = self.queues[TrafficClass.ALERT]
-        if alerts:
-            if not only_critical or any(item.severity == Severity.CRITICAL for item in alerts):
+        available_alerts = [item for item in alerts if item.item_id not in self._held_ids]
+        if available_alerts:
+            if not only_critical or any(
+                item.severity == Severity.CRITICAL for item in available_alerts
+            ):
                 return TrafficClass.ALERT
         if only_critical or high_util:
             return None
         for _ in range(len(self._rr)):
             cls = self._rr[0]
             self._rr.rotate(-1)
-            if self.queues[cls] and not self._quiet(cls):
+            if any(
+                item.item_id not in self._held_ids for item in self.queues[cls]
+            ) and not self._quiet(cls):
                 return cls
         return None
 
-    @staticmethod
-    def _pop_alert(queue: deque[OutboundItem]) -> OutboundItem:
+    def _pop_alert(self, queue: deque[OutboundItem]) -> OutboundItem:
         for severity in ALERT_SEVERITY_ORDER:
-            item = next((queued for queued in queue if queued.severity == severity), None)
+            item = next(
+                (
+                    queued
+                    for queued in queue
+                    if queued.severity == severity and queued.item_id not in self._held_ids
+                ),
+                None,
+            )
             if item is not None:
                 queue.remove(item)
                 return item
         raise AssertionError("non-empty alert queue has no severity")
+
+    def _pop_unheld(self, queue: deque[OutboundItem]) -> OutboundItem:
+        item = next(queued for queued in queue if queued.item_id not in self._held_ids)
+        queue.remove(item)
+        return item
 
     async def tick(self) -> OutboundItem | None:
         now = self.clock.monotonic()
@@ -283,7 +337,7 @@ class AirtimeGovernor:
         if cls == TrafficClass.ALERT:
             item = self._pop_alert(queue)
         else:
-            item = queue.popleft()
+            item = self._pop_unheld(queue)
         if item.expires_at <= now:
             self.metrics.dropped[(cls, "expired")] += 1
             OUTBOUND_DROPPED.labels(cls.value, "expired").inc()

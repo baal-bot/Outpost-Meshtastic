@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -15,11 +16,25 @@ class StoreError(RuntimeError):
     pass
 
 
+class Transaction:
+    """Operations executed on the serialized writer inside one SQLite transaction."""
+
+    def __init__(self, database: Database) -> None:
+        self._database = database
+
+    async def write(self, sql: str, params: Sequence[Any] = ()) -> int:
+        return await self._database._writer_write(sql, params)
+
+    async def read(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        return await self._database._writer_read(sql, params)
+
+
 class Database:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self._writer: sqlite3.Connection | None = None
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="outpost-db-writer")
+        self._transaction_lock = asyncio.Lock()
 
     @staticmethod
     def _configure(connection: sqlite3.Connection) -> None:
@@ -84,17 +99,68 @@ class Database:
             await asyncio.get_running_loop().run_in_executor(self._executor, connection.close)
         self._executor.shutdown(wait=True)
 
-    async def write(self, sql: str, params: Sequence[Any] = ()) -> int:
+    async def _writer_call(self, operation: Callable[[], T]) -> T:
+        return await asyncio.get_running_loop().run_in_executor(self._executor, operation)
+
+    async def _writer_write(self, sql: str, params: Sequence[Any] = ()) -> int:
         def operation() -> int:
             if self._writer is None:
                 raise StoreError("database is not open")
             cursor = self._writer.execute(sql, params)
-            self._writer.commit()
             if cursor.lastrowid is None:
                 raise StoreError("write did not return a row id")
             return cursor.lastrowid
 
-        return await asyncio.get_running_loop().run_in_executor(self._executor, operation)
+        return await self._writer_call(operation)
+
+    async def _writer_read(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        def operation() -> list[sqlite3.Row]:
+            if self._writer is None:
+                raise StoreError("database is not open")
+            return list(self._writer.execute(sql, params))
+
+        return await self._writer_call(operation)
+
+    async def write(self, sql: str, params: Sequence[Any] = ()) -> int:
+        async with self._transaction_lock:
+            try:
+                row_id = await self._writer_write(sql, params)
+                await self._writer_call(self._commit)
+                return row_id
+            except BaseException:
+                await asyncio.shield(self._writer_call(self._rollback))
+                raise
+
+    def _commit(self) -> None:
+        if self._writer is None:
+            raise StoreError("database is not open")
+        self._writer.commit()
+
+    def _rollback(self) -> None:
+        if self._writer is not None:
+            self._writer.rollback()
+
+    def _begin(self) -> None:
+        if self._writer is None:
+            raise StoreError("database is not open")
+        self._writer.execute("BEGIN IMMEDIATE")
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[Transaction]:
+        """Hold the sole writer and commit all enclosed operations as one unit."""
+        async with self._transaction_lock:
+            await self._writer_call(self._begin)
+            try:
+                yield Transaction(self)
+            except BaseException:
+                await asyncio.shield(self._writer_call(self._rollback))
+                raise
+            else:
+                try:
+                    await asyncio.shield(self._writer_call(self._commit))
+                except BaseException:
+                    await asyncio.shield(self._writer_call(self._rollback))
+                    raise
 
     async def read(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
         def operation() -> list[sqlite3.Row]:
@@ -124,7 +190,8 @@ class Database:
             finally:
                 target.close()
 
-        await asyncio.get_running_loop().run_in_executor(self._executor, operation)
+        async with self._transaction_lock:
+            await self._writer_call(operation)
 
     async def validate_backup(self, source: str | Path) -> dict[str, int | str]:
         source_path = Path(source)
@@ -156,7 +223,8 @@ class Database:
             finally:
                 candidate.close()
 
-        return await asyncio.get_running_loop().run_in_executor(self._executor, operation)
+        async with self._transaction_lock:
+            return await self._writer_call(operation)
 
     async def restore_from(self, source: str | Path) -> None:
         source_path = Path(source)
@@ -175,4 +243,5 @@ class Database:
             finally:
                 candidate.close()
 
-        await asyncio.get_running_loop().run_in_executor(self._executor, operation)
+        async with self._transaction_lock:
+            await self._writer_call(operation)

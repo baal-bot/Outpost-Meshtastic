@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from outpost.clock import Clock
 from outpost.router.models import TrustLevel
-from outpost.store.database import Database
+from outpost.store.database import Database, Transaction
 from outpost.store.members import Member
 
 
@@ -102,44 +102,49 @@ class BBSService:
         return [ThreadSummary(**dict(row)) for row in rows]
 
     async def create_thread(self, slug: str, body: str, member: Member) -> ThreadSummary:
-        board_rows = await self.database.read(
-            "SELECT id,min_post_trust FROM board WHERE slug=? AND archived=0",
-            (slug.lower(),),
-        )
-        if not board_rows:
-            raise ValueError(f'No board "{slug}".')
-        board = board_rows[0]
-        if not _trust_at_least(member.trust, board["min_post_trust"]):
-            raise PermissionError("Claim a NAME before posting.")
         if not body or len(body.encode()) > 200:
             raise ValueError("Post must be 1-200 bytes.")
         subject = derive_subject(body)
         now = int(self.clock.now().timestamp())
-        thread_id = await self.database.write(
-            """
-            INSERT INTO thread(
-              uid,board_id,subject,author_id,origin_node,created_at,last_post_at,post_count
+        async with self.database.transaction() as transaction:
+            board_rows = await transaction.read(
+                "SELECT id,min_post_trust FROM board WHERE slug=? AND archived=0",
+                (slug.lower(),),
             )
-            VALUES('pending',?,?,?,?,?,?,1)
-            """,
-            (board["id"], subject, member.id, self.origin_node, now, now),
-        )
-        thread_uid = f"{self.origin_node}:{thread_id}"
-        await self.database.write("UPDATE thread SET uid=? WHERE id=?", (thread_uid, thread_id))
-        post_id = await self.database.write(
-            """
-            INSERT INTO post(uid,thread_id,seq,author_id,author_label,origin_node,body,created_at)
-            VALUES('pending',?,1,?,?,?,?,?)
-            """,
-            (thread_id, member.id, member.handle or "anon", self.origin_node, body, now),
-        )
-        await self.database.write(
-            "UPDATE post SET uid=? WHERE id=?", (f"{self.origin_node}:{post_id}", post_id)
-        )
+            if not board_rows:
+                raise ValueError(f'No board "{slug}".')
+            board = board_rows[0]
+            if not _trust_at_least(member.trust, board["min_post_trust"]):
+                raise PermissionError("Claim a NAME before posting.")
+            thread_id = await transaction.write(
+                """
+                INSERT INTO thread(
+                  uid,board_id,subject,author_id,origin_node,created_at,last_post_at,post_count
+                )
+                VALUES('pending',?,?,?,?,?,?,1)
+                """,
+                (board["id"], subject, member.id, self.origin_node, now, now),
+            )
+            thread_uid = f"{self.origin_node}:{thread_id}"
+            await transaction.write("UPDATE thread SET uid=? WHERE id=?", (thread_uid, thread_id))
+            post_id = await transaction.write(
+                """
+                INSERT INTO post(
+                  uid,thread_id,seq,author_id,author_label,origin_node,body,created_at
+                ) VALUES('pending',?,1,?,?,?,?,?)
+                """,
+                (thread_id, member.id, member.handle or "anon", self.origin_node, body, now),
+            )
+            await transaction.write(
+                "UPDATE post SET uid=? WHERE id=?", (f"{self.origin_node}:{post_id}", post_id)
+            )
         return ThreadSummary(thread_id, slug.lower(), subject, member.handle or "anon", 1, now, now)
 
-    async def thread(self, thread_id: int, member: Member) -> PostView | None:
-        rows = await self.database.read(
+    async def _thread(
+        self, thread_id: int, member: Member, transaction: Transaction | None = None
+    ) -> PostView | None:
+        store = transaction or self.database
+        rows = await store.read(
             """
             SELECT p.id,p.thread_id,b.slug AS board_slug,p.seq,p.author_label,t.subject,
                    p.body,p.created_at,t.post_count,b.min_read_trust
@@ -155,32 +160,37 @@ class BBSService:
         row.pop("min_read_trust")
         return PostView(**row)
 
+    async def thread(self, thread_id: int, member: Member) -> PostView | None:
+        return await self._thread(thread_id, member)
+
     async def reply(self, thread_id: int, body: str, member: Member) -> PostView:
-        opening = await self.thread(thread_id, member)
-        if opening is None:
-            raise ValueError("No thread.")
         if not _trust_at_least(member.trust, "member"):
             raise PermissionError("Claim a NAME before replying.")
         if not body or len(body.encode()) > 200:
             raise ValueError("Reply must be 1-200 bytes.")
         now = int(self.clock.now().timestamp())
-        sequence = await self.database.read(
-            "SELECT COALESCE(MAX(seq),0)+1 value FROM post WHERE thread_id=?", (thread_id,)
-        )
-        seq = int(sequence[0]["value"])
-        post_id = await self.database.write(
-            """
-            INSERT INTO post(uid,thread_id,seq,author_id,author_label,origin_node,body,created_at)
-            VALUES('pending',?,?,?,?,?,?,?)
-            """,
-            (thread_id, seq, member.id, member.handle or "anon", self.origin_node, body, now),
-        )
-        await self.database.write(
-            "UPDATE post SET uid=? WHERE id=?", (f"{self.origin_node}:{post_id}", post_id)
-        )
-        await self.database.write(
-            "UPDATE thread SET post_count=?,last_post_at=? WHERE id=?", (seq, now, thread_id)
-        )
+        async with self.database.transaction() as transaction:
+            opening = await self._thread(thread_id, member, transaction)
+            if opening is None:
+                raise ValueError("No thread.")
+            sequence = await transaction.read(
+                "SELECT COALESCE(MAX(seq),0)+1 value FROM post WHERE thread_id=?", (thread_id,)
+            )
+            seq = int(sequence[0]["value"])
+            post_id = await transaction.write(
+                """
+                INSERT INTO post(
+                  uid,thread_id,seq,author_id,author_label,origin_node,body,created_at
+                ) VALUES('pending',?,?,?,?,?,?,?)
+                """,
+                (thread_id, seq, member.id, member.handle or "anon", self.origin_node, body, now),
+            )
+            await transaction.write(
+                "UPDATE post SET uid=? WHERE id=?", (f"{self.origin_node}:{post_id}", post_id)
+            )
+            await transaction.write(
+                "UPDATE thread SET post_count=?,last_post_at=? WHERE id=?", (seq, now, thread_id)
+            )
         return PostView(
             post_id,
             thread_id,

@@ -100,33 +100,41 @@ class FederationMailService:
                 raise ValueError("local federation mail recipient was not found")
             recipient_id = members[0]["id"]
             recipient_label = members[0]["handle"]
-        mail_id = await self.database.write(
-            "INSERT INTO mail(uid,from_label,to_id,to_label,subject,body,created_at,delivered_at,"
-            "state,expires_at,reply_peer_mesh_id) VALUES(?,?,?,?,?,?,?,?,'delivered',?,?)",
-            (
-                f"fed:{relay_id}",
-                str(message["from"]),
-                recipient_id,
-                recipient_label,
-                str(message.get("subject") or "")[:120],
-                str(message["body"]),
-                now,
-                now,
-                now + 180 * 86400,
-                peer_id,
-            ),
-        )
-        await self.database.write(
-            "INSERT INTO fed_mail_delivery(relay_id,peer_id,direction,mail_id,recipient_handle,"
-            "state,created_at,updated_at,expires_at) VALUES(?,?,'in',?,?,'delivered',?,?,?)",
-            (
-                relay_id,
-                peer.id,
-                mail_id,
-                recipient,
-                now,
-                now,
-                int(envelope["expires_at"]),
-            ),
-        )
+        async with self.database.transaction() as transaction:
+            concurrent = await transaction.read(
+                "SELECT state FROM fed_mail_delivery WHERE relay_id=?", (relay_id,)
+            )
+            if concurrent:
+                return relay_id, str(concurrent[0]["state"])
+            mail_id = await transaction.write(
+                "INSERT INTO mail(uid,from_label,to_id,to_label,subject,body,created_at,"
+                "delivered_at,state,expires_at,reply_peer_mesh_id) "
+                "VALUES(?,?,?,?,?,?,?,?,'delivered',?,?)",
+                (
+                    f"fed:{relay_id}",
+                    str(message["from"]),
+                    recipient_id,
+                    recipient_label,
+                    str(message.get("subject") or "")[:120],
+                    str(message["body"]),
+                    now,
+                    now,
+                    now + 180 * 86400,
+                    peer_id,
+                ),
+            )
+            await transaction.write(
+                "INSERT INTO fed_mail_delivery(relay_id,peer_id,direction,mail_id,"
+                "recipient_handle,state,created_at,updated_at,expires_at) "
+                "VALUES(?,?,'in',?,?,'delivered',?,?,?)",
+                (
+                    relay_id,
+                    peer.id,
+                    mail_id,
+                    recipient,
+                    now,
+                    now,
+                    int(envelope["expires_at"]),
+                ),
+            )
         return relay_id, "delivered"

@@ -192,6 +192,22 @@ def test_multipart_enqueue_is_atomic() -> None:
     assert governor.queue_depths()["reply"] == 0
 
 
+@pytest.mark.asyncio
+async def test_held_batch_cannot_transmit_until_committed() -> None:
+    clock, link = VirtualClock(), SimulatedRadioLink()
+    await link.connect()
+    governor = AirtimeGovernor(link, AirtimeConfig(min_gap_s=0), clock)
+    item = OutboundItem("held", "!peer", 0, TrafficClass.REPLY)
+
+    item_ids = governor.enqueue_many([item], hold=True)
+
+    assert item_ids is not None
+    assert await governor.tick() is None
+    assert link.sent == []
+    governor.release_many(item_ids)
+    assert await governor.tick() is item
+
+
 @given(
     st.lists(
         st.tuples(

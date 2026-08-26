@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from outpost.clock import Clock
-from outpost.store import Database
+from outpost.store import Database, Transaction
 
 TRUST_LEVELS = {"guest", "member", "trusted", "responder", "operator"}
 SLUG = re.compile(r"^[a-z0-9-]+$")
@@ -49,8 +49,11 @@ class BBSAdmin:
         if rows:
             await self.federation_notify(str(rows[0]["slug"]), post_id)
 
-    async def _audit(self, action: str, target: str, detail: object) -> None:
-        await self.database.write(
+    async def _audit(
+        self, action: str, target: str, detail: object, transaction: Transaction | None = None
+    ) -> None:
+        store = transaction or self.database
+        await store.write(
             """
             INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
             VALUES('web','operator',?,?,?,?)
@@ -110,65 +113,76 @@ class BBSAdmin:
                 raise ValueError(f"Invalid {key}.")
 
     async def create_thread(self, board_id: int, subject: str, body: str) -> int:
-        if not await self.database.read("SELECT 1 FROM board WHERE id=?", (board_id,)):
-            raise ValueError("Board not found.")
         if not subject.strip() or len(subject) > 64 or not body.strip() or len(body) > 1_000:
             raise ValueError("Subject is 1-64 characters; body is 1-1000 characters.")
         now = int(self.clock.now().timestamp())
-        thread_id = await self.database.write(
-            """
-            INSERT INTO thread(
-              uid,board_id,subject,origin_node,created_at,last_post_at,post_count
-            ) VALUES('pending',?,?,?,?,?,1)
-            """,
-            (board_id, subject.strip(), self.origin, now, now),
-        )
-        await self.database.write(
-            "UPDATE thread SET uid=? WHERE id=?", (f"{self.origin}:{thread_id}", thread_id)
-        )
-        post_id = await self.database.write(
-            """
-            INSERT INTO post(uid,thread_id,seq,author_label,origin_node,body,created_at)
-            VALUES('pending',?,1,'operator',?,?,?)
-            """,
-            (thread_id, self.origin, body.strip(), now),
-        )
-        await self.database.write(
-            "UPDATE post SET uid=? WHERE id=?", (f"{self.origin}:{post_id}", post_id)
-        )
-        await self._audit("thread.create", f"thread:{thread_id}", {"board_id": board_id})
+        async with self.database.transaction() as transaction:
+            if not await transaction.read("SELECT 1 FROM board WHERE id=?", (board_id,)):
+                raise ValueError("Board not found.")
+            thread_id = await transaction.write(
+                """
+                INSERT INTO thread(
+                  uid,board_id,subject,origin_node,created_at,last_post_at,post_count
+                ) VALUES('pending',?,?,?,?,?,1)
+                """,
+                (board_id, subject.strip(), self.origin, now, now),
+            )
+            await transaction.write(
+                "UPDATE thread SET uid=? WHERE id=?", (f"{self.origin}:{thread_id}", thread_id)
+            )
+            post_id = await transaction.write(
+                """
+                INSERT INTO post(uid,thread_id,seq,author_label,origin_node,body,created_at)
+                VALUES('pending',?,1,'operator',?,?,?)
+                """,
+                (thread_id, self.origin, body.strip(), now),
+            )
+            await transaction.write(
+                "UPDATE post SET uid=? WHERE id=?", (f"{self.origin}:{post_id}", post_id)
+            )
+            await self._audit(
+                "thread.create",
+                f"thread:{thread_id}",
+                {"board_id": board_id},
+                transaction,
+            )
         await self._notify_board(board_id, post_id)
         return thread_id
 
     async def reply(self, thread_id: int, body: str) -> int:
         if not body.strip() or len(body) > 1_000:
             raise ValueError("Reply is 1-1000 characters.")
-        rows = await self.database.read(
-            "SELECT board_id,locked,hidden FROM thread WHERE id=?", (thread_id,)
-        )
-        if not rows or rows[0]["hidden"]:
-            raise ValueError("Thread not found.")
-        if rows[0]["locked"]:
-            raise ValueError("Thread is locked.")
-        sequence = await self.database.read(
-            "SELECT COALESCE(MAX(seq),0)+1 value FROM post WHERE thread_id=?", (thread_id,)
-        )
-        now, seq = int(self.clock.now().timestamp()), int(sequence[0]["value"])
-        post_id = await self.database.write(
-            """
-            INSERT INTO post(uid,thread_id,seq,author_label,origin_node,body,created_at)
-            VALUES('pending',?,?,'operator',?,?,?)
-            """,
-            (thread_id, seq, self.origin, body.strip(), now),
-        )
-        await self.database.write(
-            "UPDATE post SET uid=? WHERE id=?", (f"{self.origin}:{post_id}", post_id)
-        )
-        await self.database.write(
-            "UPDATE thread SET post_count=?,last_post_at=? WHERE id=?", (seq, now, thread_id)
-        )
-        await self._audit("post.create", f"post:{post_id}", {"thread_id": thread_id})
-        await self._notify_board(int(rows[0]["board_id"]), post_id)
+        now = int(self.clock.now().timestamp())
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT board_id,locked,hidden FROM thread WHERE id=?", (thread_id,)
+            )
+            if not rows or rows[0]["hidden"]:
+                raise ValueError("Thread not found.")
+            if rows[0]["locked"]:
+                raise ValueError("Thread is locked.")
+            sequence = await transaction.read(
+                "SELECT COALESCE(MAX(seq),0)+1 value FROM post WHERE thread_id=?", (thread_id,)
+            )
+            seq = int(sequence[0]["value"])
+            post_id = await transaction.write(
+                """
+                INSERT INTO post(uid,thread_id,seq,author_label,origin_node,body,created_at)
+                VALUES('pending',?,?,'operator',?,?,?)
+                """,
+                (thread_id, seq, self.origin, body.strip(), now),
+            )
+            await transaction.write(
+                "UPDATE post SET uid=? WHERE id=?", (f"{self.origin}:{post_id}", post_id)
+            )
+            await transaction.write(
+                "UPDATE thread SET post_count=?,last_post_at=? WHERE id=?", (seq, now, thread_id)
+            )
+            await self._audit(
+                "post.create", f"post:{post_id}", {"thread_id": thread_id}, transaction
+            )
+            board_id = int(rows[0]["board_id"])
+        await self._notify_board(board_id, post_id)
         return post_id
 
     async def update_thread(self, thread_id: int, values: dict[str, Any]) -> bool:

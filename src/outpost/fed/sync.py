@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from outpost.fed.peers import Peer
-from outpost.store import Database
+from outpost.store import Database, Transaction
 
 
 @dataclass(frozen=True)
@@ -59,11 +59,12 @@ class FederationSyncService:
     def local_thread_uid(self, uid: str) -> str:
         return self._local_uid(uid) or uid
 
-    async def canonical_remote_uid(self, uid: str) -> str:
+    async def canonical_remote_uid(self, uid: str, transaction: Transaction | None = None) -> str:
         if not uid.startswith("!") or ":" not in uid:
             return uid
         mesh_id, suffix = uid.split(":", 1)
-        rows = await self.database.read(
+        store = transaction or self.database
+        rows = await store.read(
             "SELECT s.old_mesh_id FROM fed_peer_successor s JOIN fed_peer p "
             "ON p.id=s.successor_peer_id WHERE p.mesh_id=?",
             (mesh_id,),
@@ -258,162 +259,179 @@ class FederationSyncService:
         encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         if len(encoded.encode()) > 12_000:
             raise ValueError("inbound federation item is too large")
-        recent = await self.database.read(
-            "SELECT COUNT(*) count FROM fed_inbox_item WHERE peer_id=? AND received_at>?",
-            (peer.id, now - 3600),
-        )
-        if int(recent[0]["count"]) >= peer.quota_items_per_hour:
-            raise ValueError("peer federation item quota exceeded")
-        existing = await self.database.read(
-            "SELECT id,digest FROM fed_inbox_item WHERE peer_id=? AND stream=? AND uid=?",
-            (peer.id, stream, uid),
-        )
-        if existing:
-            digest = str(item.get("digest", ""))[:64]
-            if str(existing[0]["digest"]) == digest:
-                return False
-            await self.database.write(
-                "UPDATE fed_inbox_item SET payload_json=?,digest=?,state='pending',"
-                "received_at=?,reviewed_at=NULL,reviewed_by=NULL,rejection_reason=NULL WHERE id=?",
-                (encoded, digest, now, existing[0]["id"]),
+        async with self.database.transaction() as transaction:
+            recent = await transaction.read(
+                "SELECT COUNT(*) count FROM fed_inbox_item WHERE peer_id=? AND received_at>?",
+                (peer.id, now - 3600),
             )
-            return True
-        await self.database.write(
-            "INSERT INTO fed_inbox_item(peer_id,stream,uid,payload_json,digest,received_at) "
-            "VALUES(?,?,?,?,?,?)",
-            (peer.id, stream, uid, encoded, str(item.get("digest", ""))[:64], now),
-        )
-        return True
+            if int(recent[0]["count"]) >= peer.quota_items_per_hour:
+                raise ValueError("peer federation item quota exceeded")
+            existing = await transaction.read(
+                "SELECT id,digest FROM fed_inbox_item WHERE peer_id=? AND stream=? AND uid=?",
+                (peer.id, stream, uid),
+            )
+            digest = str(item.get("digest", ""))[:64]
+            if existing and str(existing[0]["digest"]) == digest:
+                changed = False
+            elif existing:
+                await transaction.write(
+                    "UPDATE fed_inbox_item SET payload_json=?,digest=?,state='pending',"
+                    "received_at=?,reviewed_at=NULL,reviewed_by=NULL,rejection_reason=NULL "
+                    "WHERE id=?",
+                    (encoded, digest, now, existing[0]["id"]),
+                )
+                changed = True
+            else:
+                await transaction.write(
+                    "INSERT INTO fed_inbox_item(peer_id,stream,uid,payload_json,digest,"
+                    "received_at) VALUES(?,?,?,?,?,?)",
+                    (peer.id, stream, uid, encoded, digest, now),
+                )
+                changed = True
+            await transaction.write(
+                "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
+                "VALUES(?,?,'recv',?,?) ON CONFLICT(peer_id,stream,direction) "
+                "DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at",
+                (peer.id, stream, uid, now),
+            )
+        return changed
 
     async def import_inbox(self, item_id: int, operator: str, now: int) -> str:
-        rows = await self.database.read(
-            "SELECT i.*,p.mesh_id,p.node_name,p.boards,p.sync_incidents,p.relay_alerts "
-            "FROM fed_inbox_item i "
-            "JOIN fed_peer p ON p.id=i.peer_id WHERE i.id=? AND i.state='pending'",
-            (item_id,),
-        )
-        if not rows:
-            raise ValueError("pending federation item not found")
-        row = rows[0]
-        stream, uid, payload = row["stream"], row["uid"], json.loads(row["payload_json"])
-        if stream.startswith("board:"):
-            slug = stream[6:]
-            if slug not in json.loads(row["boards"]):
-                raise ValueError("board is no longer allowed for this peer")
-            boards = await self.database.read(
-                "SELECT id FROM board WHERE slug=? AND federated=1 AND archived=0", (slug,)
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT i.*,p.mesh_id,p.node_name,p.boards,p.sync_incidents,p.relay_alerts "
+                "FROM fed_inbox_item i JOIN fed_peer p ON p.id=i.peer_id "
+                "WHERE i.id=? AND i.state='pending'",
+                (item_id,),
             )
-            if not boards:
-                raise ValueError("destination board is not federated")
-            thread_uid = await self.canonical_remote_uid(str(payload["thread_uid"]))
-            thread_uid = self.local_thread_uid(thread_uid)
-            threads = await self.database.read(
-                "SELECT id FROM thread WHERE uid=? AND board_id=?", (thread_uid, boards[0]["id"])
-            )
-            if threads:
-                thread_id = int(threads[0]["id"])
-            else:
-                thread_id = await self.database.write(
-                    "INSERT INTO thread(uid,board_id,subject,origin_node,created_at,last_post_at) "
-                    "VALUES(?,?,?,?,?,?)",
+            if not rows:
+                raise ValueError("pending federation item not found")
+            row = rows[0]
+            stream, uid, payload = row["stream"], row["uid"], json.loads(row["payload_json"])
+            if stream.startswith("board:"):
+                slug = stream[6:]
+                if slug not in json.loads(row["boards"]):
+                    raise ValueError("board is no longer allowed for this peer")
+                boards = await transaction.read(
+                    "SELECT id FROM board WHERE slug=? AND federated=1 AND archived=0", (slug,)
+                )
+                if not boards:
+                    raise ValueError("destination board is not federated")
+                thread_uid = await self.canonical_remote_uid(
+                    str(payload["thread_uid"]), transaction
+                )
+                thread_uid = self.local_thread_uid(thread_uid)
+                threads = await transaction.read(
+                    "SELECT id FROM thread WHERE uid=? AND board_id=?",
+                    (thread_uid, boards[0]["id"]),
+                )
+                if threads:
+                    thread_id = int(threads[0]["id"])
+                else:
+                    thread_id = await transaction.write(
+                        "INSERT INTO thread(uid,board_id,subject,origin_node,created_at,"
+                        "last_post_at) VALUES(?,?,?,?,?,?)",
+                        (
+                            thread_uid,
+                            boards[0]["id"],
+                            str(payload["subject"])[:160],
+                            row["mesh_id"],
+                            int(payload["created_at"]),
+                            int(payload["created_at"]),
+                        ),
+                    )
+                sequence = await transaction.read(
+                    "SELECT COALESCE(MAX(seq),0)+1 value FROM post WHERE thread_id=?",
+                    (thread_id,),
+                )
+                await transaction.write(
+                    "INSERT OR IGNORE INTO post(uid,thread_id,seq,author_label,origin_node,body,"
+                    "created_at,edited_at) VALUES(?,?,?,?,?,?,?,?)",
                     (
-                        thread_uid,
-                        boards[0]["id"],
-                        str(payload["subject"])[:160],
+                        uid,
+                        thread_id,
+                        sequence[0]["value"],
+                        str(payload["author_label"])[:80],
                         row["mesh_id"],
+                        str(payload["body"])[:4000],
                         int(payload["created_at"]),
-                        int(payload["created_at"]),
+                        payload.get("edited_at"),
                     ),
                 )
-            sequence = await self.database.read(
-                "SELECT COALESCE(MAX(seq),0)+1 value FROM post WHERE thread_id=?", (thread_id,)
+                await transaction.write(
+                    "UPDATE thread SET post_count=(SELECT COUNT(*) FROM post WHERE thread_id=?),"
+                    "last_post_at=MAX(last_post_at,?) WHERE id=?",
+                    (thread_id, int(payload["created_at"]), thread_id),
+                )
+            elif stream == "incidents":
+                if not row["sync_incidents"]:
+                    raise ValueError("incident sync is no longer allowed")
+                refs = await transaction.read(
+                    "SELECT COALESCE(MAX(local_ref),0)+1 value FROM incident"
+                )
+                await transaction.write(
+                    """INSERT INTO incident(uid,local_ref,type,severity,status,title,body,
+                       lat,lon,location_text,radius_m,reporter_label,origin_node,created_at,
+                       updated_at,expires_at,resolved_at,resolution_note,source,unverified,
+                       flagged_for_review)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'member',1,1)
+                       ON CONFLICT(uid) DO UPDATE SET type=excluded.type,
+                       severity=excluded.severity,status=excluded.status,title=excluded.title,
+                       body=excluded.body,lat=excluded.lat,lon=excluded.lon,
+                       location_text=excluded.location_text,radius_m=excluded.radius_m,
+                       reporter_label=excluded.reporter_label,origin_node=excluded.origin_node,
+                       updated_at=excluded.updated_at,expires_at=excluded.expires_at,
+                       resolved_at=excluded.resolved_at,resolution_note=excluded.resolution_note,
+                       unverified=1,flagged_for_review=1""",
+                    (
+                        uid,
+                        refs[0]["value"],
+                        payload["type"],
+                        payload["severity"],
+                        payload["status"],
+                        str(payload["title"])[:64],
+                        payload.get("body"),
+                        payload.get("lat"),
+                        payload.get("lon"),
+                        payload.get("location_text"),
+                        payload.get("radius_m"),
+                        str(payload.get("reporter_label") or "Federated peer")[:80],
+                        str(row["mesh_id"]),
+                        int(payload["created_at"]),
+                        int(payload["updated_at"]),
+                        payload.get("expires_at"),
+                        payload.get("resolved_at"),
+                        payload.get("resolution_note"),
+                    ),
+                )
+            elif stream == "alerts":
+                if not row["relay_alerts"]:
+                    raise ValueError("alert relay is no longer allowed")
+                source = payload.get("source")
+                if source not in {"operator", "incident", "cap", "same"}:
+                    source = "operator"
+                await transaction.write(
+                    """INSERT OR IGNORE INTO alert(uid,severity,headline,body,source,source_ref,
+                       channels,raised_by,raised_at,effective_at,expires_at,cancelled_at)
+                       VALUES(?,?,?,?,?,?,'[]',?,?,?,?,?)""",
+                    (
+                        uid,
+                        payload["severity"],
+                        str(payload["headline"])[:140],
+                        payload.get("body"),
+                        source,
+                        str(payload.get("source_ref") or f"federation:{row['peer_id']}")[:160],
+                        f"federation:{row['peer_id']}",
+                        int(payload["raised_at"]),
+                        payload.get("effective_at"),
+                        payload.get("expires_at"),
+                        payload.get("cancelled_at"),
+                    ),
+                )
+            else:
+                raise ValueError("unsupported federation inbox stream")
+            await transaction.write(
+                "UPDATE fed_inbox_item SET state='imported',reviewed_at=?,reviewed_by=? WHERE id=?",
+                (now, operator, item_id),
             )
-            await self.database.write(
-                "INSERT OR IGNORE INTO post(uid,thread_id,seq,author_label,origin_node,body,"
-                "created_at,edited_at) VALUES(?,?,?,?,?,?,?,?)",
-                (
-                    uid,
-                    thread_id,
-                    sequence[0]["value"],
-                    str(payload["author_label"])[:80],
-                    row["mesh_id"],
-                    str(payload["body"])[:4000],
-                    int(payload["created_at"]),
-                    payload.get("edited_at"),
-                ),
-            )
-            await self.database.write(
-                "UPDATE thread SET post_count=(SELECT COUNT(*) FROM post WHERE thread_id=?),"
-                "last_post_at=MAX(last_post_at,?) WHERE id=?",
-                (thread_id, int(payload["created_at"]), thread_id),
-            )
-        elif stream == "incidents":
-            if not row["sync_incidents"]:
-                raise ValueError("incident sync is no longer allowed")
-            refs = await self.database.read(
-                "SELECT COALESCE(MAX(local_ref),0)+1 value FROM incident"
-            )
-            await self.database.write(
-                """INSERT INTO incident(uid,local_ref,type,severity,status,title,body,
-                   lat,lon,location_text,radius_m,reporter_label,origin_node,created_at,updated_at,
-                   expires_at,resolved_at,resolution_note,source,unverified,flagged_for_review)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'member',1,1)
-                   ON CONFLICT(uid) DO UPDATE SET type=excluded.type,severity=excluded.severity,
-                   status=excluded.status,title=excluded.title,body=excluded.body,lat=excluded.lat,
-                   lon=excluded.lon,location_text=excluded.location_text,radius_m=excluded.radius_m,
-                   reporter_label=excluded.reporter_label,origin_node=excluded.origin_node,
-                   updated_at=excluded.updated_at,expires_at=excluded.expires_at,
-                   resolved_at=excluded.resolved_at,resolution_note=excluded.resolution_note,
-                   unverified=1,flagged_for_review=1""",
-                (
-                    uid,
-                    refs[0]["value"],
-                    payload["type"],
-                    payload["severity"],
-                    payload["status"],
-                    str(payload["title"])[:64],
-                    payload.get("body"),
-                    payload.get("lat"),
-                    payload.get("lon"),
-                    payload.get("location_text"),
-                    payload.get("radius_m"),
-                    str(payload.get("reporter_label") or "Federated peer")[:80],
-                    str(row["mesh_id"]),
-                    int(payload["created_at"]),
-                    int(payload["updated_at"]),
-                    payload.get("expires_at"),
-                    payload.get("resolved_at"),
-                    payload.get("resolution_note"),
-                ),
-            )
-        elif stream == "alerts":
-            if not row["relay_alerts"]:
-                raise ValueError("alert relay is no longer allowed")
-            source = payload.get("source")
-            if source not in {"operator", "incident", "cap", "same"}:
-                source = "operator"
-            await self.database.write(
-                """INSERT OR IGNORE INTO alert(uid,severity,headline,body,source,source_ref,
-                   channels,raised_by,raised_at,effective_at,expires_at,cancelled_at)
-                   VALUES(?,?,?,?,?,?,'[]',?,?,?,?,?)""",
-                (
-                    uid,
-                    payload["severity"],
-                    str(payload["headline"])[:140],
-                    payload.get("body"),
-                    source,
-                    str(payload.get("source_ref") or f"federation:{row['peer_id']}")[:160],
-                    f"federation:{row['peer_id']}",
-                    int(payload["raised_at"]),
-                    payload.get("effective_at"),
-                    payload.get("expires_at"),
-                    payload.get("cancelled_at"),
-                ),
-            )
-        else:
-            raise ValueError("unsupported federation inbox stream")
-        await self.database.write(
-            "UPDATE fed_inbox_item SET state='imported',reviewed_at=?,reviewed_by=? WHERE id=?",
-            (now, operator, item_id),
-        )
-        return stream
+        return str(stream)

@@ -222,17 +222,24 @@ class CheckinService:
                         queue_key=f"checkin:{event.id}:{row['member_id']}",
                     )
                     for row in recipients
-                ]
+                ],
+                hold=True,
             )
             if queue_ids is None:
                 raise ValueError("The complete batch could not be admitted by queue policy.")
             queued_at = int(self.clock.now().timestamp())
-            for recipient, queue_id in zip(recipients, queue_ids, strict=True):
-                await self.database.write(
-                    "INSERT INTO checkin_solicitation(event_id,member_id,queue_item_id,queued_at) "
-                    "VALUES(?,?,?,?)",
-                    (event.id, recipient["member_id"], queue_id, queued_at),
-                )
+            try:
+                async with self.database.transaction() as transaction:
+                    for recipient, queue_id in zip(recipients, queue_ids, strict=True):
+                        await transaction.write(
+                            "INSERT INTO checkin_solicitation(event_id,member_id,queue_item_id,"
+                            "queued_at) VALUES(?,?,?,?)",
+                            (event.id, recipient["member_id"], queue_id, queued_at),
+                        )
+            except BaseException:
+                self.governor.retract_many(queue_ids)
+                raise
+            self.governor.release_many(queue_ids)
             return {
                 "event_id": event.id,
                 "recipient_count": len(recipients),

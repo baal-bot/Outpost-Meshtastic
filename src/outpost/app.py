@@ -1083,13 +1083,6 @@ class OutpostApp:
                     received = await self.federation_sync.quarantine(
                         peer, item, int(self.clock.now().timestamp())
                     )
-                    await self.database.write(
-                        "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
-                        "VALUES(?,?,'recv',?,unixepoch()) "
-                        "ON CONFLICT(peer_id,stream,direction) "
-                        "DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at",
-                        (peer.id, str(item.get("stream", "")), str(item.get("uid", ""))),
-                    )
                 if received and str(item.get("stream", "")).startswith("board:"):
                     payload = item.get("payload")
                     if isinstance(payload, dict):

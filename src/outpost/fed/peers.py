@@ -380,22 +380,21 @@ class FederationPeerService:
         return bytes(rows[0]["shared_secret"])
 
     async def next_counter(self, mesh_id: str) -> int:
-        await self.database.write(
-            "UPDATE fed_peer SET tx_counter=tx_counter+1 WHERE mesh_id=? AND state='active'",
-            (mesh_id,),
-        )
-        peer = await self.by_mesh_id(mesh_id)
-        if peer.state != "active":
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "UPDATE fed_peer SET tx_counter=tx_counter+1 "
+                "WHERE mesh_id=? AND state='active' RETURNING tx_counter",
+                (mesh_id,),
+            )
+        if not rows:
             raise ValueError("federation peer is not active")
-        return peer.tx_counter
+        return int(rows[0]["tx_counter"])
 
     async def accept_counter(self, mesh_id: str, counter: int) -> bool:
-        peer = await self.by_mesh_id(mesh_id)
-        if peer.state != "active" or counter <= peer.rx_counter:
-            return False
-        await self.database.write(
-            "UPDATE fed_peer SET rx_counter=? WHERE id=? AND rx_counter<?",
-            (counter, peer.id, counter),
-        )
-        updated = await self.by_mesh_id(mesh_id)
-        return updated.rx_counter == counter
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "UPDATE fed_peer SET rx_counter=? WHERE mesh_id=? AND state='active' "
+                "AND rx_counter<? RETURNING rx_counter",
+                (counter, mesh_id, counter),
+            )
+        return bool(rows)

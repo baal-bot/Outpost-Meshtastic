@@ -254,7 +254,9 @@ have a queue depth limit; requests beyond the limit are rejected immediately wit
 
 **REQ-ARCH-016** — The store **MUST** use a single writer. Reads may be concurrent (WAL
 allows this); writes go through a serialised executor to avoid `SQLITE_BUSY` storms on slow
-storage.
+storage. Multi-record domain mutations **MUST** use `Database.transaction()` so their reads
+and writes run on that writer between `BEGIN IMMEDIATE` and one commit. Exceptions and task
+cancellation roll the complete unit back; uncommitted records are never visible to WAL readers.
 
 ---
 
