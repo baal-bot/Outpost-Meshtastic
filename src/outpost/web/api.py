@@ -204,6 +204,9 @@ class FederationServiceBody(BaseModel):
 class FederationSyncPolicyBody(BaseModel):
     boards: list[str] = Field(default_factory=list, max_length=20)
     sync_incidents: bool = False
+    incident_lat: float | None = Field(default=None, ge=-90, le=90)
+    incident_lon: float | None = Field(default=None, ge=-180, le=180)
+    incident_radius_km: float = Field(default=25, ge=1, le=500)
     relay_alerts: bool = False
     quota_items_per_hour: int = Field(default=20, ge=1, le=500)
     relay_mail: bool = False
@@ -1582,6 +1585,9 @@ def create_web_app(
                         peer.mesh_id,
                         boards=boards,
                         sync_incidents=peer.sync_incidents,
+                        incident_lat=peer.incident_lat,
+                        incident_lon=peer.incident_lon,
+                        incident_radius_km=peer.incident_radius_km,
                         relay_alerts=peer.relay_alerts,
                         quota_items_per_hour=peer.quota_items_per_hour,
                         relay_mail=peer.relay_mail,

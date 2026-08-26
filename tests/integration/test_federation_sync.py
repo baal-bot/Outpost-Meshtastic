@@ -3,6 +3,7 @@ import pytest
 from outpost.clock import VirtualClock
 from outpost.fed import FederationPeerService, FederationSyncService
 from outpost.store import Database
+from outpost.store.members import MemberRepo
 
 
 @pytest.mark.asyncio
@@ -64,6 +65,53 @@ async def test_manifest_obeys_peer_policy_and_missing_is_bounded(tmp_path) -> No
             {"stream": "board:private", "uid": "x", "payload": {}},
             102,
         )
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_incident_radius_filters_exports_and_member_positions_never_federate(
+    tmp_path,
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    peers = FederationPeerService(database, clock, "!local")
+    await peers.discover("!remote", "Remote", 1, {}, "radio")
+    await database.write("UPDATE fed_peer SET state='active' WHERE mesh_id='!remote'")
+    peer = await peers.update_sync_policy(
+        "!remote",
+        boards=[],
+        sync_incidents=True,
+        incident_lat=40.0,
+        incident_lon=-80.0,
+        incident_radius_km=25,
+        relay_alerts=False,
+        quota_items_per_hour=20,
+    )
+    for uid, lat, lon, updated in (
+        ("local:near", 40.1, -80.0, 3),
+        ("local:far", 41.0, -80.0, 2),
+        ("local:locationless", None, None, 1),
+    ):
+        await database.write(
+            "INSERT INTO incident(uid,local_ref,type,severity,title,reporter_label,origin_node,"
+            "lat,lon,created_at,updated_at) VALUES(?,?,'road','caution',?,'operator','local',"
+            "?,?,1,?)",
+            (uid, updated, uid, lat, lon, updated),
+        )
+    member = await MemberRepo(database, clock).resolve("!00000001")
+    await database.write(
+        "INSERT INTO member_position(member_id,lat,lon,received_at) VALUES(?,40.01,-80.01,1)",
+        (member.id,),
+    )
+    sync = FederationSyncService(database)
+
+    manifest = await sync.manifest(peer)
+
+    assert [item.uid for item in manifest] == ["local:near", "local:locationless"]
+    assert all(item.stream == "incidents" for item in manifest)
+    assert await sync.export_items(peer, [{"stream": "incidents", "uid": "local:far"}]) == []
+    assert not any("position" in item.stream for item in manifest)
     await database.close()
 
 

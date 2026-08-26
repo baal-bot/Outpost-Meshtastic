@@ -18,6 +18,7 @@
 .policy-form label { display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid var(--soft);border-radius:6px;color:var(--muted);font-size:.68rem; }
 .policy-form input:not([type="checkbox"]),.policy-form select { width:55%;padding:7px;border:1px solid var(--line);border-radius:5px;background:var(--raised);color:var(--ink); }
 .policy-form button,.relay-mail-form button { width:max-content;padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:var(--raised);color:var(--ink); }
+.policy-privacy { grid-column:1/-1;margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--muted);font-size:.65rem;line-height:1.5; }
 .policy-form p { align-self:center;color:var(--muted);font-size:.66rem; }
 .relay-mail-form { display:grid;grid-template-columns:1fr 1fr;gap:9px; }
 .relay-mail-form select,.relay-mail-form input,.relay-mail-form textarea { padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--raised);color:var(--ink); }

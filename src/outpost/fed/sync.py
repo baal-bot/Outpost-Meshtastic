@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,6 +33,22 @@ class FederationSyncService:
 
     def wire_uid(self, uid: str) -> str:
         return self._wire_uid(uid)
+
+    @staticmethod
+    def incident_allowed(peer: Peer, lat: object, lon: object) -> bool:
+        if lat is None or lon is None:
+            return True
+        if peer.incident_lat is None or peer.incident_lon is None:
+            return False
+        lat1, lat2 = math.radians(float(lat)), math.radians(peer.incident_lat)
+        delta_lat = lat2 - lat1
+        delta_lon = math.radians(peer.incident_lon - float(lon))
+        value = math.sin(delta_lat / 2) ** 2 + (
+            math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2
+        )
+        value = min(1.0, max(0.0, value))
+        distance_km = 6_371 * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
+        return distance_km <= peer.incident_radius_km
 
     def _local_uid(self, uid: str) -> str | None:
         if not self.local_mesh_id:
@@ -112,14 +129,14 @@ class FederationSyncService:
         if peer.sync_incidents:
             rows = await self.database.read(
                 "SELECT uid,updated_at,status,severity,title,body,lat,lon FROM incident "
-                "ORDER BY updated_at DESC LIMIT ?",
-                (limit,),
+                "ORDER BY updated_at DESC",
             )
             items.extend(
                 ManifestItem(
                     "incidents", self._wire_uid(row["uid"]), row["updated_at"], self._digest(*row)
                 )
                 for row in rows
+                if self.incident_allowed(peer, row["lat"], row["lon"])
             )
         if peer.relay_alerts:
             rows = await self.database.read(
@@ -185,6 +202,8 @@ class FederationSyncService:
                     "resolution_note FROM incident WHERE uid=?",
                     (local_uid,),
                 )
+                if rows and not self.incident_allowed(peer, rows[0]["lat"], rows[0]["lon"]):
+                    rows = []
             elif stream == "alerts" and peer.relay_alerts:
                 rows = await self.database.read(
                     "SELECT uid,severity,headline,body,source,source_ref,raised_by,raised_at,"

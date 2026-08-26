@@ -20,6 +20,10 @@ experimental until the two-node hardware backlog is complete.
   policy; disabling it removes the slug. Per-peer settings can still narrow that selection.
 - A new thread received from an allowed paired peer is imported automatically; later replies to
   that admitted thread continue without per-message approval. Disallowed boards remain rejected.
+- Incident sharing is separately disabled by default. When enabled, located incidents are exported
+  only within the configured peer-centered radius; without peer coordinates, only locationless
+  incidents are eligible. Member positions, pending location reports, and waypoints are never
+  federation streams.
 - Imported items can be quarantined for operator review.
 
 ## Before pairing

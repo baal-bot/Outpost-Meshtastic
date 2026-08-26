@@ -32,6 +32,9 @@ class Peer:
     remote_approved: bool
     boards: list[str]
     sync_incidents: bool
+    incident_lat: float | None
+    incident_lon: float | None
+    incident_radius_km: float
     relay_alerts: bool
     relay_mail: bool
     quota_mail_per_hour: int
@@ -69,6 +72,9 @@ class FederationPeerService:
             remote_approved=bool(row["remote_approved"]),
             boards=json.loads(row["boards"]),
             sync_incidents=bool(row["sync_incidents"]),
+            incident_lat=float(row["incident_lat"]) if row["incident_lat"] is not None else None,
+            incident_lon=float(row["incident_lon"]) if row["incident_lon"] is not None else None,
+            incident_radius_km=float(row["incident_radius_km"]),
             relay_alerts=bool(row["relay_alerts"]),
             relay_mail=bool(row["relay_mail"]),
             quota_mail_per_hour=int(row["quota_mail_per_hour"]),
@@ -314,6 +320,9 @@ class FederationPeerService:
         sync_incidents: bool,
         relay_alerts: bool,
         quota_items_per_hour: int,
+        incident_lat: float | None = None,
+        incident_lon: float | None = None,
+        incident_radius_km: float = 25,
         relay_mail: bool = False,
         quota_mail_per_hour: int = 20,
     ) -> Peer:
@@ -327,12 +336,24 @@ class FederationPeerService:
             raise ValueError("item quota must be 1-500 per hour")
         if not 1 <= quota_mail_per_hour <= 100:
             raise ValueError("mail quota must be 1-100 per hour")
+        if (incident_lat is None) != (incident_lon is None):
+            raise ValueError("incident boundary requires both latitude and longitude")
+        if incident_lat is not None and not -90 <= incident_lat <= 90:
+            raise ValueError("incident latitude must be -90 to 90")
+        if incident_lon is not None and not -180 <= incident_lon <= 180:
+            raise ValueError("incident longitude must be -180 to 180")
+        if not 1 <= incident_radius_km <= 500:
+            raise ValueError("incident radius must be 1-500 km")
         await self.database.write(
-            "UPDATE fed_peer SET boards=?,sync_incidents=?,relay_alerts=?,"
+            "UPDATE fed_peer SET boards=?,sync_incidents=?,incident_lat=?,incident_lon=?,"
+            "incident_radius_km=?,relay_alerts=?,"
             "quota_items_per_hour=?,relay_mail=?,quota_mail_per_hour=? WHERE id=?",
             (
                 json.dumps(cleaned, separators=(",", ":")),
                 int(sync_incidents),
+                incident_lat,
+                incident_lon,
+                incident_radius_km,
                 int(relay_alerts),
                 quota_items_per_hour,
                 int(relay_mail),
