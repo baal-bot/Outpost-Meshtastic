@@ -116,6 +116,81 @@ async def test_incident_radius_filters_exports_and_member_positions_never_federa
 
 
 @pytest.mark.asyncio
+async def test_newer_incident_version_returns_to_approval_and_updates_existing(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    peers = FederationPeerService(database, VirtualClock(), "!local")
+    await peers.discover("!remote", "Remote", 1, {}, "radio")
+    await database.write("UPDATE fed_peer SET state='active' WHERE mesh_id='!remote'")
+    peer = await peers.update_sync_policy(
+        "!remote",
+        boards=[],
+        sync_incidents=True,
+        relay_alerts=False,
+        quota_items_per_hour=20,
+    )
+    sync = FederationSyncService(database, "!local")
+    item = {
+        "stream": "incidents",
+        "uid": "!remote:incident-1",
+        "digest": "first",
+        "payload": {
+            "uid": "!remote:incident-1",
+            "type": "road",
+            "severity": "caution",
+            "status": "expired",
+            "title": "Old condition",
+            "body": "Old condition",
+            "lat": None,
+            "lon": None,
+            "location_text": None,
+            "radius_m": None,
+            "reporter_label": "Remote operator",
+            "origin_node": "!remote",
+            "created_at": 10,
+            "updated_at": 20,
+            "expires_at": 20,
+            "resolved_at": None,
+            "resolution_note": None,
+        },
+    }
+    assert await sync.quarantine(peer, item, 30)
+    inbox = await database.read("SELECT id FROM fed_inbox_item WHERE uid=?", (item["uid"],))
+    await sync.import_inbox(int(inbox[0]["id"]), "operator", 31)
+
+    assert await sync.missing(
+        [{"s": "incidents", "u": item["uid"], "v": 40, "d": "second"}]
+    ) == [{"stream": "incidents", "uid": item["uid"]}]
+    item["digest"] = "second"
+    item["payload"] = {
+        **item["payload"],
+        "status": "monitoring",
+        "title": "Current condition",
+        "updated_at": 40,
+        "expires_at": 100,
+    }
+    assert await sync.quarantine(peer, item, 41)
+    pending = await database.read(
+        "SELECT id,state FROM fed_inbox_item WHERE uid=?", (item["uid"],)
+    )
+    assert len(pending) == 1 and pending[0]["state"] == "pending"
+    await sync.import_inbox(int(pending[0]["id"]), "operator", 42)
+    incident = (await database.read(
+        "SELECT status,title,updated_at,expires_at FROM incident WHERE uid=?", (item["uid"],)
+    ))[0]
+    assert dict(incident) == {
+        "status": "monitoring",
+        "title": "Current condition",
+        "updated_at": 40,
+        "expires_at": 100,
+    }
+    assert await sync.missing(
+        [{"s": "incidents", "u": item["uid"], "v": 40, "d": "second"}]
+    ) == []
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_manifest_keyset_pages_recover_long_outage_without_skips(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()

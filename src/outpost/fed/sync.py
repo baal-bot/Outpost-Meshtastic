@@ -170,21 +170,29 @@ class FederationSyncService:
 
     async def missing(self, manifest: list[dict[str, Any]]) -> list[dict[str, str]]:
         requested: list[dict[str, str]] = []
-        tables = {"incidents": "incident", "alerts": "alert"}
+        versions = {
+            "incidents": ("incident", "updated_at"),
+            "alerts": ("alert", "COALESCE(cancelled_at,raised_at)"),
+        }
         for item in manifest[:100]:
             stream = str(item.get("stream", item.get("s", "")))
             uid = str(item.get("uid", item.get("u", "")))
             if not uid or len(uid) > 160:
                 continue
-            table = tables.get(stream, "post" if stream.startswith("board:") else None)
-            if table is None:
+            table_version = versions.get(stream)
+            if stream.startswith("board:"):
+                table_version = ("post", "COALESCE(edited_at,created_at)")
+            if table_version is None:
                 continue
+            table, version_column = table_version
             canonical_uid = await self.canonical_remote_uid(uid)
             rows = await self.database.read(
-                f"SELECT uid FROM {table} WHERE uid IN (?,?)",  # noqa: S608
+                f"SELECT {version_column} version FROM {table} "  # noqa: S608
+                "WHERE uid IN (?,?)",
                 (uid, canonical_uid),
             )
-            if not rows:
+            remote_version = int(item.get("version", item.get("v", 0)) or 0)
+            if not rows or remote_version > max(int(row["version"] or 0) for row in rows):
                 requested.append({"stream": stream, "uid": uid})
         return requested
 
@@ -259,11 +267,19 @@ class FederationSyncService:
         if int(recent[0]["count"]) >= peer.quota_items_per_hour:
             raise ValueError("peer federation item quota exceeded")
         existing = await self.database.read(
-            "SELECT id FROM fed_inbox_item WHERE peer_id=? AND stream=? AND uid=?",
+            "SELECT id,digest FROM fed_inbox_item WHERE peer_id=? AND stream=? AND uid=?",
             (peer.id, stream, uid),
         )
         if existing:
-            return False
+            digest = str(item.get("digest", ""))[:64]
+            if str(existing[0]["digest"]) == digest:
+                return False
+            await self.database.write(
+                "UPDATE fed_inbox_item SET payload_json=?,digest=?,state='pending',"
+                "received_at=?,reviewed_at=NULL,reviewed_by=NULL,rejection_reason=NULL WHERE id=?",
+                (encoded, digest, now, existing[0]["id"]),
+            )
+            return True
         await self.database.write(
             "INSERT INTO fed_inbox_item(peer_id,stream,uid,payload_json,digest,received_at) "
             "VALUES(?,?,?,?,?,?)",
@@ -340,10 +356,17 @@ class FederationSyncService:
                 "SELECT COALESCE(MAX(local_ref),0)+1 value FROM incident"
             )
             await self.database.write(
-                """INSERT OR IGNORE INTO incident(uid,local_ref,type,severity,status,title,body,
+                """INSERT INTO incident(uid,local_ref,type,severity,status,title,body,
                    lat,lon,location_text,radius_m,reporter_label,origin_node,created_at,updated_at,
                    expires_at,resolved_at,resolution_note,source,unverified,flagged_for_review)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'member',1,1)""",
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'member',1,1)
+                   ON CONFLICT(uid) DO UPDATE SET type=excluded.type,severity=excluded.severity,
+                   status=excluded.status,title=excluded.title,body=excluded.body,lat=excluded.lat,
+                   lon=excluded.lon,location_text=excluded.location_text,radius_m=excluded.radius_m,
+                   reporter_label=excluded.reporter_label,origin_node=excluded.origin_node,
+                   updated_at=excluded.updated_at,expires_at=excluded.expires_at,
+                   resolved_at=excluded.resolved_at,resolution_note=excluded.resolution_note,
+                   unverified=1,flagged_for_review=1""",
                 (
                     uid,
                     refs[0]["value"],
