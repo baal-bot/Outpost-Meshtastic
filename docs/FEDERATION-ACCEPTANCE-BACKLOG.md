@@ -6,8 +6,12 @@ observed over live radios, not only in automated tests.
 ## Pairing and discovery
 
 - [x] Discover an Outpost over radio without admitting ordinary radios.
-- [ ] Discover an Outpost through Meshtastic MQTT when enabled.
+- [x] Discover an Outpost through Meshtastic MQTT when enabled.
+  The replacement Outpost01 radio `!b2a711ec` was observed with `discovery_transports=["mqtt"]`
+  before RF rediscovery; discovery remained untrusted and created only a pending peer.
 - [x] Pair both nodes and confirm fingerprints out of band before trust is granted.
+  Re-pairing with `!b2a711ec` also validated targeted broadcast bootstrap and durable approval
+  receipts across mixed RF/MQTT paths; both databases converged to both approvals and active trust.
 - [x] Restart either node and confirm pairing and replay counters survive.
 
 ## Resilience and routing
