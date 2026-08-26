@@ -1,3 +1,5 @@
+import urllib.error
+
 import pytest
 
 from outpost.clock import VirtualClock
@@ -133,3 +135,95 @@ def test_cap_polygon_must_contain_outpost() -> None:
     )
     assert decision == "withheld"
     assert "alert polygon does not contain the Outpost" in reasons
+
+
+@pytest.mark.asyncio
+async def test_point_queries_use_location_scoped_cache(tmp_path, monkeypatch) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    calls: list[str] = []
+
+    async def request(url, *args, **kwargs):
+        calls.append(url)
+        if "/points/" in url:
+            city, state = ("Denver", "CO") if "39.7392" in url else ("Pittsburgh", "PA")
+            return {
+                "properties": {"relativeLocation": {"properties": {"city": city, "state": state}}}
+            }
+        item = feature("denver-alert" if "39.7392" in url else "pittsburgh-alert")
+        item["properties"]["areaDesc"] = "Denver County" if "39.7392" in url else "Allegheny"
+        return {"updated": "2026-01-01T00:05:00Z", "features": [item]}
+
+    monkeypatch.setattr("outpost.env.cap._request_json", request)
+    service = CapAlertService(database, VirtualClock(), EnvConfig())
+
+    denver, denver_source = await service.query_point(39.7392, -104.9903)
+    pittsburgh, pittsburgh_source = await service.query_point(40.4406, -79.9959)
+    repeated, repeated_source = await service.query_point(39.7392, -104.9903)
+
+    assert denver["status"] == pittsburgh["status"] == "ok"
+    assert denver["items"][0]["area_desc"] == "Denver County"
+    assert pittsburgh["items"][0]["area_desc"] == "Allegheny"
+    assert repeated == denver
+    assert repeated_source == denver_source
+    assert denver_source["query_lat"] == 39.7392
+    assert denver_source["query_lon"] == -104.9903
+    assert denver_source["service_area"] == "Denver, CO"
+    assert pittsburgh_source["service_area"] == "Pittsburgh, PA"
+    assert len(calls) == 4
+    assert len(await database.read("SELECT 1 FROM cap_point_cache")) == 2
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_point_query_states_distinguish_empty_stale_unsupported_and_failure(
+    tmp_path, monkeypatch
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    mode = "ok"
+
+    async def request(url, *args, **kwargs):
+        if mode == "unsupported" and "/points/" in url:
+            raise urllib.error.HTTPError(url, 404, "outside NWS service area", {}, None)
+        if mode == "failure":
+            raise OSError("provider offline")
+        if "/points/" in url:
+            return {"properties": {"forecastZone": "https://api.weather.gov/zones/forecast/PAZ021"}}
+        if mode == "empty":
+            return {"updated": "2026-01-01T00:05:00Z", "features": []}
+        return {"updated": "2026-01-01T00:05:00Z", "features": [feature("cached-alert")]}
+
+    monkeypatch.setattr("outpost.env.cap._request_json", request)
+    service = CapAlertService(database, clock, EnvConfig(refresh_minutes=5, max_age_hours=1))
+
+    current, _ = await service.query_point(40.4406, -79.9959)
+    assert current["status"] == "ok"
+    clock.advance(301)
+    mode = "failure"
+    stale, stale_source = await service.query_point(40.4406, -79.9959)
+    assert stale["status"] == "stale"
+    assert stale["items"] == current["items"]
+    assert stale["error"] == "provider offline"
+    assert stale_source["cache_age_seconds"] == 301
+    clock.advance(1_500)
+    expired_cache, _ = await service.query_point(40.4406, -79.9959)
+    assert expired_cache["status"] == "provider_failure"
+    assert expired_cache["items"] == []
+
+    mode = "empty"
+    empty, _ = await service.query_point(41.0000, -80.0000)
+    assert empty == {"status": "empty", "items": []}
+
+    mode = "unsupported"
+    unsupported, _ = await service.query_point(51.5072, -0.1276)
+    assert unsupported == {"status": "unsupported_region", "items": []}
+
+    mode = "failure"
+    failed, failed_source = await service.query_point(48.8566, 2.3522)
+    assert failed["status"] == "provider_failure"
+    assert failed["items"] == []
+    assert failed["error"] == "provider offline"
+    assert failed_source["fetched_at"] is None
+    await database.close()

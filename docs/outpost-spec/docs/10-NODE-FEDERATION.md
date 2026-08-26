@@ -270,6 +270,13 @@ the right answer is not to use LoRa at all.
 **REQ-FED-042** — Sync cursors **MUST** be opaque monotonic sequence values, never timestamps.
 Neither node has a reliable clock (a Pi has no RTC).
 
+**REQ-FED-043** — A peer public-alert service request **MUST** be evaluated for the request's
+normalized latitude/longitude, never against the serving Outpost's local alert inbox. The
+serving node **MUST** validate that point against the provider's supported service area and
+return the query point, service area, provider timestamp, fetch time, cache age, and serving
+Outpost identity. `empty`, `stale`, `unsupported_region`, and `provider_failure` are distinct
+results. Exact-point caches **MUST NOT** cross location keys or serve an expired alert.
+
 ---
 
 ## 10. Metrics

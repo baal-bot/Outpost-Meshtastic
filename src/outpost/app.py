@@ -561,7 +561,6 @@ class OutpostApp:
     async def _execute_peer_service(
         self, service: str, args: dict[str, object]
     ) -> tuple[dict[str, object], dict[str, object]]:
-        now = int(self.clock.now().timestamp())
         if service == "weather":
             location = self.config.node.location
             lat = float(args.get("lat", location.lat if location else 0))
@@ -588,27 +587,13 @@ class OutpostApp:
                 "serving_outpost": self.federation.local_mesh_id,
             }
         if service == "alerts":
-            alerts = (await self.cap_alerts.list())[:5]
-            result = {
-                "items": [
-                    {
-                        "event": item["event"],
-                        "headline": item["headline"],
-                        "severity": item["severity"],
-                        "area_desc": item["area_desc"],
-                        "expires_at": item["expires_at"],
-                    }
-                    for item in alerts
-                ]
-            }
-            return result, {
-                "provider": "NWS CAP",
-                "fetched_at": self.cap_alerts.last_poll_at,
-                "cache_age_seconds": (
-                    now - self.cap_alerts.last_poll_at if self.cap_alerts.last_poll_at else None
-                ),
-                "serving_outpost": self.federation.local_mesh_id,
-            }
+            try:
+                lat, lon = float(args["lat"]), float(args["lon"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError("alert coordinates are required") from error
+            result, provenance = await self.cap_alerts.query_point(lat, lon)
+            provenance["serving_outpost"] = self.federation.local_mesh_id
+            return result, provenance
         raise ValueError("public knowledge provider is not configured")
 
     @staticmethod
@@ -1209,6 +1194,9 @@ class OutpostApp:
         ok, result, provenance, error = True, {}, {}, None
         try:
             result, provenance = await self._execute_peer_service(service, args)
+            if service == "alerts" and result.get("status") == "provider_failure":
+                ok = False
+                error = str(result.get("error") or "public alert provider failed")[:160]
         except (OSError, ValueError) as caught:
             ok, error = False, str(caught)[:160]
         await self.database.write(

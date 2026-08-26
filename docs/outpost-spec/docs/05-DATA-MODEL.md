@@ -542,6 +542,17 @@ CREATE TABLE cap_alert (
 );
 CREATE INDEX idx_cap_active ON cap_alert(expires, severity);
 
+CREATE TABLE cap_point_cache (
+  cache_key TEXT PRIMARY KEY,       -- provider/service + normalised lat/lon
+  provider TEXT NOT NULL,
+  query_lat REAL NOT NULL, query_lon REAL NOT NULL,
+  service_area TEXT,
+  status TEXT NOT NULL,             -- ok | empty | unsupported_region
+  result_json TEXT NOT NULL,
+  provider_timestamp TEXT,
+  fetched_at INTEGER NOT NULL
+);
+
 CREATE TABLE waypoint (
   id         INTEGER PRIMARY KEY,
   name       TEXT NOT NULL,
