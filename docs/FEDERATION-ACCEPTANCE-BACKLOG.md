@@ -55,7 +55,11 @@ packet limits.
   Web operator mail to a named remote member and the member's `RR` back to the originating
   Outpost's web-only `@operator` mailbox passed over live radios. Per-peer quota enforcement
   remains covered by automated tests; a destructive live quota-exhaustion run is deferred.
-- [ ] Reject tampered, expired, unauthenticated, and replayed frames.
+- [x] Reject tampered, expired, unauthenticated, and replayed frames.
+  A live port-260 probe from `!699c2f30` to `!b2a711ec` produced the expected safe telemetry:
+  authentication failed, replay detected, expired message, and identity mismatch were rejected;
+  one benign `SYNC_DONE` control was accepted. The remote verified no inbox content, BBS content,
+  mail, incidents, service requests, trust changes, member changes, or audit actions were created.
 - [x] Remove peer trust and confirm subsequent synchronization and relay attempts fail closed.
   Live revocation of `!3136b053` erased the shared secret, cleared both approvals, reset replay
   counters, and returned the peer to pending; subsequent trusted traffic was not admitted.
