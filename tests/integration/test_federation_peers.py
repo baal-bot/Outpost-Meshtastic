@@ -174,6 +174,7 @@ async def test_sync_policy_requires_pairing_and_is_bounded(tmp_path) -> None:
     )
     assert peer.boards == ["mutual-aid", "public"]
     assert peer.sync_incidents and peer.relay_alerts
+    assert peer.policy_configured
     assert peer.quota_items_per_hour == 30
     row = (await database.read("SELECT last_sync_at FROM fed_peer WHERE id=?", (peer.id,)))[0]
     assert row["last_sync_at"] is None

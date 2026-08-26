@@ -39,6 +39,7 @@ class Peer:
     relay_mail: bool
     quota_mail_per_hour: int
     quota_items_per_hour: int
+    policy_configured: bool
 
 
 class FederationPeerService:
@@ -79,6 +80,7 @@ class FederationPeerService:
             relay_mail=bool(row["relay_mail"]),
             quota_mail_per_hour=int(row["quota_mail_per_hour"]),
             quota_items_per_hour=int(row["quota_items_per_hour"]),
+            policy_configured=bool(row["policy_configured"]),
         )
 
     def _derive_secret(
@@ -347,7 +349,8 @@ class FederationPeerService:
         await self.database.write(
             "UPDATE fed_peer SET boards=?,sync_incidents=?,incident_lat=?,incident_lon=?,"
             "incident_radius_km=?,relay_alerts=?,"
-            "quota_items_per_hour=?,relay_mail=?,quota_mail_per_hour=?,last_sync_at=NULL "
+            "quota_items_per_hour=?,relay_mail=?,quota_mail_per_hour=?,last_sync_at=NULL,"
+            "policy_configured=1 "
             "WHERE id=?",
             (
                 json.dumps(cleaned, separators=(",", ":")),
