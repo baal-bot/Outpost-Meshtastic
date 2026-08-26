@@ -1,4 +1,5 @@
 import {initTheme} from "/theme.js";
+import "/a11y.js";
 
 initTheme();
 const path = window.location.pathname;

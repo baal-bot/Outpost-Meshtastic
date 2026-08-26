@@ -24,6 +24,7 @@ dependencies = [
 [project.optional-dependencies]
 radio = ["meshtastic>=2.7,<3"]
 dev = [
+  "axe-playwright-python>=0.1.8,<0.2",
   "astral>=3.2,<4",
   "httpx>=0.28,<1",
   "hypothesis>=6.138,<7",

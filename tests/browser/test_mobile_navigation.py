@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 import pytest
 import uvicorn
+from axe_playwright_python.sync_playwright import Axe
 
 from outpost.web.api import create_web_app
 
@@ -38,6 +39,17 @@ DESTINATIONS = (
     ("AI", "/#system"),
     ("API", "/api/docs"),
 )
+OPERATOR_PAGES = tuple(
+    dict.fromkeys(target.split("#", 1)[0] for _label, target in DESTINATIONS[:-1])
+)
+THEMES = ("dark", "daylight", "night")
+
+
+def wait_for_navigation(page: object) -> None:
+    page.wait_for_function(
+        f"() => document.querySelectorAll('.rail nav a[aria-label]').length === {len(DESTINATIONS)}"
+    )
+    page.wait_for_function("() => !document.querySelector('.rail')?.inert")
 
 
 @pytest.fixture(scope="module")
@@ -72,8 +84,12 @@ def browser() -> Iterator[object]:
         instance.close()
 
 
-def prepare_page(browser: object, width: int, dashboard_url: str) -> object:
+def prepare_page(
+    browser: object, width: int, dashboard_url: str, *, theme: str | None = None
+) -> object:
     page = browser.new_page(viewport={"width": width, "height": 900})  # type: ignore[attr-defined]
+    if theme is not None:
+        page.add_init_script(f"localStorage.setItem('outpost.appearance.theme', {theme!r})")
     page.route(
         "**/api/v1/auth/session",
         lambda route: route.fulfill(
@@ -83,7 +99,7 @@ def prepare_page(browser: object, width: int, dashboard_url: str) -> object:
         ),
     )
     page.goto(dashboard_url, wait_until="domcontentloaded")
-    page.locator(".rail nav a").first.wait_for(state="attached")
+    wait_for_navigation(page)
     return page
 
 
@@ -99,7 +115,7 @@ def test_every_destination_is_reachable_from_navigation(
         assert labels == [label for label, _target in DESTINATIONS]
         for label, target in DESTINATIONS:
             page.goto(dashboard_url, wait_until="domcontentloaded")
-            page.locator(".rail nav a").first.wait_for(state="attached")
+            wait_for_navigation(page)
             if width <= 820:
                 page.get_by_role("button", name="Open navigation").click()
             link = page.locator(f'.rail nav a[aria-label="{label}"]')
@@ -111,6 +127,105 @@ def test_every_destination_is_reachable_from_navigation(
                 "expected => location.pathname + location.hash === expected",
                 arg=f"{expected.path}{expected.fragment and '#' + expected.fragment}",
             )
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("theme", THEMES)
+def test_operator_pages_pass_wcag_axe_rules(
+    browser: object, dashboard_url: str, theme: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme=theme)
+    axe = Axe()
+    try:
+        for target in OPERATOR_PAGES:
+            page.goto(f"{dashboard_url}{target}", wait_until="domcontentloaded")
+            wait_for_navigation(page)
+            results = axe.run(
+                page,
+                options={
+                    "runOnly": {
+                        "type": "tag",
+                        "values": ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+                    },
+                    "resultTypes": ["violations"],
+                },
+            )
+            assert results.violations_count == 0, f"{theme} {target}\n{results.generate_report()}"
+    finally:
+        page.close()
+
+
+def test_shared_dialogs_manage_focus_escape_validation_and_live_regions(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url)
+    try:
+        opener = page.locator("#open-settings")
+        opener.focus()
+        page.evaluate("document.querySelector('#settings-screen').classList.remove('hidden')")
+        settings = page.get_by_role("dialog", name="Identity and locality")
+        settings.wait_for(state="visible")
+        assert page.evaluate("document.querySelector('.shell').inert")
+        page.keyboard.press("Escape")
+        assert not settings.is_visible()
+        assert page.evaluate("document.activeElement === document.querySelector('#open-settings')")
+
+        page.evaluate(
+            "() => { window.confirmResult = null; "
+            "window.OutpostUI.confirm({title:'Restart receiver?', message:'Test confirmation'})"
+            ".then(value => window.confirmResult = value); }"
+        )
+        confirmation = page.get_by_role("dialog", name="Restart receiver?")
+        confirmation.wait_for(state="visible")
+        page.keyboard.press("Escape")
+        page.wait_for_function("window.confirmResult === false")
+
+        page.evaluate(
+            "() => { window.promptResult = null; "
+            "window.OutpostUI.prompt({title:'Typed approval', message:'Test prompt', "
+            "label:'Confirmation', verification:'APPROVE'})"
+            ".then(value => window.promptResult = value); }"
+        )
+        prompt = page.get_by_role("dialog", name="Typed approval")
+        prompt.get_by_role("textbox", name="Confirmation").fill("wrong")
+        prompt.get_by_role("button", name="Continue").click()
+        assert prompt.get_by_role("alert").text_content() == (
+            "The confirmation text does not match."
+        )
+        prompt.get_by_role("textbox", name="Confirmation").fill("APPROVE")
+        prompt.get_by_role("button", name="Continue").click()
+        page.wait_for_function("window.promptResult === 'APPROVE'")
+        assert page.locator("#backup-result").get_attribute("role") == "status"
+        assert page.locator("#settings-error").get_attribute("role") == "alert"
+    finally:
+        page.close()
+
+
+def test_map_targets_and_list_alternatives_are_keyboard_ready(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 390, dashboard_url)
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        size = page.evaluate(
+            """() => {
+              const marker = document.createElement('button');
+              marker.className = 'environment-marker quake';
+              document.querySelector('#environment-markers').appendChild(marker);
+              const box = marker.getBoundingClientRect();
+              return {width: box.width, height: box.height};
+            }"""
+        )
+        assert size["width"] >= 24 and size["height"] >= 24
+        scripts = " ".join(
+            page.request.get(f"{dashboard_url}/{name}").text()
+            for name in ("environment.js", "member-map.js", "watch.js")
+        )
+        assert "data-waypoint-focus" in scripts
+        assert "member-map-row-open" in scripts
+        assert "data-incident-open" in scripts
     finally:
         page.close()
 

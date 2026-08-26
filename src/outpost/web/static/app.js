@@ -248,7 +248,12 @@ $("settings-form").addEventListener("submit", async (event) => {
 $("save-watch-settings").addEventListener("click", async () => {
   $("emergency-error").textContent = "";
   const enabled = $("setting-emergency-enabled").checked;
-  if (enabled && !window.confirm("Enable emergency keyword detection? False positives create urgent incidents and notify responders.")) return;
+  if (enabled && !await window.OutpostUI.confirm({
+    title: "Enable emergency detection?",
+    message: "False positives create urgent incidents and notify responders. Public broadcasts still require operator review.",
+    confirmLabel: "Enable detection",
+    danger: true,
+  })) return;
   const keywords = $("setting-emergency-keywords").value.split(",").map(value => value.trim()).filter(Boolean);
   let escalation;
   try { escalation = $("escalation-advanced-toggle").checked ? JSON.parse($("setting-escalation").value) : readEscalationPolicy(); }
@@ -269,7 +274,11 @@ $("save-watch-settings").addEventListener("click", async () => {
 });
 
 $("reconnect-radio").addEventListener("click", async () => {
-  if (!window.confirm("Reconnect the radio now? Queued traffic will remain scheduled.")) return;
+  if (!await window.OutpostUI.confirm({
+    title: "Reconnect the radio?",
+    message: "The radio link will briefly disconnect. Queued traffic remains scheduled through the airtime governor.",
+    confirmLabel: "Reconnect radio",
+  })) return;
   const button = $("reconnect-radio");
   button.disabled = true; button.textContent = "Reconnecting…";
   await fetch("/api/v1/radio/reconnect", {method: "POST", headers: {"x-csrf-token": csrfToken}});

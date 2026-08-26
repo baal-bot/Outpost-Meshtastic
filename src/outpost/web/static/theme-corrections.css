@@ -410,7 +410,8 @@ html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-det
 html[data-theme="daylight"] .waypoint-map-card .waypoint-card-coordinates { color: #163c2c; }
 html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-detail) p { color: #526d61; }
 :is(.environment-marker, .member-map-point, .map-point, .alert-footprint) {
-  min-height: 0;
+  min-width: 24px;
+  min-height: 24px;
   padding: 0;
 }
 :is(.environment-marker.environment-marker, .member-map-point.member-map-point, .map-point.map-point) {
@@ -424,10 +425,10 @@ html[data-theme="daylight"] :is(.waypoint-map-card, .member-map-detail, .map-det
 .alert-footprint:not(:disabled):active { transform: translate(-50%, -50%); }
 .map-point.node:not(:disabled):active,
 .map-point.quake:not(:disabled):active { transform: translate(-50%, -50%) rotate(45deg); }
-.member-map-point.selected { width: 19px; height: 19px; }
-.map-point:not(.quake):is(:hover, .selected) { width: 22px; height: 22px; }
-.map-point.quake:is(:hover, .selected) { width: 13px; height: 13px; }
-.map-point.quake.significant:is(:hover, .selected) { width: 18px; height: 18px; }
+.member-map-point.selected { width: 28px; height: 28px; }
+.map-point:not(.quake):is(:hover, .selected) { width: 28px; height: 28px; }
+.map-point.quake:is(:hover, .selected) { width: 28px; height: 28px; }
+.map-point.quake.significant:is(:hover, .selected) { width: 30px; height: 30px; }
 :is(.environment-marker, .member-map-point, .map-point, .alert-footprint) {
   outline: 0 solid transparent;
   outline-offset: 3px;
@@ -452,6 +453,38 @@ html[data-theme="daylight"] .map-detail [data-resolve] {
   background: #fbe7e2;
   border-color: #c98276;
 }
+html[data-theme="daylight"] input:not([type="checkbox"]):not([type="radio"]),
+html[data-theme="daylight"] select,
+html[data-theme="daylight"] textarea {
+  color: #10231c !important;
+  background-color: #fff !important;
+  border-color: #76988a !important;
+}
+html[data-theme="daylight"] :is(button[type="submit"], .primary-button, #approve-solicitation, [data-quake-approve], [data-cap-approve]) {
+  color: #fff !important;
+  background-color: #23623f !important;
+  border-color: #23623f !important;
+}
+html[data-theme="daylight"] :is(.secondary, .small-button, [id^="refresh-"], #alert-use-map) {
+  color: #264c3c !important;
+  background-color: #edf4f0 !important;
+  border-color: #76988a !important;
+}
+html[data-theme="daylight"] .member-map-danger {
+  color: #842b20 !important;
+  background: #fbe7e2 !important;
+  border-color: #b76d61 !important;
+}
+html[data-theme="daylight"] .restore-warning p { color: #702d25 !important; }
+html[data-theme="daylight"] .environment-counts span { color: #526d61 !important; }
+.map-attribution a { text-decoration: underline; text-underline-offset: 2px; }
+#refresh-radio { color: var(--ink) !important; background: var(--raised) !important; border-color: var(--line) !important; }
+html[data-theme="night"] .phase.later { color: #d8959c; }
+.close-map, .waypoint-card-close, .member-map-detail .close { min-width: 32px !important; min-height: 32px !important; }
+.member-map-row-open { min-height: 32px; margin: 7px 0 0 10px; padding: 5px 9px; font-size: .62rem; }
+.incident-card { grid-template-columns: 72px minmax(0, 1fr) auto auto; }
+.incident-map-open { align-self: center; white-space: nowrap; }
+@media(max-width:900px) { .incident-card { grid-template-columns: 58px 1fr; } .incident-map-open { grid-column: 2; justify-self: start; } }
 
 /* Semantic action system: neutral by default, explicit primary and danger intent. */
 button,
@@ -578,6 +611,16 @@ html[data-theme="daylight"] :is(button, .action, .primary-button, .small-button)
   color: #64786f;
   background: #dfe8e3;
   border-color: #b9cbc2;
+}
+#application-dialog-confirm.danger {
+  color: #ffd8d0 !important;
+  background: #5e271f !important;
+  border-color: #9c5144 !important;
+}
+html[data-theme="daylight"] #application-dialog-confirm.danger {
+  color: #fff !important;
+  background: #a43d30 !important;
+  border-color: #a43d30 !important;
 }
 
 html[data-theme="night"] .login-screen { background: rgb(4 3 2 / 94%); }

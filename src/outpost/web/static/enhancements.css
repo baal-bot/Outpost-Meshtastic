@@ -21,6 +21,7 @@
 }
 
 html { background: var(--bg); }
+[hidden] { display: none !important; }
 html body {
   overflow-x: hidden;
   background:
@@ -37,6 +38,22 @@ button:not(:disabled), select:not(:disabled) { cursor: pointer; }
 button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: .55; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 ::selection { color: #07110d; background: var(--green); }
+.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
+.application-dialog { width: min(92vw, 470px); padding: 0; color: var(--ink); background: transparent; border: 0; overflow: visible; }
+.application-dialog::backdrop, dialog::backdrop { background: rgb(1 8 6 / 78%); backdrop-filter: blur(5px); }
+.application-dialog-card { display: grid; gap: 13px; padding: 26px; background: linear-gradient(145deg, var(--raised), var(--surface)); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 28px 90px rgb(0 0 0 / 58%); }
+.application-dialog-card h2 { margin: 0; }
+.application-dialog-message { color: var(--muted); font-size: .78rem; line-height: 1.55; white-space: pre-line; }
+.application-dialog-card label { display: grid; gap: 7px; color: var(--muted); font-size: .7rem; }
+.application-dialog-card label[hidden], .application-dialog-card [hidden] { display: none; }
+.application-dialog-card input, .application-dialog-card textarea { width: 100%; }
+.application-dialog-card small { color: var(--amber); }
+.application-dialog-error { min-height: 1em; color: var(--red); font-size: .68rem; }
+.application-dialog-card footer { display: flex; justify-content: flex-end; gap: 8px; padding: 2px 0 0; border: 0; }
+.application-dialog-card .danger { color: #ffd8d0; background: #5e271f; border-color: #9c5144; }
+html[data-theme="daylight"] .application-dialog-card { color: #163c2c; background: #fff; border-color: #92ad9f; }
+html[data-theme="daylight"] .application-dialog-message { color: #526d61; }
+html[data-theme="daylight"] .application-dialog-card .danger { color: #fff; background: #a43d30; border-color: #a43d30; }
 
 .rail { width: 232px; padding: 28px 20px 22px; background: rgb(5 18 14 / 94%); border-right-color: rgb(105 153 135 / 22%); box-shadow: 14px 0 44px rgb(0 0 0 / 12%); }
 .brand { padding: 0 8px 28px; font-family: Figtree, sans-serif; font-size: .78rem; }

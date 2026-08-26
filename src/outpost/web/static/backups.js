@@ -134,9 +134,17 @@ async function validate(button) {
 }
 
 async function restore(name) {
-  const phrase = window.prompt(`Restore ${name}?\n\nType exactly: RESTORE ${name}`);
+  const verification = `RESTORE ${name}`;
+  const phrase = await window.OutpostUI.prompt({
+    eyebrow: "CONTROLLED RECOVERY",
+    title: `Restore ${name}?`,
+    message: "Outpost will enter maintenance mode, drain background work, restore the verified snapshot, and restart. A safety copy is retained for automatic recovery.",
+    label: "Restore confirmation",
+    verification,
+    confirmLabel: "Enter maintenance and restore",
+    danger: true,
+  });
   if (phrase === null) return;
-  if (!window.confirm("Outpost will enter maintenance mode and restart. Continue?")) return;
   const response = await fetch(`/api/v1/backups/${encodeURIComponent(name)}/restore`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
@@ -144,7 +152,7 @@ async function restore(name) {
   });
   const body = await response.json();
   if (!response.ok) {
-    window.alert(body.error.message);
+    await window.OutpostUI.alert({title: "Restore could not start", message: body.error.message});
     return;
   }
   renderRestore(body);

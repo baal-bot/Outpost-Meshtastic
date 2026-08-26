@@ -53,6 +53,23 @@ sh deploy/smoke-package.sh
 - Show clear loading, empty, degraded, success, and error states on mobile screens.
 - Add tests and update public docs/spec for behavior or protocol changes.
 
+## Accessibility smoke test
+
+Before merging dashboard changes, run the Playwright browser suite and complete this short manual
+pass in Outpost Dark, Daylight, and Night Ops:
+
+1. Navigate every page using only Tab, Shift+Tab, Enter, Space, and Escape. Focus must remain visible.
+2. Open settings and a destructive confirmation. Focus must stay inside the dialog, Escape must
+   close dismissible dialogs, and focus must return to the control that opened it.
+3. With a screen reader, confirm page and dialog headings, current navigation state, async
+   success/error announcements, and pending-review badges are announced once and in context.
+4. Operate member, waypoint, and incident workflows from their list controls without using the map.
+5. At 200% zoom and a 320 px viewport, confirm controls do not overlap and every action remains
+   reachable.
+
+Automated axe scans cover every operator page and display theme, but they complement rather than
+replace this keyboard and screen-reader check.
+
 Pull requests should state checks, hardware, migrations, compatibility, airtime impact, and external
 providers. Sanitize screenshots. If specification and implementation disagree, document it rather
 than claiming completion.
