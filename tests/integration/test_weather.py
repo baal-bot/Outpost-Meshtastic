@@ -74,6 +74,16 @@ class DownProvider:
         raise OSError("NWS unavailable")
 
 
+class TimedOutProvider:
+    name = "timed-out-weather"
+
+    async def fetch(self, lat: float, lon: float) -> dict[str, object]:
+        raise TimeoutError("provider request timed out")
+
+    async def forecast(self, lat: float, lon: float) -> dict[str, object]:
+        raise TimeoutError("provider request timed out")
+
+
 @pytest.mark.asyncio
 async def test_provider_conditional_request_reuses_body_on_304(monkeypatch) -> None:
     class Response:
@@ -279,6 +289,26 @@ async def test_weather_falls_back_and_records_provider_health(tmp_path) -> None:
     assert chain.health["nws"]["status"] == "down"
     assert chain.health["fake-weather"]["status"] == "up"
     assert chain.health["nws"]["failures"] == 1
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_provider_timeout_falls_back_without_poisoning_healthy_provider(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    fallback = FakeProvider()
+    chain = FallbackWeatherProvider([TimedOutProvider(), fallback])
+    service = WeatherService(database, VirtualClock(), EnvConfig(), chain)
+
+    value = await service.current(40.4406, -79.9959)
+
+    assert value.provider == "fake-weather"
+    assert chain.health["timed-out-weather"] == {
+        "status": "down",
+        "failures": 1,
+        "last_error": "provider request timed out",
+    }
+    assert chain.health["fake-weather"]["status"] == "up"
     await database.close()
 
 

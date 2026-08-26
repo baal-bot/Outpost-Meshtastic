@@ -1,10 +1,11 @@
 import base64
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from outpost.app import OutpostApp
+from outpost.clock import VirtualClock
 from outpost.config import Config
 from outpost.fed import MessageType
 from outpost.transport.models import InboundMessage
@@ -293,7 +294,9 @@ async def test_rejected_federation_frame_records_safe_reason(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_tampered_replayed_and_expired_frames_fail_without_side_effects(tmp_path) -> None:
+async def test_tampered_replayed_and_clock_skewed_frames_fail_without_side_effects(
+    tmp_path,
+) -> None:
     config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
     app = OutpostApp(config)
     await app.database.open()
@@ -335,6 +338,11 @@ async def test_tampered_replayed_and_expired_frames_fail_without_side_effects(tm
     await receive(51, valid)
     await receive(52, valid)
 
+    # Simulate the receiving Outpost clock running ten minutes ahead. A peer
+    # request with a nominal three-minute lifetime must fail closed instead of
+    # being executed after the receiver believes it expired.
+    peer_now = datetime.now(UTC)
+    app.clock = VirtualClock(epoch=peer_now + timedelta(minutes=10))
     expired = app.federation_codec.encode(
         MessageType.SERVICE_QUERY,
         {
@@ -342,8 +350,8 @@ async def test_tampered_replayed_and_expired_frames_fail_without_side_effects(tm
             "request_id": "expired-test",
             "service": "weather",
             "args": {},
-            "expires_at": 1,
-            "ttl": 1,
+            "expires_at": int(peer_now.timestamp()) + 180,
+            "ttl": 180,
         },
         2,
         secret,

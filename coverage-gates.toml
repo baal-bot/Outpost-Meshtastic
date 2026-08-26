@@ -1,0 +1,38 @@
+[global]
+minimum = 72
+
+[groups.safety]
+minimum = 80
+files = [
+  "src/outpost/security/*.py",
+  "src/outpost/watch/*.py",
+  "src/outpost/commands/alerts.py",
+  "src/outpost/commands/checkin.py",
+  "src/outpost/commands/watch.py",
+]
+
+[groups.federation_framing_import]
+minimum = 86
+files = [
+  "src/outpost/fed/framing.py",
+  "src/outpost/fed/sync.py",
+]
+
+[groups.auth]
+minimum = 80
+files = ["src/outpost/web/auth.py"]
+
+[groups.backup_restore]
+minimum = 80
+files = ["src/outpost/store/backups.py"]
+
+[groups.radio_supervision]
+minimum = 55
+files = [
+  "src/outpost/transport/radio_link.py",
+  "src/outpost/transport/supervisor.py",
+]
+
+[groups.startup_shutdown]
+minimum = 55
+files = ["src/outpost/app.py"]

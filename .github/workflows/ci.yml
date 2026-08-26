@@ -8,18 +8,26 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+          cache: pip
       - run: pip install -e '.[dev,radio]'
       - run: python -m playwright install --with-deps chromium
       - run: ruff format --check src tests
       - run: ruff check src tests
       - run: mypy
-      - run: pytest --cov=outpost --cov-report=term
+      - run: pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json
+      - run: python tools/check_critical_coverage.py coverage.json
       - run: sh -n deploy/install.sh deploy/rollback.sh deploy/update.sh deploy/smoke-package.sh
       - run: python -m py_compile deploy/configure.py
       - run: sh deploy/smoke-package.sh
-      - run: pip-audit
+      - if: matrix.python-version == '3.13'
+        run: pip-audit

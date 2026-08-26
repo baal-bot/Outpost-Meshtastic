@@ -62,7 +62,7 @@ Read the [architecture guide](docs/ARCHITECTURE.md) for component and data-flow 
 
 - Raspberry Pi 4/5 or comparable Linux host
 - 64-bit Raspberry Pi OS or Debian-family distribution
-- Python 3.12+ with `venv` and `pip`
+- Python 3.12 or 3.13 with `venv` and `pip`
 - Meshtastic-compatible radio over USB serial, TCP, or BLE
 - Storage for the database, backups, and optional offline map tiles
 

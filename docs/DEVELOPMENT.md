@@ -2,6 +2,11 @@
 
 ## Setup
 
+Outpost explicitly supports Python 3.12 and 3.13. CI runs the complete unit, integration,
+acceptance, browser, coverage, and packaging suite on both versions. A new Python minor is not
+supported until it is added to that matrix; the package metadata intentionally rejects versions
+outside the tested `>=3.12,<3.14` range.
+
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev,radio]'
@@ -37,11 +42,35 @@ config, database, API/channel key, member export, precise location, or tile cach
 .venv/bin/ruff format src tests
 .venv/bin/ruff check src tests
 .venv/bin/mypy
-.venv/bin/pytest --cov=outpost --cov-report=term
+.venv/bin/pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json
+.venv/bin/python tools/check_critical_coverage.py coverage.json
 sh -n deploy/install.sh deploy/smoke-package.sh
 sh deploy/smoke-package.sh
 .venv/bin/pip-audit
 ```
+
+The global coverage floor is supplemented by weighted line-coverage floors in
+`coverage-gates.toml` for safety, federation framing/import, authentication, backup/restore,
+radio supervision, and startup/shutdown. A configured path that matches no source file fails the
+gate, preventing renames from silently removing a critical subsystem from enforcement.
+
+### Failure-injection matrix
+
+| Failure | Automated coverage |
+| --- | --- |
+| Radio loss and reconnect backoff | `tests/unit/test_supervisor.py` |
+| Provider timeout and fallback health | `tests/integration/test_weather.py` |
+| SQLite write failure and rollback | `tests/integration/test_transactions.py` |
+| Background cancellation and task failure | `tests/unit/test_background_tasks.py` |
+| Process restart and durable outbox recovery | `tests/integration/test_durable_outbox.py` |
+| Federation clock skew and expiry | `tests/integration/test_federation_radio.py` |
+| Duplicate/replayed frames | `tests/unit/test_inbound.py`, `tests/integration/test_federation_radio.py` |
+| Partial federation assembly and retry | `tests/unit/test_federation_framing.py`, `tests/integration/test_federation_radio.py` |
+
+The Playwright suite performs functional operator flows for authentication, Settings, BBS, Mail,
+Watch, Environment, Federation, and Backups. Critical mutation flows fail on uncaught JavaScript,
+console errors, failed API requests, non-success API responses, or horizontal viewport overflow.
+Every operator page is also scanned against WCAG 2 A/AA rules in all three display themes.
 
 ## Change rules
 

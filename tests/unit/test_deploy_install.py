@@ -1,5 +1,6 @@
 import runpy
 import sqlite3
+from contextlib import closing
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -88,13 +89,13 @@ def test_release_recovery_restores_snapshot_across_schema_migration(tmp_path: Pa
     snapshot_database(live, safety)
     restore_database(backup, live, maximum_schema=1)
     assert inspect_database(live).schema_version == 1
-    with sqlite3.connect(live) as restored:
+    with closing(sqlite3.connect(live)) as restored:
         assert restored.execute("SELECT value FROM sample").fetchone()[0] == "before"
 
     # A failed code rollback can put the exact pre-attempt data back.
     restore_database(safety, live, maximum_schema=2)
     assert inspect_database(live).schema_version == 2
-    with sqlite3.connect(live) as recovered:
+    with closing(sqlite3.connect(live)) as recovered:
         assert recovered.execute("SELECT value FROM sample").fetchone()[0] == "after"
 
 

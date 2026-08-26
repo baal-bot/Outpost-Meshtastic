@@ -116,6 +116,76 @@ def prepare_page(
     return page
 
 
+class BrowserHealth:
+    """Collect browser failures that otherwise disappear into a headless CI log."""
+
+    def __init__(self, page: object) -> None:
+        self.page_errors: list[str] = []
+        self.console_errors: list[str] = []
+        self.failed_requests: list[str] = []
+        self.failed_api_responses: list[str] = []
+        page.on("pageerror", lambda error: self.page_errors.append(str(error)))
+        page.on(
+            "console",
+            lambda message: (
+                self.console_errors.append(message.text) if message.type == "error" else None
+            ),
+        )
+        page.on(
+            "requestfailed",
+            lambda request: (
+                self.failed_requests.append(request.url) if "/api/" in request.url else None
+            ),
+        )
+        page.on(
+            "response",
+            lambda response: (
+                self.failed_api_responses.append(f"{response.status} {response.url}")
+                if "/api/" in response.url and response.status >= 400
+                else None
+            ),
+        )
+
+    def assert_clean(self) -> None:
+        assert self.page_errors == []
+        assert self.console_errors == []
+        assert self.failed_requests == []
+        assert self.failed_api_responses == []
+
+
+def route_shared_operator_api(page: object) -> None:
+    page.route(
+        "**/api/v1/modules",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": {
+                        name: {"enabled": True, "restart_required_to_change": True}
+                        for name in ("bbs", "ai", "watch", "env", "fed")
+                    },
+                    "change_policy": "restart_required",
+                }
+            ),
+        ),
+    )
+    page.route(
+        "**/api/v1/federation/inbox?state=pending",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body='{"items":[]}'
+        ),
+    )
+    page.route(
+        "**/api/v1/mail/conversations?limit=1",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"items":[],"total":0,"counts":{"unread":0,"actionable":0,"failed":0}}',
+        ),
+    )
+
+
 @pytest.mark.parametrize("width", VIEWPORTS)
 def test_every_destination_is_reachable_from_navigation(
     browser: object, dashboard_url: str, width: int
@@ -1045,5 +1115,452 @@ def test_federation_policy_wizard_presets_diff_and_global_board_confirmation(
         assert applied[0]["quota_mail_per_hour"] == 11
         assert applied[0]["policy_review_at"] == "2030-06-01T23:59:59Z"
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    finally:
+        page.close()
+
+
+def test_settings_save_is_functional_and_browser_clean(browser: object, dashboard_url: str) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="daylight")
+    mutations: list[dict[str, object]] = []
+    route_shared_operator_api(page)
+    config = {
+        "node": {
+            "name": "Pittsburgh Outpost",
+            "short_name": "PIT",
+            "operator_contact": "operator@example.test",
+            "timezone": "America/New_York",
+            "disclaimer": "Community service; not emergency response.",
+            "location": {"lat": 40.4406, "lon": -79.9959},
+            "units": "imperial",
+        }
+    }
+
+    def config_route(route: object) -> None:
+        if route.request.method == "PATCH":
+            mutations.append(route.request.post_data_json)
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(config))
+
+    status = {
+        "node": "Pittsburgh Outpost",
+        "radio": "up",
+        "airtime_used_ratio": 0,
+        "queues": {},
+        "radio_config": {
+            "node_id": "!00000001",
+            "region": "US",
+            "preset": "LONG_FAST",
+            "channels": [],
+            "gps": {"lat": 40.4406, "lon": -79.9959},
+        },
+    }
+    page.route("**/api/v1/config", config_route)
+    page.route("**/api/v1/config/node", config_route)
+    page.route(
+        "**/api/v1/status",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(status)
+        ),
+    )
+    page.route(
+        "**/api/v1/dashboard/overview",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"traffic_24h":{},"members":{"heard_24h":0,"heard_7d":0,'
+            '"members_total":0},"activity":[]}',
+        ),
+    )
+    page.route(
+        "**/api/v1/boards",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body='{"items":[]}'
+        ),
+    )
+    page.route(
+        "**/api/v1/channels",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body='{"items":[]}'
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(dashboard_url, wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.get_by_role("button", name="Open settings").click()
+        dialog = page.get_by_role("dialog", name="Identity and locality")
+        dialog.wait_for()
+        dialog.get_by_label("Outpost name").fill("Allegheny Outpost")
+        dialog.get_by_label("°C", exact=True).check()
+        dialog.get_by_role("button", name="Save identity settings").click()
+        dialog.wait_for(state="hidden")
+
+        assert len(mutations) == 1
+        assert mutations[0]["name"] == "Allegheny Outpost"
+        assert mutations[0]["units"] == "metric"
+        assert mutations[0]["location"] == {"lat": 40.4406, "lon": -79.9959}
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_bbs_create_thread_and_reply_are_functional_and_browser_clean(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    mutations: list[tuple[str, dict[str, object]]] = []
+    state = {"thread": False, "replied": False}
+    board = {
+        "id": 1,
+        "slug": "gen",
+        "title": "General",
+        "description": "General discussion",
+        "thread_count": 0,
+        "federated": True,
+        "min_post_trust": "member",
+    }
+
+    def bbs_route(route: object) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        if path == "/api/v1/boards" and request.method == "GET":
+            value = {**board, "thread_count": int(state["thread"])}
+            body = {"items": [value]}
+        elif path == "/api/v1/boards/1/threads" and request.method == "GET":
+            body = {
+                "items": [
+                    {
+                        "id": 10,
+                        "subject": "Pigeons?",
+                        "post_count": 1 + int(state["replied"]),
+                        "author": "operator",
+                        "pinned": False,
+                        "locked": False,
+                        "remote": False,
+                    }
+                ]
+                if state["thread"]
+                else []
+            }
+        elif path == "/api/v1/boards/1/threads" and request.method == "POST":
+            mutations.append(("thread", request.post_data_json))
+            state["thread"] = True
+            body = {"id": 10}
+        elif path == "/api/v1/threads/10/posts" and request.method == "POST":
+            mutations.append(("reply", request.post_data_json))
+            state["replied"] = True
+            body = {"id": 101}
+        elif path == "/api/v1/threads/10":
+            posts = [
+                {
+                    "id": 100,
+                    "seq": 1,
+                    "author_label": "operator@PIT",
+                    "body": "Has anyone seen the carrier pigeons?",
+                    "created_at": "2026-08-26T18:00:00Z",
+                    "hidden": False,
+                    "remote": False,
+                }
+            ]
+            if state["replied"]:
+                posts.append(
+                    {
+                        "id": 101,
+                        "seq": 2,
+                        "author_label": "operator@PIT",
+                        "body": "They are back at the Outpost.",
+                        "created_at": "2026-08-26T18:05:00Z",
+                        "hidden": False,
+                        "remote": False,
+                    }
+                )
+            body = {
+                "id": 10,
+                "slug": "gen",
+                "subject": "Pigeons?",
+                "pinned": False,
+                "locked": False,
+                "hidden": False,
+                "remote": False,
+                "posts": posts,
+            }
+        else:
+            body = {}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/api/v1/boards**", bbs_route)
+    page.route("**/api/v1/threads/**", bbs_route)
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/bbs.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.locator("[data-board='1']").click()
+        page.get_by_role("button", name="New thread").click()
+        dialog = page.get_by_role("dialog", name="Start a discussion")
+        dialog.get_by_label("Subject").fill("Pigeons?")
+        dialog.get_by_label("Message").fill("Has anyone seen the carrier pigeons?")
+        dialog.get_by_role("button", name="Publish thread").click()
+        page.get_by_role("button", name="Pigeons?").click()
+        page.locator("#reply-body").fill("They are back at the Outpost.")
+        page.get_by_role("button", name="Publish reply").click()
+        page.get_by_text("They are back at the Outpost.").wait_for()
+
+        assert (
+            "thread",
+            {"subject": "Pigeons?", "body": "Has anyone seen the carrier pigeons?"},
+        ) in mutations
+        assert ("reply", {"body": "They are back at the Outpost."}) in mutations
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_watch_incident_intake_is_functional_and_browser_clean(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    mutations: list[dict[str, object]] = []
+    incidents: list[dict[str, object]] = []
+
+    def watch_route(route: object) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        if path == "/api/v1/incidents" and request.method == "POST":
+            mutations.append(request.post_data_json)
+            incidents.append(
+                {
+                    "id": 7,
+                    "local_ref": 7,
+                    "title": "Tree down blocking Cedar Lane",
+                    "body": "Tree down blocking Cedar Lane",
+                    "type": "road",
+                    "severity": "urgent",
+                    "status": "open",
+                    "location_text": "Cedar Lane",
+                    "reporter_label": "operator",
+                    "confirm_count": 0,
+                    "dispute_count": 0,
+                    "flagged_for_review": False,
+                    "updated_at": 2_000_000_000,
+                    "expires_at": 2_000_100_000,
+                    "lat": 40.4406,
+                    "lon": -79.9959,
+                    "remote": False,
+                }
+            )
+            body = {"id": 7, "local_ref": 7}
+        elif path == "/api/v1/incidents":
+            body = {"items": incidents}
+        elif path == "/api/v1/alerts":
+            body = {"items": []}
+        elif path == "/api/v1/events":
+            body = {"current": None}
+        elif path == "/api/v1/watch/map":
+            body = {"incidents": incidents, "nodes": [], "alerts": []}
+        elif path == "/api/v1/status":
+            body = {
+                "alert_delivery": {
+                    "queued": 0,
+                    "sent": 0,
+                    "throttled": 0,
+                    "budget_delays": 0,
+                    "utilisation_delays": 0,
+                    "hard_stops": 0,
+                    "dropped": 0,
+                }
+            }
+        elif path == "/api/v1/environment/alerts":
+            body = {"items": [], "health": {"last_error": None, "last_poll_at": None}}
+        elif path == "/api/v1/environment/earthquakes":
+            body = {"items": []}
+        else:
+            body = {}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/api/v1/incidents**", watch_route)
+    page.route("**/api/v1/alerts**", watch_route)
+    page.route("**/api/v1/events**", watch_route)
+    page.route("**/api/v1/watch/map**", watch_route)
+    page.route("**/api/v1/status", watch_route)
+    page.route("**/api/v1/environment/alerts**", watch_route)
+    page.route("**/api/v1/environment/earthquakes**", watch_route)
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/watch.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.locator("#report-text").fill("tree down blocking Cedar Lane 40.4406 -79.9959")
+        page.get_by_role("button", name="Record incident").click()
+        page.get_by_text("Recorded INC 7.").wait_for()
+        page.get_by_role("heading", name="Tree down blocking Cedar Lane").wait_for()
+
+        assert mutations == [
+            {"text": "tree down blocking Cedar Lane 40.4406 -79.9959", "force": False}
+        ]
+        assert page.locator(".lifecycle-badge.open").is_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_environment_waypoint_create_and_map_card_are_functional_and_browser_clean(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="daylight")
+    route_shared_operator_api(page)
+    mutations: list[dict[str, object]] = []
+    waypoints: list[dict[str, object]] = []
+
+    def environment_route(route: object) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        if path == "/api/v1/config":
+            body = {"node": {"location": {"lat": 40.4406, "lon": -79.9959}}}
+        elif path == "/api/v1/environment/waypoints" and request.method == "POST":
+            value = {"id": 4, **request.post_data_json}
+            mutations.append(request.post_data_json)
+            waypoints.append(value)
+            body = value
+        elif path == "/api/v1/environment/waypoints":
+            body = {"items": waypoints}
+        elif path == "/api/v1/environment/weather":
+            body = {
+                "provider": "nws",
+                "source_kind": "observation",
+                "temperature_c": 21,
+                "apparent_c": 20,
+                "precipitation_mm": 0,
+                "wind_kph": 8,
+                "wind_direction": 270,
+                "valid_age_seconds": 60,
+                "age_seconds": 60,
+                "stale": False,
+                "units": "imperial",
+            }
+        elif path == "/api/v1/environment/forecast":
+            body = {"provider": "nws", "stale": False, "daily": [], "hourly": []}
+        elif path == "/api/v1/environment/astronomy":
+            body = {
+                "civil_dawn": None,
+                "sunrise": None,
+                "sunset": None,
+                "civil_dusk": None,
+                "moon_illumination": 50,
+                "moon_phase": "First quarter",
+                "moon_age_days": 7,
+                "daylight_minutes": 720,
+            }
+        elif path == "/api/v1/environment/providers":
+            body = {"items": {"nws": {"status": "up"}}}
+        elif path == "/api/v1/environment/alerts":
+            body = {"items": []}
+        elif path == "/api/v1/environment/earthquakes":
+            body = {"items": []}
+        else:
+            body = {}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/api/v1/config", environment_route)
+    page.route("**/api/v1/environment/**", environment_route)
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.get_by_label("Name").fill("Riverview Spring")
+        page.get_by_label("Latitude").fill("40.446")
+        page.get_by_label("Longitude").fill("-80.010")
+        page.get_by_label("Category").select_option("water")
+        page.get_by_label("Notes").fill("Seasonal potable-water source")
+        page.get_by_role("button", name="Save waypoint").click()
+        page.get_by_text("Saved Riverview Spring.").wait_for()
+        page.get_by_role("button", name="Riverview Spring").click()
+        card = page.locator("#waypoint-map-card")
+        card.get_by_role("heading", name="Riverview Spring").wait_for()
+
+        assert mutations == [
+            {
+                "name": "Riverview Spring",
+                "latitude": 40.446,
+                "longitude": -80.01,
+                "category": "water",
+                "notes": "Seasonal potable-water source",
+            }
+        ]
+        assert "40.44600, -80.01000" in card.text_content()
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_backup_create_validate_and_restore_confirmation_are_functional_and_clean(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    mutations: list[tuple[str, object]] = []
+    state = {"created": False}
+    backup = {
+        "name": "outpost-20260826-180000.db",
+        "size_bytes": 4096,
+        "created_at": "2026-08-26T18:00:00Z",
+    }
+
+    def backup_route(route: object) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        if path == "/api/v1/backups" and request.method == "POST":
+            state["created"] = True
+            mutations.append(("create", None))
+            body = {"backup": backup}
+        elif path == "/api/v1/backups":
+            body = {"items": [backup] if state["created"] else []}
+        elif path.endswith("/validate"):
+            mutations.append(("validate", backup["name"]))
+            body = {"valid": True}
+        elif path.endswith("/restore"):
+            mutations.append(("restore", request.post_data_json))
+            body = {
+                "job_id": "restore-1",
+                "state": "completed",
+                "message": "Restore completed.",
+                "backup": backup["name"],
+            }
+        elif path.endswith("/restore-1"):
+            body = {
+                "job_id": "restore-1",
+                "state": "completed",
+                "message": "Restore completed.",
+                "backup": backup["name"],
+            }
+        else:
+            body = {}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/api/v1/backups**", backup_route)
+    page.route("**/api/v1/recovery/restores/**", backup_route)
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/backups.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.get_by_role("button", name="Create verified backup").click()
+        page.get_by_text(backup["name"]).wait_for()
+        page.get_by_role("button", name="Validate").click()
+        page.get_by_role("button", name="✓ Valid").wait_for()
+        page.get_by_role("button", name="Restore").click()
+        dialog = page.get_by_role("dialog", name=f"Restore {backup['name']}?")
+        phrase = f"RESTORE {backup['name']}"
+        dialog.get_by_label("Restore confirmation").fill(phrase)
+        dialog.get_by_role("button", name="Enter maintenance and restore").click()
+        page.get_by_text("Restore complete").wait_for()
+
+        assert ("create", None) in mutations
+        assert ("validate", backup["name"]) in mutations
+        assert ("restore", {"confirmation": phrase}) in mutations
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
     finally:
         page.close()

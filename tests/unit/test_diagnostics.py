@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 from outpost.config import load_config
@@ -48,7 +49,7 @@ def test_diagnostic_bundle_redacts_bootstrap_password_session_and_csrf(
 
 def test_database_secrets_returns_only_auth_redaction_values(tmp_path: Path) -> None:
     database = tmp_path / "outpost.db"
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection:
         connection.executescript(
             "CREATE TABLE web_credential(password_hash TEXT);"
             "CREATE TABLE web_session(csrf_token TEXT);"
