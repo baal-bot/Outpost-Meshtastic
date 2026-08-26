@@ -186,6 +186,64 @@ async def test_sync_policy_requires_pairing_and_is_bounded(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_policy_setup_confirms_global_boards_and_records_review_metadata(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    service = FederationPeerService(database, VirtualClock(), "!local")
+    await service.discover("!remote", "Remote", 1, {}, "radio")
+    await database.write("UPDATE fed_peer SET state='active' WHERE mesh_id='!remote'")
+    client = TestClient(
+        create_web_app(lambda: {"radio": "up"}, database=database, federation=service)
+    )
+    payload = {
+        "boards": ["gen"],
+        "enable_boards": ["gen"],
+        "confirm_enable_boards": False,
+        "sync_incidents": True,
+        "incident_lat": 40.4406,
+        "incident_lon": -79.9959,
+        "incident_radius_km": 25,
+        "relay_alerts": True,
+        "relay_mail": True,
+        "service_permissions": ["alerts", "weather"],
+        "policy_review_at": "2035-01-01T00:00:00Z",
+    }
+
+    confirmation = client.put("/api/v1/federation/peers/!remote/sync-policy", json=payload)
+
+    assert confirmation.status_code == 409
+    assert "confirmation required" in confirmation.json()["error"]["message"]
+    assert not bool(
+        (await database.read("SELECT federated FROM board WHERE slug='gen'"))[0]["federated"]
+    )
+    assert (await service.by_mesh_id("!remote")).boards == []
+
+    payload["confirm_enable_boards"] = True
+    applied = client.put("/api/v1/federation/peers/!remote/sync-policy", json=payload)
+
+    assert applied.status_code == 200
+    peer = await service.by_mesh_id("!remote")
+    assert peer.boards == ["gen"] and peer.sync_incidents and peer.relay_alerts and peer.relay_mail
+    assert peer.service_permissions == ["alerts", "weather"]
+    assert peer.policy_applied_by == "web:operator" and peer.policy_applied_at is not None
+    assert peer.policy_review_at == 2_051_222_400
+    assert bool(
+        (await database.read("SELECT federated FROM board WHERE slug='gen'"))[0]["federated"]
+    )
+    audit = (
+        await database.read(
+            "SELECT actor_ref,target,detail FROM audit_log WHERE action='federation.policy_update'"
+        )
+    )[0]
+    assert audit["actor_ref"] == "web:operator" and audit["target"] == "!remote"
+    assert '"globally_enabled_boards":["gen"]' in audit["detail"]
+    assert '"before"' in audit["detail"] and '"after"' in audit["detail"]
+    assert '"quota_services_per_hour":6' in audit["detail"]
+    assert '"service_max_response_bytes":1200' in audit["detail"]
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_board_federation_toggle_updates_active_peer_policies(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()

@@ -121,6 +121,11 @@ and counted.
 > impersonating a peer, and the counter protects against replay of a captured frame. Do not
 > overstate it (doc 12 §7).
 
+**REQ-FED-015a** — After pairing, one operator flow **MUST** configure boards, incident radius,
+alerts, mail, service permissions, and quotas. It **MUST** present a before/after policy diff and
+require explicit confirmation before making a local-only board federation-eligible. The applied
+operator, timestamp, and optional review date are retained with the peer policy.
+
 ---
 
 ## 5. Board replication

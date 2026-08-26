@@ -669,3 +669,172 @@ def test_desktop_audit_retains_dense_scanning_columns(browser: object, dashboard
         assert page.screenshot().startswith(b"\x89PNG")
     finally:
         page.close()
+
+
+def route_federation_policy_workspace(page: object, applied: list[dict[str, object]]) -> None:
+    peer = {
+        "id": 1,
+        "mesh_id": "!00000002",
+        "node_name": "Denver Outpost",
+        "state": "active",
+        "protocol_version": 1,
+        "capabilities": {"weather": True, "alerts": True, "bbs": True},
+        "discovery_transports": ["radio", "mqtt"],
+        "tx_counter": 2,
+        "rx_counter": 3,
+        "last_seen_at": 2_000_000_000,
+        "local_approved": True,
+        "remote_approved": True,
+        "boards": ["roads"],
+        "sync_incidents": False,
+        "incident_lat": 39.7392,
+        "incident_lon": -104.9903,
+        "incident_radius_km": 40,
+        "relay_alerts": False,
+        "relay_mail": False,
+        "quota_items_per_hour": 37,
+        "quota_mail_per_hour": 11,
+        "policy_configured": True,
+        "policy_applied_by": "web:operator",
+        "policy_applied_at": 2_000_000_000,
+        "policy_review_at": None,
+        "service_permissions": ["weather"],
+        "quota_services_per_hour": 9,
+        "service_concurrency": 2,
+        "service_max_response_bytes": 900,
+        "service_airtime_seconds_per_hour": 12,
+    }
+
+    def federation(route: object) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        if path.endswith("/sync-policy") and request.method == "PUT":
+            applied.append(request.post_data_json)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(peer))
+        elif path == "/api/v1/federation/peers":
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"items": [peer]}),
+            )
+        elif path == "/api/v1/federation/mqtt":
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "available": False,
+                        "enabled": False,
+                        "address": "",
+                        "root": "msh",
+                        "tls_enabled": True,
+                        "channels": [
+                            {
+                                "index": 0,
+                                "name": "Primary",
+                                "uplink_enabled": False,
+                                "downlink_enabled": False,
+                            }
+                        ],
+                    }
+                ),
+            )
+        elif path in {
+            "/api/v1/federation/services",
+            "/api/v1/federation/inbox",
+            "/api/v1/federation/origins",
+            "/api/v1/federation/mail",
+        }:
+            route.fulfill(status=200, content_type="application/json", body='{"items":[]}')
+        elif path == "/api/v1/federation/sync-status":
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"items":[],"outbound":{"frames_24h":0,"last_at":null}}',
+            )
+        else:
+            route.fulfill(status=404, content_type="application/json", body='{"error":{}}')
+
+    page.route("**/api/v1/federation/**", federation)
+    page.route(
+        "**/api/v1/status",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body='{"radio":"up"}'
+        ),
+    )
+    page.route(
+        "**/api/v1/boards*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": [
+                        {"id": 1, "slug": "gen", "title": "General", "federated": 0},
+                        {"id": 2, "slug": "roads", "title": "Roads", "federated": 1},
+                    ]
+                }
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("width", "theme"),
+    ((390, "daylight"), (1280, "dark"), (1280, "daylight"), (1280, "night")),
+)
+def test_federation_policy_wizard_presets_diff_and_global_board_confirmation(
+    browser: object, dashboard_url: str, width: int, theme: str
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme=theme)
+    applied: list[dict[str, object]] = []
+    route_federation_policy_workspace(page, applied)
+    try:
+        page.goto(f"{dashboard_url}/federation.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        assert "Policy by web:operator" in page.locator(".peer-policy-meta").text_content()
+        page.get_by_role("button", name="Sharing setup").click()
+        dialog = page.get_by_role("dialog")
+        dialog.wait_for()
+        assert dialog.get_by_role("button", name="Discovery only").is_visible()
+        assert dialog.get_by_role("button", name="BBS only").is_visible()
+        assert dialog.get_by_role("button", name="Mutual aid").is_visible()
+        dialog.get_by_role("button", name="Full trusted partner").click()
+        dialog.locator("#wizard-review-date").fill("2030-06-01")
+        dialog.get_by_role("button", name="Review sharing").click()
+
+        assert dialog.locator(".wizard-diff-row").count() == 9
+        assert "2 board stream(s)" in dialog.locator("#wizard-sharing-summary").text_content()
+        confirmation = dialog.locator("#wizard-board-confirmation")
+        assert confirmation.is_visible()
+        assert confirmation.locator("strong").text_content() == "gen"
+        if width == 1280:
+            results = Axe().run(
+                page,
+                options={
+                    "runOnly": {
+                        "type": "tag",
+                        "values": ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+                    },
+                    "resultTypes": ["violations"],
+                },
+            )
+            assert results.violations_count == 0, results.generate_report()
+        dialog.get_by_role("button", name="Apply policy").click()
+        assert applied == []
+        assert "Confirm the global board" in dialog.locator("#wizard-result").text_content()
+
+        confirmation.locator("input").check()
+        dialog.get_by_role("button", name="Apply policy").click()
+        page.wait_for_function("() => !document.querySelector('.sharing-wizard')")
+        assert len(applied) == 1
+        assert applied[0]["boards"] == ["gen", "roads"]
+        assert applied[0]["enable_boards"] == ["gen"]
+        assert applied[0]["confirm_enable_boards"] is True
+        assert applied[0]["service_permissions"] == ["alerts", "knowledge", "weather"]
+        assert applied[0]["quota_items_per_hour"] == 37
+        assert applied[0]["quota_mail_per_hour"] == 11
+        assert applied[0]["policy_review_at"] == "2030-06-01T23:59:59Z"
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    finally:
+        page.close()

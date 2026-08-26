@@ -223,6 +223,9 @@ class FederationSyncPolicyBody(BaseModel):
     service_concurrency: int = Field(default=1, ge=1, le=4)
     service_max_response_bytes: int = Field(default=1200, ge=256, le=1600)
     service_airtime_seconds_per_hour: float = Field(default=15, ge=1, le=120)
+    policy_review_at: datetime | None = None
+    enable_boards: list[str] | None = Field(default=None, max_length=20)
+    confirm_enable_boards: bool = False
 
 
 class FederationInboxBody(BaseModel):
@@ -765,7 +768,14 @@ def create_web_app(
             mesh_id: str, body: FederationSyncPolicyBody
         ) -> dict[str, Any] | Response:
             try:
-                peer = await federation.update_sync_policy(mesh_id, **body.model_dump())
+                values = body.model_dump()
+                review_at = values.pop("policy_review_at")
+                peer = await federation.update_sync_policy(
+                    mesh_id,
+                    **values,
+                    policy_review_at=int(review_at.timestamp()) if review_at else None,
+                    applied_by="web:operator",
+                )
             except ValueError as error:
                 return JSONResponse(
                     {"error": {"code": "sync_policy_failed", "message": str(error)}},

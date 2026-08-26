@@ -672,6 +672,10 @@ CREATE TABLE fed_peer (
   last_seen_at INTEGER,
   paused_reason TEXT,
   approved_by TEXT, approved_at INTEGER,
+  policy_configured INTEGER NOT NULL DEFAULT 0,
+  policy_applied_by TEXT, policy_applied_at INTEGER, policy_review_at INTEGER,
+  service_permissions TEXT NOT NULL DEFAULT '[]',
+  quota_services_per_hour INTEGER NOT NULL DEFAULT 6,
   created_at  INTEGER NOT NULL
 );
 

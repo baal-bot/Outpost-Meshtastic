@@ -25,9 +25,16 @@ experimental until the two-node hardware backlog is complete.
 - Durable board items retain one authenticated wire counter across retries. This lets multipart
   fragments received on different attempts complete the same logical item; a duplicate of an
   already imported item can regenerate only its receipt and cannot import content twice.
-- Per-peer policy controls boards, incidents, alerts, mail, quotas, and transport.
-- Enabling federation on a board automatically adds its slug to every currently paired peer's
-  policy; disabling it removes the slug. Per-peer settings can still narrow that selection.
+- Per-peer policy controls boards, incidents, alerts, mail, quotas, peer information services, and
+  an optional operator review date. The peer card records who last applied the policy and flags an
+  overdue review without automatically interrupting a field link.
+- Pairing completion opens the same sharing wizard used for later edits. Discovery-only, BBS-only,
+  mutual-aid, and full-partner presets fill the editable policy. The final step shows every
+  before/after value and a plain-language data-sharing summary before anything changes.
+- Enabling federation from a board's BBS control automatically adds its slug to every currently
+  paired peer's policy; disabling it removes the slug. Selecting a local-only board inside the
+  per-peer wizard instead requires an explicit global-eligibility confirmation and assigns that
+  board only to the peer being edited. The board and peer changes commit atomically.
 - A new thread received from an allowed paired peer is imported automatically; later replies to
   that admitted thread continue without per-message approval. Disallowed boards remain rejected.
 - Incident sharing is separately disabled by default. When enabled, located incidents are exported
@@ -50,7 +57,8 @@ cost, and revocation.
 4. Review the pending request on the other.
 5. Compare the six-digit code over an independent trusted channel.
 6. Approve only when codes and node identities match.
-7. Configure least-privilege sync/mail policy.
+7. Use the sharing wizard to choose a least-privilege preset or custom policy, review its exact
+   diff, and optionally schedule a review date.
 8. Send one small test and inspect status, inbox, audit, and airtime.
 
 Never approve based only on a claimed Outpost name.

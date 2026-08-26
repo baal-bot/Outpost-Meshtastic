@@ -40,6 +40,9 @@ class Peer:
     quota_mail_per_hour: int
     quota_items_per_hour: int
     policy_configured: bool
+    policy_applied_by: str | None
+    policy_applied_at: int | None
+    policy_review_at: int | None
     service_permissions: list[str]
     quota_services_per_hour: int
     service_concurrency: int
@@ -86,6 +89,9 @@ class FederationPeerService:
             quota_mail_per_hour=int(row["quota_mail_per_hour"]),
             quota_items_per_hour=int(row["quota_items_per_hour"]),
             policy_configured=bool(row["policy_configured"]),
+            policy_applied_by=row["policy_applied_by"],
+            policy_applied_at=row["policy_applied_at"],
+            policy_review_at=row["policy_review_at"],
             service_permissions=json.loads(row["service_permissions"]),
             quota_services_per_hour=int(row["quota_services_per_hour"]),
             service_concurrency=int(row["service_concurrency"]),
@@ -342,6 +348,10 @@ class FederationPeerService:
         service_concurrency: int | None = None,
         service_max_response_bytes: int | None = None,
         service_airtime_seconds_per_hour: float | None = None,
+        applied_by: str = "web:operator",
+        policy_review_at: int | None = None,
+        enable_boards: list[str] | None = None,
+        confirm_enable_boards: bool = False,
     ) -> Peer:
         peer = await self.by_mesh_id(mesh_id)
         if peer.state not in {"active", "paused"}:
@@ -392,36 +402,127 @@ class FederationPeerService:
             raise ValueError("incident longitude must be -180 to 180")
         if not 1 <= incident_radius_km <= 500:
             raise ValueError("incident radius must be 1-500 km")
-        await self.database.write(
-            "UPDATE fed_peer SET boards=?,sync_incidents=?,incident_lat=?,incident_lon=?,"
-            "incident_radius_km=?,relay_alerts=?,"
-            "quota_items_per_hour=?,relay_mail=?,quota_mail_per_hour=?,last_sync_at=NULL,"
-            "service_permissions=?,quota_services_per_hour=?,service_concurrency=?,"
-            "service_max_response_bytes=?,service_airtime_seconds_per_hour=?,"
-            "policy_configured=1 "
-            "WHERE id=?",
-            (
-                json.dumps(cleaned, separators=(",", ":")),
-                int(sync_incidents),
-                incident_lat,
-                incident_lon,
-                incident_radius_km,
-                int(relay_alerts),
-                quota_items_per_hour,
-                int(relay_mail),
-                quota_mail_per_hour,
-                json.dumps(permissions, separators=(",", ":")),
-                service_quota,
-                concurrency,
-                response_bytes,
-                airtime_seconds,
-                peer.id,
-            ),
-        )
-        await self.database.write(
-            "DELETE FROM fed_cursor WHERE peer_id=? AND stream='_reconcile' AND direction='recv'",
-            (peer.id,),
-        )
+        now = int(self.clock.now().timestamp())
+        if policy_review_at is not None and policy_review_at <= now:
+            raise ValueError("policy review date must be in the future")
+        boards_to_enable: list[str] = []
+        if enable_boards is not None:
+            requested_enable = sorted(
+                {slug.strip().lower() for slug in enable_boards if slug.strip()}
+            )
+            if set(requested_enable) - set(cleaned):
+                raise ValueError("globally enabled boards must also be selected for this peer")
+            board_rows = []
+            if cleaned:
+                placeholders = ",".join("?" for _ in cleaned)
+                board_rows = await self.database.read(
+                    f"SELECT slug,federated FROM board WHERE slug IN ({placeholders})",  # noqa: S608
+                    cleaned,
+                )
+            found = {str(row["slug"]): bool(row["federated"]) for row in board_rows}
+            missing = sorted(set(cleaned) - set(found))
+            if missing:
+                raise ValueError(f"unknown board selection: {', '.join(missing)}")
+            boards_to_enable = sorted(slug for slug, enabled in found.items() if not enabled)
+            if boards_to_enable and not confirm_enable_boards:
+                raise ValueError(
+                    "global board federation confirmation required for: "
+                    + ", ".join(boards_to_enable)
+                )
+            if set(boards_to_enable) - set(requested_enable):
+                raise ValueError("every selected private board requires explicit global enablement")
+        before = {
+            "boards": peer.boards,
+            "sync_incidents": peer.sync_incidents,
+            "incident_lat": peer.incident_lat,
+            "incident_lon": peer.incident_lon,
+            "incident_radius_km": peer.incident_radius_km,
+            "relay_alerts": peer.relay_alerts,
+            "relay_mail": peer.relay_mail,
+            "quota_items_per_hour": peer.quota_items_per_hour,
+            "quota_mail_per_hour": peer.quota_mail_per_hour,
+            "service_permissions": peer.service_permissions,
+            "quota_services_per_hour": peer.quota_services_per_hour,
+            "service_concurrency": peer.service_concurrency,
+            "service_max_response_bytes": peer.service_max_response_bytes,
+            "service_airtime_seconds_per_hour": peer.service_airtime_seconds_per_hour,
+            "policy_review_at": peer.policy_review_at,
+        }
+        after = {
+            "boards": cleaned,
+            "sync_incidents": sync_incidents,
+            "incident_lat": incident_lat,
+            "incident_lon": incident_lon,
+            "incident_radius_km": incident_radius_km,
+            "relay_alerts": relay_alerts,
+            "relay_mail": relay_mail,
+            "quota_items_per_hour": quota_items_per_hour,
+            "quota_mail_per_hour": quota_mail_per_hour,
+            "service_permissions": permissions,
+            "quota_services_per_hour": service_quota,
+            "service_concurrency": concurrency,
+            "service_max_response_bytes": response_bytes,
+            "service_airtime_seconds_per_hour": airtime_seconds,
+            "policy_review_at": policy_review_at,
+        }
+        async with self.database.transaction() as transaction:
+            if boards_to_enable:
+                placeholders = ",".join("?" for _ in boards_to_enable)
+                await transaction.write(
+                    f"UPDATE board SET federated=1 WHERE slug IN ({placeholders})",  # noqa: S608
+                    boards_to_enable,
+                )
+            await transaction.write(
+                "UPDATE fed_peer SET boards=?,sync_incidents=?,incident_lat=?,incident_lon=?,"
+                "incident_radius_km=?,relay_alerts=?,"
+                "quota_items_per_hour=?,relay_mail=?,quota_mail_per_hour=?,last_sync_at=NULL,"
+                "service_permissions=?,quota_services_per_hour=?,service_concurrency=?,"
+                "service_max_response_bytes=?,service_airtime_seconds_per_hour=?,"
+                "policy_configured=1,policy_applied_by=?,policy_applied_at=?,policy_review_at=? "
+                "WHERE id=?",
+                (
+                    json.dumps(cleaned, separators=(",", ":")),
+                    int(sync_incidents),
+                    incident_lat,
+                    incident_lon,
+                    incident_radius_km,
+                    int(relay_alerts),
+                    quota_items_per_hour,
+                    int(relay_mail),
+                    quota_mail_per_hour,
+                    json.dumps(permissions, separators=(",", ":")),
+                    service_quota,
+                    concurrency,
+                    response_bytes,
+                    airtime_seconds,
+                    applied_by[:120],
+                    now,
+                    policy_review_at,
+                    peer.id,
+                ),
+            )
+            await transaction.write(
+                "DELETE FROM fed_cursor WHERE peer_id=? AND stream='_reconcile' "
+                "AND direction='recv'",
+                (peer.id,),
+            )
+            await transaction.write(
+                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                "VALUES('web',?,'federation.policy_update',?,?,?)",
+                (
+                    applied_by[:120],
+                    peer.mesh_id,
+                    json.dumps(
+                        {
+                            "before": before,
+                            "after": after,
+                            "globally_enabled_boards": boards_to_enable,
+                        },
+                        separators=(",", ":"),
+                    ),
+                    now,
+                ),
+            )
         return await self.by_mesh_id(mesh_id)
 
     async def secret(self, mesh_id: str) -> bytes:
