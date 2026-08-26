@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,9 +23,27 @@ class ManifestItem:
 
 
 class FederationSyncService:
-    def __init__(self, database: Database, local_mesh_id: str = "") -> None:
+    def __init__(
+        self,
+        database: Database,
+        local_mesh_id: str = "",
+        module_enabled: Callable[[str], bool] | None = None,
+    ) -> None:
         self.database = database
         self.local_mesh_id = local_mesh_id
+        self.module_enabled = module_enabled or (lambda _name: True)
+
+    @staticmethod
+    def stream_module(stream: str) -> str | None:
+        if stream.startswith("board:"):
+            return "bbs"
+        if stream in {"incidents", "alerts"}:
+            return "watch"
+        return None
+
+    def stream_enabled(self, stream: str) -> bool:
+        module = self.stream_module(stream)
+        return module is None or self.module_enabled(module)
 
     def _wire_uid(self, uid: str) -> str:
         if uid.startswith("!") and ":" in uid:
@@ -80,6 +99,8 @@ class FederationSyncService:
         return bool(rows)
 
     async def import_approved_replies(self, operator: str, now: int) -> int:
+        if not self.module_enabled("bbs"):
+            return 0
         rows = await self.database.read(
             "SELECT id,stream,payload_json FROM fed_inbox_item "
             "WHERE state='pending' AND stream LIKE 'board:%' ORDER BY id"
@@ -110,7 +131,7 @@ class FederationSyncService:
         if peer.state != "active":
             raise ValueError("sync requires an active peer")
         items: list[ManifestItem] = []
-        if peer.boards:
+        if peer.boards and self.module_enabled("bbs"):
             placeholders = ",".join("?" for _ in peer.boards)
             rows = await self.database.read(
                 f"""SELECT p.uid,p.created_at,p.edited_at,p.body,p.author_label,t.uid thread_uid,
@@ -134,7 +155,7 @@ class FederationSyncService:
                 )
                 for row in rows
             )
-        if peer.sync_incidents:
+        if peer.sync_incidents and self.module_enabled("watch"):
             rows = await self.database.read(
                 "SELECT uid,updated_at,status,severity,title,body,lat,lon FROM incident "
                 "ORDER BY updated_at DESC",
@@ -146,7 +167,7 @@ class FederationSyncService:
                 for row in rows
                 if self.incident_allowed(peer, row["lat"], row["lon"])
             )
-        if peer.relay_alerts:
+        if peer.relay_alerts and self.module_enabled("watch"):
             rows = await self.database.read(
                 "SELECT uid,raised_at,cancelled_at,severity,headline,expires_at FROM alert "
                 "ORDER BY raised_at DESC",
@@ -175,6 +196,8 @@ class FederationSyncService:
         }
         for item in manifest[:100]:
             stream = str(item.get("stream", item.get("s", "")))
+            if not self.stream_enabled(stream):
+                continue
             uid = str(item.get("uid", item.get("u", "")))
             if not uid or len(uid) > 160:
                 continue
@@ -203,6 +226,8 @@ class FederationSyncService:
         exported: list[dict[str, Any]] = []
         for request in requests[:8]:
             stream, uid = str(request.get("stream", "")), str(request.get("uid", ""))
+            if not self.stream_enabled(stream):
+                continue
             local_uid = self._local_uid(uid)
             if local_uid is None:
                 continue
@@ -248,6 +273,8 @@ class FederationSyncService:
 
     async def quarantine(self, peer: Peer, item: dict[str, Any], now: int) -> bool:
         stream, uid = str(item.get("stream", "")), str(item.get("uid", ""))
+        if not self.stream_enabled(stream):
+            raise ValueError(f"{self.stream_module(stream)} module is disabled")
         payload = item.get("payload")
         allowed = (
             (stream.startswith("board:") and stream[6:] in peer.boards)
@@ -308,6 +335,8 @@ class FederationSyncService:
                 raise ValueError("pending federation item not found")
             row = rows[0]
             stream, uid, payload = row["stream"], row["uid"], json.loads(row["payload_json"])
+            if not self.stream_enabled(str(stream)):
+                raise ValueError(f"{self.stream_module(str(stream))} module is disabled")
             if stream.startswith("board:"):
                 slug = stream[6:]
                 if slug not in json.loads(row["boards"]):

@@ -30,6 +30,25 @@ async def about(ctx: CommandContext) -> Response:
 
 
 async def help_command(ctx: CommandContext) -> Response:
+    groups = {
+        "BBS": {"bbs"},
+        "MAIL": {"mail"},
+        "IDENTITY": {"identity"},
+        "RADIO": {"core", "directory"},
+        "OPERATOR": {"operator"},
+        "WATCH": {"watch"},
+        "ENV": {"env"},
+    }
+
+    def group_commands(modules: set[str]) -> list[str]:
+        return [
+            spec.name
+            for spec in ctx.registry.commands()
+            if spec.module in modules
+            and ctx.member.trust != "blocked"
+            and TrustLevel.parse(ctx.member.trust) >= spec.min_trust
+        ]
+
     topic = ctx.args.strip().upper()
     if topic:
         spec = ctx.registry.resolve(topic)
@@ -40,36 +59,28 @@ async def help_command(ctx: CommandContext) -> Response:
                 "Mail is private from other members, not the node operator. "
                 "The operator can view stored plaintext; every dashboard view is audited."
             )
-        groups = {
-            "BBS": {"bbs"},
-            "MAIL": {"mail"},
-            "IDENTITY": {"identity"},
-            "RADIO": {"core", "directory"},
-            "OPERATOR": {"operator"},
-            "WATCH": {"watch"},
-            "ENV": {"env"},
-        }
         modules = groups.get(topic)
         if modules:
-            commands = [
-                spec.name
-                for spec in ctx.registry.commands()
-                if spec.module in modules
-                and ctx.member.trust != "blocked"
-                and TrustLevel.parse(ctx.member.trust) >= spec.min_trust
-            ]
+            commands = group_commands(modules)
+            if not commands:
+                return _detail(f"{topic} is not enabled on this Outpost.")
             suffix = " Mail is operator-readable; HELP PRIVACY." if topic == "MAIL" else ""
             return Response(
                 ResponseKind.DETAIL,
                 [Line(f"{topic}: {' · '.join(commands)} · HELP <command>")]
                 + ([Line(suffix.strip())] if suffix else []),
             )
-        return _detail("Help topics: BBS · MAIL · IDENTITY · RADIO · WATCH · ENV · PRIVACY")
+        topics = [name for name, modules in groups.items() if group_commands(modules)]
+        return _detail(f"Help topics: {' · '.join(topics)} · PRIVACY")
+    topics = [name for name, modules in groups.items() if group_commands(modules)]
+    start = "Start: NAME <handle> · WHO"
+    if group_commands(groups["BBS"]):
+        start += " · BOARDS · NEW"
     return Response(
         ResponseKind.DETAIL,
         [
-            Line("HELP BBS · MAIL · IDENTITY · RADIO · WATCH · ENV · PRIVACY"),
-            Line("Start: NAME <handle> · BOARDS · NEW · WHO"),
+            Line(f"HELP {' · '.join(topics)} · PRIVACY"),
+            Line(start),
         ],
     )
 

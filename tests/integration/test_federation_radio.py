@@ -112,7 +112,9 @@ async def test_pairing_bootstrap_uses_targeted_broadcast(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_pairing_approval_uses_authenticated_targeted_broadcast(tmp_path) -> None:
-    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    config = Config.model_validate(
+        {"store": {"path": str(tmp_path / "outpost.db")}, "modules": {"fed": {"enabled": True}}}
+    )
     app = OutpostApp(config)
     await app.database.open()
     app.radio._local_id = "!local"

@@ -46,6 +46,22 @@ region, modem preset, PSK, or channel setup.
 Disable unused modules. Environment and AI have additional validation: environment needs a real
 user agent, and an enabled non-null AI provider needs a base URL.
 
+Module flags are startup policy, not live switches. Change `modules.<name>.enabled` in the YAML (or
+the matching environment override) and restart `outpost.service`. The dashboard marks disabled
+navigation and capability cards, direct page visits explain the disabled state, and module APIs
+return `409 module_disabled` with `restart_required_to_change: true`.
+
+| Module | Disabled behavior |
+|---|---|
+| `bbs` | Board commands, moderation, digests, board APIs, and federated board exchange stop. |
+| `watch` | Incident/check-in/alert commands, schedulers, APIs, and federated safety records stop. |
+| `env` | Weather/forecast/geo commands, provider polling, APIs, and peer provider service stop. |
+| `fed` | Discovery, pairing, sync, relay mail/services, background work, and federation APIs stop. |
+| `ai` | AI navigation/API capability is unavailable; core deterministic features are unaffected. |
+
+Mail, identity, member directory, radio safety/governance, backups, and system operations are core
+surfaces and do not depend on the BBS flag.
+
 ### `airtime`
 
 The governor enforces an Outpost-originated budget, reserve, channel-utilization ceiling, minimum

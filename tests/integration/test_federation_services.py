@@ -24,7 +24,9 @@ def public_alert(area: str) -> dict:
 
 @pytest.mark.asyncio
 async def test_service_request_selects_capable_peer_and_records_response(tmp_path) -> None:
-    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    config = Config.model_validate(
+        {"store": {"path": str(tmp_path / "outpost.db")}, "modules": {"fed": {"enabled": True}}}
+    )
     app = OutpostApp(config)
     await app.database.open()
     app.federation.local_mesh_id = "!local"
@@ -84,7 +86,9 @@ async def test_service_request_selects_capable_peer_and_records_response(tmp_pat
 
 @pytest.mark.asyncio
 async def test_service_request_requires_active_capable_peer(tmp_path) -> None:
-    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    config = Config.model_validate(
+        {"store": {"path": str(tmp_path / "outpost.db")}, "modules": {"fed": {"enabled": True}}}
+    )
     app = OutpostApp(config)
     await app.database.open()
 
@@ -279,6 +283,8 @@ async def test_serving_outpost_queries_alerts_for_requesting_nodes_exact_point(
         {
             "store": {"path": str(tmp_path / "outpost.db")},
             "node": {"location": {"lat": 40.4406, "lon": -79.9959}},
+            "modules": {"env": {"enabled": True}, "fed": {"enabled": True}},
+            "env": {"user_agent": "Outpost tests (operator: test@example.org)"},
         }
     )
     app = OutpostApp(config)

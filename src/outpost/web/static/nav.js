@@ -76,6 +76,109 @@ if (navigation) {
   }).join("");
 }
 
+const moduleLinks = {
+  BBS: "bbs",
+  Watch: "watch",
+  Environment: "env",
+  Federation: "fed",
+  AI: "ai",
+};
+const modulePages = {
+  "/bbs.html": "bbs",
+  "/watch.html": "watch",
+  "/environment.html": "env",
+  "/federation.html": "fed",
+};
+const moduleNames = {
+  bbs: "Community boards",
+  watch: "Community Watch",
+  env: "Environment",
+  fed: "Federation",
+  ai: "Local AI",
+};
+const capabilityModules = {
+  Moderation: "bbs",
+  "Emergency settings": "watch",
+  "AI settings": "ai",
+};
+let effectiveModules = null;
+
+function applyModuleState() {
+  if (!effectiveModules) return;
+  for (const [label, module] of Object.entries(moduleLinks)) {
+    const link = navigation?.querySelector(`a[aria-label="${label}"]`);
+    if (!link) continue;
+    const disabled = effectiveModules[module]?.enabled === false;
+    link.classList.toggle("module-disabled", disabled);
+    if (disabled) link.setAttribute("aria-disabled", "true");
+    else link.removeAttribute("aria-disabled");
+    link.title = disabled
+      ? `${moduleNames[module]} is disabled · restart required to enable`
+      : label;
+  }
+
+  for (const card of document.querySelectorAll(".capability-grid article")) {
+    const module = capabilityModules[card.querySelector("b")?.textContent?.trim()];
+    if (!module) continue;
+    const disabled = effectiveModules[module]?.enabled === false;
+    card.classList.toggle("module-disabled", disabled);
+    const phase = card.querySelector(".phase");
+    if (phase && !phase.dataset.enabledLabel) phase.dataset.enabledLabel = phase.textContent;
+    const phaseLabel = disabled ? "DISABLED" : phase?.dataset.enabledLabel;
+    if (phase && phase.textContent !== phaseLabel) phase.textContent = phaseLabel;
+    for (const control of card.querySelectorAll("button, input, select, textarea, a")) {
+      if (control.matches("a")) {
+        if (disabled) control.setAttribute("aria-disabled", "true");
+        else control.removeAttribute("aria-disabled");
+        control.tabIndex = disabled ? -1 : 0;
+      } else {
+        control.disabled = disabled;
+      }
+    }
+  }
+
+  const pageModule = modulePages[path];
+  const disabled = pageModule && effectiveModules[pageModule]?.enabled === false;
+  document.body.classList.toggle("module-disabled-page", Boolean(disabled));
+  const main = document.querySelector("main");
+  if (!main) return;
+  let banner = document.querySelector(".module-disabled-banner");
+  if (disabled && !banner) {
+    banner = document.createElement("section");
+    banner.className = "module-disabled-banner";
+    banner.setAttribute("role", "status");
+    banner.innerHTML = `<div><p class="eyebrow">MODULE DISABLED</p><h2>${moduleNames[pageModule]} is offline</h2></div><p>Its commands, background work, federation exchange, and API are inactive. Enable <code>modules.${pageModule}.enabled</code> in the Outpost configuration and restart the service.</p>`;
+    main.prepend(banner);
+  } else if (!disabled) {
+    banner?.remove();
+  }
+  for (const section of main.children) {
+    if (!section.classList.contains("module-disabled-banner")) {
+      section.toggleAttribute("inert", Boolean(disabled));
+    }
+  }
+}
+
+async function refreshModuleState() {
+  try {
+    const response = await fetch("/api/v1/modules");
+    if (!response.ok) return;
+    effectiveModules = (await response.json()).items;
+    applyModuleState();
+  } catch (_) {
+    // The existing page remains usable while the backend reconnects.
+  }
+}
+
+navigation?.addEventListener("click", event => {
+  if (event.target.closest("a[aria-disabled='true']")) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+}, true);
+new MutationObserver(applyModuleState).observe(document.body, {childList: true, subtree: true});
+refreshModuleState();
+
 function updateCurrentPage() {
   if (!navigation) return;
   const candidates = [...navigation.querySelectorAll("a")];

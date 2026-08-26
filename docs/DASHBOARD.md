@@ -48,6 +48,11 @@ and action buttons remain in their authored primary/secondary order. The action 
 intermediate widths and stacks below its heading on narrow or enlarged-text displays rather than
 clipping controls at the viewport edge.
 
+Disabled optional modules remain visible as policy state, not as apparently broken features. Their
+navigation entries and matching capability cards read **Disabled**; a direct page visit shows the
+configuration key and restart requirement while making the inactive controls inert. The API source
+of truth is `/api/v1/modules`.
+
 ## API
 
 The JSON API is rooted at `/api/v1`. Important read surfaces include:

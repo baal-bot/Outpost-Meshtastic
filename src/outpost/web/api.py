@@ -270,8 +270,39 @@ def create_web_app(
         Callable[[str, str, str, str], Awaitable[dict[str, object]]] | None
     ) = None,
     restore_coordinator: RestoreCoordinator | None = None,
+    module_provider: Callable[[], dict[str, bool]] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Outpost API", version=__version__, docs_url="/api/docs")
+
+    def effective_modules() -> dict[str, bool]:
+        if module_provider is not None:
+            return module_provider()
+        if settings is not None:
+            return settings.config.modules.enabled_map()
+        return {name: True for name in ("bbs", "ai", "watch", "env", "fed")}
+
+    def api_module(path: str) -> str | None:
+        routes = (
+            ("/api/v1/environment", "env"),
+            ("/api/v1/federation", "fed"),
+            ("/api/v1/incidents", "watch"),
+            ("/api/v1/alerts", "watch"),
+            ("/api/v1/events", "watch"),
+            ("/api/v1/watch", "watch"),
+            ("/api/v1/config/watch", "watch"),
+            ("/api/v1/boards", "bbs"),
+            ("/api/v1/threads", "bbs"),
+            ("/api/v1/posts", "bbs"),
+            ("/api/v1/ai", "ai"),
+        )
+        return next(
+            (
+                module
+                for prefix, module in routes
+                if path == prefix or path.startswith(f"{prefix}/")
+            ),
+            None,
+        )
 
     @app.middleware("http")
     async def security_headers(request: Any, call_next: Any) -> Any:
@@ -319,6 +350,25 @@ def create_web_app(
                         {"error": {"code": "csrf", "message": "Invalid CSRF token."}},
                         status_code=403,
                     )
+        module = api_module(path)
+        if module is not None and not effective_modules().get(module, True):
+            return JSONResponse(
+                {
+                    "error": {
+                        "code": "module_disabled",
+                        "message": (
+                            f"The {module} module is disabled. Enable modules.{module}.enabled "
+                            "and restart Outpost."
+                        ),
+                    },
+                    "module": {
+                        "name": module,
+                        "enabled": False,
+                        "restart_required_to_change": True,
+                    },
+                },
+                status_code=409,
+            )
         return await call_next(request)
 
     if restore_coordinator is not None:
@@ -963,6 +1013,16 @@ def create_web_app(
     @app.get("/api/v1/status")
     async def status() -> dict[str, Any]:
         return status_provider()
+
+    @app.get("/api/v1/modules")
+    async def modules() -> dict[str, Any]:
+        return {
+            "items": {
+                name: {"enabled": enabled, "restart_required_to_change": True}
+                for name, enabled in effective_modules().items()
+            },
+            "change_policy": "restart_required",
+        }
 
     if database is not None:
         if settings is not None:

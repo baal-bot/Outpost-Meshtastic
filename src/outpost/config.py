@@ -159,6 +159,14 @@ class ModulesConfig(StrictModel):
     env: Enabled = Field(default_factory=Enabled)
     fed: Enabled = Field(default_factory=Enabled)
 
+    def enabled_map(self) -> dict[str, bool]:
+        return {
+            name: bool(getattr(self, name).enabled) for name in ("bbs", "ai", "watch", "env", "fed")
+        }
+
+    def is_enabled(self, name: str) -> bool:
+        return self.enabled_map().get(name, True)
+
 
 class BaseUrl(StrictModel):
     base_url: str = ""

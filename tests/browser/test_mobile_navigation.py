@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import socket
 import threading
@@ -48,6 +49,12 @@ ACTION_SECTIONS = (
     ("/operator.html", "Community members"),
     ("/radio.html", "Message log"),
     ("/watch.html", "Open incidents"),
+)
+MODULE_PAGES = (
+    ("bbs", "BBS", "/bbs.html", "Community boards is offline"),
+    ("watch", "Watch", "/watch.html", "Community Watch is offline"),
+    ("env", "Environment", "/environment.html", "Environment is offline"),
+    ("fed", "Federation", "/federation.html", "Federation is offline"),
 )
 
 
@@ -457,5 +464,82 @@ def test_action_heavy_sections_reflow_at_320px_and_200_percent_text(
         )
         screenshot = heading.screenshot(animations="disabled")
         assert screenshot.startswith(b"\x89PNG") and len(screenshot) > 1_000
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize(("module", "label", "path", "heading"), MODULE_PAGES)
+def test_disabled_module_pages_are_explained_and_inert(
+    browser: object,
+    dashboard_url: str,
+    module: str,
+    label: str,
+    path: str,
+    heading: str,
+) -> None:
+    page = prepare_page(browser, 390, dashboard_url, theme="daylight")
+    states = {
+        name: {"enabled": name != module, "restart_required_to_change": True}
+        for name in ("bbs", "ai", "watch", "env", "fed")
+    }
+    page.route(
+        "**/api/v1/modules",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"items": states, "change_policy": "restart_required"}),
+        ),
+    )
+    try:
+        page.goto(f"{dashboard_url}{path}", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.get_by_role("heading", name=heading).wait_for()
+        link = page.locator(f'.rail nav a[aria-label="{label}"]')
+        assert link.get_attribute("aria-disabled") == "true"
+        assert "restart required" in link.get_attribute("title")
+        assert page.locator("main > :not(.module-disabled-banner)[inert]").count() > 0
+        assert "restart the service" in page.locator(".module-disabled-banner").text_content()
+    finally:
+        page.close()
+
+
+def test_capability_cards_reflect_disabled_modules(browser: object, dashboard_url: str) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    states = {
+        name: {
+            "enabled": name not in {"bbs", "watch", "ai"},
+            "restart_required_to_change": True,
+        }
+        for name in ("bbs", "ai", "watch", "env", "fed")
+    }
+    page.route(
+        "**/api/v1/modules",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"items": states, "change_policy": "restart_required"}),
+        ),
+    )
+    try:
+        page.goto(dashboard_url, wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.wait_for_function(
+            "() => document.querySelectorAll("
+            "'.capability-grid article.module-disabled').length === 3"
+        )
+        disabled = page.locator(".capability-grid article.module-disabled")
+        assert disabled.locator("b").all_text_contents() == [
+            "Moderation",
+            "AI settings",
+            "Emergency settings",
+        ]
+        assert disabled.locator(".phase").all_text_contents() == [
+            "DISABLED",
+            "DISABLED",
+            "DISABLED",
+        ]
+        assert page.locator('.rail nav a[aria-label="AI"]').get_attribute("aria-disabled") == (
+            "true"
+        )
     finally:
         page.close()

@@ -157,16 +157,22 @@ class OutpostApp:
         self.seismic = SeismicService(self.database, self.clock, self.config.env)
         self.waypoints = WaypointService(self.database, self.clock)
         self.federation = FederationPeerService(self.database, self.clock, "")
-        self.federation_sync = FederationSyncService(self.database)
+        self.federation_sync = FederationSyncService(
+            self.database, module_enabled=self.config.modules.is_enabled
+        )
         self.federation_mail = FederationMailService(self.database, self.federation, self.clock)
         self.federation_codec = FrameCodec(self.config.fed.max_fragments)
         self.federation_reassembler = Reassembler(self.config.fed.reassembly_timeout_s)
         for spec in (
             *identity_specs(members, mail, self.config.security.require_approval),
-            *bbs_specs(bbs, self.config.bbs.self_delete_minutes),
+            *(
+                bbs_specs(bbs, self.config.bbs.self_delete_minutes)
+                if self.config.modules.bbs.enabled
+                else ()
+            ),
             *mail_specs(mail),
             *directory_specs(directory),
-            *operator_specs(bbs),
+            *(operator_specs(bbs) if self.config.modules.bbs.enabled else ()),
             *(watch_specs(self.incidents) if self.config.modules.watch.enabled else ()),
             *(alert_specs(self.alerts) if self.config.modules.watch.enabled else ()),
             *(checkin_specs(self.checkins) if self.config.modules.watch.enabled else ()),
@@ -226,6 +232,7 @@ class OutpostApp:
             self.import_federation_inbox,
             self.send_federation_mail,
             self.restore_coordinator,
+            module_provider=self.config.modules.enabled_map,
         )
 
     def _start_background_task(
@@ -293,6 +300,8 @@ class OutpostApp:
         return await self.backups.restore_quiesced(name)
 
     async def import_federation_inbox(self, item_id: int) -> str:
+        if not self.config.modules.fed.enabled:
+            raise ValueError("federation module is disabled")
         return await self.federation_sync.import_inbox(
             item_id, "web:operator", int(self.clock.now().timestamp())
         )
@@ -300,6 +309,8 @@ class OutpostApp:
     async def send_federation_mail(
         self, peer_id: str, recipient: str, subject: str, body: str
     ) -> dict[str, object]:
+        if not self.config.modules.fed.enabled:
+            raise ValueError("federation module is disabled")
         envelope = await self.federation_mail.seal(
             peer_id, recipient, f"operator@{self.config.node.short_name}", subject, body
         )
@@ -375,14 +386,38 @@ class OutpostApp:
                 )
                 for worker in range(1, self.config.router.inbound_workers + 1)
             ],
-            self._start_background_task("bbs-digests", self._digest_loop()),
+            *(
+                [self._start_background_task("bbs-digests", self._digest_loop())]
+                if self.config.modules.bbs.enabled
+                else []
+            ),
             self._start_background_task("store-maintenance", self._maintenance_loop()),
-            self._start_background_task("watch-scheduler", self._watch_loop()),
-            self._start_background_task("environment-poller", self._environment_loop()),
-            self._start_background_task("federation-discovery", self._federation_hello_loop()),
-            self._start_background_task("federation-services", self._federation_service_loop()),
-            self._start_background_task("federation-sync", self._federation_sync_loop()),
-            self._start_background_task("federation-delivery", self._federation_delivery_loop()),
+            *(
+                [self._start_background_task("watch-scheduler", self._watch_loop())]
+                if self.config.modules.watch.enabled
+                else []
+            ),
+            *(
+                [self._start_background_task("environment-poller", self._environment_loop())]
+                if self.config.modules.env.enabled
+                else []
+            ),
+            *(
+                [
+                    self._start_background_task(
+                        "federation-discovery", self._federation_hello_loop()
+                    ),
+                    self._start_background_task(
+                        "federation-services", self._federation_service_loop()
+                    ),
+                    self._start_background_task("federation-sync", self._federation_sync_loop()),
+                    self._start_background_task(
+                        "federation-delivery", self._federation_delivery_loop()
+                    ),
+                ]
+                if self.config.modules.fed.enabled
+                else []
+            ),
         ]
 
     async def _federation_hello_loop(self) -> None:
@@ -404,7 +439,7 @@ class OutpostApp:
         capabilities = {
             "internet": True,
             "weather": self.config.modules.env.enabled,
-            "alerts": self.config.modules.watch.enabled,
+            "alerts": self.config.modules.env.enabled,
             "bbs": self.config.modules.bbs.enabled,
             "ai": self.config.modules.ai.enabled,
         }
@@ -486,6 +521,8 @@ class OutpostApp:
         return "invalid federation frame"
 
     async def initiate_federation_pairing(self, mesh_id: str) -> object:
+        if not self.config.modules.fed.enabled:
+            raise ValueError("federation module is disabled")
         local_id = self.radio.local_node_id
         if not local_id:
             raise ValueError("radio identity is not available")
@@ -498,6 +535,8 @@ class OutpostApp:
         return peer
 
     async def approve_federation_pairing(self, mesh_id: str, code: str) -> object:
+        if not self.config.modules.fed.enabled:
+            raise ValueError("federation module is disabled")
         secret = await self.federation.pairing_secret(mesh_id)
         peer = await self.federation.approve_local(mesh_id, "web:operator", code)
         frames = self.federation_codec.encode(
@@ -529,6 +568,8 @@ class OutpostApp:
     async def request_federation_service(
         self, service: str, args: dict[str, object]
     ) -> dict[str, object]:
+        if not self.config.modules.fed.enabled:
+            raise ValueError("federation module is disabled")
         if service not in {"weather", "alerts", "knowledge"}:
             raise ValueError("unsupported federation service")
         peers = [
@@ -623,6 +664,8 @@ class OutpostApp:
         self, service: str, args: dict[str, object]
     ) -> tuple[dict[str, object], dict[str, object]]:
         if service == "weather":
+            if not self.config.modules.env.enabled:
+                raise ValueError("environment module is disabled")
             location = self.config.node.location
             lat = float(args.get("lat", location.lat if location else 0))
             lon = float(args.get("lon", location.lon if location else 0))
@@ -653,6 +696,8 @@ class OutpostApp:
                 "serving_outpost": self.federation.local_mesh_id,
             }
         if service == "alerts":
+            if not self.config.modules.env.enabled:
+                raise ValueError("environment module is disabled")
             try:
                 lat, lon = float(args["lat"]), float(args["lon"])
             except (KeyError, TypeError, ValueError) as error:
@@ -748,6 +793,10 @@ class OutpostApp:
 
     async def _federation_service_loop(self) -> None:
         while True:
+            if not self.config.modules.fed.enabled:
+                self._task_progress("federation-services")
+                await self.clock.sleep(15)
+                continue
             now = int(self.clock.now().timestamp())
             rows = await self.database.read(
                 "SELECT * FROM fed_service_request WHERE direction='out' AND status='pending'"
@@ -1548,8 +1597,9 @@ class OutpostApp:
 
     async def _watch_loop(self) -> None:
         while True:
-            await self.alerts.advance_due()
-            await self.incidents.expire_due()
+            if self.config.modules.watch.enabled:
+                await self.alerts.advance_due()
+                await self.incidents.expire_due()
             self._task_progress("watch-scheduler")
             await self.clock.sleep(15)
 
@@ -1558,26 +1608,27 @@ class OutpostApp:
 
     async def _digest_loop(self) -> None:
         while True:
-            for delivery in await self.digests.due():
-                parts = chunk_text(
-                    delivery.text,
-                    max_parts=self.config.airtime.max_parts.get("digest", 4),
-                )
-                scheduled = await self.governor.admit_many(
-                    [
-                        OutboundItem(
-                            text=part,
-                            dest=delivery.mesh_id,
-                            channel=0,
-                            traffic_class=TrafficClass.DIGEST,
-                            want_ack=True,
-                            multipart=len(parts) > 1,
-                        )
-                        for part in parts
-                    ]
-                )
-                if scheduled is not None:
-                    await self.digests.mark_scheduled(delivery)
+            if self.config.modules.bbs.enabled:
+                for delivery in await self.digests.due():
+                    parts = chunk_text(
+                        delivery.text,
+                        max_parts=self.config.airtime.max_parts.get("digest", 4),
+                    )
+                    scheduled = await self.governor.admit_many(
+                        [
+                            OutboundItem(
+                                text=part,
+                                dest=delivery.mesh_id,
+                                channel=0,
+                                traffic_class=TrafficClass.DIGEST,
+                                want_ack=True,
+                                multipart=len(parts) > 1,
+                            )
+                            for part in parts
+                        ]
+                    )
+                    if scheduled is not None:
+                        await self.digests.mark_scheduled(delivery)
             self._task_progress("bbs-digests")
             await self.clock.sleep(30)
 
@@ -1818,6 +1869,10 @@ class OutpostApp:
         available = set(self.radio.snapshot.channels)
         return {
             "node": self.config.node.name,
+            "modules": {
+                name: {"enabled": enabled, "restart_required_to_change": True}
+                for name, enabled in self.config.modules.enabled_map().items()
+            },
             "radio": self.radio.state.value,
             "airtime_used_ratio": self.governor.used_airtime / 3_600,
             "queues": self.governor.queue_depths(),

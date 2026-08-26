@@ -65,6 +65,8 @@ html[data-theme="daylight"] .application-dialog-card .danger { color: #fff; back
 .rail nav a:hover { border-color: rgb(169 226 124 / 10%); transform: translateX(2px); }
 .rail nav a.active { color: var(--ink); background: #143127; border-color: #234a3c; box-shadow: inset 3px 0 var(--green); }
 .rail nav a.active i { color: var(--green); }
+.rail nav a.module-disabled { color: color-mix(in srgb, var(--muted) 58%, transparent); border-color: transparent; background: transparent; box-shadow: none; cursor: not-allowed; }
+.rail nav a.module-disabled::after { content: "OFF"; margin-left: auto; padding: 2px 4px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; font-size: .48rem; letter-spacing: .08em; }
 .rail-foot { padding: 12px 9px; font-size: .72rem; }
 .mobile-nav-toggle, .mobile-nav-backdrop { display: none; }
 
@@ -121,6 +123,13 @@ button:not(:disabled):not(.environment-marker):not(.member-map-point):not(.map-p
 .capability-grid { gap: 11px; }
 .capability-grid article { padding: 18px; border-radius: 10px; }
 .capability-grid article p { font-size: .72rem; }
+.capability-grid article.module-disabled { opacity: .62; border-style: dashed; }
+.capability-grid article.module-disabled .phase { color: var(--muted); background: var(--surface); }
+.module-disabled-banner { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(280px, 1.3fr); align-items: center; gap: 24px; margin-bottom: 18px; padding: 22px 24px; color: var(--ink); background: color-mix(in srgb, var(--surface) 88%, var(--amber)); border: 1px solid color-mix(in srgb, var(--amber) 48%, var(--line)); border-radius: 12px; }
+.module-disabled-banner h2 { margin: 0; }
+.module-disabled-banner > p { margin: 0; color: var(--muted); font-size: .76rem; line-height: 1.55; }
+.module-disabled-banner code { color: var(--amber); }
+.module-disabled-page main > :not(.module-disabled-banner) { opacity: .42; filter: saturate(.4); }
 .login-screen { background: rgb(3 12 9 / 90%); }
 .login-card { border-radius: 16px; box-shadow: 0 30px 100px rgb(0 0 0 / 55%); }
 
@@ -165,6 +174,7 @@ button:not(:disabled):not(.environment-marker):not(.member-map-point):not(.map-p
   .heading .heading-actions { width: 100%; flex: 1 1 auto; align-items: center; justify-content: flex-start; }
   .heading .heading-actions > select, .heading .heading-actions > input:not([type="checkbox"]):not([type="radio"]) { width: auto; flex: 1 1 10rem; }
   .heading .heading-actions > .safety-note, .heading .heading-actions > .alert-warning { flex: 1 1 100%; }
+  .module-disabled-banner { grid-template-columns: 1fr; gap: 10px; padding: 18px; }
 }
 
 @media (max-width: 480px) {

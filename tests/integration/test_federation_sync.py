@@ -69,6 +69,52 @@ async def test_manifest_obeys_peer_policy_and_missing_is_bounded(tmp_path) -> No
 
 
 @pytest.mark.asyncio
+async def test_disabled_content_modules_block_federation_sync(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    peers = FederationPeerService(database, VirtualClock(), "!local")
+    await peers.discover("!remote", "Remote", 1, {}, "radio")
+    await database.write("UPDATE fed_peer SET state='active' WHERE mesh_id='!remote'")
+    peer = await peers.update_sync_policy(
+        "!remote",
+        boards=["gen"],
+        sync_incidents=True,
+        relay_alerts=True,
+        quota_items_per_hour=20,
+    )
+    await database.write("UPDATE board SET federated=1 WHERE slug='gen'")
+    await database.write(
+        "INSERT INTO incident(uid,local_ref,type,severity,title,reporter_label,origin_node,"
+        "created_at,updated_at) VALUES('local:inc:1',99,'road','caution','Road closed',"
+        "'operator','local',1,2)"
+    )
+    sync = FederationSyncService(database, module_enabled=lambda _module: False)
+
+    assert await sync.manifest(peer) == []
+    assert (
+        await sync.missing(
+            [
+                {"stream": "incidents", "uid": "remote:incident:1", "version": 1},
+                {"stream": "board:gen", "uid": "remote:post:1", "version": 1},
+            ]
+        )
+        == []
+    )
+    assert await sync.export_items(peer, [{"stream": "incidents", "uid": "local:inc:1"}]) == []
+    with pytest.raises(ValueError, match="watch module is disabled"):
+        await sync.quarantine(
+            peer,
+            {
+                "stream": "incidents",
+                "uid": "remote:incident:1",
+                "payload": {"title": "Remote incident"},
+            },
+            10,
+        )
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_incident_radius_filters_exports_and_member_positions_never_federate(
     tmp_path,
 ) -> None:
