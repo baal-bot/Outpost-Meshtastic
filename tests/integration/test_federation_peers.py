@@ -3,6 +3,7 @@ from dataclasses import asdict
 import pytest
 from fastapi.testclient import TestClient
 
+from outpost.bbs.admin import BBSAdmin
 from outpost.clock import VirtualClock
 from outpost.fed import FederationPeerService
 from outpost.store import Database
@@ -167,4 +168,33 @@ async def test_sync_policy_requires_pairing_and_is_bounded(tmp_path) -> None:
     assert peer.boards == ["mutual-aid", "public"]
     assert peer.sync_incidents and peer.relay_alerts
     assert peer.quota_items_per_hour == 30
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_board_federation_toggle_updates_active_peer_policies(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    service = FederationPeerService(database, clock, "!local")
+    await service.discover("!remote", "Remote", 1, {}, "radio")
+    await database.write("UPDATE fed_peer SET state='active' WHERE mesh_id='!remote'")
+    admin = BBSAdmin(database, clock, set())
+    client = TestClient(
+        create_web_app(
+            lambda: {"radio": "up"},
+            database=database,
+            bbs_admin=admin,
+            federation=service,
+        )
+    )
+    board_id = int((await database.read("SELECT id FROM board WHERE slug='gen'"))[0]["id"])
+
+    enabled = client.patch(f"/api/v1/boards/{board_id}", json={"federated": True})
+    assert enabled.status_code == 200
+    assert (await service.by_mesh_id("!remote")).boards == ["gen"]
+
+    disabled = client.patch(f"/api/v1/boards/{board_id}", json={"federated": False})
+    assert disabled.status_code == 200
+    assert (await service.by_mesh_id("!remote")).boards == []
     await database.close()

@@ -1505,6 +1505,36 @@ def create_web_app(
 
         if bbs_admin is not None:
 
+            async def apply_board_federation_policy(board_id: int, enabled: bool) -> None:
+                if federation is None:
+                    return
+                board_rows = await database.read("SELECT slug FROM board WHERE id=?", (board_id,))
+                if not board_rows:
+                    return
+                slug = str(board_rows[0]["slug"])
+                for peer in await federation.list("active"):
+                    boards = list(peer.boards)
+                    if enabled and slug not in boards:
+                        boards.append(slug)
+                    elif not enabled and slug in boards:
+                        boards.remove(slug)
+                    else:
+                        continue
+                    await federation.update_sync_policy(
+                        peer.mesh_id,
+                        boards=boards,
+                        sync_incidents=peer.sync_incidents,
+                        relay_alerts=peer.relay_alerts,
+                        quota_items_per_hour=peer.quota_items_per_hour,
+                        relay_mail=peer.relay_mail,
+                        quota_mail_per_hour=peer.quota_mail_per_hour,
+                    )
+                await database.write(
+                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                    "VALUES('web','operator','federation.board_policy',?,?,unixepoch())",
+                    (f"board:{board_id}", json.dumps({"slug": slug, "enabled": enabled})),
+                )
+
             @app.post("/api/v1/boards", response_model=None)
             async def board_create(body: BoardCreateBody) -> dict[str, int] | Response:
                 try:
@@ -1514,6 +1544,8 @@ def create_web_app(
                         {"error": {"code": "invalid_board", "message": str(error)}},
                         status_code=422,
                     )
+                if body.federated:
+                    await apply_board_federation_policy(board_id, True)
                 return {"id": board_id}
 
             @app.patch("/api/v1/boards/{board_id}", response_model=None)
@@ -1534,6 +1566,8 @@ def create_web_app(
                         {"error": {"code": "not_found", "message": "Board not found."}},
                         status_code=404,
                     )
+                if body.federated is not None:
+                    await apply_board_federation_policy(board_id, body.federated)
                 return {"ok": True}
 
             @app.post("/api/v1/boards/{board_id}/threads", response_model=None)

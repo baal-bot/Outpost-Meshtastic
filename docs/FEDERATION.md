@@ -10,6 +10,8 @@ experimental until the two-node hardware backlog is complete.
 - Pairing uses X25519 and a six-digit out-of-band confirmation code.
 - Paired frames use canonical CBOR, bounded fragments, HMAC, and persistent replay counters.
 - Per-peer policy controls boards, incidents, alerts, mail, quotas, and transport.
+- Enabling federation on a board automatically adds its slug to every currently paired peer's
+  policy; disabling it removes the slug. Per-peer settings can still narrow that selection.
 - Imported items can be quarantined for operator review.
 
 ## Before pairing
