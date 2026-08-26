@@ -347,7 +347,8 @@ class FederationPeerService:
         await self.database.write(
             "UPDATE fed_peer SET boards=?,sync_incidents=?,incident_lat=?,incident_lon=?,"
             "incident_radius_km=?,relay_alerts=?,"
-            "quota_items_per_hour=?,relay_mail=?,quota_mail_per_hour=? WHERE id=?",
+            "quota_items_per_hour=?,relay_mail=?,quota_mail_per_hour=?,last_sync_at=NULL "
+            "WHERE id=?",
             (
                 json.dumps(cleaned, separators=(",", ":")),
                 int(sync_incidents),
@@ -360,6 +361,11 @@ class FederationPeerService:
                 quota_mail_per_hour,
                 peer.id,
             ),
+        )
+        await self.database.write(
+            "DELETE FROM fed_cursor WHERE peer_id=? AND stream='_reconcile' "
+            "AND direction='recv'",
+            (peer.id,),
         )
         return await self.by_mesh_id(mesh_id)
 
