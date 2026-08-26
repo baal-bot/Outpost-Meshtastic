@@ -350,7 +350,10 @@ class OutpostApp:
         self.federation.local_mesh_id = local_id
         peer, payload = await self.federation.create_pairing_request(mesh_id)
         frames = self.federation_codec.encode(MessageType.PAIR_REQ, payload, 0, None)
-        self._queue_federation_frames(frames, mesh_id, want_ack=True)
+        mqtt_only = "mqtt" in peer.discovery_transports and "radio" not in peer.discovery_transports
+        self._queue_federation_frames(
+            frames, "^all" if mqtt_only else mesh_id, want_ack=not mqtt_only
+        )
         return peer
 
     async def approve_federation_pairing(self, mesh_id: str, code: str) -> object:
@@ -675,6 +678,9 @@ class OutpostApp:
                 raise FrameError("replayed federation service frame")
             if not isinstance(value, dict) or value.get("mesh_id") != sender:
                 raise FrameError("federation identity does not match packet sender")
+            target = value.get("target_mesh_id")
+            if target is not None and target != self.radio.local_node_id:
+                return
             self.federation.local_mesh_id = self.radio.local_node_id
             self.federation_sync.local_mesh_id = self.radio.local_node_id
             await self.federation_sync.import_approved_replies(
@@ -703,7 +709,11 @@ class OutpostApp:
                 frames = self.federation_codec.encode(
                     MessageType.PAIR_ACK, acknowledgement, 0, None
                 )
-                self._queue_federation_frames(frames, sender, want_ack=True)
+                self._queue_federation_frames(
+                    frames,
+                    sender if getattr(message, "is_direct", False) else "^all",
+                    want_ack=bool(getattr(message, "is_direct", False)),
+                )
             elif msg_type is MessageType.PAIR_ACK:
                 await self.federation.accept_pairing_ack(
                     sender, bytes(value["public_key"]), bytes(value["nonce"])

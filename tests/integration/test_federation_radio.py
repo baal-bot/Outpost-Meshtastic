@@ -84,6 +84,28 @@ async def test_direct_hello_does_not_trigger_response_loop(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_mqtt_only_pairing_bootstrap_uses_targeted_broadcast(tmp_path) -> None:
+    config = Config.model_validate(
+        {"store": {"path": str(tmp_path / "outpost.db")}, "modules": {"fed": {"enabled": True}}}
+    )
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    await app.federation.discover("!remote", "Remote", 1, {}, "mqtt")
+
+    await app.initiate_federation_pairing("!remote")
+
+    queued = app.governor.queued_items()
+    assert len(queued) == 1
+    assert queued[0].dest == "^all"
+    assert queued[0].want_ack is False
+    fragment = app.federation_codec.decode_fragment(queued[0].binary_payload, None)
+    value = app.federation_reassembler.add("!local", fragment)
+    assert value["target_mesh_id"] == "!remote"
+    await app.database.close()
+
+
+@pytest.mark.asyncio
 async def test_radio_hello_cannot_claim_another_sender(tmp_path) -> None:
     config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
     app = OutpostApp(config)

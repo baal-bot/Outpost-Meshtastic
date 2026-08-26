@@ -36,9 +36,11 @@ async def test_operator_pairing_and_explicit_key_rotation(tmp_path) -> None:
     await remote.discover("!local", "Local", 1, {}, "radio")
 
     pending, request = await local.create_pairing_request("!remote")
+    assert request["target_mesh_id"] == "!remote"
     _, acknowledgement, remote_code = await remote.accept_pairing_request(
         "!local", request["public_key"], request["nonce"]
     )
+    assert acknowledgement["target_mesh_id"] == "!local"
     _, local_code = await local.accept_pairing_ack(
         "!remote", acknowledgement["public_key"], acknowledgement["nonce"]
     )

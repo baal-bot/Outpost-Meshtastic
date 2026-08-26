@@ -122,6 +122,7 @@ class FederationPeerService:
         )
         return await self.by_mesh_id(mesh_id), {
             "mesh_id": self.local_mesh_id,
+            "target_mesh_id": mesh_id,
             "public_key": public_raw,
             "nonce": nonce,
         }
@@ -151,6 +152,7 @@ class FederationPeerService:
             updated,
             {
                 "mesh_id": self.local_mesh_id,
+                "target_mesh_id": mesh_id,
                 "public_key": public_raw,
                 "nonce": nonce,
             },
