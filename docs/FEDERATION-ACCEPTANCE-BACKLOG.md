@@ -24,11 +24,12 @@ observed over live radios, not only in automated tests.
 - [x] Restore connectivity and confirm queued frames are deduplicated rather than replayed.
   After Outpost01's WAN was restored, local weather and a new peer weather request each produced
   one current result; the earlier offline request was neither replayed nor duplicated.
-- [ ] Partition both transports, reconnect, and verify bounded catch-up respects airtime policy.
+- [x] Partition both transports, reconnect, and verify bounded catch-up respects airtime policy.
   Snapshot/keyset pagination, 8-item pages, durable continuation checkpoints, and long-outage
-  no-skip coverage are implemented. The first live run imported all eight offline board changes;
-  two multipart items lacked receipts because retries changed counters. Stable retry counters and
-  idempotent receipt regeneration were then added; final live convergence remains to be observed.
+  no-skip coverage are implemented. A live run imported all eight offline board changes (three
+  threads and five replies). Two multipart items initially lacked receipts because retries changed
+  counters; after stable retry counters and idempotent receipt regeneration were deployed, both
+  durable records converged without recreating content or resetting either database.
 
 Live testing found that 225–233-byte application payloads were not reliably acknowledged by the
 test radios, while payloads at 188 bytes were. Routine weather responses use compact wire keys and
