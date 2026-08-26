@@ -99,18 +99,18 @@ class WaypointService:
         self, member_id: int | None = None, handle: str | None = None
     ) -> dict[str, Any] | None:
         query = (
-            """SELECT m.id,m.mesh_id,m.handle,m.prefs,p.lat,p.lon,p.received_at
+            """SELECT m.id,m.mesh_id,m.handle,m.prefs,p.lat,p.lon,p.received_at,p.expires_at
                FROM member m JOIN member_position p ON p.member_id=m.id
-               WHERE m.id=? LIMIT 1"""
+               WHERE m.id=? AND p.expires_at>? LIMIT 1"""
             if member_id is not None
-            else """SELECT m.id,m.mesh_id,m.handle,m.prefs,p.lat,p.lon,p.received_at
+            else """SELECT m.id,m.mesh_id,m.handle,m.prefs,p.lat,p.lon,p.received_at,p.expires_at
                      FROM member m JOIN member_position p ON p.member_id=m.id
-                     WHERE m.handle=? LIMIT 1"""
+                     WHERE m.handle=? AND p.expires_at>? LIMIT 1"""
         )
         value = member_id if member_id is not None else handle
         rows = await self.database.read(
             query,
-            (value,),
+            (value, int(self.clock.now().timestamp())),
         )
         return dict(rows[0]) if rows else None
 

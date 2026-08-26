@@ -63,6 +63,11 @@ escalation stages, and acknowledgement threshold before approval.
 
 Retention reduces old posts, mail, and message logs; it does not create an organizational policy.
 Document who can approve members, view locations, export rosters, access backups, and pair peers.
+Exact member POS shares expire after `store.retention.member_positions_hours` (168 hours by
+default). The Members map shows the source, share time, visibility, and scheduled deletion, with
+audited controls to delete one share or purge expired rows. Expired positions remain excluded after
+restore, and member positions are not federated. Backups and welfare CSV exports must be treated as
+sensitive because they may contain location data captured before expiry.
 
 During WAN outages, avoid repeated forced refreshes. Cached data may be stale—use its timestamp.
 Radio federation can still work. Peer/AI fallback must remain bounded and source-attributed.

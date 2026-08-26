@@ -64,8 +64,15 @@ class Incident:
 
 
 class IncidentService:
-    def __init__(self, database: Database, clock: Clock, origin_node: str = "local") -> None:
+    def __init__(
+        self,
+        database: Database,
+        clock: Clock,
+        origin_node: str = "local",
+        position_retention_hours: int = 168,
+    ) -> None:
         self.database, self.clock, self.origin_node = database, clock, origin_node
+        self.position_retention_seconds = position_retention_hours * 3_600
 
     @staticmethod
     def infer(text: str) -> str:
@@ -229,10 +236,11 @@ class IncidentService:
             raise ValueError("invalid position")
         now = int(self.clock.now().timestamp())
         await self.database.write(
-            """INSERT INTO member_position(member_id,lat,lon,received_at)
-               VALUES(?,?,?,?) ON CONFLICT(member_id) DO UPDATE SET
-               lat=excluded.lat,lon=excluded.lon,received_at=excluded.received_at""",
-            (member.id, lat, lon, now),
+            """INSERT INTO member_position(member_id,lat,lon,received_at,source,expires_at)
+               VALUES(?,?,?,?,'position_app',?) ON CONFLICT(member_id) DO UPDATE SET
+               lat=excluded.lat,lon=excluded.lon,received_at=excluded.received_at,
+               source=excluded.source,expires_at=excluded.expires_at""",
+            (member.id, lat, lon, now, now + self.position_retention_seconds),
         )
         if prompt:
             await self.database.write(
@@ -281,7 +289,8 @@ class IncidentService:
             assert updated is not None
             return updated, False
         positions = await self.database.read(
-            "SELECT lat,lon FROM member_position WHERE member_id=?", (member.id,)
+            "SELECT lat,lon FROM member_position WHERE member_id=? AND expires_at>?",
+            (member.id, now),
         )
         coordinates = (
             (float(positions[0]["lat"]), float(positions[0]["lon"])) if positions else None

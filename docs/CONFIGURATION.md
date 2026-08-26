@@ -78,7 +78,11 @@ proxy for remote administration.
 ### `store`
 
 Controls SQLite path, maintenance hour, retention, and backup count. The service account needs
-write access to the database parent directory.
+write access to the database parent directory. `retention.member_positions_hours` controls how
+long the latest exact POS share is retained (default 168 hours, range 1–720). Each new share stores
+its own deletion time. Past-due positions are excluded immediately from maps, commands, welfare,
+and safety processing; daily maintenance physically deletes them. Existing positions from before
+the expiry migration are expired on upgrade and require a fresh member share to reappear.
 
 ## Environment overrides
 

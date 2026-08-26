@@ -100,8 +100,8 @@ class RateLimiter:
             return ""
         rows = await self.database.read(
             "SELECT p.lat,p.lon FROM member_position p "
-            "JOIN member m ON m.id=p.member_id WHERE m.mesh_id=?",
-            (member_id,),
+            "JOIN member m ON m.id=p.member_id WHERE m.mesh_id=? AND p.expires_at>?",
+            (member_id, int(self.clock.now().timestamp())),
         )
         if not rows:
             return ""

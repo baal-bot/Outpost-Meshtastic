@@ -5,14 +5,45 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from outpost.clock import VirtualClock
+from outpost.config import AirtimeConfig
 from outpost.store import Database
 from outpost.store.backups import (
     BackupService,
     RestoreCoordinator,
     RestoreRecoveredError,
 )
+from outpost.transport.governor import AirtimeGovernor
+from outpost.transport.simulated import SimulatedRadioLink
+from outpost.watch import CheckinService
 from outpost.web.api import create_web_app
 from outpost.web.auth import WebAuthService
+
+
+def test_backup_routes_are_independent_from_optional_checkins(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    backups = BackupService(database)
+    with_backups = create_web_app(
+        lambda: {"radio": "up"}, database=database, backups=backups
+    )
+    backup_paths = {route.path for route in with_backups.routes}
+    assert {
+        "/api/v1/backups",
+        "/api/v1/backups/{name}",
+        "/api/v1/backups/{name}/validate",
+        "/api/v1/backups/{name}/restore",
+    } <= backup_paths
+
+    clock = VirtualClock()
+    checkins = CheckinService(
+        database,
+        AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock),
+        clock,
+    )
+    without_backups = create_web_app(
+        lambda: {"radio": "up"}, database=database, checkins=checkins
+    )
+    assert not any(route.path.startswith("/api/v1/backups") for route in without_backups.routes)
 
 
 @pytest.mark.asyncio

@@ -127,5 +127,5 @@ web:
 store:
   path: "/var/lib/outpost/outpost.db"
   maintenance_hour: 3
-  retention: {posts_days: 90, mail_days: 180, message_log_days: 30, message_log_max_rows: 500000}
+  retention: {posts_days: 90, mail_days: 180, member_positions_hours: 168, message_log_days: 30, message_log_max_rows: 500000}
   backup: {enabled: true, keep: 14}

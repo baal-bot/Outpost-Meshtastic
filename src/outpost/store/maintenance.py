@@ -15,6 +15,8 @@ from .database import Database
 class MaintenanceResult:
     threads: int
     mail: int
+    member_positions: int
+    pending_positions: int
     messages: int
     kv: int
     safety_floor: int
@@ -56,6 +58,14 @@ class MaintenanceService:
                 thread_cutoff,
             ),
             "mail": ("SELECT COUNT(*) AS count FROM mail WHERE created_at<?", mail_cutoff),
+            "member_positions": (
+                "SELECT COUNT(*) AS count FROM member_position WHERE expires_at<=?",
+                now,
+            ),
+            "pending_positions": (
+                "SELECT COUNT(*) AS count FROM pending_incident_location WHERE expires_at<=?",
+                now,
+            ),
             "messages": (
                 "SELECT COUNT(*) AS count FROM message_log WHERE created_at<?",
                 message_cutoff,
@@ -92,6 +102,10 @@ class MaintenanceService:
             "DELETE FROM thread WHERE pinned=0 AND last_post_at<?", (thread_cutoff,)
         )
         await self.database.write("DELETE FROM mail WHERE created_at<?", (mail_cutoff,))
+        await self.database.write("DELETE FROM member_position WHERE expires_at<=?", (now,))
+        await self.database.write(
+            "DELETE FROM pending_incident_location WHERE expires_at<=?", (now,)
+        )
         await self.database.write("DELETE FROM message_log WHERE created_at<?", (message_cutoff,))
         await self.database.write(
             """
@@ -138,6 +152,8 @@ class MaintenanceService:
         result = MaintenanceResult(
             threads=counts["threads"],
             mail=counts["mail"],
+            member_positions=counts["member_positions"],
+            pending_positions=counts["pending_positions"],
             messages=counts["messages"],
             kv=counts["kv"],
             safety_floor=counts["safety_floor"],

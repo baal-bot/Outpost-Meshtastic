@@ -48,6 +48,20 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
         "last_seen_at,accepted_at) VALUES('!00000001','HELPME','old',?,?,?)",
         (old, old, old),
     )
+    member_id = await database.write(
+        "INSERT INTO member(mesh_id,mesh_num,first_seen,last_seen) VALUES('!00000003',3,?,?)",
+        (old, old),
+    )
+    await database.write(
+        "INSERT INTO member_position(member_id,lat,lon,received_at,expires_at) "
+        "VALUES(?,40,-80,?,?)",
+        (member_id, old, old),
+    )
+    await database.write(
+        "INSERT INTO pending_incident_location(member_id,lat,lon,created_at,expires_at) "
+        "VALUES(?,40,-80,?,?)",
+        (member_id, old, old),
+    )
     peer_id = await database.write(
         "INSERT INTO fed_peer(mesh_id,created_at) VALUES('!00000002',?)", (old,)
     )
@@ -80,12 +94,16 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
     assert await service.due() is True
     result = await service.run()
     assert result.threads == 1 and result.messages == 1 and result.kv == 1
+    assert result.member_positions == 1
+    assert result.pending_positions == 1
     assert result.safety_floor == 1
     assert result.federation_services == 1
     assert result.federation_service_usage == 1
     assert result.environment_cache == 1
     assert result.alert_point_cache == 1
     assert await database.read("SELECT 1 FROM safety_floor_attempt") == []
+    assert await database.read("SELECT 1 FROM member_position") == []
+    assert await database.read("SELECT 1 FROM pending_incident_location") == []
     assert await database.read("SELECT 1 FROM fed_service_request") == []
     assert await database.read("SELECT 1 FROM fed_service_usage") == []
     assert await database.read("SELECT 1 FROM env_cache") == []

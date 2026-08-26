@@ -84,8 +84,10 @@ class CheckinService:
         if status not in {"ok", "need_help", "evacuated"}:
             raise ValueError("Invalid check-in status.")
         event = await self.current_event()
+        now = int(self.clock.now().timestamp())
         position = await self.database.read(
-            "SELECT lat,lon FROM member_position WHERE member_id=?", (member.id,)
+            "SELECT lat,lon FROM member_position WHERE member_id=? AND expires_at>?",
+            (member.id, now),
         )
         lat = float(position[0]["lat"]) if position else None
         lon = float(position[0]["lon"]) if position else None
@@ -99,7 +101,7 @@ class CheckinService:
                 note[:280] or None,
                 lat,
                 lon,
-                int(self.clock.now().timestamp()),
+                now,
             ),
         )
         if status == "need_help":

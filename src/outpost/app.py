@@ -129,7 +129,12 @@ class OutpostApp:
             self._send_federated_operator_reply,
         )
         self.digests = DigestService(self.database, self.clock, self.config)
-        self.incidents = IncidentService(self.database, self.clock, "local")
+        self.incidents = IncidentService(
+            self.database,
+            self.clock,
+            "local",
+            self.config.store.retention.member_positions_hours,
+        )
         self.alerts = AlertService(self.database, self.governor, self.clock, self.config)
         self.checkins = CheckinService(self.database, self.governor, self.clock)
         self.weather = WeatherService(

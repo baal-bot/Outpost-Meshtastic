@@ -226,6 +226,7 @@ class WebConfig(StrictModel):
 class RetentionConfig(StrictModel):
     posts_days: int = Field(default=90, ge=1)
     mail_days: int = Field(default=180, ge=1)
+    member_positions_hours: int = Field(default=168, ge=1, le=720)
     message_log_days: int = Field(default=30, ge=1)
     message_log_max_rows: int = Field(default=500_000, ge=1_000)
 

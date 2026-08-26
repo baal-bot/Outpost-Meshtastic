@@ -82,8 +82,14 @@ async def test_safety_floor_coalescing_is_durable_and_accepts_changed_details(tm
 
     member = await MemberRepo(database, clock).resolve("!00000002")
     await database.write(
-        "INSERT INTO member_position(member_id,lat,lon,received_at) VALUES(?,?,?,?)",
-        (member.id, 40.4406, -79.9959, int(clock.now().timestamp())),
+        "INSERT INTO member_position(member_id,lat,lon,received_at,expires_at) VALUES(?,?,?,?,?)",
+        (
+            member.id,
+            40.4406,
+            -79.9959,
+            int(clock.now().timestamp()),
+            int(clock.now().timestamp()) + 3_600,
+        ),
     )
     located = await limiter.safety_floor_decision("!00000002", "REPORT", "road blocked")
     located_repeat = await limiter.safety_floor_decision("!00000002", "REPORT", "road blocked")

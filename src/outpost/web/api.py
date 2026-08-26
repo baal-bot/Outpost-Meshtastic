@@ -63,6 +63,10 @@ class MemberPatchBody(BaseModel):
     notes: str | None = None
 
 
+class PositionPurgeBody(BaseModel):
+    confirmation: str
+
+
 class PostPatchBody(BaseModel):
     hidden: bool
     reason: str = "operator moderation"
@@ -1222,7 +1226,14 @@ def create_web_app(
                         {"error": {"code": "not_found", "message": "Backup not found."}},
                         status_code=404,
                     )
-                return FileResponse(path, filename=path.name, media_type="application/x-sqlite3")
+                return FileResponse(
+                    path,
+                    filename=path.name,
+                    media_type="application/x-sqlite3",
+                    headers={
+                        "X-Outpost-Data-Classification": "sensitive-includes-location-data"
+                    },
+                )
 
             @app.get("/api/v1/backups/{name}/validate", response_model=None)
             async def backup_validate(name: str) -> dict[str, object] | Response:
@@ -1234,20 +1245,28 @@ def create_web_app(
                         status_code=422,
                     )
 
-            if restore_coordinator is not None:
-
-                @app.post("/api/v1/backups/{name}/restore", response_model=None)
-                async def backup_restore(
-                    name: str, body: RestoreBody
-                ) -> dict[str, object] | Response:
-                    try:
-                        job = await restore_coordinator.schedule(name, body.confirmation)
-                    except (ValueError, RuntimeError) as error:
-                        return JSONResponse(
-                            {"error": {"code": "restore_rejected", "message": str(error)}},
-                            status_code=422,
-                        )
-                    return JSONResponse(job, status_code=202)
+            @app.post("/api/v1/backups/{name}/restore", response_model=None)
+            async def backup_restore(
+                name: str, body: RestoreBody
+            ) -> dict[str, object] | Response:
+                if restore_coordinator is None:
+                    return JSONResponse(
+                        {
+                            "error": {
+                                "code": "restore_unavailable",
+                                "message": "Application recovery coordination is unavailable.",
+                            }
+                        },
+                        status_code=503,
+                    )
+                try:
+                    job = await restore_coordinator.schedule(name, body.confirmation)
+                except (ValueError, RuntimeError) as error:
+                    return JSONResponse(
+                        {"error": {"code": "restore_rejected", "message": str(error)}},
+                        status_code=422,
+                    )
+                return JSONResponse(job, status_code=202)
 
         if incidents is not None:
 
@@ -1303,10 +1322,10 @@ def create_web_app(
                     SELECT m.id,m.mesh_id,m.handle,m.trust,p.lat,p.lon,p.received_at
                     FROM member m JOIN member_position p ON p.member_id=m.id
                     WHERE m.trust IN ('member','trusted','responder','operator')
-                      AND p.received_at<=?
+                      AND p.received_at<=? AND p.expires_at>?
                     ORDER BY COALESCE(m.handle,m.mesh_id)
                     """,
-                    (cutoff,),
+                    (cutoff, int(datetime.now(UTC).timestamp())),
                 )
                 alert_rows = await database.read(
                     """SELECT a.*,i.local_ref AS incident_ref,
@@ -1672,7 +1691,10 @@ def create_web_app(
                     headers={
                         "Content-Disposition": (
                             f'attachment; filename="outpost-roster-{event_id}.csv"'
-                        )
+                        ),
+                        "X-Outpost-Data-Classification": (
+                            "sensitive-may-include-member-location-data"
+                        ),
                     },
                 )
 
@@ -2021,20 +2043,109 @@ def create_web_app(
 
         @app.get("/api/v1/members/map")
         async def member_map() -> dict[str, Any]:
+            now = int(datetime.now(UTC).timestamp())
             rows = await database.read(
                 """SELECT m.id,m.mesh_id,m.handle,m.trust,m.last_seen,m.last_heard_snr,
                           m.hops_away,json_extract(m.prefs,'$.position') AS privacy,
-                          p.lat,p.lon,p.received_at,p.source
+                          p.lat,p.lon,p.received_at,p.source,p.expires_at
                    FROM member m JOIN member_position p ON p.member_id=m.id
-                   WHERE m.handle IS NOT NULL
-                      OR m.trust IN ('member','trusted','responder','operator')
-                   ORDER BY p.received_at DESC"""
+                   WHERE (m.handle IS NOT NULL
+                      OR m.trust IN ('member','trusted','responder','operator'))
+                     AND p.expires_at>?
+                   ORDER BY p.received_at DESC""",
+                (now,),
             )
             items = [dict(row) for row in rows]
             for item in items:
+                received_at, expires_at = int(item["received_at"]), int(item["expires_at"])
+                item["age_seconds"] = max(0, now - received_at)
+                item["deletes_in_seconds"] = max(0, expires_at - now)
+                item["retention_hours"] = max(1, (expires_at - received_at) // 3_600)
+                item["privacy"] = item["privacy"] or "coarse"
+                item["visibility"] = f"operator exact; member {item['privacy']}"
                 item["last_seen"] = _timestamp(item["last_seen"])
-                item["received_at"] = _timestamp(item["received_at"])
+                item["received_at"] = _timestamp(received_at)
+                item["expires_at"] = _timestamp(expires_at)
             return {"items": items}
+
+        @app.delete("/api/v1/members/{member_id}/position", response_model=None)
+        async def member_position_delete(member_id: int) -> dict[str, bool] | Response:
+            async with database.transaction() as transaction:
+                rows = await transaction.read(
+                    """SELECT m.mesh_id,p.source,p.received_at,p.expires_at
+                       FROM member m JOIN member_position p ON p.member_id=m.id WHERE m.id=?""",
+                    (member_id,),
+                )
+                if not rows:
+                    return JSONResponse(
+                        {
+                            "error": {
+                                "code": "not_found",
+                                "message": "Member position not found.",
+                            }
+                        },
+                        status_code=404,
+                    )
+                row = rows[0]
+                detail = (
+                    f"source={row['source']};received_at={row['received_at']};"
+                    f"scheduled_expiry={row['expires_at']}"
+                )
+                await transaction.write(
+                    "DELETE FROM pending_incident_location WHERE member_id=?", (member_id,)
+                )
+                await transaction.write(
+                    "DELETE FROM member_position WHERE member_id=?", (member_id,)
+                )
+                await transaction.write(
+                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                    "VALUES('web','operator','member.position_delete',?,?,unixepoch())",
+                    (row["mesh_id"], detail),
+                )
+            return {"deleted": True}
+
+        @app.post("/api/v1/members/positions/purge-expired", response_model=None)
+        async def member_positions_purge(
+            body: PositionPurgeBody,
+        ) -> dict[str, int] | Response:
+            if body.confirmation != "PURGE EXPIRED POSITIONS":
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "confirmation_required",
+                            "message": "Confirmation must be PURGE EXPIRED POSITIONS.",
+                        }
+                    },
+                    status_code=422,
+                )
+            now = int(datetime.now(UTC).timestamp())
+            async with database.transaction() as transaction:
+                rows = await transaction.read(
+                    "SELECT COUNT(*) AS count FROM member_position WHERE expires_at<=?", (now,)
+                )
+                count = int(rows[0]["count"])
+                pending_rows = await transaction.read(
+                    "SELECT COUNT(*) AS count FROM pending_incident_location "
+                    "WHERE expires_at<=?",
+                    (now,),
+                )
+                pending_count = int(pending_rows[0]["count"])
+                await transaction.write(
+                    "DELETE FROM pending_incident_location WHERE expires_at<=?", (now,)
+                )
+                await transaction.write(
+                    "DELETE FROM member_position WHERE expires_at<=?", (now,)
+                )
+                await transaction.write(
+                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                    "VALUES('web','operator','member.position_purge','member_position',?,?)",
+                    (
+                        f"deleted={count};pending_deleted={pending_count};"
+                        f"expired_at_or_before={now}",
+                        now,
+                    ),
+                )
+            return {"deleted": count, "pending_deleted": pending_count}
 
         @app.get("/api/v1/members")
         async def members(

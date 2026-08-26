@@ -25,9 +25,13 @@ placed behind an unauthenticated public proxy.
 
 ## Location privacy
 
-Member positions may be full, coarse, or off. Public incident/waypoint coordinates have different
-visibility. Avoid publishing homes, shelters, vulnerable people, or resource locations without
-authorization. Backups and exports may retain historical information.
+Member positions may be full, coarse, or off for member-facing queries; authenticated operators can
+see an unexpired exact share. Exact shares carry a configurable scheduled deletion time and are
+excluded everywhere once past due. Operators can delete one current position or purge all expired
+positions with audit evidence. Public incident, welfare, and waypoint coordinates are separate
+records with different lifecycles. Avoid publishing homes, shelters, vulnerable people, or resource
+locations without authorization. Database backups can contain unexpired exact shares, and welfare
+CSV exports can contain coordinates recorded at check-in; handle both as sensitive data.
 
 ## Radio limitations
 
