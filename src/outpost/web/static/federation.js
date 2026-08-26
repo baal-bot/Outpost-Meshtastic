@@ -64,12 +64,12 @@ async function refreshServices() {
   history.innerHTML = items.map(item => `<article><div><strong>${safe(item.service)} · ${safe(item.status)}</strong><code>${safe(item.peer_mesh_id)}</code></div><p>${item.status === "complete" ? safe(JSON.stringify(item.result)) : safe(item.error || "Awaiting peer response")}</p><small>${item.provenance?.provider ? `Source ${safe(item.provenance.provider)} · cache ${safe(item.provenance.cache_age_seconds ?? "?")}s` : new Date(item.created_at * 1000).toLocaleString()}</small></article>`).join("") || `<p class="empty">No peer requests yet.</p>`;
 }
 async function loadInbox() {
-  const policy = document.querySelector(".path-grid").closest(".panel");
+  const directory = $("peer-list").closest(".panel");
   const panel = document.createElement("section");
   panel.id = "federation-inbox";
   panel.className = "panel content-panel inbox-panel";
   panel.innerHTML = `<div class="heading"><div><p class="eyebrow">FEDERATION INBOX</p><h2>Quarantined records</h2></div><button id="refresh-inbox" class="small-button">Refresh</button></div><p class="mqtt-note">Review remote records before they enter local boards, incidents, or alerts. Imported alerts are not automatically broadcast.</p><div id="fed-inbox"><p class="empty">No records awaiting review.</p></div>`;
-  policy.parentElement.insertBefore(panel, policy);
+  directory.parentElement.insertBefore(panel, directory);
   $("refresh-inbox").addEventListener("click", refreshInbox);
   await refreshInbox();
 }

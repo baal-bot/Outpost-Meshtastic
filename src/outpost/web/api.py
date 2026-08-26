@@ -1108,6 +1108,20 @@ def create_web_app(
 
         if incidents is not None:
 
+            async def incident_origins(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                assert database is not None
+                peers = {
+                    str(row["mesh_id"]): str(row["node_name"] or row["mesh_id"])
+                    for row in await database.read("SELECT mesh_id,node_name FROM fed_peer")
+                }
+                for value in values:
+                    uid = str(value.get("uid", ""))
+                    mesh_id = uid.split(":", 1)[0] if uid.startswith("!") and ":" in uid else None
+                    value["remote"] = mesh_id is not None
+                    value["origin_mesh_id"] = mesh_id
+                    value["origin_name"] = peers.get(mesh_id, mesh_id) if mesh_id else None
+                return values
+
             @app.get("/api/v1/incidents")
             async def incident_list(
                 status: str | None = None,
@@ -1115,7 +1129,7 @@ def create_web_app(
                 limit: int = Query(50, ge=1, le=200),
             ) -> dict[str, Any]:
                 values = await incidents.list(status=status, kind=type, limit=limit)
-                return {"items": [value.json() for value in values]}
+                return {"items": await incident_origins([value.json() for value in values])}
 
             @app.get("/api/v1/watch/map")
             async def watch_map(hours_ago: int = Query(0, ge=0, le=24)) -> dict[str, Any]:
@@ -1197,11 +1211,12 @@ def create_web_app(
                         else:
                             node["status"] = "unaccounted"
                     nodes.append(node)
+                incident_values = await incident_origins([dict(row) for row in incident_rows])
                 return {
                     "at": cutoff,
                     "hours_ago": hours_ago,
                     "event": event,
-                    "incidents": [dict(row) for row in incident_rows],
+                    "incidents": incident_values,
                     "nodes": nodes,
                     "alerts": [dict(row) for row in alert_rows],
                 }

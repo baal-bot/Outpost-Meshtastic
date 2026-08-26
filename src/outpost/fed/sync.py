@@ -380,7 +380,7 @@ class FederationSyncService:
                     payload.get("location_text"),
                     payload.get("radius_m"),
                     str(payload.get("reporter_label") or "Federated peer")[:80],
-                    str(payload.get("origin_node") or "federation"),
+                    str(row["mesh_id"]),
                     int(payload["created_at"]),
                     int(payload["updated_at"]),
                     payload.get("expires_at"),
