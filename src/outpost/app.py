@@ -1309,9 +1309,7 @@ class OutpostApp:
                 "mesh_id": self.federation.local_mesh_id,
                 "ok": response_ok,
                 "result": self._service_result_to_wire(service, response_result),
-                "provenance": self._service_provenance_to_wire(
-                    service, response_provenance
-                ),
+                "provenance": self._service_provenance_to_wire(service, response_provenance),
                 "error": response_error,
             }
             content_bytes = len(json.dumps(value, separators=(",", ":"), sort_keys=True).encode())

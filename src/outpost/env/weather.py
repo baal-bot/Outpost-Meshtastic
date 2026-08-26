@@ -242,9 +242,7 @@ class OpenMeteoProvider:
                     daily["precipitation_probability_max"][index]
                 ),
                 "wind_kph": _optional_float(daily["wind_speed_10m_max"][index]),
-                "wind_direction": _optional_int(
-                    daily["wind_direction_10m_dominant"][index]
-                ),
+                "wind_direction": _optional_int(daily["wind_direction_10m_dominant"][index]),
                 "summary": summary(daily["weather_code"][index], "Mixed conditions"),
             }
             for index, day in enumerate(daily["time"])
@@ -377,9 +375,7 @@ class NWSProvider:
         station_url = str(station.get("id") or station.get("@id") or "").rstrip("/")
         if urllib.parse.urlparse(station_url).hostname != NWS_HOST:
             raise ValueError("NWS returned an observation station outside the allowlist")
-        latest = await _request_json(
-            f"{station_url}/observations/latest", NWS_HOST, self.config
-        )
+        latest = await _request_json(f"{station_url}/observations/latest", NWS_HOST, self.config)
         properties = latest.get("properties")
         if not isinstance(properties, dict):
             return None
@@ -477,9 +473,7 @@ class NWSProvider:
                     "precipitation_probability": _optional_int(
                         (tonight.get("probabilityOfPrecipitation") or {}).get("value")
                     ),
-                    "wind_kph": (
-                        float(wind_match.group()) * 1.609344 if wind_match else None
-                    ),
+                    "wind_kph": (float(wind_match.group()) * 1.609344 if wind_match else None),
                     "wind_direction": self._direction(tonight.get("windDirection")),
                     "summary": str(tonight.get("shortForecast", "Forecast unavailable")),
                 }
@@ -505,9 +499,7 @@ class NWSProvider:
                     "precipitation_probability": _optional_int(
                         (period.get("probabilityOfPrecipitation") or {}).get("value")
                     ),
-                    "wind_kph": (
-                        float(wind_match.group()) * 1.609344 if wind_match else None
-                    ),
+                    "wind_kph": (float(wind_match.group()) * 1.609344 if wind_match else None),
                     "wind_direction": self._direction(period.get("windDirection")),
                     "summary": str(period.get("shortForecast", "Forecast unavailable")),
                 }

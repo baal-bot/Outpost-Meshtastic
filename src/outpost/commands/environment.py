@@ -77,14 +77,14 @@ def specs(
             day = forecast.daily[index]
             raw_wind = day.get("wind_kph")
             wind = (
-                float(raw_wind) / 1.609344 if imperial else float(raw_wind)
-            ) if raw_wind is not None else None
+                (float(raw_wind) / 1.609344 if imperial else float(raw_wind))
+                if raw_wind is not None
+                else None
+            )
             rain = day.get("precipitation_probability")
             cached = " cached" if forecast.stale else ""
             rain_text = f"{rain}%" if rain is not None else "—"
-            wind_text = (
-                f"{wind:.0f}{'mph' if imperial else 'km/h'}" if wind is not None else "—"
-            )
+            wind_text = f"{wind:.0f}{'mph' if imperial else 'km/h'}" if wind is not None else "—"
             text = (
                 f"{mode.title()} {temp(optional_float(day.get('high_c')))}/"
                 f"{temp(optional_float(day.get('low_c')))} · {day['summary']} · "
@@ -93,6 +93,7 @@ def specs(
             return Response(ResponseKind.DETAIL, [Line(text)])
         if mode == "HOURLY":
             periods = forecast.hourly[:6]
+
             def hourly_text(period: dict[str, object]) -> str:
                 rain = period.get("precipitation_probability")
                 rain_text = f"{rain}%" if rain is not None else "—"
@@ -127,9 +128,7 @@ def specs(
             measurements.append(f"wind {wind:.0f}{'mph' if imperial else 'km/h'}{direction}")
         elif value.temperature_c is None:
             measurements.append("measurements unavailable")
-        text = (
-            f"{' · '.join(measurements)} · {value.provider} {kind}{stale} · valid {age}"
-        )
+        text = f"{' · '.join(measurements)} · {value.provider} {kind}{stale} · valid {age}"
         return Response(ResponseKind.DETAIL, [Line(_fit_radio(text))])
 
     async def forecast(ctx: CommandContext) -> Response:
