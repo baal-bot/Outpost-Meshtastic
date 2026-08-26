@@ -365,11 +365,15 @@ class OutpostApp:
         peer = await self.federation.approve_local(mesh_id, "web:operator", code)
         frames = self.federation_codec.encode(
             MessageType.PAIR_CONFIRM,
-            {"mesh_id": self.federation.local_mesh_id, "approved": True},
+            {
+                "mesh_id": self.federation.local_mesh_id,
+                "target_mesh_id": mesh_id,
+                "approved": True,
+            },
             0,
             secret,
         )
-        self._queue_federation_frames(frames, mesh_id, want_ack=True)
+        self._queue_federation_frames(frames, "^all", want_ack=False)
         return peer
 
     async def federation_service_requests(self) -> list[dict[str, object]]:
@@ -726,7 +730,21 @@ class OutpostApp:
                     sender, bytes(value["public_key"]), bytes(value["nonce"])
                 )
             elif msg_type is MessageType.PAIR_CONFIRM and value.get("approved") is True:
-                await self.federation.confirm_remote(sender)
+                before = await self.federation.by_mesh_id(sender)
+                secret = await self.federation.pairing_secret(sender)
+                peer = await self.federation.confirm_remote(sender)
+                if peer.local_approved and not before.remote_approved:
+                    confirmation = self.federation_codec.encode(
+                        MessageType.PAIR_CONFIRM,
+                        {
+                            "mesh_id": self.federation.local_mesh_id,
+                            "target_mesh_id": sender,
+                            "approved": True,
+                        },
+                        0,
+                        secret,
+                    )
+                    self._queue_federation_frames(confirmation, "^all", want_ack=False)
             elif msg_type is MessageType.SERVICE_QUERY:
                 await self._handle_service_query(sender, value)
             elif msg_type is MessageType.SERVICE_RESPONSE:

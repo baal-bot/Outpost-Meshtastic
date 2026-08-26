@@ -109,6 +109,32 @@ async def test_pairing_bootstrap_uses_targeted_broadcast(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_pairing_approval_uses_authenticated_targeted_broadcast(tmp_path) -> None:
+    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    app.federation.local_mesh_id = "!local"
+    await app.federation.discover("!remote", "Remote", 1, {}, "mqtt")
+    await app.database.write(
+        "UPDATE fed_peer SET state='pairing',shared_secret=? WHERE mesh_id='!remote'",
+        (bytes(range(32)),),
+    )
+    code = app.federation.confirmation_code(bytes(range(32)), "!local", "!remote")
+
+    await app.approve_federation_pairing("!remote", code)
+
+    queued = app.governor.queued_items()
+    assert len(queued) == 1
+    assert queued[0].dest == "^all"
+    assert queued[0].want_ack is False
+    fragment = app.federation_codec.decode_fragment(queued[0].binary_payload, bytes(range(32)))
+    value = app.federation_reassembler.add("!local", fragment)
+    assert value == {"mesh_id": "!local", "target_mesh_id": "!remote", "approved": True}
+    await app.database.close()
+
+
+@pytest.mark.asyncio
 async def test_radio_hello_cannot_claim_another_sender(tmp_path) -> None:
     config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
     app = OutpostApp(config)
