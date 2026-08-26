@@ -597,8 +597,13 @@ class OutpostApp:
             await self.clock.sleep(15)
 
     async def _send_federation_value(
-        self, peer_id: str, msg_type: MessageType, value: dict[str, object]
-    ) -> None:
+        self,
+        peer_id: str,
+        msg_type: MessageType,
+        value: dict[str, object],
+        *,
+        counter: int | None = None,
+    ) -> int:
         local_id = self.radio.local_node_id
         if not local_id:
             raise ValueError("radio identity is not available")
@@ -606,9 +611,10 @@ class OutpostApp:
         self.federation_sync.local_mesh_id = local_id
         value = {**value, "mesh_id": local_id}
         secret = await self.federation.secret(peer_id)
-        counter = await self.federation.next_counter(peer_id)
+        counter = counter or await self.federation.next_counter(peer_id)
         frames = self.federation_codec.encode(msg_type, value, counter, secret)
         self._queue_trusted_federation_frames(frames)
+        return counter
 
     async def _federation_sync_loop(self) -> None:
         while True:
@@ -709,7 +715,8 @@ class OutpostApp:
                     except ValueError:
                         pass
                 rows = await self.database.read(
-                    "SELECT d.peer_id,d.post_id,d.uid,d.stream,p.mesh_id,post.uid local_uid "
+                    "SELECT d.peer_id,d.post_id,d.uid,d.stream,d.wire_counter,p.mesh_id,"
+                    "post.uid local_uid "
                     "FROM fed_post_delivery d JOIN fed_peer p ON p.id=d.peer_id "
                     "JOIN post ON post.id=d.post_id WHERE d.state<>'delivered' "
                     "AND d.updated_at<=? AND p.state='active' ORDER BY d.updated_at LIMIT 20",
@@ -728,13 +735,20 @@ class OutpostApp:
                         )
                         if not items:
                             raise ValueError("durable federation post could not be exported")
-                        await self._send_federation_value(
-                            str(row["mesh_id"]), MessageType.ITEM, {"item": items[0]}
+                        wire_counter = await self._send_federation_value(
+                            str(row["mesh_id"]),
+                            MessageType.ITEM,
+                            {"item": items[0]},
+                            counter=(
+                                int(row["wire_counter"])
+                                if row["wire_counter"] is not None
+                                else None
+                            ),
                         )
                         await self.database.write(
                             "UPDATE fed_post_delivery SET state='sent',attempts=attempts+1,"
-                            "updated_at=?,error=NULL WHERE peer_id=? AND post_id=?",
-                            (now, row["peer_id"], row["post_id"]),
+                            "wire_counter=?,updated_at=?,error=NULL WHERE peer_id=? AND post_id=?",
+                            (wire_counter, now, row["peer_id"], row["post_id"]),
                         )
                     except (FrameError, ValueError) as error:
                         await self.database.write(
@@ -790,10 +804,14 @@ class OutpostApp:
                 MessageType.PAIR_ACK,
                 MessageType.PAIR_CONFIRM,
             }
+            replayed_item = False
             if authenticated and not (
                 await self.federation.accept_counter(sender, fragment.counter)
             ):
-                raise FrameError("replayed federation service frame")
+                if msg_type is MessageType.ITEM:
+                    replayed_item = True
+                else:
+                    raise FrameError("replayed federation service frame")
             if not isinstance(value, dict) or value.get("mesh_id") != sender:
                 raise FrameError("federation identity does not match packet sender")
             target = value.get("target_mesh_id")
@@ -981,15 +999,18 @@ class OutpostApp:
                 if not isinstance(item, dict):
                     raise ValueError("invalid federation item")
                 peer = await self.federation.by_mesh_id(sender)
-                received = await self.federation_sync.quarantine(
-                    peer, item, int(self.clock.now().timestamp())
-                )
-                await self.database.write(
-                    "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
-                    "VALUES(?,?,'recv',?,unixepoch()) ON CONFLICT(peer_id,stream,direction) "
-                    "DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at",
-                    (peer.id, str(item.get("stream", "")), str(item.get("uid", ""))),
-                )
+                received = False
+                if not replayed_item:
+                    received = await self.federation_sync.quarantine(
+                        peer, item, int(self.clock.now().timestamp())
+                    )
+                    await self.database.write(
+                        "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
+                        "VALUES(?,?,'recv',?,unixepoch()) "
+                        "ON CONFLICT(peer_id,stream,direction) "
+                        "DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at",
+                        (peer.id, str(item.get("stream", "")), str(item.get("uid", ""))),
+                    )
                 if received and str(item.get("stream", "")).startswith("board:"):
                     payload = item.get("payload")
                     if isinstance(payload, dict):

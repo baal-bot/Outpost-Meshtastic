@@ -22,6 +22,9 @@ experimental until the two-node hardware backlog is complete.
   limited to eight manifest entries and each catch-up cycle is bounded by
   `fed.max_items_per_cycle`; unfinished snapshots resume in later airtime-governed batches. New
   records cannot shift the cursor and cause older records to be skipped.
+- Durable board items retain one authenticated wire counter across retries. This lets multipart
+  fragments received on different attempts complete the same logical item; a duplicate of an
+  already imported item can regenerate only its receipt and cannot import content twice.
 - Per-peer policy controls boards, incidents, alerts, mail, quotas, and transport.
 - Enabling federation on a board automatically adds its slug to every currently paired peer's
   policy; disabling it removes the slug. Per-peer settings can still narrow that selection.

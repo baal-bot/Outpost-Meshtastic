@@ -1,3 +1,5 @@
+import base64
+import os
 from datetime import UTC, datetime
 
 import pytest
@@ -136,7 +138,12 @@ async def test_pairing_approval_uses_authenticated_targeted_broadcast(tmp_path) 
 
 @pytest.mark.asyncio
 async def test_trusted_federation_uses_authenticated_broadcast_carrier(tmp_path) -> None:
-    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "airtime": {"dedupe_window_s": 0},
+        }
+    )
     app = OutpostApp(config)
     await app.database.open()
     app.radio._local_id = "!local"
@@ -149,7 +156,7 @@ async def test_trusted_federation_uses_authenticated_broadcast_carrier(tmp_path)
         (secret,),
     )
 
-    await app._send_federation_value("!remote", MessageType.SYNC_REQ, {"limit": 8})
+    counter = await app._send_federation_value("!remote", MessageType.SYNC_REQ, {"limit": 8})
 
     queued = app.governor.queued_items()
     assert len(queued) == 1
@@ -158,6 +165,14 @@ async def test_trusted_federation_uses_authenticated_broadcast_carrier(tmp_path)
     fragment = app.federation_codec.decode_fragment(queued[0].binary_payload, secret)
     value = app.federation_reassembler.add("!local", fragment)
     assert value == {"mesh_id": "!local", "limit": 8}
+    reused = await app._send_federation_value(
+        "!remote", MessageType.SYNC_REQ, {"limit": 8}, counter=counter
+    )
+    assert reused == counter
+    assert app.federation_codec.decode_fragment(
+        app.governor.queued_items()[1].binary_payload, secret
+    ).counter == counter
+    assert (await app.federation.by_mesh_id("!remote")).tx_counter == 1
     await app.database.close()
 
 
@@ -342,4 +357,72 @@ async def test_tampered_replayed_and_expired_frames_fail_without_side_effects(tm
     assert await app.database.read("SELECT 1 FROM fed_service_request") == []
     assert await app.database.read("SELECT 1 FROM fed_inbox_item") == []
     assert await app.database.read("SELECT 1 FROM fed_mail_delivery") == []
+    await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_multipart_item_completes_across_retries_and_replays_only_receipt(tmp_path) -> None:
+    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    secret = bytes(range(32))
+    await app.federation.discover("!remote", "Remote", 1, {}, "radio")
+    await app.database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,boards='[\"gen\"]',"
+        "local_approved=1,remote_approved=1 WHERE mesh_id='!remote'",
+        (secret,),
+    )
+    await app.database.write("UPDATE board SET federated=1 WHERE slug='gen'")
+    body = base64.b64encode(os.urandom(450)).decode()
+    item = {
+        "stream": "board:gen",
+        "uid": "!remote:local:multipart-post",
+        "digest": "multipart",
+        "payload": {
+            "uid": "!remote:local:multipart-post",
+            "thread_uid": "!remote:local:multipart-thread",
+            "seq": 1,
+            "subject": "Multipart recovery",
+            "author_label": "operator@Remote",
+            "origin_node": "!remote",
+            "body": body,
+            "created_at": 100,
+            "edited_at": None,
+        },
+    }
+    frames = app.federation_codec.encode(
+        MessageType.ITEM, {"mesh_id": "!remote", "item": item}, 1, secret
+    )
+    assert len(frames) > 1
+
+    async def receive(packet_id: int, frame: bytes) -> None:
+        message = InboundMessage(
+            packet_id,
+            "!remote",
+            "^all",
+            0,
+            config.radio.federation_portnum,
+            False,
+            None,
+            frame,
+            datetime.now(UTC),
+        )
+        await app.message_log.record_inbound(message)
+        await app._handle_federation_discovery(message)
+
+    await receive(70, frames[0])
+    assert await app.database.read("SELECT 1 FROM fed_inbox_item") == []
+    for packet_id, frame in enumerate(frames[1:], start=71):
+        await receive(packet_id, frame)
+    inbox = await app.database.read("SELECT state FROM fed_inbox_item")
+    assert inbox[0]["state"] == "imported"
+    receipt_frames = len(app.governor.queued_items())
+    assert receipt_frames > 0
+
+    for packet_id, frame in enumerate(frames, start=80):
+        await receive(packet_id, frame)
+    assert len(await app.database.read("SELECT 1 FROM fed_inbox_item")) == 1
+    assert len(app.governor.queued_items()) > receipt_frames
+    assert (await app.federation.by_mesh_id("!remote")).rx_counter == 1
     await app.database.close()

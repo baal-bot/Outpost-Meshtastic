@@ -26,7 +26,9 @@ observed over live radios, not only in automated tests.
   one current result; the earlier offline request was neither replayed nor duplicated.
 - [ ] Partition both transports, reconnect, and verify bounded catch-up respects airtime policy.
   Snapshot/keyset pagination, 8-item pages, durable continuation checkpoints, and long-outage
-  no-skip coverage are implemented. The live two-node partition/reconnect observation remains.
+  no-skip coverage are implemented. The first live run imported all eight offline board changes;
+  two multipart items lacked receipts because retries changed counters. Stable retry counters and
+  idempotent receipt regeneration were then added; final live convergence remains to be observed.
 
 Live testing found that 225–233-byte application payloads were not reliably acknowledged by the
 test radios, while payloads at 188 bytes were. Routine weather responses use compact wire keys and
