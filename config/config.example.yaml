@@ -38,6 +38,7 @@ router:
   session_idle_minutes: 30
   page_ttl_minutes: 15
   inbound_workers: 4
+  inbound_queue_max: 256
   member_lock_timeout_s: 60
   page_sizes: {boards: 6, threads: 5, posts: 3, mail: 5, incidents: 5, members: 8}
   intents_file: /etc/outpost/intents.yaml

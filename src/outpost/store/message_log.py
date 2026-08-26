@@ -108,3 +108,9 @@ class MessageLogRepo:
             (outcome, rows[0]["id"]),
         )
         return True
+
+    async def mark_inbound_dropped(self, log_id: int, reason: str) -> None:
+        await self.database.write(
+            "UPDATE message_log SET outcome='dropped',drop_reason=? WHERE id=? AND direction='in'",
+            (reason, log_id),
+        )

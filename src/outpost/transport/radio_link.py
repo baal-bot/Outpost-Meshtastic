@@ -8,6 +8,7 @@ from typing import Any
 from outpost.clock import Clock
 from outpost.config import RadioConfig
 
+from .metrics import INBOUND_DROPPED, INBOUND_QUEUE_DEPTH
 from .models import InboundMessage, LinkState, LocalTelemetry, RadioSnapshot, SendResult
 
 
@@ -23,6 +24,9 @@ class MeshtasticRadioLink:
         self._local_id = ""
         self._last_rx = 0.0
         self._snapshot = RadioSnapshot()
+        self._inbound_received = 0
+        self._inbound_dropped = 0
+        self._last_inbound_drop_at: int | None = None
 
     @property
     def state(self) -> LinkState:
@@ -121,10 +125,24 @@ class MeshtasticRadioLink:
 
     def _put_from_thread(self, message: InboundMessage) -> None:
         self._last_rx = self.clock.monotonic()
+        self._inbound_received += 1
         if self._inbound.full():
             with contextlib.suppress(asyncio.QueueEmpty):
                 self._inbound.get_nowait()
+                self._inbound_dropped += 1
+                self._last_inbound_drop_at = int(self.clock.now().timestamp())
+                INBOUND_DROPPED.labels("radio_queue_full").inc()
         self._inbound.put_nowait(message)
+        INBOUND_QUEUE_DEPTH.labels("radio").set(self._inbound.qsize())
+
+    def inbound_status(self) -> dict[str, int | None]:
+        return {
+            "depth": self._inbound.qsize(),
+            "capacity": self._inbound.maxsize,
+            "received": self._inbound_received,
+            "dropped": self._inbound_dropped,
+            "last_drop_at": self._last_inbound_drop_at,
+        }
 
     @staticmethod
     def _portnum(value: object) -> int:
@@ -182,7 +200,9 @@ class MeshtasticRadioLink:
 
     async def inbound(self) -> AsyncIterator[InboundMessage]:
         while True:
-            yield await self._inbound.get()
+            message = await self._inbound.get()
+            INBOUND_QUEUE_DEPTH.labels("radio").set(self._inbound.qsize())
+            yield message
 
     async def _send_text(
         self, text: str, *, dest: str, channel: int, want_ack: bool, priority: int

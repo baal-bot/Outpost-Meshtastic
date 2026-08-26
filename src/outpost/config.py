@@ -133,6 +133,7 @@ class RouterConfig(StrictModel):
     session_idle_minutes: int = 30
     page_ttl_minutes: int = 15
     inbound_workers: int = Field(default=4, ge=1, le=32)
+    inbound_queue_max: int = Field(default=256, ge=1, le=4096)
     member_lock_timeout_s: float = 60
     page_sizes: dict[str, int] = Field(
         default_factory=lambda: {

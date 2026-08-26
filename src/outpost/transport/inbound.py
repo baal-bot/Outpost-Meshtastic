@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import replace
 
+from .metrics import INBOUND_DROPPED
 from .models import InboundMessage
 
 
@@ -16,10 +17,12 @@ class InboundPipeline:
     def process(self, message: InboundMessage) -> InboundMessage | None:
         if message.from_id == self.local_node_id:
             self.dropped["self"] += 1
+            INBOUND_DROPPED.labels("self").inc()
             return None
         key = (message.from_id, message.packet_id)
         if key in self._seen:
             self.dropped["duplicate"] += 1
+            INBOUND_DROPPED.labels("duplicate").inc()
             return None
         self._seen[key] = None
         self._seen.move_to_end(key)

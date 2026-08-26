@@ -119,3 +119,29 @@ async def test_position_fields_are_normalised() -> None:
     assert message.latitude == pytest.approx(40.4406)
     assert message.longitude == pytest.approx(-79.9959)
     assert message.is_direct is True
+
+
+@pytest.mark.asyncio
+async def test_full_callback_queue_counts_drop_and_keeps_newest_frame() -> None:
+    link = MeshtasticRadioLink(RadioConfig(), VirtualClock(), queue_size=1)
+    link._loop = asyncio.get_running_loop()
+    for packet_id in (50, 51):
+        link._on_receive(
+            {
+                "id": packet_id,
+                "fromId": "!12345678",
+                "decoded": {"portnum": "TEXT_MESSAGE_APP", "text": str(packet_id)},
+            }
+        )
+    await asyncio.sleep(0)
+
+    assert link.inbound_status() == {
+        "depth": 1,
+        "capacity": 1,
+        "received": 2,
+        "dropped": 1,
+        "last_drop_at": 1_767_225_600,
+    }
+    message = await anext(link.inbound())
+    assert message.packet_id == 51
+    assert link.inbound_status()["depth"] == 0

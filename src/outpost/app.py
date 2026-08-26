@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+from collections import defaultdict, deque
 from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import Any
@@ -56,8 +57,14 @@ from outpost.store.message_log import MessageLogRepo
 from outpost.transport.chunker import chunk_text
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.inbound import InboundPipeline
-from outpost.transport.metrics import ACK_OUTCOME, INBOUND
-from outpost.transport.models import Severity, TrafficClass
+from outpost.transport.metrics import (
+    ACK_OUTCOME,
+    INBOUND,
+    INBOUND_DROPPED,
+    INBOUND_QUEUE_DEPTH,
+    INBOUND_WORKERS_BUSY,
+)
+from outpost.transport.models import InboundMessage, Severity, TrafficClass
 from outpost.transport.radio_link import MeshtasticRadioLink
 from outpost.transport.supervisor import RadioSupervisor
 from outpost.watch import AlertService, CheckinService, IncidentService
@@ -77,6 +84,13 @@ class OutpostApp:
         self._task_failure = asyncio.Event()
         self._fatal_task_error: str | None = None
         self._shutting_down = False
+        self._inbound_pending: dict[str, deque[tuple[InboundMessage, int]]] = defaultdict(deque)
+        self._inbound_active: set[str] = set()
+        self._inbound_ready: asyncio.Queue[str] = asyncio.Queue()
+        self._inbound_queued = 0
+        self._inbound_busy = 0
+        self._inbound_fast_processed = 0
+        self._inbound_backlog_dropped = 0
         self.clock = SystemClock()
         self.database = Database(self.config.store.path)
         self.radio = MeshtasticRadioLink(self.config.radio, self.clock)
@@ -320,6 +334,12 @@ class OutpostApp:
             self._start_background_task("radio-supervisor", self.supervisor.run()),
             self._start_background_task("airtime-governor", self._governor_loop()),
             self._start_background_task("inbound-router", self._inbound_loop()),
+            *[
+                self._start_background_task(
+                    f"inbound-worker-{worker}", self._inbound_worker(worker)
+                )
+                for worker in range(1, self.config.router.inbound_workers + 1)
+            ],
             self._start_background_task("bbs-digests", self._digest_loop()),
             self._start_background_task("store-maintenance", self._maintenance_loop()),
             self._start_background_task("watch-scheduler", self._watch_loop()),
@@ -1373,115 +1393,173 @@ class OutpostApp:
             message = self.inbound_pipeline.process(inbound)
             if message is None:
                 continue
-            await self.message_log.record_inbound(message)
+            log_id = await self.message_log.record_inbound(message)
             self._task_progress("inbound-router")
             INBOUND.labels(
                 str(message.portnum), str(message.channel), str(message.is_direct).lower()
             ).inc()
-            if (
-                self.config.modules.fed.enabled
-                and message.portnum == self.config.radio.federation_portnum
-            ):
-                await self._handle_federation_discovery(message)
+            await self._route_inbound(message, log_id)
+
+    def _is_safety_inbound(self, message: InboundMessage) -> bool:
+        if message.portnum == 5 and message.request_id is not None:
+            return True
+        if message.latitude is not None and message.longitude is not None:
+            return True
+        if self.router.command_token(message) in {"REPORT", "REPORT!", "OK", "HELPME", "ACK"}:
+            return True
+        return bool(
+            self.config.modules.watch.enabled
+            and self.config.watch.emergency_keywords_enabled
+            and message.text
+            and self.incidents.emergency_keyword(message.text, self.config.watch.emergency_keywords)
+        )
+
+    async def _route_inbound(self, message: InboundMessage, log_id: int) -> None:
+        if self._is_safety_inbound(message):
+            self._inbound_fast_processed += 1
+            await self._handle_inbound_message(message, ordered=False)
+            return
+        if self._inbound_queued >= self.config.router.inbound_queue_max:
+            self._inbound_backlog_dropped += 1
+            INBOUND_DROPPED.labels("worker_backlog_full").inc()
+            await self.message_log.mark_inbound_dropped(log_id, "worker backlog full")
+            return
+        pending = self._inbound_pending[message.from_id]
+        should_schedule = not pending and message.from_id not in self._inbound_active
+        pending.append((message, log_id))
+        self._inbound_queued += 1
+        INBOUND_QUEUE_DEPTH.labels("worker_backlog").set(self._inbound_queued)
+        if should_schedule:
+            self._inbound_ready.put_nowait(message.from_id)
+
+    async def _inbound_worker(self, worker: int) -> None:
+        task_name = f"inbound-worker-{worker}"
+        while True:
+            sender = await self._inbound_ready.get()
+            pending = self._inbound_pending.get(sender)
+            if not pending:
                 continue
-            if message.portnum == 5 and message.request_id is not None:
-                outcome = "acked" if message.routing_error in {None, "NONE"} else "naked"
-                if await self.message_log.resolve_ack(message.request_id, outcome):
-                    ACK_OUTCOME.labels(outcome).inc()
-                continue
-            if (
-                self.config.modules.watch.enabled
-                and message.latitude is not None
-                and message.longitude is not None
-            ):
-                member = await self.router.members.resolve(message.from_id)
-                await self.incidents.record_position(
-                    member, message.latitude, message.longitude, prompt=message.is_direct
-                )
-                if not message.is_direct:
-                    continue
-                response = Response(
-                    ResponseKind.DETAIL,
-                    [
-                        Line(
-                            "Location saved. What happened? Reply with a type and details, "
-                            "for example: tree blocking road. Not 911."
-                        )
-                    ],
-                )
-            elif (
-                self.config.modules.watch.enabled
-                and self.config.watch.emergency_keywords_enabled
-                and message.text
-                and self.incidents.emergency_keyword(
-                    message.text, self.config.watch.emergency_keywords
-                )
-            ):
-                member = await self.router.members.resolve(message.from_id)
-                incident, created = await self.incidents.emergency_trigger(
-                    member, message.text, self.config.watch.emergency_cooldown_minutes
-                )
-                if created:
-                    await self._notify_emergency_responders(incident, member.mesh_id)
-                response = Response(
-                    ResponseKind.ACK,
-                    [
-                        Line(
-                            f"⚠ INC {incident.local_ref} filed. Contact 911. Not emergency service."
-                        )
-                    ],
-                )
-            elif self.config.modules.watch.enabled and message.is_direct and message.text:
-                member = await self.router.members.resolve(message.from_id)
-                if self.incidents.is_position_share_notice(message.text):
-                    response = Response(ResponseKind.NONE)
+            self._inbound_active.add(sender)
+            message, _ = pending.popleft()
+            self._inbound_queued -= 1
+            self._inbound_busy += 1
+            INBOUND_QUEUE_DEPTH.labels("worker_backlog").set(self._inbound_queued)
+            INBOUND_WORKERS_BUSY.set(self._inbound_busy)
+            try:
+                await self._handle_inbound_message(message, ordered=False)
+                self._task_progress(task_name)
+            finally:
+                self._inbound_busy -= 1
+                INBOUND_WORKERS_BUSY.set(self._inbound_busy)
+                self._inbound_active.discard(sender)
+                if pending:
+                    self._inbound_ready.put_nowait(sender)
                 else:
-                    pending = await self.incidents.create_from_pending(message.text, member)
-                    if pending is None:
-                        response = await self.router.dispatch(message)
-                    else:
-                        created, similar = pending
-                        if similar is not None:
-                            response = Response(
-                                ResponseKind.DETAIL,
-                                [
-                                    Line(
-                                        f"Similar: INC {similar.local_ref} {similar.type}. "
-                                        f"CONFIRM {similar.local_ref}, or REPORT! to file new."
-                                    )
-                                ],
-                            )
-                        else:
-                            assert created is not None
-                            response = Response(
-                                ResponseKind.ACK,
-                                [
-                                    Line(
-                                        f"✓ INC {created.local_ref} {created.type} · shared GPS "
-                                        f"{created.lat:.3f},{created.lon:.3f}"
-                                    )
-                                ],
-                            )
-            else:
-                response = await self.router.dispatch(message)
-            if response.kind == ResponseKind.NONE:
-                continue
-            text = render_response(response)
-            max_parts = self.config.airtime.max_parts.get(response.airtime_class.value, 1)
-            parts = chunk_text(text, max_parts=max_parts)
-            self.governor.enqueue_many(
-                [
-                    OutboundItem(
-                        text=part,
-                        dest=message.from_id,
-                        channel=message.channel,
-                        traffic_class=response.airtime_class,
-                        want_ack=True,
-                        multipart=len(parts) > 1,
-                    )
-                    for part in parts
-                ]
+                    self._inbound_pending.pop(sender, None)
+
+    async def _handle_inbound_message(
+        self, message: InboundMessage, *, ordered: bool = True
+    ) -> None:
+        if (
+            self.config.modules.fed.enabled
+            and message.portnum == self.config.radio.federation_portnum
+        ):
+            await self._handle_federation_discovery(message)
+            return
+        if message.portnum == 5 and message.request_id is not None:
+            outcome = "acked" if message.routing_error in {None, "NONE"} else "naked"
+            if await self.message_log.resolve_ack(message.request_id, outcome):
+                ACK_OUTCOME.labels(outcome).inc()
+            return
+        if (
+            self.config.modules.watch.enabled
+            and message.latitude is not None
+            and message.longitude is not None
+        ):
+            member = await self.router.members.resolve(message.from_id)
+            await self.incidents.record_position(
+                member, message.latitude, message.longitude, prompt=message.is_direct
             )
+            if not message.is_direct:
+                return
+            response = Response(
+                ResponseKind.DETAIL,
+                [
+                    Line(
+                        "Location saved. What happened? Reply with a type and details, "
+                        "for example: tree blocking road. Not 911."
+                    )
+                ],
+            )
+        elif (
+            self.config.modules.watch.enabled
+            and self.config.watch.emergency_keywords_enabled
+            and message.text
+            and self.incidents.emergency_keyword(message.text, self.config.watch.emergency_keywords)
+        ):
+            member = await self.router.members.resolve(message.from_id)
+            incident, created = await self.incidents.emergency_trigger(
+                member, message.text, self.config.watch.emergency_cooldown_minutes
+            )
+            if created:
+                await self._notify_emergency_responders(incident, member.mesh_id)
+            response = Response(
+                ResponseKind.ACK,
+                [Line(f"⚠ INC {incident.local_ref} filed. Contact 911. Not emergency service.")],
+            )
+        elif self.config.modules.watch.enabled and message.is_direct and message.text:
+            member = await self.router.members.resolve(message.from_id)
+            if self.incidents.is_position_share_notice(message.text):
+                response = Response(ResponseKind.NONE)
+            else:
+                pending_report = await self.incidents.create_from_pending(message.text, member)
+                if pending_report is None:
+                    response = await self.router.dispatch(message, ordered=ordered)
+                else:
+                    created, similar = pending_report
+                    if similar is not None:
+                        response = Response(
+                            ResponseKind.DETAIL,
+                            [
+                                Line(
+                                    f"Similar: INC {similar.local_ref} {similar.type}. "
+                                    f"CONFIRM {similar.local_ref}, or REPORT! to file new."
+                                )
+                            ],
+                        )
+                    else:
+                        assert created is not None
+                        response = Response(
+                            ResponseKind.ACK,
+                            [
+                                Line(
+                                    f"✓ INC {created.local_ref} {created.type} · shared GPS "
+                                    f"{created.lat:.3f},{created.lon:.3f}"
+                                )
+                            ],
+                        )
+        else:
+            response = await self.router.dispatch(message, ordered=ordered)
+            if response.kind == ResponseKind.NONE:
+                return
+        if response.kind == ResponseKind.NONE:
+            return
+        text = render_response(response)
+        max_parts = self.config.airtime.max_parts.get(response.airtime_class.value, 1)
+        parts = chunk_text(text, max_parts=max_parts)
+        self.governor.enqueue_many(
+            [
+                OutboundItem(
+                    text=part,
+                    dest=message.from_id,
+                    channel=message.channel,
+                    traffic_class=response.airtime_class,
+                    want_ack=True,
+                    multipart=len(parts) > 1,
+                )
+                for part in parts
+            ]
+        )
 
     async def _notify_emergency_responders(self, incident: Incident, sender_mesh_id: str) -> None:
         rows = await self.database.read(
@@ -1514,6 +1592,16 @@ class OutpostApp:
             "tasks_healthy": self.background_tasks_healthy(),
             "task_failure": self._fatal_task_error,
             "tasks": {name: dict(health) for name, health in self._task_health.items()},
+            "inbound": {
+                "workers": self.config.router.inbound_workers,
+                "busy": self._inbound_busy,
+                "backlog": self._inbound_queued,
+                "capacity": self.config.router.inbound_queue_max,
+                "fast_processed": self._inbound_fast_processed,
+                "backlog_dropped": self._inbound_backlog_dropped,
+                "pipeline_dropped": dict(self.inbound_pipeline.dropped),
+                "radio": self.radio.inbound_status(),
+            },
             "radio_config": {
                 "node_id": self.radio.snapshot.node_id,
                 "region": self.radio.snapshot.region,

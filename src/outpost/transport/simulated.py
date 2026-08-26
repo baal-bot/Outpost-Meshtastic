@@ -42,6 +42,15 @@ class SimulatedRadioLink:
         while True:
             yield await self.received.get()
 
+    def inbound_status(self) -> dict[str, int | None]:
+        return {
+            "depth": self.received.qsize(),
+            "capacity": self.received.maxsize,
+            "received": None,
+            "dropped": 0,
+            "last_drop_at": None,
+        }
+
     async def _send_text(
         self, text: str, *, dest: str, channel: int, want_ack: bool, priority: int
     ) -> SendResult:

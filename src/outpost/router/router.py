@@ -48,7 +48,25 @@ class Router:
         match = re.match(rf"^{short}\s+(.+)$", text, re.IGNORECASE)
         return match.group(1) if match else None
 
-    async def dispatch(self, inbound: InboundMessage) -> Response:
+    def command_token(self, inbound: InboundMessage) -> str | None:
+        invoked = self._invoked(inbound)
+        if invoked is None:
+            return None
+        parts = invoked.split(maxsplit=1)
+        return parts[0].upper() if parts else ""
+
+    async def dispatch(self, inbound: InboundMessage, *, ordered: bool = True) -> Response:
+        try:
+            async with asyncio.timeout(self.config.router.member_lock_timeout_s):
+                if not ordered:
+                    return await self._dispatch_unlocked(inbound)
+                lock = self._locks[inbound.from_id]
+                async with lock:
+                    return await self._dispatch_unlocked(inbound)
+        except TimeoutError:
+            return Response(ResponseKind.ERROR, [Line(message("internal_error"))])
+
+    async def _dispatch_unlocked(self, inbound: InboundMessage) -> Response:
         invoked = self._invoked(inbound)
         if invoked is None or inbound.no_reply:
             return Response(ResponseKind.NONE)
@@ -81,12 +99,7 @@ class Router:
                 " · Weather fallback data: Open-Meteo" if self.config.modules.env.enabled else ""
             ),
         )
-        lock = self._locks[member.mesh_id]
         try:
-            async with asyncio.timeout(self.config.router.member_lock_timeout_s):
-                async with lock:
-                    return await spec.handler(ctx)
-        except TimeoutError:
-            return Response(ResponseKind.ERROR, [Line(message("internal_error"))])
+            return await spec.handler(ctx)
         except Exception:
             return Response(ResponseKind.ERROR, [Line(message("internal_error"))])

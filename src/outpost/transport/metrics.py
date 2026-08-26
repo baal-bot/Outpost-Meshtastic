@@ -9,6 +9,8 @@ INBOUND = Counter(
     ("portnum", "channel", "direct"),
 )
 INBOUND_DROPPED = Counter("outpost_inbound_dropped_total", "Dropped inbound messages", ("reason",))
+INBOUND_QUEUE_DEPTH = Gauge("outpost_inbound_queue_depth", "Inbound queue depth", ("lane",))
+INBOUND_WORKERS_BUSY = Gauge("outpost_inbound_workers_busy", "Busy inbound workers")
 OUTBOUND_ENQUEUED = Counter(
     "outpost_outbound_enqueued_total", "Queued outbound messages", ("class",)
 )
