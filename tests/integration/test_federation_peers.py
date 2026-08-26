@@ -232,6 +232,11 @@ async def test_sync_status_reports_transport_and_delivery_health(tmp_path) -> No
         "VALUES('in','!remote',0,260,0,40,'federation','rejected','replay detected',"
         "'radio',unixepoch())"
     )
+    await database.write(
+        "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
+        "VALUES(?,'_reconcile','recv',?,unixepoch())",
+        (peer.id, '{"before":[10,"board:gen","local:1"],"snapshot":20,"pending":false}'),
+    )
     client = TestClient(
         create_web_app(lambda: {"radio": "up"}, database=database, federation=service)
     )
@@ -245,4 +250,6 @@ async def test_sync_status_reports_transport_and_delivery_health(tmp_path) -> No
     assert transfer["deliveries"]["recovered"] == 1
     assert transfer["security"]["rejected_24h"] == 1
     assert transfer["security"]["recent"][0]["reason"] == "replay detected"
+    assert transfer["catch_up"]["active"] is True
+    assert transfer["catch_up"]["waiting"] is False
     await database.close()

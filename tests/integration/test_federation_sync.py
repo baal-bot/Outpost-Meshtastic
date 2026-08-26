@@ -116,6 +116,57 @@ async def test_incident_radius_filters_exports_and_member_positions_never_federa
 
 
 @pytest.mark.asyncio
+async def test_manifest_keyset_pages_recover_long_outage_without_skips(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    peers = FederationPeerService(database, VirtualClock(), "!local")
+    await peers.discover("!remote", "Remote", 1, {}, "radio")
+    await database.write("UPDATE fed_peer SET state='active' WHERE mesh_id='!remote'")
+    peer = await peers.update_sync_policy(
+        "!remote",
+        boards=["gen"],
+        sync_incidents=False,
+        relay_alerts=False,
+        quota_items_per_hour=100,
+    )
+    await database.write("UPDATE board SET federated=1 WHERE slug='gen'")
+    thread_id = await database.write(
+        "INSERT INTO thread(uid,board_id,subject,origin_node,created_at,last_post_at) "
+        "VALUES('local:catchup',1,'Catch up','local',1,25)"
+    )
+    for number in range(1, 26):
+        await database.write(
+            "INSERT INTO post(uid,thread_id,seq,author_label,origin_node,body,created_at) "
+            "VALUES(?,?,?,'operator','local',?,?)",
+            (f"local:catchup:{number}", thread_id, number, f"Post {number}", number),
+        )
+    sync = FederationSyncService(database, "!local")
+
+    recovered: list[str] = []
+    before = None
+    while True:
+        page = await sync.manifest(peer, 8, snapshot=25, before=before)
+        if not page:
+            break
+        recovered.extend(item.uid for item in page)
+        last = page[-1]
+        before = (last.version, last.stream, last.uid)
+        if len(recovered) == 8:
+            await database.write(
+                "INSERT INTO post(uid,thread_id,seq,author_label,origin_node,body,created_at) "
+                "VALUES('local:catchup:26',?,26,'operator','local','New during recovery',26)",
+                (thread_id,),
+            )
+
+    assert len(recovered) == 25
+    assert len(set(recovered)) == 25
+    assert "!local:local:catchup:26" not in recovered
+    newest = await sync.manifest(peer, 1, snapshot=26)
+    assert newest[0].uid == "!local:local:catchup:26"
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_export_namespaces_local_ids_with_outpost_identity(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()

@@ -611,8 +611,21 @@ def create_web_app(
                     "ORDER BY updated_at DESC"
                 )
                 cursor_map: dict[int, list[dict[str, Any]]] = {}
+                catchup_map: dict[int, dict[str, Any]] = {}
                 for cursor in cursors:
                     cursor_map.setdefault(int(cursor["peer_id"]), []).append(dict(cursor))
+                    if cursor["stream"] == "_reconcile" and cursor["direction"] == "recv":
+                        try:
+                            checkpoint = json.loads(str(cursor["cursor"]))
+                        except (TypeError, ValueError):
+                            checkpoint = {}
+                        before = checkpoint.get("before")
+                        catchup_map[int(cursor["peer_id"])] = {
+                            "active": bool(checkpoint.get("pending")) or bool(before),
+                            "waiting": bool(checkpoint.get("pending")),
+                            "snapshot": checkpoint.get("snapshot"),
+                            "updated_at": cursor["updated_at"],
+                        }
                 transfer_map: dict[int, dict[str, Any]] = {}
                 for peer in peers:
                     peer_id = int(peer["id"])
@@ -676,6 +689,15 @@ def create_web_app(
                                 for row in rejected
                             ],
                         },
+                        "catch_up": catchup_map.get(
+                            peer_id,
+                            {
+                                "active": False,
+                                "waiting": False,
+                                "snapshot": None,
+                                "updated_at": None,
+                            },
+                        ),
                     }
                 outbound = (
                     await database.read(

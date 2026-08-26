@@ -18,6 +18,10 @@ experimental until the two-node hardware backlog is complete.
 - Tampered authentication tags, unknown peer secrets, replayed counters, expired messages, identity
   mismatches, and policy violations are rejected before import. The transfer panel reports bounded
   counts and fixed safe reason labels; it never displays payloads, keys, or raw exception details.
+- Reconciliation after an outage uses a stable timestamped snapshot and keyset cursor. Pages are
+  limited to eight manifest entries and each catch-up cycle is bounded by
+  `fed.max_items_per_cycle`; unfinished snapshots resume in later airtime-governed batches. New
+  records cannot shift the cursor and cause older records to be skipped.
 - Per-peer policy controls boards, incidents, alerts, mail, quotas, and transport.
 - Enabling federation on a board automatically adds its slug to every currently paired peer's
   policy; disabling it removes the slug. Per-peer settings can still narrow that selection.

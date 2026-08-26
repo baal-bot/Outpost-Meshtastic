@@ -25,6 +25,8 @@ observed over live radios, not only in automated tests.
   After Outpost01's WAN was restored, local weather and a new peer weather request each produced
   one current result; the earlier offline request was neither replayed nor duplicated.
 - [ ] Partition both transports, reconnect, and verify bounded catch-up respects airtime policy.
+  Snapshot/keyset pagination, 8-item pages, durable continuation checkpoints, and long-outage
+  no-skip coverage are implemented. The live two-node partition/reconnect observation remains.
 
 Live testing found that 225–233-byte application payloads were not reliably acknowledged by the
 test radios, while payloads at 188 bytes were. Routine weather responses use compact wire keys and

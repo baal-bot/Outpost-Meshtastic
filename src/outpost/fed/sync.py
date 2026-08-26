@@ -98,7 +98,14 @@ class FederationSyncService:
         joined = "\x1f".join("" if value is None else str(value) for value in values)
         return hashlib.sha256(joined.encode()).hexdigest()[:16]
 
-    async def manifest(self, peer: Peer, limit: int = 100) -> list[ManifestItem]:
+    async def manifest(
+        self,
+        peer: Peer,
+        limit: int = 100,
+        *,
+        snapshot: int | None = None,
+        before: tuple[int, str, str] | None = None,
+    ) -> list[ManifestItem]:
         if peer.state != "active":
             raise ValueError("sync requires an active peer")
         items: list[ManifestItem] = []
@@ -109,8 +116,8 @@ class FederationSyncService:
                     b.slug FROM post p JOIN thread t ON t.id=p.thread_id
                     JOIN board b ON b.id=t.board_id
                     WHERE b.federated=1 AND b.slug IN ({placeholders}) AND p.hidden=0
-                    ORDER BY COALESCE(p.edited_at,p.created_at) DESC LIMIT ?""",  # noqa: S608
-                (*peer.boards, limit),
+                    ORDER BY COALESCE(p.edited_at,p.created_at) DESC""",  # noqa: S608
+                tuple(peer.boards),
             )
             items.extend(
                 ManifestItem(
@@ -141,8 +148,7 @@ class FederationSyncService:
         if peer.relay_alerts:
             rows = await self.database.read(
                 "SELECT uid,raised_at,cancelled_at,severity,headline,expires_at FROM alert "
-                "ORDER BY raised_at DESC LIMIT ?",
-                (limit,),
+                "ORDER BY raised_at DESC",
             )
             items.extend(
                 ManifestItem(
@@ -153,6 +159,13 @@ class FederationSyncService:
                 )
                 for row in rows
             )
+        items.sort(key=lambda item: (item.version, item.stream, item.uid), reverse=True)
+        if snapshot is not None:
+            items = [item for item in items if item.version <= snapshot]
+        if before is not None:
+            items = [
+                item for item in items if (item.version, item.stream, item.uid) < before
+            ]
         return items[:limit]
 
     async def missing(self, manifest: list[dict[str, Any]]) -> list[dict[str, str]]:

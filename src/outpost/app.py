@@ -616,18 +616,70 @@ class OutpostApp:
                 await self.clock.sleep(30)
                 continue
             if self.config.modules.fed.enabled:
+                now = int(self.clock.now().timestamp())
                 for peer in await self.federation.list("active"):
                     if not (peer.boards or peer.sync_incidents or peer.relay_alerts):
                         continue
+                    rows = await self.database.read(
+                        "SELECT cursor,updated_at FROM fed_cursor WHERE peer_id=? "
+                        "AND stream='_reconcile' AND direction='recv'",
+                        (peer.id,),
+                    )
+                    checkpoint: dict[str, object] = {}
+                    updated_at = 0
+                    if rows:
+                        try:
+                            checkpoint = json.loads(str(rows[0]["cursor"]))
+                        except (TypeError, ValueError):
+                            checkpoint = {}
+                        updated_at = int(rows[0]["updated_at"])
+                    cursor = checkpoint.get("before")
+                    pending = bool(checkpoint.get("pending"))
+                    continuing = isinstance(cursor, list) and len(cursor) == 3
+                    peer_row = (
+                        await self.database.read(
+                            "SELECT last_sync_at FROM fed_peer WHERE id=?", (peer.id,)
+                        )
+                    )[0]
+                    interval = self.config.fed.sync_interval_minutes * 60
+                    periodic_due = (
+                        peer_row["last_sync_at"] is None
+                        or now - int(peer_row["last_sync_at"]) >= interval
+                    )
+                    retry_due = pending and now - updated_at >= 120
+                    continuation_due = continuing and not pending and now - updated_at >= 30
+                    if not retry_due and not continuation_due and (pending or not periodic_due):
+                        continue
+                    snapshot = int(checkpoint.get("snapshot") or now)
+                    if not continuing:
+                        cursor = None
+                        snapshot = now
+                    next_checkpoint = {
+                        "before": cursor,
+                        "snapshot": snapshot,
+                        "pending": True,
+                    }
                     try:
                         await self._send_federation_value(
                             peer.mesh_id,
                             MessageType.SYNC_REQ,
-                            {"mesh_id": self.federation.local_mesh_id, "limit": 8},
+                            {
+                                "limit": 8,
+                                "budget": self.config.fed.max_items_per_cycle,
+                                "snapshot": snapshot,
+                                "before": cursor,
+                            },
+                        )
+                        await self.database.write(
+                            "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
+                            "VALUES(?,'_reconcile','recv',?,?) "
+                            "ON CONFLICT(peer_id,stream,direction) DO UPDATE SET "
+                            "cursor=excluded.cursor,updated_at=excluded.updated_at",
+                            (peer.id, json.dumps(next_checkpoint), now),
                         )
                     except (FrameError, ValueError):
                         continue
-            await self.clock.sleep(self.config.fed.sync_interval_minutes * 60)
+            await self.clock.sleep(30)
 
     async def _federation_delivery_loop(self) -> None:
         while True:
@@ -811,13 +863,33 @@ class OutpostApp:
             elif msg_type is MessageType.SYNC_REQ:
                 peer = await self.federation.by_mesh_id(sender)
                 limit = max(1, min(int(value.get("limit", 8)), 8))
-                manifest = [
-                    item.json() for item in await self.federation_sync.manifest(peer, limit)
-                ]
+                budget = max(1, min(int(value.get("budget", limit)), 100))
+                page_size = min(limit, budget)
+                snapshot = int(value.get("snapshot", int(self.clock.now().timestamp())))
+                raw_before = value.get("before")
+                before = None
+                if raw_before is not None:
+                    if not isinstance(raw_before, list) or len(raw_before) != 3:
+                        raise ValueError("invalid federation reconciliation cursor")
+                    before = (int(raw_before[0]), str(raw_before[1]), str(raw_before[2]))
+                page = await self.federation_sync.manifest(
+                    peer, page_size + 1, snapshot=snapshot, before=before
+                )
+                items = page[:page_size]
+                has_more = len(page) > page_size
+                next_before = None
+                if has_more and items:
+                    last = items[-1]
+                    next_before = [last.version, last.stream, last.uid]
                 await self._send_federation_value(
                     sender,
                     MessageType.SYNC_MANIFEST,
-                    {"mesh_id": self.federation.local_mesh_id, "items": manifest},
+                    {
+                        "items": [item.json() for item in items],
+                        "snapshot": snapshot,
+                        "next_before": next_before,
+                        "remaining": max(0, budget - len(items)),
+                    },
                 )
             elif msg_type is MessageType.SYNC_NOTIFY:
                 stream = str(value.get("stream", ""))
@@ -829,6 +901,25 @@ class OutpostApp:
                 manifest = value.get("items", [])
                 if not isinstance(manifest, list):
                     raise ValueError("invalid sync manifest")
+                peer = await self.federation.by_mesh_id(sender)
+                raw_next = value.get("next_before")
+                if raw_next is not None and (
+                    not isinstance(raw_next, list) or len(raw_next) != 3
+                ):
+                    raise ValueError("invalid federation reconciliation cursor")
+                remaining = max(0, min(int(value.get("remaining", 0)), 100))
+                checkpoint = {
+                    "before": raw_next,
+                    "snapshot": int(value.get("snapshot", int(self.clock.now().timestamp()))),
+                    "pending": False,
+                }
+                await self.database.write(
+                    "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
+                    "VALUES(?,'_reconcile','recv',?,unixepoch()) "
+                    "ON CONFLICT(peer_id,stream,direction) DO UPDATE SET "
+                    "cursor=excluded.cursor,updated_at=excluded.updated_at",
+                    (peer.id, json.dumps(checkpoint)),
+                )
                 missing = await self.federation_sync.missing(manifest)
                 if missing:
                     await self._send_federation_value(
@@ -841,6 +932,27 @@ class OutpostApp:
                         sender,
                         MessageType.SYNC_DONE,
                         {"mesh_id": self.federation.local_mesh_id, "received": 0},
+                    )
+                if raw_next is not None and remaining > 0:
+                    await self._send_federation_value(
+                        sender,
+                        MessageType.SYNC_REQ,
+                        {
+                            "limit": 8,
+                            "budget": remaining,
+                            "snapshot": checkpoint["snapshot"],
+                            "before": raw_next,
+                        },
+                    )
+                    checkpoint["pending"] = True
+                    await self.database.write(
+                        "UPDATE fed_cursor SET cursor=?,updated_at=unixepoch() WHERE peer_id=? "
+                        "AND stream='_reconcile' AND direction='recv'",
+                        (json.dumps(checkpoint), peer.id),
+                    )
+                elif raw_next is None:
+                    await self.database.write(
+                        "UPDATE fed_peer SET last_sync_at=unixepoch() WHERE id=?", (peer.id,)
                     )
             elif msg_type is MessageType.ITEM_REQ:
                 requests = value.get("items", [])
