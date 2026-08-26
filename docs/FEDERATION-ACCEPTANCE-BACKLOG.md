@@ -43,6 +43,12 @@ packet limits.
   without duplicate posts. Verified over live radios between `!699c2f30` and `!3136b053`;
   durable item receipts/retries and automatic Web UI refresh were also observed.
 - [ ] Sync allowed items while excluded or over-radius data remains private.
+  A production-path boundary probe on the live local database passed: a temporary post on the
+  local-only `roads` board was absent from both the peer manifest and item export; a temporary
+  incident inside a 5 km boundary was admitted while an otherwise equivalent incident outside it
+  was absent from both paths. The service was stopped during the probe and all fixtures were
+  removed before restart. Two-node incident delivery remains pending an operator-selected peer
+  location and radius.
 - [x] Relay encrypted mail in both directions and verify receipts, routing, and deduplication.
   Web operator mail to a named remote member and the member's `RR` back to the originating
   Outpost's web-only `@operator` mailbox passed over live radios. Per-peer quota enforcement
