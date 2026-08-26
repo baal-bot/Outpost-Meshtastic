@@ -162,6 +162,62 @@ async def test_trusted_federation_uses_authenticated_broadcast_carrier(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_allowed_remote_thread_root_imports_without_manual_inbox_approval(tmp_path) -> None:
+    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    secret = bytes(range(32))
+    await app.federation.discover("!remote", "Remote", 1, {}, "radio")
+    await app.database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,boards='[\"gen\"]',"
+        "local_approved=1,remote_approved=1 WHERE mesh_id='!remote'",
+        (secret,),
+    )
+    await app.database.write("UPDATE board SET federated=1 WHERE slug='gen'")
+    item = {
+        "stream": "board:gen",
+        "uid": "!remote:local:20",
+        "digest": "test",
+        "payload": {
+            "uid": "!remote:local:20",
+            "thread_uid": "!remote:local:7",
+            "seq": 1,
+            "subject": "Remote thread",
+            "author_label": "operator@Remote",
+            "origin_node": "!remote",
+            "body": "First post",
+            "created_at": 100,
+            "edited_at": None,
+        },
+    }
+    frames = app.federation_codec.encode(
+        MessageType.ITEM, {"mesh_id": "!remote", "item": item}, 1, secret
+    )
+
+    for packet_id, frame in enumerate(frames, start=2):
+        await app._handle_federation_discovery(
+            InboundMessage(
+                packet_id,
+                "!remote",
+                "^all",
+                0,
+                config.radio.federation_portnum,
+                False,
+                None,
+                frame,
+                datetime.now(UTC),
+            )
+        )
+
+    threads = await app.database.read("SELECT uid,subject FROM thread WHERE uid='!remote:local:7'")
+    assert dict(threads[0]) == {"uid": "!remote:local:7", "subject": "Remote thread"}
+    inbox = await app.database.read("SELECT state FROM fed_inbox_item WHERE uid='!remote:local:20'")
+    assert inbox[0]["state"] == "imported"
+    await app.database.close()
+
+
+@pytest.mark.asyncio
 async def test_radio_hello_cannot_claim_another_sender(tmp_path) -> None:
     config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
     app = OutpostApp(config)

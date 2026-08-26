@@ -218,6 +218,7 @@ class OutpostApp:
         posts = await self.database.read("SELECT uid FROM post WHERE id=?", (post_id,))
         if not posts:
             return
+        self.federation_sync.local_mesh_id = self.radio.local_node_id or ""
         now = int(self.clock.now().timestamp())
         for peer in await self.federation.list("active"):
             if slug not in peer.boards:
@@ -585,6 +586,7 @@ class OutpostApp:
         if not local_id:
             raise ValueError("radio identity is not available")
         self.federation.local_mesh_id = local_id
+        self.federation_sync.local_mesh_id = local_id
         value = {**value, "mesh_id": local_id}
         secret = await self.federation.secret(peer_id)
         counter = await self.federation.next_counter(peer_id)
@@ -674,6 +676,8 @@ class OutpostApp:
         sender = getattr(message, "from_id", "")
         if not isinstance(payload, bytes) or not sender:
             return
+        if self.radio.local_node_id:
+            self.federation_sync.local_mesh_id = self.radio.local_node_id
         try:
             if len(payload) < 3:
                 return
@@ -852,9 +856,10 @@ class OutpostApp:
                     payload = item.get("payload")
                     if isinstance(payload, dict):
                         slug = str(item["stream"])[6:]
-                        if await self.federation_sync.approved_thread(
+                        approved = await self.federation_sync.approved_thread(
                             slug, str(payload.get("thread_uid", ""))
-                        ):
+                        )
+                        if approved or int(payload.get("seq", 0)) == 1:
                             inbox = await self.database.read(
                                 "SELECT id FROM fed_inbox_item WHERE peer_id=? AND stream=? "
                                 "AND uid=? AND state='pending'",

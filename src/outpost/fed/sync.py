@@ -70,7 +70,8 @@ class FederationSyncService:
         for row in rows:
             payload = json.loads(row["payload_json"])
             slug = str(row["stream"])[6:]
-            if await self.approved_thread(slug, str(payload.get("thread_uid", ""))):
+            approved = await self.approved_thread(slug, str(payload.get("thread_uid", "")))
+            if approved or int(payload.get("seq", 0)) == 1:
                 await self.import_inbox(int(row["id"]), operator, now)
                 imported += 1
         return imported

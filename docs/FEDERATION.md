@@ -14,6 +14,8 @@ experimental until the two-node hardware backlog is complete.
 - Per-peer policy controls boards, incidents, alerts, mail, quotas, and transport.
 - Enabling federation on a board automatically adds its slug to every currently paired peer's
   policy; disabling it removes the slug. Per-peer settings can still narrow that selection.
+- A new thread received from an allowed paired peer is imported automatically; later replies to
+  that admitted thread continue without per-message approval. Disallowed boards remain rejected.
 - Imported items can be quarantined for operator review.
 
 ## Before pairing
