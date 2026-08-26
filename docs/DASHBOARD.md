@@ -22,9 +22,10 @@ use admitted members only.
 
 ## Authentication
 
-The first login requires the generated journal password and then a replacement of at least 12
-characters. Sessions expire according to `web.auth.session_hours`. State-changing requests require
-the session's CSRF token. Do not share browser sessions among operators.
+The first login requires the short-lived token shown by `sudo outpost-setup-token show`, followed
+by a permanent password of at least 12 characters. The token is consumed by that login. Completing
+setup invalidates the bootstrap session and requires a clean sign-in. Sessions expire according to
+`web.auth.session_hours`; state-changing requests require the session's CSRF token.
 
 ## Appearance
 

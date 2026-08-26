@@ -6,7 +6,7 @@ trusted local service, not an anonymous public web application.
 ## Baseline
 
 - Maintain the OS, Python, Meshtastic firmware, and Outpost revision.
-- Replace the generated dashboard password immediately.
+- Complete the short-lived local setup-token flow and set a permanent dashboard password.
 - Limit port 8080 and `/metrics` to a LAN, VPN, or authenticated TLS proxy.
 - Protect `/etc/outpost`, `/var/lib/outpost`, backups, and radio keys.
 - Retain the dedicated non-login service account installed by the project.
@@ -18,10 +18,18 @@ allowing supported radio/accelerator devices.
 
 ## Authentication
 
-The initial random password appears once in the journal. Passwords use Argon2. Sessions use random
-tokens stored as hashes, and state changes use CSRF tokens. Login failures are limited by source;
-password change invalidates other sessions. `auth.mode: none` works only on loopback and must not be
-placed behind an unauthenticated public proxy.
+First startup stores a short-lived setup token in a mode-0600 local file and only its Argon2 hash in
+the database. The token never enters normal logs, expires after 60 minutes, and is consumed by its
+first successful login. Setting the permanent password removes every bootstrap and dashboard
+session secret. Local root can recover with `outpost-setup-token reset`. State changes use CSRF
+tokens and login failures are limited by source. `auth.mode: none` works only on loopback and must
+not be placed behind an unauthenticated public proxy.
+
+`sudo outpost-diagnostics --output /path/to/outpost-diagnostics.zip` creates a mode-0600 support
+bundle containing a bounded journal excerpt and non-secret configuration summary. The exporter
+redacts legacy bootstrap passwords, current setup values, password hashes, session cookies, bearer
+tokens, and CSRF values. Review any bundle before sharing because ordinary operational messages can
+still contain community-sensitive information.
 
 ## Location privacy
 

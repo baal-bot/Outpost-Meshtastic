@@ -28,7 +28,10 @@ opening the dashboard directly to the internet.
 ## Login failure
 
 Confirm system time and recent login failures. After repeated failures, wait before retrying. Use a
-private browser window to isolate stale cookie/CSRF state. Do not delete the database to reset auth.
+private browser window to isolate stale cookie/CSRF state. During first setup, inspect the token
+state with `sudo outpost-setup-token status`; use `sudo outpost-setup-token reset` if it expired or
+was consumed before a permanent password was saved. This local recovery revokes existing sessions.
+Do not delete the database to reset auth.
 
 ## Radio disconnected
 

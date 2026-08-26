@@ -290,9 +290,11 @@ def create_web_app(
     @app.middleware("http")
     async def authentication(request: Request, call_next: Any) -> Response:
         path = request.url.path
-        public = path in {"/api/v1/health", "/api/v1/auth/login"} or path.startswith(
-            "/api/v1/recovery/restores/"
-        )
+        public = path in {
+            "/api/v1/health",
+            "/api/v1/auth/login",
+            "/api/v1/auth/setup",
+        } or path.startswith("/api/v1/recovery/restores/")
         if auth is not None and path.startswith("/api/v1/") and not public:
             session = await auth.session(request.cookies.get("outpost_session"))
             if session is None:
@@ -306,7 +308,7 @@ def create_web_app(
                     {
                         "error": {
                             "code": "password_change_required",
-                            "message": "Change the initial password first.",
+                            "message": "Complete first-run password setup before using the API.",
                         }
                     },
                     status_code=403,
@@ -393,6 +395,10 @@ def create_web_app(
 
     if auth is not None:
 
+        @app.get("/api/v1/auth/setup")
+        async def setup_status() -> dict[str, bool | int | None]:
+            return await auth.setup_status()
+
         @app.post("/api/v1/auth/login", response_model=None)
         async def login(
             body: LoginBody, request: Request, response: Response
@@ -436,12 +442,14 @@ def create_web_app(
                     {
                         "error": {
                             "code": "invalid_password",
-                            "message": "Current password is wrong or replacement is too short.",
+                            "message": "Credential is invalid or replacement is too short.",
                         }
                     },
                     status_code=400,
                 )
-            return JSONResponse({"ok": True})
+            result = JSONResponse({"ok": True, "reauthenticate": True})
+            result.delete_cookie("outpost_session")
+            return result
 
     @app.get("/api/v1/health", response_class=JSONResponse, response_model=None)
     async def health() -> dict[str, str] | Response:

@@ -78,8 +78,21 @@ sudo systemctl status outpost --no-pager
 sudo journalctl -u outpost -n 100 --no-pager
 ```
 
-First startup logs a generated dashboard password once. Store it securely, open
-`http://<host>:8080/`, and replace it immediately.
+First startup creates a mode-0600 setup token beside the database. It expires after 60 minutes and
+is never written to the service journal. Retrieve it through local root access, open
+`http://<host>:8080/`, and choose a permanent password:
+
+```sh
+sudo outpost-setup-token show
+```
+
+The first login consumes the token. Completing setup invalidates every dashboard session and asks
+you to sign in with the permanent password. If the token expires, is lost, or setup is interrupted,
+issue a replacement locally; this also revokes existing dashboard sessions:
+
+```sh
+sudo outpost-setup-token reset
+```
 
 ## Verify
 

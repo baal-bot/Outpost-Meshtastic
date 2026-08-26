@@ -92,8 +92,9 @@ a verified database snapshot, atomic activation, health-gated automatic rollback
 `sudo outpost-rollback` command. Use `./deploy/update.sh <tag-or-ref>` from a clean checkout for a
 safe GitHub update.
 
-Open `http://<outpost-address>:8080/`. First startup writes a one-time operator password to the
-service journal; sign in and replace it immediately. Follow the complete
+Open `http://<outpost-address>:8080/`. First startup creates a short-lived, one-time setup token;
+retrieve it locally with `sudo outpost-setup-token show`, then choose a permanent password. The
+token is never written to the service journal. Follow the complete
 [installation guide](docs/INSTALLATION.md) for prerequisites, upgrades, and verification.
 
 ## Configure

@@ -25,6 +25,10 @@ def test_installer_stages_health_checked_release_with_rollback() -> None:
     assert '"$RELEASE_DIR/rollback.json"' in script
     assert 'mv -Tf "$CURRENT_LINK.next" "$CURRENT_LINK"' in script
     assert 'curl -fsS "$HEALTH_URL"' in script
+    assert 'ln -sfn "$CURRENT_LINK/bin/outpost-setup-token"' in script
+    assert 'ln -sfn "$CURRENT_LINK/bin/outpost-diagnostics"' in script
+    assert "sudo outpost-setup-token show" in script
+    assert "sudo outpost-setup-token reset" in script
     assert "New release failed health verification; rolling back." in script
 
 
@@ -33,6 +37,13 @@ def test_service_uses_atomic_current_release() -> None:
 
     assert "ExecStart=/opt/outpost/current/bin/python -m outpost" in unit
     assert "ExecStartPre=/opt/outpost/current/bin/python" in unit
+
+
+def test_service_startup_never_prints_reusable_dashboard_credentials() -> None:
+    application = (Path(__file__).parents[2] / "src" / "outpost" / "app.py").read_text()
+
+    assert "OUTPOST INITIAL OPERATOR PASSWORD" not in application
+    assert "setup_path.read_text" not in application
 
 
 def _database(path: Path, schema: int, value: str) -> None:

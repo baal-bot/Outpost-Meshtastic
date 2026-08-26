@@ -356,9 +356,7 @@ class OutpostApp:
             await self.federation_sync.import_approved_replies(
                 "federation:auto-thread", int(self.clock.now().timestamp())
             )
-        initial_password = await self.web_auth.ensure_credential()
-        if initial_password:
-            print(f"OUTPOST INITIAL OPERATOR PASSWORD: {initial_password}", flush=True)
+        await self.web_auth.ensure_credential()
         self._tasks = [
             self._start_background_task("radio-supervisor", self.supervisor.run()),
             self._start_background_task("airtime-governor", self._governor_loop()),

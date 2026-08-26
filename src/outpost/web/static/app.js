@@ -92,6 +92,30 @@ async function refresh() {
   }
 }
 let csrfToken = "";
+async function configureLogin(message = "") {
+  const response = await fetch("/api/v1/auth/setup");
+  const setup = response.ok ? await response.json() : {required: false, available: false};
+  const setupMode = Boolean(setup.required);
+  $("login-eyebrow").textContent = setupMode ? "ONE-TIME LOCAL SETUP" : "OUTPOST OPERATOR";
+  $("login-title").textContent = setupMode ? "Finish Outpost setup" : "Sign in to the console";
+  if (setupMode && setup.available) {
+    const expiry = new Date(setup.expires_at * 1000).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
+    $("login-copy").innerHTML = `On the Outpost host, run <code>sudo outpost-setup-token show</code> Enter that one-time token here before ${expiry}.`;
+  } else if (setupMode) {
+    $("login-copy").innerHTML = "The setup token expired or was already used. On the Outpost host, run <code>sudo outpost-setup-token reset</code> to issue a new one.";
+  } else {
+    $("login-copy").textContent = "This dashboard controls community infrastructure on your mesh.";
+  }
+  $("password-label").textContent = setupMode ? "One-time setup token" : "Operator password";
+  $("password").autocomplete = setupMode ? "one-time-code" : "current-password";
+  $("login-submit").textContent = setupMode ? "Continue setup" : "Sign in";
+  if (message) {
+    $("login-error").dataset.success = "true";
+    $("login-error").textContent = message;
+  } else {
+    delete $("login-error").dataset.success;
+  }
+}
 async function initialize() {
   const sessionResponse = await fetch("/api/v1/auth/session");
   if (sessionResponse.ok) {
@@ -108,11 +132,13 @@ async function initialize() {
   } else {
     sessionStorage.removeItem(authHintKey);
     $("login-screen").classList.remove("hidden");
+    await configureLogin();
   }
 }
 
 $("login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  delete $("login-error").dataset.success;
   $("login-error").textContent = "";
   const response = await fetch("/api/v1/auth/login", {
     method: "POST",
@@ -127,7 +153,6 @@ $("login-form").addEventListener("submit", async (event) => {
   sessionStorage.setItem(authHintKey, "true");
   csrfToken = session.csrf_token;
   if (session.must_change) {
-    $("current-password").value = $("password").value;
     $("login-form").classList.add("hidden");
     $("change-form").classList.remove("hidden");
   } else {
@@ -140,11 +165,15 @@ $("login-form").addEventListener("submit", async (event) => {
 $("change-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("change-error").textContent = "";
+  if ($("new-password").value !== $("confirm-password").value) {
+    $("change-error").textContent = "The permanent passwords do not match.";
+    return;
+  }
   const response = await fetch("/api/v1/auth/password", {
     method: "POST",
     headers: {"content-type": "application/json", "x-csrf-token": csrfToken},
     body: JSON.stringify({
-      current_password: $("current-password").value,
+      current_password: "",
       new_password: $("new-password").value,
     }),
   });
@@ -152,8 +181,14 @@ $("change-form").addEventListener("submit", async (event) => {
     $("change-error").textContent = "Could not change password. Use 12 or more characters.";
     return;
   }
-  $("login-screen").classList.add("hidden");
-  await refresh();
+  csrfToken = "";
+  sessionStorage.removeItem(authHintKey);
+  $("change-form").classList.add("hidden");
+  $("login-form").classList.remove("hidden");
+  $("new-password").value = "";
+  $("confirm-password").value = "";
+  await configureLogin("Permanent password saved. Sign in to continue.");
+  $("password").focus();
 });
 
 const emergencySection = document.querySelector(".emergency-settings");

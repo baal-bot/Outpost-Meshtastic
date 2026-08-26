@@ -230,6 +230,75 @@ def test_map_targets_and_list_alternatives_are_keyboard_ready(
         page.close()
 
 
+def test_first_run_uses_one_time_token_and_forces_clean_sign_in(
+    browser: object, dashboard_url: str
+) -> None:
+    page = browser.new_page(viewport={"width": 390, "height": 844})  # type: ignore[attr-defined]
+    state = {"complete": False}
+
+    def setup_route(route: object) -> None:
+        body = (
+            '{"required":false,"available":false,"expires_at":null}'
+            if state["complete"]
+            else '{"required":true,"available":true,"expires_at":2000000000}'
+        )
+        route.fulfill(status=200, content_type="application/json", body=body)
+
+    def password_route(route: object) -> None:
+        state["complete"] = True
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"ok":true,"reauthenticate":true}',
+        )
+
+    page.route("**/api/v1/auth/setup", setup_route)
+    page.route(
+        "**/api/v1/auth/session",
+        lambda route: route.fulfill(
+            status=401,
+            content_type="application/json",
+            body='{"error":{"code":"unauthorized"}}',
+        ),
+    )
+    page.route(
+        "**/api/v1/auth/login",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"csrf_token":"bootstrap-csrf","must_change":true}',
+        ),
+    )
+    page.route("**/api/v1/auth/password", password_route)
+    try:
+        page.goto(dashboard_url, wait_until="domcontentloaded")
+        page.get_by_role("heading", name="Finish Outpost setup").wait_for()
+        results = Axe().run(
+            page,
+            options={
+                "runOnly": {"type": "tag", "values": ["wcag2a", "wcag2aa", "wcag22aa"]},
+                "resultTypes": ["violations"],
+            },
+        )
+        assert results.violations_count == 0, results.generate_report()
+        token = page.get_by_label("One-time setup token")
+        token.fill("one-time-value")
+        page.get_by_role("button", name="Continue setup").click()
+
+        permanent = page.get_by_label("New permanent password")
+        permanent.fill("permanent-password-42")
+        page.get_by_label("Confirm permanent password").fill("permanent-password-42")
+        page.get_by_role("button", name="Complete setup").click()
+
+        page.get_by_role("heading", name="Sign in to the console").wait_for()
+        assert page.locator("#login-error").text_content() == (
+            "Permanent password saved. Sign in to continue."
+        )
+        assert page.locator("#current-password").count() == 0
+    finally:
+        page.close()
+
+
 def test_mobile_menu_has_keyboard_current_page_and_review_states(
     browser: object, dashboard_url: str
 ) -> None:

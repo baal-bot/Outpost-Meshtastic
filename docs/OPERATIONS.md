@@ -18,6 +18,15 @@ curl -fsS http://127.0.0.1:8080/api/v1/health
 Prometheus metrics are mounted at `/metrics`. Restrict them to trusted networks because labels and
 traffic characteristics can reveal operational patterns.
 
+Create a credential-redacted diagnostic archive with:
+
+```sh
+sudo outpost-diagnostics --output /var/lib/outpost/outpost-diagnostics.zip
+```
+
+The archive is mode 0600. Review it before sharing; secret redaction does not make ordinary radio or
+community activity non-sensitive.
+
 ## Backups
 
 The dashboard can create, validate, download, and restore backups. Rotation protects disk space;

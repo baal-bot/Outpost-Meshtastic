@@ -37,8 +37,11 @@ field with a phone on the node's Wi-Fi is a primary scenario during an event.
 | `users` | Multiple accounts with roles (Phase 6) |
 | `none` | Only permitted when bound to `127.0.0.1`; **MUST** refuse to start otherwise |
 
-**REQ-API-006** — First run **MUST** generate a random initial password, print it to the
-console and the journal, and **MUST** force a change on first login.
+**REQ-API-006** — First run **MUST** generate a short-lived one-time setup token, retain only its
+hash in the database, store the plaintext in a restrictive local file, and **MUST NOT** emit it to
+the normal console or journal. The first successful login consumes it, **MUST** force a permanent
+password, and completion **MUST** invalidate every bootstrap and dashboard session secret. Recovery
+requires local privileged access.
 
 **REQ-API-007** — Sessions **MUST** be HttpOnly, SameSite=Lax cookies with a configurable
 lifetime (default 12 h), server-side revocable, and invalidated on password change.
@@ -61,6 +64,15 @@ timestamps in responses (storage remains epoch integers per REQ-DATA-004).
 available offline.
 
 ### 3.1 Endpoint catalogue
+
+**Authentication**
+```
+GET    /api/v1/auth/setup                 # setup state only; unauthenticated, never the token
+POST   /api/v1/auth/login                 # permanent password or active one-time setup token
+GET    /api/v1/auth/session
+POST   /api/v1/auth/password              # completes setup/change; invalidates every session
+POST   /api/v1/auth/logout
+```
 
 **System**
 ```

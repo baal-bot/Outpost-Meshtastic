@@ -132,6 +132,8 @@ ln -sfn "$RELEASE_DIR" "$CURRENT_LINK.next"
 mv -Tf "$CURRENT_LINK.next" "$CURRENT_LINK"
 install -m 0644 "$SCRIPT_DIR/outpost.service" /etc/systemd/system/outpost.service
 install -m 0755 "$SCRIPT_DIR/rollback.sh" /usr/local/sbin/outpost-rollback
+ln -sfn "$CURRENT_LINK/bin/outpost-setup-token" /usr/local/sbin/outpost-setup-token
+ln -sfn "$CURRENT_LINK/bin/outpost-diagnostics" /usr/local/sbin/outpost-diagnostics
 install -d -m 0755 /usr/local/lib/outpost
 install -m 0755 "$SCRIPT_DIR/release_recovery.py" /usr/local/lib/outpost/release_recovery.py
 printf '%s\n' "$PROJECT_DIR" > "$CONFIG_DIR/install-source"
@@ -184,4 +186,6 @@ if [ -n "$OLD_TARGET" ]; then
 fi
 printf '%s\n' "$RELEASE_ID" > "$PREFIX/installed-release"
 echo "Outpost $RELEASE_ID is healthy at $HEALTH_URL"
+echo "Dashboard setup token (first install): sudo outpost-setup-token show"
+echo "Dashboard setup recovery (local root only): sudo outpost-setup-token reset"
 echo "Rollback command: sudo outpost-rollback"

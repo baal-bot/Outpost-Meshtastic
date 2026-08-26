@@ -22,22 +22,32 @@ import zipfile
 wheel = sys.argv[1]
 required = {
     "outpost/__main__.py",
+    "outpost/diagnostics.py",
+    "outpost/setup_token.py",
     "outpost/store/migrations/0000_core.sql",
     "outpost/store/migrations/0104_digests.sql",
+    "outpost/store/migrations/0139_web_setup_secret.sql",
     "outpost/web/static/Figtree-Variable.ttf",
+    "outpost/web/static/a11y.js",
     "outpost/web/static/app.js",
     "outpost/web/static/favicon.svg",
     "outpost/web/static/index.html",
     "outpost/web/static/nav.js",
     "outpost/web/static/radio.html",
     "outpost/web/static/theme-corrections.css",
+    "outpost/web/static/theme-boot.js",
     "outpost/web/static/theme.js",
 }
 with zipfile.ZipFile(wheel) as archive:
     names = set(archive.namelist())
+    entry_points_name = next(name for name in names if name.endswith(".dist-info/entry_points.txt"))
+    entry_points = archive.read(entry_points_name).decode()
 missing = sorted(required - names)
 if missing:
     raise SystemExit(f"wheel is missing runtime files: {', '.join(missing)}")
+for command in ("outpost-diagnostics", "outpost-setup-token"):
+    if command not in entry_points:
+        raise SystemExit(f"wheel is missing console command: {command}")
 PY
 
 echo "Package smoke test passed: $WHEEL"

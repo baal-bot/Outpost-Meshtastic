@@ -20,3 +20,5 @@ config/config.local.yaml
 *.db
 *.db-shm
 *.db-wal
+setup-token
+outpost-diagnostics-*.zip
