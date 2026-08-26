@@ -1,7 +1,7 @@
 import runpy
 import sqlite3
-from contextlib import closing
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from typing import Any, cast
 
