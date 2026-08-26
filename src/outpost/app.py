@@ -608,6 +608,25 @@ class OutpostApp:
         while True:
             if self.config.modules.fed.enabled and self.radio.local_node_id:
                 now = int(self.clock.now().timestamp())
+                pending_approvals = await self.database.read(
+                    "SELECT mesh_id,shared_secret FROM fed_peer WHERE state='pairing' "
+                    "AND local_approved=1 AND remote_approved=0 AND shared_secret IS NOT NULL"
+                )
+                for approval in pending_approvals:
+                    frames = self.federation_codec.encode(
+                        MessageType.PAIR_CONFIRM,
+                        {
+                            "mesh_id": self.radio.local_node_id,
+                            "target_mesh_id": str(approval["mesh_id"]),
+                            "approved": True,
+                        },
+                        now & 0xFFFFFFFF,
+                        bytes(approval["shared_secret"]),
+                    )
+                    try:
+                        self._queue_federation_frames(frames, "^all", want_ack=False)
+                    except ValueError:
+                        pass
                 rows = await self.database.read(
                     "SELECT d.peer_id,d.post_id,d.uid,d.stream,p.mesh_id,post.uid local_uid "
                     "FROM fed_post_delivery d JOIN fed_peer p ON p.id=d.peer_id "
