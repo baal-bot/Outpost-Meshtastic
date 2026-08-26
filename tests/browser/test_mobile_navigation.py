@@ -543,3 +543,129 @@ def test_capability_cards_reflect_disabled_modules(browser: object, dashboard_ur
         )
     finally:
         page.close()
+
+
+def route_operator_workspace(page: object, seen_audit_urls: list[str]) -> None:
+    page.route(
+        "**/api/v1/members*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": [],
+                    "approved_count": 0,
+                    "discovered_count": 0,
+                    "trusted_count": 0,
+                }
+            ),
+        ),
+    )
+    page.route(
+        "**/api/v1/security/safety-floor",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "summary": {"attempts": 0, "coalesced": 0},
+                    "items": [],
+                }
+            ),
+        ),
+    )
+
+    def audit(route: object) -> None:
+        seen_audit_urls.append(route.request.url)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": 1,
+                            "actor_kind": "web",
+                            "actor_ref": "operator-with-a-long-reference",
+                            "action": "federation.origin_adopt",
+                            "target": "fed_peer:an-unbroken-target-value-that-must-wrap-safely",
+                            "detail": '{\n  "old_mesh_id": "!00000001",\n  "safe": true\n}',
+                            "detail_format": "json",
+                            "outcome": "success",
+                            "created_at": "2026-08-26T20:00:00Z",
+                        }
+                    ],
+                    "total": 1,
+                    "next_cursor": None,
+                }
+            ),
+        )
+
+    page.route("**/api/v1/audit*", audit)
+
+
+@pytest.mark.parametrize("width", (320, 390))
+def test_mobile_audit_cards_filter_wrap_expand_and_copy(
+    browser: object, dashboard_url: str, width: int
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme="daylight")
+    seen_audit_urls: list[str] = []
+    route_operator_workspace(page, seen_audit_urls)
+    try:
+        page.goto(f"{dashboard_url}/operator.html#audit", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        event = page.locator("#audit-list .audit-event")
+        event.wait_for()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        assert event.locator(".audit-target small").is_visible()
+        assert (
+            event.locator(".audit-target span").evaluate(
+                "element => getComputedStyle(element).overflowWrap"
+            )
+            == "anywhere"
+        )
+
+        page.locator("#audit-actor").fill("web:operator")
+        page.locator("#audit-action").fill("origin")
+        page.get_by_role("button", name="Apply filters").click()
+        page.wait_for_function(
+            "() => document.querySelector('#audit-summary').textContent.includes('1 of 1')"
+        )
+        assert any(
+            "actor=web%3Aoperator" in url and "action=origin" in url for url in seen_audit_urls
+        )
+
+        event.locator("summary").click()
+        assert '"old_mesh_id"' in event.locator("pre").text_content()
+        page.evaluate(
+            "() => Object.defineProperty(navigator, 'clipboard', {configurable: true, "
+            "value: {writeText: async value => { window.__auditCopied = value; }}})"
+        )
+        event.get_by_role("button", name="Copy details").click()
+        page.wait_for_function("() => window.__auditCopied?.includes('old_mesh_id')")
+        assert event.get_by_role("status").text_content() == "Copied"
+    finally:
+        page.close()
+
+
+def test_desktop_audit_retains_dense_scanning_columns(browser: object, dashboard_url: str) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    seen_audit_urls: list[str] = []
+    route_operator_workspace(page, seen_audit_urls)
+    try:
+        page.goto(f"{dashboard_url}/operator.html#audit", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        event = page.locator("#audit-list .audit-event")
+        event.wait_for()
+        assert page.locator(".audit-columns").is_visible()
+        assert (
+            len(
+                event.evaluate(
+                    "element => getComputedStyle(element).gridTemplateColumns.split(' ')"
+                )
+            )
+            == 4
+        )
+        assert page.screenshot().startswith(b"\x89PNG")
+    finally:
+        page.close()

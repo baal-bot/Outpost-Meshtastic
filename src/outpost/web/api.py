@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -238,6 +239,41 @@ class FederationMailBody(BaseModel):
 
 def _timestamp(value: int) -> str:
     return datetime.fromtimestamp(value, UTC).isoformat().replace("+00:00", "Z")
+
+
+_AUDIT_SECRET_KEY = re.compile(
+    r"password|passphrase|secret|token|api[_-]?key|private[_-]?key|psk|credential|"
+    r"authorization|cookie",
+    re.IGNORECASE,
+)
+_AUDIT_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b(password|passphrase|secret|token|api[_-]?key|private[_-]?key|psk|credential|"
+    r"authorization|cookie)(\s*[:=]\s*)([^,;\s}]+)"
+)
+
+
+def _redact_audit_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): "[REDACTED]"
+            if _AUDIT_SECRET_KEY.search(str(key))
+            else _redact_audit_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_audit_value(item) for item in value]
+    return value
+
+
+def _audit_detail(value: object) -> tuple[str | None, str | None]:
+    if value is None:
+        return None, None
+    text = str(value)
+    try:
+        structured = _redact_audit_value(json.loads(text))
+    except (json.JSONDecodeError, TypeError):
+        return _AUDIT_SECRET_ASSIGNMENT.sub(r"\1\2[REDACTED]", text), "text"
+    return json.dumps(structured, indent=2, sort_keys=True, ensure_ascii=False), "json"
 
 
 def create_web_app(
@@ -2438,19 +2474,60 @@ def create_web_app(
 
         @app.get("/api/v1/audit")
         async def audit(
-            cursor: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)
+            cursor: int = Query(0, ge=0),
+            limit: int = Query(50, ge=1, le=200),
+            from_time: datetime | None = None,
+            until: datetime | None = None,
+            actor: str = Query(default="", max_length=100),
+            action: str = Query(default="", max_length=100),
+            target: str = Query(default="", max_length=160),
+            outcome: Literal["success", "denied", "failure"] | None = None,
         ) -> dict[str, Any]:
+            clauses: list[str] = []
+            params: list[object] = []
+            if from_time is not None:
+                clauses.append("created_at>=?")
+                params.append(int(from_time.timestamp()))
+            if until is not None:
+                clauses.append("created_at<=?")
+                params.append(int(until.timestamp()))
+            for column, value in (
+                ("actor_kind || ':' || actor_ref", actor),
+                ("action", action),
+                ("COALESCE(target,'')", target),
+            ):
+                if value.strip():
+                    clauses.append(f"instr(lower({column}),lower(?))>0")  # noqa: S608
+                    params.append(value.strip())
+            if outcome is not None:
+                clauses.append("outcome=?")
+                params.append(outcome)
+            where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+            audit_sql = (
+                "SELECT id,actor_kind,actor_ref,action,target,detail,outcome,created_at "  # noqa: S608
+                f"FROM audit_log{where} ORDER BY id DESC LIMIT ? OFFSET ?"
+            )
             rows = await database.read(
-                """
-                SELECT id,actor_kind,actor_ref,action,target,detail,created_at
-                FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?
-                """,
-                (limit + 1, cursor),
+                audit_sql,
+                (*params, limit + 1, cursor),
+            )
+            total = int(
+                (
+                    await database.read(
+                        f"SELECT COUNT(*) count FROM audit_log{where}",  # noqa: S608
+                        params,
+                    )
+                )[0]["count"]
             )
             items = [dict(row) for row in rows[:limit]]
             for item in items:
                 item["created_at"] = _timestamp(item["created_at"])
-            return {"items": items, "next_cursor": cursor + limit if len(rows) > limit else None}
+                item["detail"], item["detail_format"] = _audit_detail(item["detail"])
+            return {
+                "items": items,
+                "total": total,
+                "next_cursor": cursor + limit if len(rows) > limit else None,
+            }
 
         @app.get("/api/v1/security/safety-floor")
         async def safety_floor_activity() -> dict[str, Any]:

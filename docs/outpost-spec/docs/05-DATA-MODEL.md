@@ -210,6 +210,7 @@ CREATE TABLE audit_log (
   action     TEXT NOT NULL,
   target     TEXT,
   detail     TEXT,                   -- JSON
+  outcome    TEXT NOT NULL DEFAULT 'success', -- success | denied | failure
   created_at INTEGER NOT NULL
 );
 CREATE INDEX idx_audit_time ON audit_log(created_at DESC);

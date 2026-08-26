@@ -13,11 +13,56 @@ td { padding: 12px 10px; border-bottom: 1px solid var(--soft); }
 td code { color: var(--muted); font-size: .64rem; }
 td small { display: block; color: var(--muted); margin-top: 3px; }
 select { padding: 7px 25px 7px 8px; color: var(--ink); background: var(--raised); border: 1px solid var(--line); border-radius: 5px; font: 650 .66rem Figtree, sans-serif; }
+.audit-panel { overflow: hidden; }
+.audit-summary { color: var(--muted); font: .62rem ui-monospace, monospace; }
+.audit-filters { display: grid; grid-template-columns: 1.1fr repeat(3, minmax(110px, 1fr)) 1fr auto; gap: 9px; margin-bottom: 18px; padding: 13px; background: color-mix(in srgb, var(--surface) 70%, transparent); border: 1px solid var(--soft); border-radius: 8px; }
+.audit-filters label { display: grid; align-content: end; gap: 5px; min-width: 0; }
+.audit-filters label span { color: var(--muted); font: 650 .55rem ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase; }
+.audit-filters :is(input, select) { width: 100%; min-width: 0; min-height: 34px; padding: 7px 9px; color: var(--ink); background: var(--raised); border: 1px solid var(--line); border-radius: 5px; font: 650 .66rem Figtree, sans-serif; }
+.audit-filter-actions { display: flex; align-items: end; gap: 7px; }
+.audit-filter-actions button { min-height: 34px; white-space: nowrap; }
+.audit-columns { display: grid; grid-template-columns: minmax(150px, 1.05fr) minmax(145px, .9fr) minmax(180px, 1.45fr) 74px; gap: 14px; padding: 0 12px 8px; color: var(--muted); font: 650 .54rem ui-monospace, monospace; letter-spacing: .05em; text-transform: uppercase; }
 .audit-list { display: grid; }
-.audit-event { display: grid; grid-template-columns: 135px 1fr auto; gap: 15px; padding: 12px 0; border-top: 1px solid var(--soft); font-size: .7rem; }
+.audit-event { display: grid; grid-template-columns: minmax(150px, 1.05fr) minmax(145px, .9fr) minmax(180px, 1.45fr) 74px; gap: 8px 14px; min-width: 0; padding: 13px 12px; border-top: 1px solid var(--soft); font-size: .7rem; }
 .audit-event:first-child { border-top: 0; }
-.audit-event code { color: var(--green); }
-.audit-event p { color: var(--muted); }
-.audit-event time { color: var(--muted); font: .58rem ui-monospace, monospace; }
+.audit-action { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.audit-event code { min-width: 0; color: var(--green); overflow-wrap: anywhere; }
+.audit-outcome { flex: 0 0 auto; padding: 2px 5px; color: var(--green); background: color-mix(in srgb, var(--green) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--green) 34%, var(--line)); border-radius: 999px; font: 650 .49rem ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase; }
+.audit-outcome:is(.failure, .denied) { color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, var(--surface)); border-color: color-mix(in srgb, var(--amber) 38%, var(--line)); }
+.audit-value { display: grid; gap: 3px; min-width: 0; }
+.audit-value small { display: none; color: var(--muted); font: 650 .52rem ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase; }
+.audit-value span { min-width: 0; color: var(--muted); overflow-wrap: anywhere; word-break: break-word; }
+.audit-event time { color: var(--muted); font: .58rem ui-monospace, monospace; white-space: nowrap; }
+.audit-detail { grid-column: 1 / -1; min-width: 0; margin-top: 2px; color: var(--muted); }
+.audit-detail summary { width: max-content; cursor: pointer; color: var(--muted); font: 650 .58rem ui-monospace, monospace; }
+.audit-detail[open] { padding: 10px 12px; background: color-mix(in srgb, var(--raised) 72%, transparent); border: 1px solid var(--soft); border-radius: 7px; }
+.audit-detail pre { max-width: 100%; max-height: 280px; margin: 10px 0; padding: 10px; overflow: auto; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 5px; font: .62rem/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.audit-detail-actions { display: flex; align-items: center; gap: 9px; }
+.audit-detail-actions button { min-height: 30px; }
+.audit-detail-actions span { color: var(--green); font: .57rem ui-monospace, monospace; }
+.audit-more { width: 100%; margin-top: 10px; }
+.safety-floor-list .audit-event { grid-template-columns: 135px 1fr auto; }
+.safety-floor-event p { color: var(--muted); overflow-wrap: anywhere; }
 .safety-floor-summary { color: var(--muted); font: .62rem ui-monospace, monospace; }
-@media (max-width: 650px) { .operator-stats { grid-template-columns: 1fr 1fr; } .operator-stats article { padding: 12px; } .operator-stats strong { font-size: 1.35rem; } .audit-event { grid-template-columns: 100px 1fr; } .audit-event time { display: none; } .member-controls { align-items: end; flex-direction: column; } }
+@media (max-width: 1080px) { .audit-filters { grid-template-columns: repeat(3, minmax(140px, 1fr)); } .audit-filter-actions { grid-column: span 1; } }
+@media (max-width: 650px) {
+  .operator-stats { grid-template-columns: 1fr 1fr; }
+  .operator-stats article { padding: 12px; }
+  .operator-stats strong { font-size: 1.35rem; }
+  .member-controls { align-items: end; flex-direction: column; }
+  .audit-panel { padding-inline: 14px; }
+  .audit-panel .heading { align-items: start; }
+  .audit-filters { grid-template-columns: 1fr 1fr; padding: 11px; }
+  .audit-filters label:first-child, .audit-filter-actions { grid-column: 1 / -1; }
+  .audit-filter-actions button { flex: 1; }
+  .audit-columns { display: none; }
+  .audit-event { grid-template-columns: 1fr auto; gap: 11px 12px; padding: 16px 2px; }
+  .audit-action { align-items: start; flex-direction: column; }
+  .audit-value { grid-column: 1 / -1; }
+  .audit-value small { display: block; }
+  .audit-event time { grid-column: 2; grid-row: 1; }
+  .audit-detail { grid-column: 1 / -1; }
+  .safety-floor-list .audit-event { grid-template-columns: 1fr auto; }
+  .safety-floor-list .audit-event p { grid-column: 1 / -1; }
+}
+@media (max-width: 420px) { .audit-filters { grid-template-columns: 1fr; } .audit-filters label:first-child, .audit-filter-actions { grid-column: auto; } }

@@ -31,6 +31,10 @@ redacts legacy bootstrap passwords, current setup values, password hashes, sessi
 tokens, and CSRF values. Review any bundle before sharing because ordinary operational messages can
 still contain community-sensitive information.
 
+The audit API and dashboard redact credential-shaped keys and assignments before displaying or
+copying structured detail. This is a defense in depth, not permission to write secrets into audit
+records: the database and its backups remain sensitive and must retain their filesystem controls.
+
 ## Location privacy
 
 Member positions may be full, coarse, or off for member-facing queries; authenticated operators can

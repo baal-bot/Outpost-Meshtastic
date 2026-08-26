@@ -85,6 +85,9 @@ GET    /api/v1/metrics                    # Prometheus text (also at /metrics)
 GET    /api/v1/audit
 ```
 
+The audit read surface supports bounded pagination plus time, actor, action, target, and outcome
+filters. Credential-shaped values in event detail are redacted before the API returns them.
+
 **Mesh**
 ```
 GET    /api/v1/mesh/nodes                 # radio node DB + member join

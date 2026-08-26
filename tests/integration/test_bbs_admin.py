@@ -39,7 +39,9 @@ async def test_bbs_admin_lifecycle_validates_and_audits(tmp_path) -> None:
     assert dict(rows[0]) == {"pinned": 1, "locked": 1, "post_count": 3}
     assert await database.read("SELECT 1 FROM post WHERE id=?", (post_id,))
     assert await database.read("SELECT seq FROM post WHERE id=? AND seq=3", (second_post_id,))
-    actions = [row["action"] for row in await database.read("SELECT action FROM audit_log")]
+    actions = [
+        row["action"] for row in await database.read("SELECT action FROM audit_log ORDER BY id")
+    ]
     assert actions == [
         "board.create",
         "board.update",
