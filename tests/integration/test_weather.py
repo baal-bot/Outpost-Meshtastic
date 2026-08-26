@@ -4,6 +4,7 @@ import urllib.error
 from datetime import UTC, datetime
 
 import pytest
+from prometheus_client import REGISTRY
 
 from outpost.clock import VirtualClock
 from outpost.config import EnvConfig
@@ -114,10 +115,14 @@ async def test_provider_conditional_request_reuses_body_on_304(monkeypatch) -> N
     monkeypatch.setattr("urllib.request.urlopen", urlopen)
     config = EnvConfig(user_agent="Outpost test (operator: test@example.org)")
     url = "https://api.weather.gov/test"
+    metric = "outpost_environment_provider_requests_total"
+    before = REGISTRY.get_sample_value(metric, {"host": "api.weather.gov"}) or 0
     assert await _request_json(url, "api.weather.gov", config) == {"value": 42}
     assert await _request_json(url, "api.weather.gov", config) == {"value": 42}
     assert requests[1].get_header("If-none-match") == '"forecast-1"'
     assert requests[1].get_header("If-modified-since") == "Mon, 24 Aug 2026 20:00:00 GMT"
+    after = REGISTRY.get_sample_value(metric, {"host": "api.weather.gov"}) or 0
+    assert after - before == 2
 
 
 @pytest.mark.asyncio

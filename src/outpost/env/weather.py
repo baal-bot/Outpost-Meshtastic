@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
+from prometheus_client import Counter
+
 from outpost.clock import Clock
 from outpost.config import EnvConfig
 from outpost.store import Database
@@ -20,6 +22,11 @@ NWS_HOST = "api.weather.gov"
 _HTTP_CACHE: dict[str, tuple[dict[str, Any], str | None, str | None]] = {}
 ENV_CACHE_MAX = 1_000
 HTTP_CACHE_MAX = 1_000
+PROVIDER_REQUESTS = Counter(
+    "outpost_environment_provider_requests_total",
+    "External environment provider HTTP requests",
+    ("host",),
+)
 
 
 def _optional_float(value: object) -> float | None:
@@ -53,6 +60,7 @@ async def _request_json(url: str, host: str, config: EnvConfig) -> dict[str, Any
             if cached[2]:
                 headers["If-Modified-Since"] = cached[2]
         try:
+            PROVIDER_REQUESTS.labels(host=host).inc()
             with urllib.request.urlopen(  # noqa: S310 - caller supplies a fixed, checked host.
                 urllib.request.Request(url, headers=headers),  # noqa: S310 - checked HTTPS host.
                 timeout=config.request_timeout_s,

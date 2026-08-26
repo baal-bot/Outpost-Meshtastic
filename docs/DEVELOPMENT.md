@@ -72,6 +72,10 @@ Watch, Environment, Federation, and Backups. Critical mutation flows fail on unc
 console errors, failed API requests, non-success API responses, or horizontal viewport overflow.
 Every operator page is also scanned against WCAG 2 A/AA rules in all three display themes.
 
+Dashboard refresh changes must also remain within the Raspberry Pi
+[performance budget](PERFORMANCE.md). Run `tools/dashboard_idle_probe.py --seconds 300` on target
+hardware when adding a timer, provider-backed surface, or recurring database query.
+
 ## Change rules
 
 - Add a new ordered migration; never rewrite one used by deployed databases.
@@ -79,6 +83,7 @@ Every operator page is also scanned against WCAG 2 A/AA rules in all three displ
 - Commands declare module, trust, traffic class, maximum parts, rate key, and help.
 - Keep radio output concise, bounded, and direct rather than broadcast when possible.
 - Preserve auth/CSRF on web state changes and all offline dashboard assets.
+- Register recurring dashboard work with `refresh-scheduler.js`; do not add page-local intervals.
 - Show clear loading, empty, degraded, success, and error states on mobile screens.
 - Add tests and update public docs/spec for behavior or protocol changes.
 

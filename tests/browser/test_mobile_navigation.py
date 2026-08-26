@@ -58,6 +58,30 @@ MODULE_PAGES = (
 )
 
 
+def dashboard_poll_body(
+    *,
+    states: dict[str, dict[str, bool]] | None = None,
+    reviews: dict[str, int] | None = None,
+    actionable: int = 0,
+) -> str:
+    module_states = states or {
+        name: {"enabled": True, "restart_required_to_change": True}
+        for name in ("bbs", "ai", "watch", "env", "fed")
+    }
+    review_counts = {"total": 0, "board": 0, "incidents": 0, "alerts": 0}
+    review_counts.update(reviews or {})
+    return json.dumps(
+        {
+            "modules": {
+                "items": module_states,
+                "change_policy": "restart_required",
+            },
+            "reviews": review_counts,
+            "mail": {"actionable": actionable},
+        }
+    )
+
+
 def wait_for_navigation(page: object) -> None:
     page.wait_for_function(
         f"() => document.querySelectorAll('.rail nav a[aria-label]').length === {len(DESTINATIONS)}"
@@ -179,33 +203,12 @@ def route_shared_operator_api(page: object) -> None:
         lambda route: route.fulfill(status=200, content_type="image/png", body=empty_png),
     )
     page.route(
-        "**/api/v1/modules",
+        "**/api/v1/dashboard/poll",
         lambda route: route.fulfill(
             status=200,
             content_type="application/json",
-            body=json.dumps(
-                {
-                    "items": {
-                        name: {"enabled": True, "restart_required_to_change": True}
-                        for name in ("bbs", "ai", "watch", "env", "fed")
-                    },
-                    "change_policy": "restart_required",
-                }
-            ),
-        ),
-    )
-    page.route(
-        "**/api/v1/federation/inbox?state=pending",
-        lambda route: route.fulfill(
-            status=200, content_type="application/json", body='{"items":[]}'
-        ),
-    )
-    page.route(
-        "**/api/v1/mail/conversations?limit=1",
-        lambda route: route.fulfill(
-            status=200,
-            content_type="application/json",
-            body='{"items":[],"total":0,"counts":{"unread":0,"actionable":0,"failed":0}}',
+            headers={"etag": '"browser-test"'},
+            body=dashboard_poll_body(),
         ),
     )
 
@@ -412,11 +415,13 @@ def test_mobile_menu_has_keyboard_current_page_and_review_states(
     page = prepare_page(browser, 390, dashboard_url)
     try:
         page.route(
-            "**/api/v1/federation/inbox?state=pending",
+            "**/api/v1/dashboard/poll",
             lambda route: route.fulfill(
                 status=200,
                 content_type="application/json",
-                body='{"items":[{"stream":"incidents"}]}',
+                body=dashboard_poll_body(
+                    reviews={"total": 1, "incidents": 1},
+                ),
             ),
         )
         page.goto(f"{dashboard_url}/watch.html", wait_until="domcontentloaded")
@@ -577,11 +582,11 @@ def test_disabled_module_pages_are_explained_and_inert(
         for name in ("bbs", "ai", "watch", "env", "fed")
     }
     page.route(
-        "**/api/v1/modules",
+        "**/api/v1/dashboard/poll",
         lambda route: route.fulfill(
             status=200,
             content_type="application/json",
-            body=json.dumps({"items": states, "change_policy": "restart_required"}),
+            body=dashboard_poll_body(states=states),
         ),
     )
     try:
@@ -607,11 +612,11 @@ def test_capability_cards_reflect_disabled_modules(browser: object, dashboard_ur
         for name in ("bbs", "ai", "watch", "env", "fed")
     }
     page.route(
-        "**/api/v1/modules",
+        "**/api/v1/dashboard/poll",
         lambda route: route.fulfill(
             status=200,
             content_type="application/json",
-            body=json.dumps({"items": states, "change_policy": "restart_required"}),
+            body=dashboard_poll_body(states=states),
         ),
     )
     try:
@@ -874,6 +879,14 @@ def route_operations_inbox(page: object, mutations: list[tuple[str, object]]) ->
 
     page.route("**/api/v1/mail/conversations**", mail)
     page.route(
+        "**/api/v1/dashboard/poll",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=dashboard_poll_body(actionable=1),
+        ),
+    )
+    page.route(
         "**/api/v1/federation/peers*",
         lambda route: route.fulfill(
             status=200,
@@ -903,6 +916,88 @@ def route_operations_inbox(page: object, mutations: list[tuple[str, object]]) ->
         )
 
     page.route("**/api/v1/federation/mail", compose)
+
+
+def test_refresh_scheduler_is_single_flight_and_pauses_hidden_tabs(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 390, dashboard_url)
+    try:
+        result = page.evaluate(
+            """async () => {
+              const {RefreshScheduler} = await import('/refresh-scheduler.js');
+              const fakeDocument = {
+                hidden: false,
+                listener: null,
+                addEventListener(name, listener) {
+                  if (name === 'visibilitychange') this.listener = listener;
+                },
+              };
+              const wait = milliseconds => new Promise(
+                resolve => setTimeout(resolve, milliseconds)
+              );
+              const scheduler = new RefreshScheduler({documentRef: fakeDocument, random: () => 0});
+              let active = 0;
+              let maximumActive = 0;
+              let runs = 0;
+              scheduler.schedule('test-probe', async () => {
+                active += 1;
+                maximumActive = Math.max(maximumActive, active);
+                await wait(35);
+                active -= 1;
+                runs += 1;
+              }, {initial: 0, interval: 10});
+              await wait(90);
+              fakeDocument.hidden = true;
+              fakeDocument.listener();
+              await wait(60);
+              const hiddenRuns = runs;
+              await wait(60);
+              const hiddenRunsAfterWait = runs;
+              fakeDocument.hidden = false;
+              fakeDocument.listener();
+              await wait(60);
+              const resumedRuns = runs;
+              const snapshot = scheduler.snapshot()[0];
+              scheduler.cancel('test-probe');
+              const attempts = [];
+              scheduler.schedule('backoff-probe', async () => {
+                attempts.push(performance.now());
+                if (attempts.length === 1) throw new Error('expected probe failure');
+              }, {initial: 0, interval: 10});
+              await wait(45);
+              scheduler.cancel('backoff-probe');
+              let replacedTaskRuns = 0;
+              scheduler.schedule('replacement-probe', async () => {
+                replacedTaskRuns += 1;
+                await wait(30);
+              }, {initial: 0, interval: 5});
+              await wait(5);
+              scheduler.schedule('replacement-probe', async () => {}, {
+                initial: 100,
+                interval: 100,
+              });
+              await wait(50);
+              scheduler.cancel('replacement-probe');
+              return {
+                maximumActive,
+                hiddenRuns,
+                hiddenRunsAfterWait,
+                resumedRuns,
+                snapshot,
+                backoffMilliseconds: attempts[1] - attempts[0],
+                replacedTaskRuns,
+              };
+            }"""
+        )
+        assert result["maximumActive"] == 1
+        assert result["hiddenRunsAfterWait"] == result["hiddenRuns"]
+        assert result["resumedRuns"] > result["hiddenRunsAfterWait"]
+        assert result["snapshot"]["failures"] == 0
+        assert result["backoffMilliseconds"] >= 18
+        assert result["replacedTaskRuns"] == 1
+    finally:
+        page.close()
 
 
 @pytest.mark.parametrize(

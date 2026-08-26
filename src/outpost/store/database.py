@@ -2,14 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import threading
 from collections.abc import AsyncIterator, Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, TypeVar
 
+from prometheus_client import Counter, Gauge
+
 T = TypeVar("T")
 MIN_SQLITE = (3, 43, 0)
+DB_READ_POOL_SIZE = 2
+DB_READ_CONNECTIONS_OPENED = Counter(
+    "outpost_db_read_connections_opened_total", "SQLite read connections opened"
+)
+DB_READ_CONNECTIONS_ACTIVE = Gauge(
+    "outpost_db_read_connections_active", "Active bounded SQLite read connections"
+)
+DB_READ_QUERIES = Counter("outpost_db_read_queries_total", "SQLite read queries")
 
 
 class StoreError(RuntimeError):
@@ -34,6 +45,14 @@ class Database:
         self.path = Path(path)
         self._writer: sqlite3.Connection | None = None
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="outpost-db-writer")
+        self._read_executor = ThreadPoolExecutor(
+            max_workers=DB_READ_POOL_SIZE, thread_name_prefix="outpost-db-reader"
+        )
+        self._read_local = threading.local()
+        self._read_connections: list[sqlite3.Connection] = []
+        self._read_connections_lock = threading.Lock()
+        self._read_connection_opens = 0
+        self._read_queries = 0
         self._transaction_lock = asyncio.Lock()
 
     @staticmethod
@@ -94,6 +113,12 @@ class Database:
         await asyncio.get_running_loop().run_in_executor(self._executor, self._open_sync)
 
     async def close(self) -> None:
+        self._read_executor.shutdown(wait=True)
+        with self._read_connections_lock:
+            for reader in self._read_connections:
+                reader.close()
+                DB_READ_CONNECTIONS_ACTIVE.dec()
+            self._read_connections.clear()
         if self._writer is not None:
             connection, self._writer = self._writer, None
             await asyncio.get_running_loop().run_in_executor(self._executor, connection.close)
@@ -163,16 +188,36 @@ class Database:
                     raise
 
     async def read(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
-        def operation() -> list[sqlite3.Row]:
-            connection = sqlite3.connect(self.path)
-            connection.row_factory = sqlite3.Row
-            self._configure(connection)
-            try:
-                return list(connection.execute(sql, params))
-            finally:
-                connection.close()
+        if self._writer is None:
+            raise StoreError("database is not open")
 
-        return await asyncio.to_thread(operation)
+        def operation() -> list[sqlite3.Row]:
+            connection = getattr(self._read_local, "connection", None)
+            if connection is None:
+                connection = sqlite3.connect(self.path, check_same_thread=False)
+                connection.row_factory = sqlite3.Row
+                self._configure(connection)
+                self._read_local.connection = connection
+                with self._read_connections_lock:
+                    self._read_connections.append(connection)
+                    self._read_connection_opens += 1
+                DB_READ_CONNECTIONS_OPENED.inc()
+                DB_READ_CONNECTIONS_ACTIVE.inc()
+            with self._read_connections_lock:
+                self._read_queries += 1
+            DB_READ_QUERIES.inc()
+            return list(connection.execute(sql, params))
+
+        return await asyncio.get_running_loop().run_in_executor(self._read_executor, operation)
+
+    def read_pool_status(self) -> dict[str, int]:
+        with self._read_connections_lock:
+            return {
+                "capacity": DB_READ_POOL_SIZE,
+                "opened": self._read_connection_opens,
+                "active": len(self._read_connections),
+                "queries": self._read_queries,
+            }
 
     async def backup(self, destination: str | Path) -> None:
         target_path = Path(destination)

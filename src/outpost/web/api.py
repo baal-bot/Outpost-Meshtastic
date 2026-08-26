@@ -4,6 +4,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal
 
@@ -1081,6 +1082,46 @@ def create_web_app(
             },
             "change_policy": "restart_required",
         }
+
+    @app.get("/api/v1/dashboard/poll", response_model=None)
+    async def dashboard_poll(request: Request) -> Response:
+        reviews = {"total": 0, "board": 0, "incidents": 0, "alerts": 0}
+        actionable_mail = 0
+        if database is not None:
+            rows = await database.read(
+                """WITH reviews AS (
+                     SELECT COUNT(*) total,
+                            COALESCE(SUM(stream LIKE 'board:%'),0) board,
+                            COALESCE(SUM(stream='incidents'),0) incidents,
+                            COALESCE(SUM(stream='alerts'),0) alerts
+                     FROM fed_inbox_item WHERE state='pending'
+                   )
+                   SELECT reviews.*,
+                     (SELECT COUNT(DISTINCT conversation_key) FROM mail
+                      WHERE conversation_key IS NOT NULL AND archived_at IS NULL AND
+                        ((operator_read_at IS NULL AND mail_direction<>'out')
+                         OR state IN ('failed','undeliverable'))) actionable
+                   FROM reviews"""
+            )
+            reviews = {key: int(rows[0][key]) for key in ("total", "board", "incidents", "alerts")}
+            actionable_mail = int(rows[0]["actionable"])
+        value = {
+            "modules": {
+                "items": {
+                    name: {"enabled": enabled, "restart_required_to_change": True}
+                    for name, enabled in effective_modules().items()
+                },
+                "change_policy": "restart_required",
+            },
+            "reviews": reviews,
+            "mail": {"actionable": actionable_mail},
+        }
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+        etag = f'"{sha256(encoded).hexdigest()[:24]}"'
+        headers = {"ETag": etag, "Cache-Control": "private, max-age=0, must-revalidate"}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        return Response(encoded, media_type="application/json", headers=headers)
 
     if database is not None:
         if settings is not None:

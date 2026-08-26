@@ -1,5 +1,6 @@
 import {initTheme} from "/theme.js";
 import "/a11y.js";
+import {scheduler} from "/refresh-scheduler.js";
 
 initTheme();
 const path = window.location.pathname;
@@ -102,6 +103,28 @@ const capabilityModules = {
   "AI settings": "ai",
 };
 let effectiveModules = null;
+let navigationStatus = null;
+let navigationStatusEtag = "";
+let navigationStatusRequest = null;
+
+async function loadNavigationStatus() {
+  if (navigationStatusRequest) return navigationStatusRequest;
+  navigationStatusRequest = (async () => {
+    const response = await fetch("/api/v1/dashboard/poll", {
+      headers: navigationStatusEtag ? {"if-none-match": navigationStatusEtag} : {},
+    });
+    if (response.status === 304) return navigationStatus;
+    if (!response.ok) throw new Error(`navigation status ${response.status}`);
+    navigationStatusEtag = response.headers.get("etag") || "";
+    navigationStatus = await response.json();
+    return navigationStatus;
+  })();
+  try {
+    return await navigationStatusRequest;
+  } finally {
+    navigationStatusRequest = null;
+  }
+}
 
 function applyModuleState() {
   if (!effectiveModules) return;
@@ -161,9 +184,7 @@ function applyModuleState() {
 
 async function refreshModuleState() {
   try {
-    const response = await fetch("/api/v1/modules");
-    if (!response.ok) return;
-    effectiveModules = (await response.json()).items;
+    effectiveModules = (await loadNavigationStatus()).modules.items;
     applyModuleState();
   } catch (_) {
     // The existing page remains usable while the backend reconnects.
@@ -283,7 +304,6 @@ const reviewTargets = {
   "/federation.html": null,
 };
 
-const reviewArea = (stream) => stream.startsWith("board:") ? "board" : stream;
 const reviewLabel = (count) => count > 99 ? "99+" : String(count);
 
 function setReviewBadge(href, count, label = "pending reviews") {
@@ -316,15 +336,9 @@ function renderReviewCallout(count, kinds) {
 
 async function refreshFederationReviews() {
   try {
-    const response = await fetch("/api/v1/federation/inbox?state=pending");
-    if (!response.ok) return;
-    const items = (await response.json()).items || [];
-    const counts = {board: 0, incidents: 0, alerts: 0};
-    for (const item of items) {
-      const area = reviewArea(String(item.stream || ""));
-      if (area in counts) counts[area] += 1;
-    }
-    setReviewBadge("/federation.html", items.length);
+    const reviews = (await loadNavigationStatus()).reviews;
+    const counts = {board: reviews.board, incidents: reviews.incidents, alerts: reviews.alerts};
+    setReviewBadge("/federation.html", reviews.total);
     setReviewBadge("/bbs.html", counts.board);
     setReviewBadge("/watch.html", counts.incidents + counts.alerts);
     const target = reviewTargets[path];
@@ -338,14 +352,11 @@ async function refreshFederationReviews() {
 }
 
 refreshFederationReviews();
-setInterval(refreshFederationReviews, 30000);
 window.addEventListener("outpost:federation-reviewed", refreshFederationReviews);
 
 async function refreshOperationsInboxBadge() {
   try {
-    const response = await fetch("/api/v1/mail/conversations?limit=1");
-    if (!response.ok) return;
-    const count = Number((await response.json()).counts?.actionable || 0);
+    const count = Number((await loadNavigationStatus()).mail.actionable || 0);
     setReviewBadge("/mail.html", count, "actionable mail conversations");
   } catch (_) {
     // Navigation remains usable while the backend reconnects.
@@ -353,5 +364,11 @@ async function refreshOperationsInboxBadge() {
 }
 
 refreshOperationsInboxBadge();
-setInterval(refreshOperationsInboxBadge, 30000);
 window.addEventListener("outpost:mail-updated", refreshOperationsInboxBadge);
+scheduler.schedule(
+  "navigation-status",
+  () => sessionStorage.getItem("outpost.operator.authenticated") === "true"
+    ? Promise.all([refreshModuleState(), refreshFederationReviews(), refreshOperationsInboxBadge()])
+    : undefined,
+  {interval: 30000},
+);

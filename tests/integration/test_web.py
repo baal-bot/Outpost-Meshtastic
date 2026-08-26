@@ -66,6 +66,8 @@ async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp
     backups = client.get("/backups.html")
     assert backups.status_code == 200 and "Backups contain sensitive location data" in backups.text
     navigation = client.get("/nav.js").text
+    scheduler = client.get("/refresh-scheduler.js")
+    assert scheduler.status_code == 200 and "visibilitychange" in scheduler.text
     federation_script = client.get("/federation.js").text
     assert "LoRa observed" in federation_script and "MQTT observed" in federation_script
     assert "Radio + MQTT" in federation_script
@@ -83,4 +85,48 @@ async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp
         "AI",
     ):
         assert label in navigation
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_poll_batches_status_and_revalidates_with_etag(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    peer_id = await database.write(
+        "INSERT INTO fed_peer(mesh_id,node_name,state,created_at) "
+        "VALUES('!00000002','Remote Outpost','active',1)"
+    )
+    for index, stream in enumerate(("board:gen", "incidents", "alerts"), start=1):
+        await database.write(
+            "INSERT INTO fed_inbox_item(peer_id,stream,uid,payload_json,digest,state,"
+            "received_at) VALUES(?,?,?,?,?,'pending',1)",
+            (peer_id, stream, f"remote:{index}", "{}", f"digest-{index}"),
+        )
+    await database.write(
+        "INSERT INTO mail(uid,from_label,to_label,body,created_at,state,expires_at,"
+        "conversation_key,mail_direction) VALUES('remote:mail','operator@REMOTE','operator',"
+        "'Please review',1,'delivered',9999999999,'fed:remote:one','in')"
+    )
+
+    client = TestClient(create_web_app(lambda: {"radio": "up"}, database))
+    response = client.get("/api/v1/dashboard/poll")
+    assert response.status_code == 200
+    assert response.json()["reviews"] == {
+        "total": 3,
+        "board": 1,
+        "incidents": 1,
+        "alerts": 1,
+    }
+    assert response.json()["mail"] == {"actionable": 1}
+    assert response.json()["modules"]["items"]["bbs"]["enabled"] is True
+    assert response.headers["cache-control"] == "private, max-age=0, must-revalidate"
+
+    unchanged = client.get(
+        "/api/v1/dashboard/poll",
+        headers={"if-none-match": response.headers["etag"]},
+    )
+    assert unchanged.status_code == 304
+    assert unchanged.content == b""
+    assert unchanged.headers["etag"] == response.headers["etag"]
+
     await database.close()

@@ -27,6 +27,7 @@ detailed intended product design.
 
 - [Architecture](ARCHITECTURE.md)
 - [Development and contributing](DEVELOPMENT.md)
+- [Dashboard performance budget](PERFORMANCE.md)
 - [Detailed specification](outpost-spec/README.md)
 - [Phase 3 acceptance](PHASE3-ACCEPTANCE.md)
 - [Phase 4 acceptance](PHASE4-ACCEPTANCE.md)

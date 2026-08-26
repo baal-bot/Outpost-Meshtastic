@@ -3,6 +3,7 @@ document.head.insertAdjacentHTML("beforeend", '<link rel="stylesheet" href="/wea
 document.head.insertAdjacentHTML("beforeend", '<link rel="stylesheet" href="/weather-controls.css?v=2">');
 const $ = (id) => document.getElementById(id);
 const authHintKey = "outpost.operator.authenticated";
+let refreshSchedulersStarted = false;
 if (sessionStorage.getItem(authHintKey) === "true") $("login-screen").classList.add("hidden");
 const safe = (value) => String(value).replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"})[char]);
 const ago = (stamp) => { const seconds = Math.max(0, (Date.now() - new Date(stamp)) / 1000); if (seconds < 60) return "now"; if (seconds < 3600) return `${Math.floor(seconds / 60)}m`; if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`; return `${Math.floor(seconds / 86400)}d`; };
@@ -34,15 +35,10 @@ setTimeout(syncThemeOptions);
 const weatherSource = (kind) => ({observation:"Station observation",forecast:"Near-term forecast",estimate:"Current model estimate",peer:"Peer-provided conditions"})[kind] || "Weather data";
 const weatherAge = (seconds) => seconds == null ? "valid time unavailable" : seconds < 60 ? "valid now" : seconds < 3600 ? `valid ${Math.floor(seconds/60)}m ago` : `valid ${Math.floor(seconds/3600)}h ago`;
 async function refreshWeather() { const response = await fetch("/api/v1/environment/weather"); if (response.status === 401) return; const body = await response.json(); if (!response.ok) { $("weather-summary").textContent = body.error?.message || "Weather unavailable."; $("weather-reading").innerHTML = '<strong>—</strong><span>Setup required</span>'; $("weather-details").innerHTML = ""; return; } const imperial=body.units==="imperial",temperature=body.temperature_c==null?null:imperial?body.temperature_c*9/5+32:body.temperature_c,apparent=body.apparent_c==null?null:imperial?body.apparent_c*9/5+32:body.apparent_c,wind=body.wind_kph==null?null:imperial?body.wind_kph/1.609344:body.wind_kph,tempUnit=imperial?"F":"C",windUnit=imperial?"MPH":"KM/H",source=weatherSource(body.source_kind),cacheAge=body.stale?` · cached ${body.age_seconds<60?"now":`${Math.floor(body.age_seconds/60)}m ago`}`:""; $("weather-kind").textContent=body.source_kind==="forecast"?"LOCAL FORECAST":body.source_kind==="observation"?"LOCAL OBSERVATION":"LOCAL CONDITIONS"; $("weather-title").textContent=source; $("weather-summary").textContent=`${body.stale?"Cached ":""}${source} · ${body.provider}${body.source_detail?` · ${body.source_detail}`:""} · ${weatherAge(body.valid_age_seconds)}${cacheAge}`; $("weather-summary").title=body.valid_at?`Valid ${new Date(body.valid_at).toLocaleString()}`:"Valid time unavailable"; $("weather-reading").innerHTML=`<strong>${temperature==null?"—":`${Number(temperature).toFixed(1)}°${tempUnit}`}</strong><span>${apparent==null?"Feels-like unavailable":`Feels ${Number(apparent).toFixed(1)}°${tempUnit}`}</span>`; $("weather-details").innerHTML=`<span><b>${wind==null?"—":`${Number(wind).toFixed(0)} ${windUnit}`}</b><em>Wind speed${wind==null?" unavailable":""}</em></span><span><b>${body.precipitation_mm==null?"—":`${Number(body.precipitation_mm).toFixed(1)} MM`}</b><em>Precipitation${body.precipitation_mm==null?" unavailable":""}</em></span><span><b>${body.wind_direction==null?"—":`${safe(body.wind_direction)}°`}</b><em>Wind direction${body.wind_direction==null?" unavailable":""}</em></span>`; $("weather-reading").classList.toggle("stale", body.stale); }
-setTimeout(refreshWeather, 1500); setInterval(refreshWeather, 30000);
 async function refreshForecast() { const response=await fetch("/api/v1/environment/forecast"); if(response.status===401)return; const body=await response.json(); if(!response.ok){$("forecast-meta").textContent=body.error?.message||"Forecast unavailable.";$("forecast-days").innerHTML="";$("forecast-hours").innerHTML="";return;} const imperial=body.units==="imperial",temp=(c)=>c==null?null:Math.round(imperial?c*9/5+32:c),wind=(k)=>k==null?null:Math.round(imperial?k/1.609344:k),unit=imperial?"F":"C",windUnit=imperial?"mph":"km/h",tempText=(c)=>c==null?"—":`${temp(c)}°`,rainText=(value)=>value==null?"—":`${safe(value)}%`; $("forecast-meta").textContent=`Forecast · ${body.provider}${body.stale?" · cached":""} · ${body.age_seconds<60?"updated now":`${Math.floor(body.age_seconds/60)}m old`}`; $("forecast-days").innerHTML=body.daily.slice(0,5).map((day,index)=>`<article class="forecast-day ${index===0?"current":""}"><span>${safe(index===0?"Today":index===1?"Tomorrow":day.name)}</span><strong>${tempText(day.high_c)}<small> / ${tempText(day.low_c)}${day.low_c==null?"":unit}</small></strong><p>${safe(day.summary)}</p><div><b>${rainText(day.precipitation_probability)}</b> rain <b>${wind(day.wind_kph)==null?"—":wind(day.wind_kph)}</b> ${wind(day.wind_kph)==null?"":windUnit}</div></article>`).join(""); const now=Date.now()-3600000, hours=body.hourly.filter((hour)=>new Date(hour.start_time).getTime()>now).slice(0,8); $("forecast-hours").innerHTML=hours.map((hour)=>`<div><time>${new Date(hour.start_time).toLocaleTimeString([],{hour:"numeric"})}</time><strong>${tempText(hour.temperature_c)}</strong><span>${rainText(hour.precipitation_probability)} rain</span></div>`).join(""); }
-setTimeout(refreshForecast,1700); setInterval(refreshForecast,30000);
 async function refreshAstronomy(){const response=await fetch("/api/v1/environment/astronomy");if(response.status===401)return;const body=await response.json();if(!response.ok){$("astronomy-date").textContent=body.error?.message||"Astronomy unavailable.";return;}const time=(stamp)=>stamp?new Date(stamp).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"—",minutes=body.daylight_minutes,hours=minutes==null?"—":`${Math.floor(minutes/60)}h ${minutes%60}m`;$("astronomy-date").textContent=`${new Date(`${body.date}T12:00:00`).toLocaleDateString([],{weekday:"long",month:"long",day:"numeric"})} · ${body.timezone} · no internet required`;$("astro-rise").textContent=time(body.sunrise);$("astro-set").textContent=time(body.sunset);$("astro-dawn").textContent=`Civil dawn ${time(body.civil_dawn)}`;$("astro-dusk").textContent=`Civil dusk ${time(body.civil_dusk)}`;$("astro-daylight").textContent=hours;$("astro-moon").textContent=`${body.moon_illumination}%`;$("astro-phase").textContent=`${body.moon_phase} · ${body.moon_age_days} days`;}
-setTimeout(refreshAstronomy,1900);setInterval(refreshAstronomy,300000);
 async function refreshSeismic(){const response=await fetch("/api/v1/environment/earthquakes");if(response.status===401)return;const body=await response.json();if(!response.ok)return;const values=body.items||[];$("seismic-total").textContent=values.length;$("seismic-health").textContent=body.health.last_error?`Feed unavailable · showing stored events · ${body.health.last_error}`:body.health.last_poll_at?`${body.radius_km} km radius · updated ${new Date(body.health.last_poll_at*1000).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}`:`${body.radius_km} km monitoring radius`;$("seismic-list").innerHTML=values.slice(0,5).map(value=>`<article class="seismic-event ${value.significance?"significant":""}"><div class="magnitude">M<strong>${Number(value.magnitude).toFixed(1)}</strong></div><div><h3>${safe(value.place)}</h3><p>${Number(value.distance_km).toFixed(0)} km away · ${safe(value.bearing_deg)}° · ${Number(value.depth_km).toFixed(1)} km deep</p></div><time>${new Date(value.occurred_at*1000).toLocaleString()}</time><span class="review-state">${safe(value.review_state)}</span></article>`).join("")||'<p class="empty">No nearby earthquakes recorded in the past 24 hours.</p>';}
-setTimeout(refreshSeismic,2100);setInterval(refreshSeismic,60000);
 async function refreshProviderHealth() { const response = await fetch("/api/v1/environment/providers"); if (!response.ok) return; const values = (await response.json()).items; $("provider-health").innerHTML = Object.entries(values).map(([name, value]) => `<span class="${safe(value.status)}"><i></i>${safe(name)} ${safe(value.status)}</span>`).join(""); }
-setTimeout(refreshProviderHealth, 1800); setInterval(refreshProviderHealth, 30000);
 
 function activityRow(entry) {
   const outbound = entry.direction === "outbound";
@@ -130,6 +126,7 @@ async function initialize() {
     } else {
       $("login-screen").classList.add("hidden");
       await refresh();
+      startRefreshSchedulers();
     }
   } else {
     sessionStorage.removeItem(authHintKey);
@@ -160,6 +157,7 @@ $("login-form").addEventListener("submit", async (event) => {
   } else {
     $("login-screen").classList.add("hidden");
     await refresh();
+    startRefreshSchedulers();
   }
   $("password").value = "";
 });
@@ -335,4 +333,15 @@ $("create-backup").addEventListener("click", async () => {
   button.disabled = false; button.textContent = "Create backup";
 });
 
-initialize(); setInterval(() => { if (csrfToken) refresh(); }, 15000);
+async function startRefreshSchedulers() {
+  if (refreshSchedulersStarted) return;
+  refreshSchedulersStarted = true;
+  const {scheduler} = await import("/refresh-scheduler.js");
+  scheduler.schedule("overview-main", refresh, {interval:15000});
+  scheduler.schedule("overview-weather", refreshWeather, {initial:1500, interval:30000});
+  scheduler.schedule("overview-forecast", refreshForecast, {initial:1700, interval:30000});
+  scheduler.schedule("overview-providers", refreshProviderHealth, {initial:1800, interval:30000});
+  scheduler.schedule("overview-astronomy", refreshAstronomy, {initial:1900, interval:300000});
+  scheduler.schedule("overview-seismic", refreshSeismic, {initial:2100, interval:60000});
+}
+initialize();

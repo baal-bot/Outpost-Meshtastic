@@ -54,6 +54,12 @@ navigation entries and matching capability cards read **Disabled**; a direct pag
 configuration key and restart requirement while making the inactive controls inert. The API source
 of truth is `/api/v1/modules`.
 
+Recurring refreshes are visibility-aware: hidden tabs stop nonessential API work and resume with
+jitter rather than producing a request burst. Navigation consumes the compact, ETag-enabled
+`/api/v1/dashboard/poll` response for module state, pending federation reviews, and actionable
+mail. The contributor-facing request, CPU, memory, provider, and database limits are recorded in
+the [dashboard performance budget](PERFORMANCE.md).
+
 The Members workspace includes a responsive audit inspector. Desktop keeps action, actor, target,
 outcome, and time in dense scanning columns; narrow displays use complete stacked event cards.
 Time, actor, action, target, and outcome filters run on the server and remain active while paging.
@@ -75,7 +81,7 @@ The JSON API is rooted at `/api/v1`. Important read surfaces include:
 
 - `/api/v1/health` and `/api/v1/status`
 - `/api/v1/config`
-- `/api/v1/dashboard/overview`
+- `/api/v1/dashboard/overview` and the ETag-enabled `/api/v1/dashboard/poll`
 - `/api/v1/members`, `/api/v1/members/map`, and `/api/v1/mesh/messages`
 - `/api/v1/mesh/queue` and `/api/v1/mesh/airtime`
 - `/api/v1/boards`, `/api/v1/mail`, `/api/v1/mail/conversations`, `/api/v1/incidents`,

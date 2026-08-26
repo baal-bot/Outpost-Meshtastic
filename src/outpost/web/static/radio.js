@@ -36,6 +36,8 @@ async function initialize() {
   }
   csrfToken = (await response.json()).csrf_token;
   await refresh();
+  const {scheduler} = await import("/refresh-scheduler.js");
+  scheduler.schedule("radio-main", refresh, {interval:10000});
 }
 
 async function refresh() {
@@ -167,6 +169,3 @@ $("refresh-radio").addEventListener("click", refresh);
 $("filter-direction").addEventListener("change", refresh);
 $("filter-channel").addEventListener("change", refresh);
 initialize();
-setInterval(() => {
-  if (csrfToken) refresh();
-}, 10000);

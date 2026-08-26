@@ -185,5 +185,5 @@ async function refresh() {
   const unconfigured = all.find(peer => peer.state === "active" && !peer.policy_configured);
   if (unconfigured && !policyWizardOpen) await showPolicyWizard(unconfigured);
 }
-async function initialize() { const response = await fetch("/api/v1/auth/session"); if (!response.ok) { location.href = "/"; return; } csrf = (await response.json()).csrf_token; await refresh(); await loadMqtt(); await loadServices(); await loadInbox(); await loadSyncStatus(); await loadOriginHistory(); await loadRelayMail(); }
-$("refresh-fed").addEventListener("click", refresh); $("peer-filter").addEventListener("change", refresh); initialize(); setInterval(() => { refresh(); refreshServices(); refreshSyncStatus(); }, 15000);
+async function initialize() { const response = await fetch("/api/v1/auth/session"); if (!response.ok) { location.href = "/"; return; } csrf = (await response.json()).csrf_token; await refresh(); await loadMqtt(); await loadServices(); await loadInbox(); await loadSyncStatus(); await loadOriginHistory(); await loadRelayMail(); const {scheduler}=await import("/refresh-scheduler.js"); scheduler.schedule("federation-main",()=>Promise.all([refresh(),refreshServices(),refreshSyncStatus()]),{interval:15000}); }
+$("refresh-fed").addEventListener("click", refresh); $("peer-filter").addEventListener("change", refresh); initialize();
