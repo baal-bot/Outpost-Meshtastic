@@ -179,7 +179,7 @@ def test_shared_dialogs_manage_focus_escape_validation_and_live_regions(
         confirmation = page.get_by_role("dialog", name="Restart receiver?")
         confirmation.wait_for(state="visible")
         page.keyboard.press("Escape")
-        page.wait_for_function("window.confirmResult === false")
+        page.wait_for_function("() => window.confirmResult === false")
 
         page.evaluate(
             "() => { window.promptResult = null; "
@@ -195,7 +195,7 @@ def test_shared_dialogs_manage_focus_escape_validation_and_live_regions(
         )
         prompt.get_by_role("textbox", name="Confirmation").fill("APPROVE")
         prompt.get_by_role("button", name="Continue").click()
-        page.wait_for_function("window.promptResult === 'APPROVE'")
+        page.wait_for_function("() => window.promptResult === 'APPROVE'")
         assert page.locator("#backup-result").get_attribute("role") == "status"
         assert page.locator("#settings-error").get_attribute("role") == "alert"
     finally:

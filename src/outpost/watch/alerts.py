@@ -216,7 +216,7 @@ class AlertService:
         destinations = await self._destinations(stage.notify)
         for destination in destinations:
             for channel in channels or stage.channels:
-                item_id = self.governor.enqueue(
+                item_id = await self.governor.admit(
                     OutboundItem(
                         text=text,
                         dest=destination,
@@ -380,7 +380,7 @@ class AlertService:
             )
             for index, audience in enumerate(audiences)
         ]
-        queued = self.governor.enqueue_many(items)
+        queued = await self.governor.admit_many(items)
         await self.database.write(
             "UPDATE alert SET cancelled_at=?,next_escalation_at=NULL,all_clear_at=?,"
             "all_clear_queued=? WHERE id=?",

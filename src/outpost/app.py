@@ -56,6 +56,7 @@ from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.store.maintenance import MaintenanceService
 from outpost.store.members import MemberRepo
 from outpost.store.message_log import MessageLogRepo
+from outpost.store.outbox import OutboxStore
 from outpost.transport.chunker import chunk_text
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.inbound import InboundPipeline
@@ -106,7 +107,12 @@ class OutpostApp:
             lambda: self._task_progress("radio-supervisor"),
         )
         self.inbound_pipeline = InboundPipeline("", set(self.config.radio.bridge_node_ids))
-        self.governor = AirtimeGovernor(self.radio, self.config.airtime, self.clock)
+        self.governor = AirtimeGovernor(
+            self.radio,
+            self.config.airtime,
+            self.clock,
+            outbox=OutboxStore(self.database),
+        )
         self.radio_operations = RadioOperations(self.database, self.governor, self.clock)
         members = MemberRepo(self.database, self.clock)
         self.message_log = MessageLogRepo(self.database, self.clock)
@@ -350,6 +356,7 @@ class OutpostApp:
 
     async def startup(self) -> None:
         await self.database.open()
+        await self.governor.recover()
         await self.runtime_settings.load()
         self.federation_sync.local_mesh_id = self.radio.local_node_id
         if self.radio.local_node_id:
@@ -379,14 +386,14 @@ class OutpostApp:
 
     async def _federation_hello_loop(self) -> None:
         while True:
-            if self.config.modules.fed.enabled and self._queue_federation_hello("^all"):
+            if self.config.modules.fed.enabled and await self._queue_federation_hello("^all"):
                 self._task_progress("federation-discovery")
                 await self.clock.sleep(self.config.fed.hello_interval_hours * 3_600)
             else:
                 self._task_progress("federation-discovery")
                 await self.clock.sleep(30)
 
-    def _queue_federation_hello(
+    async def _queue_federation_hello(
         self, destination: str, *, target_mesh_id: str | None = None
     ) -> bool:
         local_id = self.radio.local_node_id
@@ -415,7 +422,7 @@ class OutpostApp:
             counter,
             None,
         )
-        admitted = self.governor.enqueue_many(
+        admitted = await self.governor.admit_many(
             [
                 OutboundItem(
                     text="",
@@ -432,10 +439,10 @@ class OutpostApp:
         )
         return admitted is not None
 
-    def _queue_federation_frames(
+    async def _queue_federation_frames(
         self, frames: list[bytes], destination: str, *, want_ack: bool
     ) -> list[int]:
-        admitted = self.governor.enqueue_many(
+        admitted = await self.governor.admit_many(
             [
                 OutboundItem(
                     text="",
@@ -454,11 +461,11 @@ class OutpostApp:
             raise ValueError("federation queue rejected the complete message")
         return admitted
 
-    def _queue_trusted_federation_frames(self, frames: list[bytes]) -> list[int]:
+    async def _queue_trusted_federation_frames(self, frames: list[bytes]) -> list[int]:
         # Meshtastic direct custom-app packets can be radio-ACKed without being surfaced to the
         # destination client. Federation already authenticates and encrypts each peer's frames,
         # so use the same RF/MQTT-compatible carrier as pairing and rely on application receipts.
-        return self._queue_federation_frames(frames, "^all", want_ack=False)
+        return await self._queue_federation_frames(frames, "^all", want_ack=False)
 
     @staticmethod
     def _federation_rejection_reason(error: Exception) -> str:
@@ -486,7 +493,7 @@ class OutpostApp:
         frames = self.federation_codec.encode(MessageType.PAIR_REQ, payload, 0, None)
         # Pre-trust directed packets are not consistently bridged by Meshtastic MQTT.
         # The application-level target makes this broadcast safe for mixed RF/MQTT paths.
-        self._queue_federation_frames(frames, "^all", want_ack=False)
+        await self._queue_federation_frames(frames, "^all", want_ack=False)
         return peer
 
     async def approve_federation_pairing(self, mesh_id: str, code: str) -> object:
@@ -502,7 +509,7 @@ class OutpostApp:
             0,
             secret,
         )
-        self._queue_federation_frames(frames, "^all", want_ack=False)
+        await self._queue_federation_frames(frames, "^all", want_ack=False)
         return peer
 
     async def federation_service_requests(self) -> list[dict[str, object]]:
@@ -609,7 +616,7 @@ class OutpostApp:
             counter,
             secret,
         )
-        self._queue_trusted_federation_frames(frames)
+        await self._queue_trusted_federation_frames(frames)
 
     async def _execute_peer_service(
         self, service: str, args: dict[str, object]
@@ -731,7 +738,7 @@ class OutpostApp:
         secret = await self.federation.secret(peer_id)
         counter = counter or await self.federation.next_counter(peer_id)
         frames = self.federation_codec.encode(msg_type, value, counter, secret)
-        self._queue_trusted_federation_frames(frames)
+        await self._queue_trusted_federation_frames(frames)
         return counter
 
     async def _federation_sync_loop(self) -> None:
@@ -829,7 +836,7 @@ class OutpostApp:
                         bytes(approval["shared_secret"]),
                     )
                     try:
-                        self._queue_federation_frames(frames, "^all", want_ack=False)
+                        await self._queue_federation_frames(frames, "^all", want_ack=False)
                     except ValueError:
                         pass
                 rows = await self.database.read(
@@ -957,9 +964,9 @@ class OutpostApp:
                 # another broadcast or an endless HELLO response loop.
                 if not getattr(message, "is_direct", False) and target is None:
                     if getattr(message, "via_mqtt", False):
-                        self._queue_federation_hello("^all", target_mesh_id=sender)
+                        await self._queue_federation_hello("^all", target_mesh_id=sender)
                     else:
-                        self._queue_federation_hello(sender)
+                        await self._queue_federation_hello(sender)
             elif msg_type is MessageType.PAIR_REQ:
                 _, acknowledgement, _ = await self.federation.accept_pairing_request(
                     sender, bytes(value["public_key"]), bytes(value["nonce"])
@@ -967,7 +974,7 @@ class OutpostApp:
                 frames = self.federation_codec.encode(
                     MessageType.PAIR_ACK, acknowledgement, 0, None
                 )
-                self._queue_federation_frames(
+                await self._queue_federation_frames(
                     frames,
                     sender if getattr(message, "is_direct", False) else "^all",
                     want_ack=bool(getattr(message, "is_direct", False)),
@@ -992,7 +999,7 @@ class OutpostApp:
                         0,
                         secret,
                     )
-                    self._queue_federation_frames(confirmation, "^all", want_ack=False)
+                    await self._queue_federation_frames(confirmation, "^all", want_ack=False)
             elif msg_type is MessageType.SERVICE_QUERY:
                 await self._handle_service_query(sender, value)
             elif msg_type is MessageType.SERVICE_RESPONSE:
@@ -1284,7 +1291,7 @@ class OutpostApp:
             ):
                 return ok, result, provenance, error, 0, 0.0
         try:
-            self._queue_trusted_federation_frames(frames)
+            await self._queue_trusted_federation_frames(frames)
         except ValueError as caught:
             return False, {}, provenance, str(caught)[:160], 0, 0.0
         return ok, result, provenance, error, response_bytes, airtime_seconds
@@ -1487,7 +1494,7 @@ class OutpostApp:
                     delivery.text,
                     max_parts=self.config.airtime.max_parts.get("digest", 4),
                 )
-                scheduled = self.governor.enqueue_many(
+                scheduled = await self.governor.admit_many(
                     [
                         OutboundItem(
                             text=part,
@@ -1526,7 +1533,7 @@ class OutpostApp:
     async def _governor_loop(self) -> None:
         while True:
             item = await self.governor.tick()
-            if item is not None:
+            if item is not None and not self.governor.durable:
                 result = item.send_result
                 await self.message_log.record_outbound(
                     peer_mesh_id=item.dest,
@@ -1704,7 +1711,7 @@ class OutpostApp:
         text = render_response(response)
         max_parts = self.config.airtime.max_parts.get(response.airtime_class.value, 1)
         parts = chunk_text(text, max_parts=max_parts)
-        self.governor.enqueue_many(
+        await self.governor.admit_many(
             [
                 OutboundItem(
                     text=part,
@@ -1724,7 +1731,7 @@ class OutpostApp:
             (sender_mesh_id,),
         )
         for row in rows:
-            self.governor.enqueue(
+            await self.governor.admit(
                 OutboundItem(
                     text=(
                         f"⚠ Emergency keyword · INC {incident.local_ref} · {incident.title[:80]}"

@@ -2283,7 +2283,7 @@ def create_web_app(
 
             @app.get("/api/v1/mesh/queue")
             async def mesh_queue() -> dict[str, Any]:
-                return {"items": radio_operations.queue()}
+                return {"items": await radio_operations.queue()}
 
             @app.delete("/api/v1/mesh/queue/{item_id}")
             async def mesh_queue_cancel(item_id: int) -> Response:

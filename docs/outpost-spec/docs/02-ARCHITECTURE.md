@@ -496,12 +496,14 @@ when no peer nodes are known.
 | SQLite `SQLITE_BUSY` | Serialised writer plus `busy_timeout=5000`; on persistent failure, degrade to read-only mode and alert the operator |
 | Disk full | Detected by a health check at 90%; retention pruning runs early; write-path returns a terse error; alerts still transmit |
 | WAN down | All internet-backed data sources serve cached values, age-stamped; SAME path (if present) continues to work; no user-visible failure other than staleness labels |
-| Power loss | WAL + `synchronous=NORMAL`; on restart, integrity check; sessions are volatile and simply reset |
+| Power loss | WAL + `synchronous=NORMAL`; on restart, integrity check; recover unexpired durable outbound work in safety order; sessions are volatile and simply reset |
 | Clock skew (no RTC on a Pi) | On boot, if system time is implausible (< build date), mark timestamps `unsynced` and prefer monotonic ordering; NTP when WAN available; an RTC module is recommended in the install docs |
 
 **REQ-ARCH-021** — The outbound queue **MUST** be bounded (default 500 items) with per-class
 TTLs (e.g. `reply` 5 min, `digest` 1 h, `alert` 24 h). Expired items are dropped with a
-counted metric, never transmitted stale.
+counted metric, never transmitted stale. Admission **MUST** commit to durable storage before an
+item becomes eligible to transmit. Startup **MUST** reconcile interrupted attempts, pending
+acknowledgements, supersession, deduplication, and priority without producing duplicate log rows.
 
 ---
 

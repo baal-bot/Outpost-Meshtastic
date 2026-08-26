@@ -11,7 +11,8 @@ phones and desktops and uses bundled assets so its interface remains available w
 - **Watch:** incident map/list, monitoring state, alerts, acknowledgements, and welfare events.
 - **Environment:** separate environmental map, weather/forecast, official alerts, earthquakes,
   astronomy, and editable waypoints.
-- **Radio:** connection state, firmware/node details, telemetry, queue, airtime, reconnect, MQTT.
+- **Radio:** connection state, firmware/node details, telemetry, durable outbound state and
+  cancellation, airtime, reconnect, and MQTT.
 - **Federation:** peer directory, pairing, transport policy, per-path transfer telemetry, durable
   retry/recovery health, sync policy/inbox, services, and relay mail.
 - **Backups/System/Settings:** health, retention, backup/restore, identity, emergency policy, AI, and
@@ -42,6 +43,7 @@ The JSON API is rooted at `/api/v1`. Important read surfaces include:
 - `/api/v1/config`
 - `/api/v1/dashboard/overview`
 - `/api/v1/members`, `/api/v1/members/map`, and `/api/v1/mesh/messages`
+- `/api/v1/mesh/queue` and `/api/v1/mesh/airtime`
 - `/api/v1/boards`, `/api/v1/mail`, `/api/v1/incidents`, `/api/v1/events`
 - `/api/v1/environment/weather`, `/forecast`, `/alerts`, `/earthquakes`, `/waypoints`
 - `/api/v1/backups`, `/api/v1/audit`, and federation endpoints under `/api/v1/federation`

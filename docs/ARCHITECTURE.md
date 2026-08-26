@@ -9,7 +9,7 @@ durable state, and an asynchronous supervisor owns the radio.
 - **Inbound workers:** packet normalization, dedupe, member-scoped serialization.
 - **Command router:** prefixes, DM shorthand, aliases, context, trust, modules, channels.
 - **Domain services:** BBS, mail, environment, incidents, alerts, welfare, federation.
-- **Airtime governor:** traffic classes, queues, channel limits, pacing.
+- **Airtime governor:** durable traffic classes, safety priority, channel limits, pacing.
 - **Database:** ordered migrations and transactional reads/writes.
 - **Web app:** authenticated APIs, static dashboards, tiles, metrics.
 - **Providers:** weather, CAP, seismic, and map data with caching.
@@ -24,8 +24,10 @@ radio packet
  → command parse and authorization
  → domain transaction
  → bounded rendering
+ → durable outbox admission
  → airtime governor
  → radio send
+ → atomic attempt/message-log completion
 ```
 
 Position packets may update an allowed member position or start report/waypoint interaction; they
@@ -35,6 +37,12 @@ are not blindly converted to incidents.
 
 SQLite is authoritative. Ordered SQL under `src/outpost/store/migrations` covers members, messages,
 BBS/mail, incidents/alerts, environment caches, welfare, web auth, settings, audit, and federation.
+The `outbound_work` state machine persists work before it becomes scheduler-eligible. Startup
+recovers interrupted `sending` work, expires stale items, retains acknowledgement correlation, and
+loads safety traffic ahead of ordinary traffic. Each completed radio attempt and its `message_log`
+row commit together through a unique outbox ID; acknowledgement routing updates both records in one
+transaction. A transport exception retries with bounded backoff and then remains operator-visible.
+
 Online backup supports validation and a controlled recovery coordinator: maintenance gating,
 in-flight request drain, transport/background-task quiescence, a verified pre-restore safety copy,
 atomic database replacement, durable sidecar progress, and a supervisor-driven process restart.

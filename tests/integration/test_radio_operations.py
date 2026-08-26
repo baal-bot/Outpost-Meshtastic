@@ -16,10 +16,10 @@ async def test_operator_send_uses_governor_and_queue_can_be_cancelled(tmp_path) 
     operations = RadioOperations(database, governor, clock)
 
     item_id = await operations.send("Road closed", "^all", 0, "bulletin")
-    assert operations.queue()[0]["id"] == item_id
-    assert operations.queue()[0]["traffic_class"] == "bulletin"
+    assert (await operations.queue())[0]["id"] == item_id
+    assert (await operations.queue())[0]["traffic_class"] == "bulletin"
     assert await operations.cancel(item_id) is True
-    assert operations.queue() == []
+    assert await operations.queue() == []
     actions = [row["action"] for row in await database.read("SELECT action FROM audit_log")]
     assert actions == ["mesh.send", "queue.cancel"]
     with pytest.raises(ValueError):

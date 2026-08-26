@@ -6,7 +6,7 @@ Outpost is pre-release. This table distinguishes implementation from field valid
 | --- | --- | --- |
 | Meshtastic transport | Serial, TCP, BLE; reconnect and liveness supervision | Serial exercised; broader hardware matrix pending |
 | Command routing | DM/channel parsing, sessions, paging, trust and module gates | Automated integration and acceptance coverage |
-| Airtime control | Priority, budgets, reserve, quiet hours, queue limits, dedupe | Automated tests; extended channel calibration pending |
+| Airtime control | Durable priority queue, budgets, reserve, quiet hours, limits, dedupe, restart recovery | Automated restart and failure-injection tests; extended channel calibration pending |
 | Identity | Handles, trust, approvals, recently heard discovery | Implemented and tested |
 | BBS and mail | Boards, threads, posts, subscriptions, digests, stored mail | Implemented and tested |
 | Community Watch | Incidents, maps, confirmation/dispute, responder alerts | Implemented; tabletop scale exercise recommended |

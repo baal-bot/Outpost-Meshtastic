@@ -125,7 +125,8 @@ has completed within 60 s. On timeout, force a reconnect cycle.
 
 **REQ-TRANSPORT-009** — Reconnect backoff **MUST** be exponential with jitter:
 `min(initial * 2^n, max)` with ±20% jitter; defaults `initial=2s`, `max=120s`. The
-outbound queue is retained across reconnects, subject to per-class TTL (REQ-ARCH-021).
+durable outbound queue is retained across reconnects and process restarts, subject to per-class TTL
+(REQ-ARCH-021).
 
 **REQ-TRANSPORT-010** — On connection establishment the node **MUST**: read local config
 and record the region, modem preset, and configured channels; snapshot the node DB;

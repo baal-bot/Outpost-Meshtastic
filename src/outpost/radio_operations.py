@@ -15,7 +15,20 @@ class RadioOperations:
     def __init__(self, database: Database, governor: AirtimeGovernor, clock: Clock) -> None:
         self.database, self.governor, self.clock = database, governor, clock
 
-    def queue(self) -> list[dict[str, Any]]:
+    async def queue(self) -> list[dict[str, Any]]:
+        if self.governor.outbox is not None:
+            now = self.clock.now().timestamp()
+            rows = await self.governor.outbox.list_operator_work()
+            return [
+                {
+                    **{key: value for key, value in row.items() if key != "binary_len"},
+                    "byte_len": row["binary_len"] or len(str(row["text"]).encode()),
+                    "cancellable": row["state"] in {"pending", "held", "awaiting_ack", "failed"},
+                    "stale": row["state"] == "awaiting_ack"
+                    and now - float(row["last_attempt_at"] or row["created_at"]) >= 120,
+                }
+                for row in rows
+            ]
         return [
             {
                 "id": item.item_id,
@@ -26,12 +39,16 @@ class RadioOperations:
                 "byte_len": item.payload_size,
                 "created_at_monotonic": item.created_at,
                 "expires_at_monotonic": item.expires_at,
+                "state": "pending",
+                "attempts": item.attempts,
+                "cancellable": True,
+                "stale": False,
             }
             for item in self.governor.queued_items()
         ]
 
     async def cancel(self, item_id: int) -> bool:
-        cancelled = self.governor.cancel(item_id)
+        cancelled = await self.governor.cancel_work(item_id)
         if cancelled:
             await self._audit("queue.cancel", f"queue:{item_id}", None)
         return cancelled
@@ -45,7 +62,7 @@ class RadioOperations:
             raise ValueError("Channel must be 0-7.")
         if traffic_class not in {"reply", "bulletin", "alert"}:
             raise ValueError("Traffic class must be reply, bulletin, or alert.")
-        item_id = self.governor.enqueue(
+        item_id = await self.governor.admit(
             OutboundItem(
                 text=text.strip(),
                 dest=destination,

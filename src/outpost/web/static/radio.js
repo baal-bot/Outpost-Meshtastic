@@ -57,7 +57,9 @@ async function refresh() {
   $("radio-preset").textContent =
     `${status.radio_config.region} · ${status.radio_config.preset}`;
   $("airtime-total").textContent = airtime.used_seconds.toFixed(2);
-  $("queue-count").textContent = queue.items.length;
+  $("queue-count").textContent = queue.items.filter((item) =>
+    ["pending", "held", "sending"].includes(item.state || "pending"),
+  ).length;
   $("message-count").textContent = messages.items.length;
 
   const inbound = status.inbound || {};
@@ -81,15 +83,42 @@ async function refresh() {
         `<strong>${Number(value).toFixed(2)}s</strong></div>`,
     )
     .join("");
+  const stateLabel = {
+    pending: "Queued",
+    held: "Committing",
+    sending: "Transmitting",
+    awaiting_ack: "Awaiting acknowledgement",
+    failed: "Failed",
+    expired: "Expired",
+  };
   $("queue-list").innerHTML =
     queue.items
-      .map(
-        (item) =>
-          `<article class="queue-card"><strong>#${item.id} · ${safe(item.traffic_class)} → ` +
-          `${safe(item.destination)}</strong><p>${safe(item.text)}</p>` +
-          `<button data-cancel="${item.id}">Cancel item</button></article>`,
-      )
-      .join("") || '<p class="empty">Queue empty.</p>';
+      .map((item) => {
+        const stateName = item.state || "pending";
+        const created = item.created_at
+          ? new Date(item.created_at * 1000).toLocaleString()
+          : "Current session";
+        const payload = item.text || `${item.byte_len} byte application frame`;
+        const detail = item.last_error
+          ? `<p class="${stateName === "failed" ? "queue-error" : "queue-meta"}">${safe(
+              item.last_error,
+            )}</p>`
+          : `<p class="queue-meta">Queued ${safe(created)} · ${item.attempts || 0} attempt${
+              Number(item.attempts || 0) === 1 ? "" : "s"
+            }</p>`;
+        return (
+          `<article class="queue-card queue-${safe(stateName)}">` +
+          `<div class="queue-card-head"><strong>#${item.id} · ${safe(item.traffic_class)} → ` +
+          `${safe(item.destination)}</strong><span>${safe(stateLabel[stateName] || stateName)}${
+            item.stale ? " · stale" : ""
+          }</span></div><p title="${safe(payload)}">${safe(payload)}</p>${detail}` +
+          (item.cancellable
+            ? `<button data-cancel="${item.id}">Cancel item</button>`
+            : "") +
+          `</article>`
+        );
+      })
+      .join("") || '<p class="empty">No queued, failed, or stale work.</p>';
   document.querySelectorAll("[data-cancel]").forEach((button) =>
     button.addEventListener("click", async () => {
       await api(`/api/v1/mesh/queue/${button.dataset.cancel}`, { method: "DELETE" });

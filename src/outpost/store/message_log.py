@@ -97,16 +97,30 @@ class MessageLogRepo:
         return [MessageLogEntry(**dict(row)) for row in rows]
 
     async def resolve_ack(self, packet_id: int, outcome: str) -> bool:
-        rows = await self.database.read(
-            "SELECT id FROM message_log WHERE direction='out' AND packet_id=? LIMIT 1",
-            (packet_id,),
-        )
-        if not rows:
-            return False
-        await self.database.write(
-            "UPDATE message_log SET outcome=? WHERE id=?",
-            (outcome, rows[0]["id"]),
-        )
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT m.id,m.outbox_id FROM message_log m "
+                "LEFT JOIN outbound_work w ON w.id=m.outbox_id "
+                "WHERE m.direction='out' AND m.packet_id=? "
+                "ORDER BY CASE WHEN w.state='awaiting_ack' THEN 0 ELSE 1 END,m.id DESC LIMIT 1",
+                (packet_id,),
+            )
+            if not rows:
+                return False
+            await transaction.write(
+                "UPDATE message_log SET outcome=? WHERE id=?",
+                (outcome, rows[0]["id"]),
+            )
+            if rows[0]["outbox_id"] is not None:
+                await transaction.write(
+                    "UPDATE outbound_work SET state=?,outcome=?,completed_at=unixepoch() "
+                    "WHERE id=? AND state='awaiting_ack'",
+                    (
+                        "acked" if outcome == "acked" else "failed",
+                        outcome,
+                        rows[0]["outbox_id"],
+                    ),
+                )
         return True
 
     async def mark_inbound_dropped(self, log_id: int, reason: str) -> None:

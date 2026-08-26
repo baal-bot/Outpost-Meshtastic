@@ -122,7 +122,7 @@ class CheckinService:
         event_name = event.name if event else "community"
         text = f"⚠ HELP @{label} · {event_name} · {note[:80] or 'needs assistance'}"
         for responder in responders:
-            self.governor.enqueue(
+            await self.governor.admit(
                 OutboundItem(
                     text=text,
                     dest=responder["mesh_id"],
@@ -213,25 +213,29 @@ class CheckinService:
             if not recipients:
                 raise ValueError("No unsolicited, unaccounted members remain.")
             message = self.solicitation_message(event)
-            queue_ids = self.governor.enqueue_many(
-                [
-                    OutboundItem(
-                        text=message,
-                        dest=row["mesh_id"],
-                        channel=0,
-                        traffic_class=TrafficClass.DIGEST,
-                        want_ack=True,
-                        queue_key=f"checkin:{event.id}:{row['member_id']}",
-                    )
-                    for row in recipients
-                ],
-                hold=True,
-            )
-            if queue_ids is None:
-                raise ValueError("The complete batch could not be admitted by queue policy.")
             queued_at = int(self.clock.now().timestamp())
+            queue_ids: list[int] | None = None
             try:
                 async with self.database.transaction() as transaction:
+                    queue_ids = await self.governor.admit_many(
+                        [
+                            OutboundItem(
+                                text=message,
+                                dest=row["mesh_id"],
+                                channel=0,
+                                traffic_class=TrafficClass.DIGEST,
+                                want_ack=True,
+                                queue_key=f"checkin:{event.id}:{row['member_id']}",
+                            )
+                            for row in recipients
+                        ],
+                        hold=True,
+                        transaction=transaction,
+                    )
+                    if queue_ids is None:
+                        raise ValueError(
+                            "The complete batch could not be admitted by queue policy."
+                        )
                     for recipient, queue_id in zip(recipients, queue_ids, strict=True):
                         await transaction.write(
                             "INSERT INTO checkin_solicitation(event_id,member_id,queue_item_id,"
@@ -239,9 +243,10 @@ class CheckinService:
                             (event.id, recipient["member_id"], queue_id, queued_at),
                         )
             except BaseException:
-                self.governor.retract_many(queue_ids)
+                if queue_ids is not None:
+                    await self.governor.retract_work(queue_ids, persisted=False)
                 raise
-            self.governor.release_many(queue_ids)
+            await self.governor.release_work(queue_ids)
             return {
                 "event_id": event.id,
                 "recipient_count": len(recipients),

@@ -3,7 +3,9 @@
 ## Routine checks
 
 - System and Radio dashboards show healthy service and current connectivity.
-- The outbound queue is bounded and drains when utilization permits.
+- The durable outbound queue is bounded and drains when utilization permits. Radio → Outbound queue
+  shows queued, transmitting, acknowledgement-waiting, expired, and failed work. Failed work and a
+  stale acknowledgement wait can be cancelled without editing SQLite.
 - Provider status shows recent success or a clear degraded state.
 - Disk space accommodates database, backups, and tiles.
 - Journal shows no restart loop, migration/integrity error, or repeated radio flap.
@@ -61,6 +63,13 @@ sudo systemctl start outpost
 ```
 
 Then verify serial path, node ID, DM `PING`, channel handling, positions, and telemetry.
+
+Queued work survives a normal service restart or host power loss until its traffic-class TTL. An
+item interrupted at the radio-call boundary may be transmitted again after recovery because the
+radio cannot provide a transactional exactly-once boundary; its outbox ID still produces only one
+packet-history row. Direct messages already awaiting a radio acknowledgement are not resent on
+restart. Safety alerts recover before lower-priority bulk work and remain subject to the airtime
+budget and emergency reserve.
 
 ## Incident and welfare use
 
