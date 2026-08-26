@@ -229,6 +229,17 @@ def test_weather_service_wire_result_stays_below_reliable_radio_size() -> None:
         "weather_code": 0,
     }
     wire = OutpostApp._service_result_to_wire("weather", result)
+    provenance = {
+        "provider": "nws",
+        "source_kind": "observation",
+        "delivery_kind": "peer",
+        "valid_at": "2026-08-26T14:51:00+00:00",
+        "valid_age_seconds": 300,
+        "cached": False,
+        "fetched_at": 1787756040,
+        "serving_outpost": "!699c2f30",
+    }
+    provenance_wire = OutpostApp._service_provenance_to_wire("weather", provenance)
     codec = FrameCodec()
     frames = codec.encode(
         MessageType.SERVICE_RESPONSE,
@@ -237,11 +248,7 @@ def test_weather_service_wire_result_stays_below_reliable_radio_size() -> None:
             "mesh_id": "!699c2f30",
             "ok": True,
             "result": wire,
-            "provenance": {
-                "provider": "nws",
-                "fetched_at": 1787680919,
-                "serving_outpost": "!699c2f30",
-            },
+            "provenance": provenance_wire,
             "error": None,
         },
         1,
@@ -251,6 +258,13 @@ def test_weather_service_wire_result_stays_below_reliable_radio_size() -> None:
     assert len(frames) == 1
     assert len(frames[0]) < 200
     assert OutpostApp._service_result_from_wire("weather", wire) == result
+    assert OutpostApp._service_provenance_from_wire(
+        "weather", provenance_wire, 1787756160, "!699c2f30"
+    ) == {
+        **provenance,
+        "valid_age_seconds": 300,
+        "valid_at": "2026-08-26T14:51:00+00:00",
+    }
 
 
 @pytest.mark.parametrize(

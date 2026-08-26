@@ -9,6 +9,15 @@ let csrf = "";
 let policyWizardOpen = false;
 const api = (url, options = {}) => fetch(url, {...options, headers: {...(options.body ? {"content-type":"application/json"} : {}), ...(options.method && options.method !== "GET" ? {"x-csrf-token":csrf} : {}), ...options.headers}});
 function age(epoch) { if (!epoch) return "Never"; const seconds = Math.max(0, Date.now()/1000-epoch); if (seconds < 90) return "Just now"; if (seconds < 3600) return `${Math.floor(seconds/60)}m ago`; if (seconds < 86400) return `${Math.floor(seconds/3600)}h ago`; return `${Math.floor(seconds/86400)}d ago`; }
+function serviceProvenance(item) {
+  const value = item.provenance || {};
+  if (!value.provider) return new Date(item.created_at * 1000).toLocaleString();
+  const source = ({observation:"station observation",forecast:"near-term forecast",estimate:"model estimate"})[value.source_kind] || value.source_kind || "provider data";
+  const delivery = value.delivery_kind === "peer" ? "Peer-provided" : "Source";
+  const valid = value.valid_age_seconds == null ? "valid time unavailable" : value.valid_age_seconds < 60 ? "valid now" : `valid ${Math.floor(value.valid_age_seconds / 60)}m ago`;
+  const cache = value.cached === true ? "cached" : value.cached === false ? "live fetch" : value.cache_age_seconds == null ? "cache age unavailable" : `cache ${value.cache_age_seconds}s`;
+  return `${delivery} · ${source} · ${value.provider} · ${valid} · ${cache}`;
+}
 function transportBadges(peer) { const paths=peer.discovery_transports||[]; const badges=[]; if(paths.includes("radio"))badges.push(`<span class="transport-chip radio">⌁ LoRa observed</span>`); if(paths.includes("mqtt"))badges.push(`<span class="transport-chip mqtt">◫ MQTT observed</span>`); return badges.join("")||`<span class="transport-chip unknown">Path not yet observed</span>`; }
 async function showPolicyWizard(peer) {
   if (!peer || policyWizardOpen) return;
@@ -91,7 +100,7 @@ async function refreshServices() {
   const response = await api("/api/v1/federation/services");
   if (!response.ok) return;
   const items = (await response.json()).items;
-  history.innerHTML = items.map(item => `<article><div><strong>${safe(item.service)} · ${safe(item.status)}</strong><code>${safe(item.peer_mesh_id)}</code></div><p>${item.status === "complete" ? safe(JSON.stringify(item.result)) : safe(item.error || "Awaiting peer response")}</p><small>${item.provenance?.provider ? `Source ${safe(item.provenance.provider)} · cache ${safe(item.provenance.cache_age_seconds ?? "?")}s` : new Date(item.created_at * 1000).toLocaleString()}</small></article>`).join("") || `<p class="empty">No peer requests yet.</p>`;
+  history.innerHTML = items.map(item => `<article><div><strong>${safe(item.service)} · ${safe(item.status)}</strong><code>${safe(item.peer_mesh_id)}</code></div><p>${item.status === "complete" ? safe(JSON.stringify(item.result)) : safe(item.error || "Awaiting peer response")}</p><small>${safe(serviceProvenance(item))}</small></article>`).join("") || `<p class="empty">No peer requests yet.</p>`;
 }
 async function loadInbox() {
   const directory = $("peer-list").closest(".panel");

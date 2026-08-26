@@ -1,13 +1,14 @@
 import io
 import json
 import urllib.error
+from datetime import UTC, datetime
 
 import pytest
 
 from outpost.clock import VirtualClock
 from outpost.config import EnvConfig
 from outpost.env import AstronomyService, FallbackWeatherProvider, WeatherService
-from outpost.env.weather import _HTTP_CACHE, _request_json
+from outpost.env.weather import _HTTP_CACHE, NWSProvider, _request_json
 from outpost.store import Database
 
 
@@ -23,6 +24,7 @@ class FakeProvider:
         if self.fail:
             raise OSError("WAN down")
         return {
+            "source_kind": "observation",
             "temperature_c": 21.5,
             "apparent_c": 20.8,
             "precipitation_mm": 0.2,
@@ -30,6 +32,8 @@ class FakeProvider:
             "wind_direction": 245,
             "weather_code": 3,
             "observed_at": "2026-08-24T20:00",
+            "summary": "Partly cloudy",
+            "source_detail": "Test station",
         }
 
     async def forecast(self, lat: float, lon: float) -> dict[str, object]:
@@ -110,11 +114,25 @@ async def test_provider_conditional_request_reuses_body_on_304(monkeypatch) -> N
 async def test_weather_cache_age_labels_and_safe_wan_failure(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()
-    clock, provider = VirtualClock(), FakeProvider()
+    clock = VirtualClock(epoch=datetime(2026, 8, 24, 20, 5, tzinfo=UTC))
+    provider = FakeProvider()
     service = WeatherService(database, clock, EnvConfig(refresh_minutes=15), provider)
 
     fresh = await service.current(40.4406, -79.9959)
     assert fresh.temperature_c == 21.5 and not fresh.stale and provider.calls == 1
+    assert fresh.source_kind == "observation"
+    assert fresh.valid_age_seconds == 5 * 60
+    assert fresh.json()["measurements"]["temperature_c"] == {
+        "value": 21.5,
+        "unit": "°C",
+        "available": True,
+        "unavailable": False,
+        "provider": "fake-weather",
+        "source_kind": "observation",
+        "valid_at": "2026-08-24T20:00",
+        "age_seconds": 5 * 60,
+        "cached": False,
+    }
     assert (await service.current(40.4406, -79.9959)).age_seconds == 0
     assert provider.calls == 1
 
@@ -122,11 +140,129 @@ async def test_weather_cache_age_labels_and_safe_wan_failure(tmp_path) -> None:
     provider.fail = True
     stale = await service.current(40.4406, -79.9959)
     assert stale.stale and stale.age_seconds == 16 * 60
+    assert stale.valid_age_seconds == 21 * 60
+    assert stale.json()["measurements"]["temperature_c"]["cached"] is True
 
     clock.advance(6 * 3600)
     with pytest.raises(RuntimeError, match="no safe cached"):
         await service.current(40.4406, -79.9959)
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_nws_uses_latest_station_observation_and_preserves_missing_values(
+    monkeypatch,
+) -> None:
+    async def request(url: str, host: str, config: EnvConfig) -> dict[str, object]:
+        assert host == "api.weather.gov"
+        if "/points/" in url:
+            return {
+                "properties": {
+                    "forecast": "https://api.weather.gov/gridpoints/PBZ/80,68/forecast",
+                    "forecastHourly": (
+                        "https://api.weather.gov/gridpoints/PBZ/80,68/forecast/hourly"
+                    ),
+                    "observationStations": (
+                        "https://api.weather.gov/gridpoints/PBZ/80,68/stations"
+                    ),
+                }
+            }
+        if url.endswith("/stations"):
+            return {
+                "features": [
+                    {
+                        "id": "https://api.weather.gov/stations/KAGC",
+                        "properties": {"name": "Allegheny County Airport"},
+                    }
+                ]
+            }
+        if url.endswith("/observations/latest"):
+            return {
+                "properties": {
+                    "timestamp": "2026-08-26T14:51:00+00:00",
+                    "textDescription": "Mostly Cloudy",
+                    "temperature": {"value": 20.0, "unitCode": "wmoUnit:degC"},
+                    "heatIndex": {"value": None, "unitCode": "wmoUnit:degC"},
+                    "windChill": {"value": 18.0, "unitCode": "wmoUnit:degC"},
+                    "precipitationLastHour": {
+                        "value": None,
+                        "unitCode": "wmoUnit:mm",
+                    },
+                    "windSpeed": {"value": 18.0, "unitCode": "wmoUnit:km_h-1"},
+                    "windDirection": {
+                        "value": 270.0,
+                        "unitCode": "wmoUnit:degree_(angle)",
+                    },
+                }
+            }
+        raise AssertionError(f"unexpected NWS URL: {url}")
+
+    monkeypatch.setattr("outpost.env.weather._request_json", request)
+    value = await NWSProvider(EnvConfig()).fetch(40.4406, -79.9959)
+
+    assert value == {
+        "source_kind": "observation",
+        "temperature_c": 20.0,
+        "apparent_c": 18.0,
+        "precipitation_mm": None,
+        "wind_kph": 18.0,
+        "wind_direction": 270,
+        "weather_code": None,
+        "observed_at": "2026-08-26T14:51:00+00:00",
+        "summary": "Mostly Cloudy",
+        "source_detail": "Allegheny County Airport",
+    }
+
+
+@pytest.mark.asyncio
+async def test_nws_labels_hourly_fallback_as_forecast_when_station_is_missing(
+    monkeypatch,
+) -> None:
+    async def request(url: str, host: str, config: EnvConfig) -> dict[str, object]:
+        assert host == "api.weather.gov"
+        if "/points/" in url:
+            return {
+                "properties": {
+                    "forecast": "https://api.weather.gov/gridpoints/PBZ/80,68/forecast",
+                    "forecastHourly": (
+                        "https://api.weather.gov/gridpoints/PBZ/80,68/forecast/hourly"
+                    ),
+                    "observationStations": (
+                        "https://api.weather.gov/gridpoints/PBZ/80,68/stations"
+                    ),
+                }
+            }
+        if url.endswith("/stations"):
+            return {"features": []}
+        if url.endswith("/forecast/hourly"):
+            return {
+                "properties": {
+                    "periods": [
+                        {
+                            "name": "This Afternoon",
+                            "startTime": "2026-08-26T15:00:00-04:00",
+                            "temperature": 68,
+                            "temperatureUnit": "F",
+                            "windSpeed": "5 mph",
+                            "windDirection": "W",
+                            "shortForecast": "Partly Cloudy",
+                        }
+                    ]
+                }
+            }
+        raise AssertionError(f"unexpected NWS URL: {url}")
+
+    monkeypatch.setattr("outpost.env.weather._request_json", request)
+    value = await NWSProvider(EnvConfig()).fetch(40.4406, -79.9959)
+
+    assert value["source_kind"] == "forecast"
+    assert value["temperature_c"] == pytest.approx(20.0)
+    assert value["wind_kph"] == pytest.approx(8.04672)
+    assert value["wind_direction"] == 270
+    assert value["apparent_c"] is None
+    assert value["precipitation_mm"] is None
+    assert value["weather_code"] is None
+    assert value["observed_at"] == "2026-08-26T15:00:00-04:00"
 
 
 @pytest.mark.asyncio

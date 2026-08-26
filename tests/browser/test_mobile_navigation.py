@@ -332,3 +332,41 @@ def test_mobile_menu_has_keyboard_current_page_and_review_states(
         )
     finally:
         page.close()
+
+
+def test_weather_forecast_provenance_and_unavailable_values_are_visible(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url)
+    try:
+        page.route(
+            "**/api/v1/environment/weather",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=(
+                    '{"provider":"nws","source_kind":"forecast",'
+                    '"source_detail":"This Afternoon","temperature_c":20.0,'
+                    '"apparent_c":null,"precipitation_mm":null,"wind_kph":null,'
+                    '"wind_direction":null,"weather_code":null,'
+                    '"valid_at":"2026-08-26T15:00:00-04:00",'
+                    '"valid_age_seconds":300,"age_seconds":5,"stale":false,'
+                    '"units":"metric"}'
+                ),
+            ),
+        )
+        page.evaluate("refreshWeather()")
+
+        assert page.locator("#weather-kind").text_content() == "LOCAL FORECAST"
+        assert page.locator("#weather-title").text_content() == "Near-term forecast"
+        summary = page.locator("#weather-summary").text_content()
+        assert "nws" in summary and "This Afternoon" in summary and "valid 5m ago" in summary
+        assert page.locator("#weather-reading span").text_content() == "Feels-like unavailable"
+        assert page.locator("#weather-details b").all_text_contents() == ["—", "—", "—"]
+        assert page.locator("#weather-details em").all_text_contents() == [
+            "Wind speed unavailable",
+            "Precipitation unavailable",
+            "Wind direction unavailable",
+        ]
+    finally:
+        page.close()

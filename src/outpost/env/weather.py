@@ -8,6 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
 from outpost.clock import Clock
@@ -19,6 +20,20 @@ NWS_HOST = "api.weather.gov"
 _HTTP_CACHE: dict[str, tuple[dict[str, Any], str | None, str | None]] = {}
 ENV_CACHE_MAX = 1_000
 HTTP_CACHE_MAX = 1_000
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value: object) -> int | None:
+    parsed = _optional_float(value)
+    return round(parsed) if parsed is not None else None
 
 
 async def _request_json(url: str, host: str, config: EnvConfig) -> dict[str, Any]:
@@ -65,19 +80,47 @@ async def _request_json(url: str, host: str, config: EnvConfig) -> dict[str, Any
 @dataclass(frozen=True)
 class WeatherSnapshot:
     provider: str
-    temperature_c: float
-    apparent_c: float
-    precipitation_mm: float
-    wind_kph: float
-    wind_direction: int
-    weather_code: int
+    source_kind: str
+    temperature_c: float | None
+    apparent_c: float | None
+    precipitation_mm: float | None
+    wind_kph: float | None
+    wind_direction: int | None
+    weather_code: int | None
     observed_at: str
     fetched_at: int
+    summary: str | None = None
+    source_detail: str | None = None
+    valid_age_seconds: int | None = None
     age_seconds: int = 0
     stale: bool = False
 
     def json(self) -> dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        value["valid_at"] = self.observed_at
+        units = {
+            "temperature_c": "°C",
+            "apparent_c": "°C",
+            "precipitation_mm": "mm",
+            "wind_kph": "km/h",
+            "wind_direction": "degrees",
+            "weather_code": "WMO code",
+        }
+        value["measurements"] = {
+            name: {
+                "value": getattr(self, name),
+                "unit": unit,
+                "available": getattr(self, name) is not None,
+                "unavailable": getattr(self, name) is None,
+                "provider": self.provider,
+                "source_kind": self.source_kind,
+                "valid_at": self.observed_at,
+                "age_seconds": self.valid_age_seconds,
+                "cached": self.stale,
+            }
+            for name, unit in units.items()
+        }
+        return value
 
 
 @dataclass(frozen=True)
@@ -86,6 +129,7 @@ class ForecastSnapshot:
     daily: list[dict[str, Any]]
     hourly: list[dict[str, Any]]
     fetched_at: int
+    source_kind: str = "forecast"
     age_seconds: int = 0
     stale: bool = False
 
@@ -118,20 +162,23 @@ class OpenMeteoProvider:
                 ),
                 "temperature_unit": "celsius",
                 "wind_speed_unit": "kmh",
-                "timezone": "auto",
+                "timezone": "GMT",
             }
         )
         url = f"https://{OPEN_METEO_HOST}/v1/forecast?{query}"
         value = await _request_json(url, OPEN_METEO_HOST, self.config)
         current = value["current"]
         return {
-            "temperature_c": float(current["temperature_2m"]),
-            "apparent_c": float(current["apparent_temperature"]),
-            "precipitation_mm": float(current["precipitation"]),
-            "wind_kph": float(current["wind_speed_10m"]),
-            "wind_direction": int(current["wind_direction_10m"]),
-            "weather_code": int(current["weather_code"]),
+            "source_kind": "estimate",
+            "temperature_c": _optional_float(current.get("temperature_2m")),
+            "apparent_c": _optional_float(current.get("apparent_temperature")),
+            "precipitation_mm": _optional_float(current.get("precipitation")),
+            "wind_kph": _optional_float(current.get("wind_speed_10m")),
+            "wind_direction": _optional_int(current.get("wind_direction_10m")),
+            "weather_code": _optional_int(current.get("weather_code")),
             "observed_at": str(current["time"]),
+            "summary": "Model-derived current conditions",
+            "source_detail": "Open-Meteo current model",
         }
 
     async def forecast(self, lat: float, lon: float) -> dict[str, Any]:
@@ -180,27 +227,36 @@ class OpenMeteoProvider:
             96: "Storms with hail",
             99: "Storms with hail",
         }
+
+        def summary(value: object, fallback: str) -> str:
+            code = _optional_int(value)
+            return summaries.get(code, fallback) if code is not None else "Unavailable"
+
         days = [
             {
                 "name": str(day),
                 "start_time": str(day),
-                "high_c": float(daily["temperature_2m_max"][index]),
-                "low_c": float(daily["temperature_2m_min"][index]),
-                "precipitation_probability": int(
-                    daily["precipitation_probability_max"][index] or 0
+                "high_c": _optional_float(daily["temperature_2m_max"][index]),
+                "low_c": _optional_float(daily["temperature_2m_min"][index]),
+                "precipitation_probability": _optional_int(
+                    daily["precipitation_probability_max"][index]
                 ),
-                "wind_kph": float(daily["wind_speed_10m_max"][index]),
-                "wind_direction": int(daily["wind_direction_10m_dominant"][index]),
-                "summary": summaries.get(int(daily["weather_code"][index]), "Mixed conditions"),
+                "wind_kph": _optional_float(daily["wind_speed_10m_max"][index]),
+                "wind_direction": _optional_int(
+                    daily["wind_direction_10m_dominant"][index]
+                ),
+                "summary": summary(daily["weather_code"][index], "Mixed conditions"),
             }
             for index, day in enumerate(daily["time"])
         ]
         hours = [
             {
                 "start_time": str(stamp),
-                "temperature_c": float(hourly["temperature_2m"][index]),
-                "precipitation_probability": int(hourly["precipitation_probability"][index] or 0),
-                "summary": summaries.get(int(hourly["weather_code"][index]), "Mixed"),
+                "temperature_c": _optional_float(hourly["temperature_2m"][index]),
+                "precipitation_probability": _optional_int(
+                    hourly["precipitation_probability"][index]
+                ),
+                "summary": summary(hourly["weather_code"][index], "Mixed"),
             }
             for index, stamp in enumerate(hourly["time"][:24])
         ]
@@ -226,6 +282,8 @@ class NWSProvider:
                 "hourly": str(properties["forecastHourly"]),
                 "daily": str(properties["forecast"]),
             }
+            if properties.get("observationStations"):
+                urls["stations"] = str(properties["observationStations"])
             if any(urllib.parse.urlparse(url).hostname != NWS_HOST for url in urls.values()):
                 raise ValueError("NWS returned a forecast host outside the allowlist")
             self._forecast_urls[key] = urls
@@ -234,7 +292,7 @@ class NWSProvider:
         return urls
 
     @staticmethod
-    def _direction(value: str) -> int:
+    def _direction(value: object) -> int | None:
         points = {
             name: index * 22.5
             for index, name in enumerate(
@@ -258,26 +316,134 @@ class NWSProvider:
                 )
             )
         }
-        return round(points.get(value.upper(), 0))
+        if not isinstance(value, str):
+            return None
+        direction = points.get(value.upper())
+        return round(direction) if direction is not None else None
+
+    @staticmethod
+    def _quantity(properties: dict[str, Any], name: str) -> tuple[float | None, str]:
+        quantity = properties.get(name)
+        if not isinstance(quantity, dict):
+            return None, ""
+        return _optional_float(quantity.get("value")), str(quantity.get("unitCode") or "")
+
+    @classmethod
+    def _temperature(cls, properties: dict[str, Any], name: str) -> float | None:
+        value, unit = cls._quantity(properties, name)
+        if value is None:
+            return None
+        if unit.endswith("degF"):
+            return (value - 32) * 5 / 9
+        return value
+
+    @classmethod
+    def _wind_kph(cls, properties: dict[str, Any]) -> float | None:
+        value, unit = cls._quantity(properties, "windSpeed")
+        if value is None:
+            return None
+        if unit.endswith("m_s-1"):
+            return value * 3.6
+        if unit.endswith("mi_h-1"):
+            return value * 1.609344
+        if unit.endswith("kt"):
+            return value * 1.852
+        return value
+
+    @classmethod
+    def _precipitation_mm(cls, properties: dict[str, Any]) -> float | None:
+        value, unit = cls._quantity(properties, "precipitationLastHour")
+        if value is None:
+            return None
+        if unit.endswith(":m"):
+            return value * 1_000
+        if unit.endswith(":cm"):
+            return value * 10
+        if unit.endswith("[in_i]"):
+            return value * 25.4
+        return value
+
+    async def _observation(self, urls: dict[str, str]) -> dict[str, Any] | None:
+        stations_url = urls.get("stations")
+        if not stations_url:
+            return None
+        stations = await _request_json(stations_url, NWS_HOST, self.config)
+        features = stations.get("features")
+        if not isinstance(features, list) or not features:
+            return None
+        station = features[0]
+        if not isinstance(station, dict):
+            return None
+        station_url = str(station.get("id") or station.get("@id") or "").rstrip("/")
+        if urllib.parse.urlparse(station_url).hostname != NWS_HOST:
+            raise ValueError("NWS returned an observation station outside the allowlist")
+        latest = await _request_json(
+            f"{station_url}/observations/latest", NWS_HOST, self.config
+        )
+        properties = latest.get("properties")
+        if not isinstance(properties, dict):
+            return None
+        temperature = self._temperature(properties, "temperature")
+        apparent = self._temperature(properties, "heatIndex")
+        if apparent is None:
+            apparent = self._temperature(properties, "windChill")
+        wind_direction, _unit = self._quantity(properties, "windDirection")
+        values = (
+            temperature,
+            apparent,
+            self._precipitation_mm(properties),
+            self._wind_kph(properties),
+            wind_direction,
+        )
+        if not any(value is not None for value in values):
+            return None
+        station_properties = station.get("properties")
+        station_name = (
+            str(station_properties.get("name"))
+            if isinstance(station_properties, dict) and station_properties.get("name")
+            else station_url.rsplit("/", 1)[-1]
+        )
+        return {
+            "source_kind": "observation",
+            "temperature_c": temperature,
+            "apparent_c": apparent,
+            "precipitation_mm": values[2],
+            "wind_kph": values[3],
+            "wind_direction": round(wind_direction) if wind_direction is not None else None,
+            "weather_code": None,
+            "observed_at": str(properties.get("timestamp") or ""),
+            "summary": str(properties.get("textDescription") or "Observed conditions"),
+            "source_detail": station_name,
+        }
+
+    async def _near_term_forecast(self, urls: dict[str, str]) -> dict[str, Any]:
+        forecast = await _request_json(urls["hourly"], NWS_HOST, self.config)
+        periods = forecast.get("properties", {}).get("periods", [])
+        if not periods:
+            raise ValueError("NWS returned no hourly forecast periods")
+        period = periods[0]
+        temperature = _optional_float(period.get("temperature"))
+        if temperature is not None and str(period.get("temperatureUnit", "F")).upper() == "F":
+            temperature = (temperature - 32) * 5 / 9
+        wind_match = re.search(r"\d+(?:\.\d+)?", str(period.get("windSpeed") or ""))
+        wind_mph = float(wind_match.group()) if wind_match else None
+        return {
+            "source_kind": "forecast",
+            "temperature_c": temperature,
+            "apparent_c": None,
+            "precipitation_mm": None,
+            "wind_kph": wind_mph * 1.609344 if wind_mph is not None else None,
+            "wind_direction": self._direction(period.get("windDirection")),
+            "weather_code": None,
+            "observed_at": str(period["startTime"]),
+            "summary": str(period.get("shortForecast") or "Near-term forecast"),
+            "source_detail": str(period.get("name") or "NWS hourly period"),
+        }
 
     async def fetch(self, lat: float, lon: float) -> dict[str, Any]:
         urls = await self._urls(lat, lon)
-        forecast = await _request_json(urls["hourly"], NWS_HOST, self.config)
-        period = forecast["properties"]["periods"][0]
-        temperature = float(period["temperature"])
-        if str(period.get("temperatureUnit", "F")).upper() == "F":
-            temperature = (temperature - 32) * 5 / 9
-        wind_match = re.search(r"\d+(?:\.\d+)?", str(period.get("windSpeed", "0")))
-        wind_mph = float(wind_match.group()) if wind_match else 0.0
-        return {
-            "temperature_c": temperature,
-            "apparent_c": temperature,
-            "precipitation_mm": 0.0,
-            "wind_kph": wind_mph * 1.609344,
-            "wind_direction": self._direction(str(period.get("windDirection", "N"))),
-            "weather_code": 0,
-            "observed_at": str(period["startTime"]),
-        }
+        observation = await self._observation(urls)
+        return observation if observation is not None else await self._near_term_forecast(urls)
 
     async def forecast(self, lat: float, lon: float) -> dict[str, Any]:
         urls = await self._urls(lat, lon)
@@ -286,8 +452,10 @@ class NWSProvider:
             _request_json(urls["hourly"], NWS_HOST, self.config),
         )
 
-        def temperature_c(period: dict[str, Any]) -> float:
-            value = float(period["temperature"])
+        def temperature_c(period: dict[str, Any]) -> float | None:
+            value = _optional_float(period.get("temperature"))
+            if value is None:
+                return None
             return (
                 (value - 32) * 5 / 9
                 if str(period.get("temperatureUnit", "F")).upper() == "F"
@@ -299,17 +467,20 @@ class NWSProvider:
         if nws_periods and not nws_periods[0].get("isDaytime", True):
             tonight = nws_periods[0]
             tonight_temperature = temperature_c(tonight)
+            wind_match = re.search(r"\d+(?:\.\d+)?", str(tonight.get("windSpeed") or ""))
             days.append(
                 {
                     "name": str(tonight["name"]),
                     "start_time": str(tonight["startTime"]),
                     "high_c": tonight_temperature,
                     "low_c": tonight_temperature,
-                    "precipitation_probability": int(
-                        (tonight.get("probabilityOfPrecipitation") or {}).get("value") or 0
+                    "precipitation_probability": _optional_int(
+                        (tonight.get("probabilityOfPrecipitation") or {}).get("value")
                     ),
-                    "wind_kph": 0.0,
-                    "wind_direction": self._direction(str(tonight.get("windDirection", "N"))),
+                    "wind_kph": (
+                        float(wind_match.group()) * 1.609344 if wind_match else None
+                    ),
+                    "wind_direction": self._direction(tonight.get("windDirection")),
                     "summary": str(tonight.get("shortForecast", "Forecast unavailable")),
                 }
             )
@@ -324,18 +495,20 @@ class NWSProvider:
                 ),
                 period,
             )
-            wind_match = re.search(r"\d+(?:\.\d+)?", str(period.get("windSpeed", "0")))
+            wind_match = re.search(r"\d+(?:\.\d+)?", str(period.get("windSpeed") or ""))
             days.append(
                 {
                     "name": str(period["name"]),
                     "start_time": str(period["startTime"]),
                     "high_c": temperature_c(period),
                     "low_c": temperature_c(following),
-                    "precipitation_probability": int(
-                        (period.get("probabilityOfPrecipitation") or {}).get("value") or 0
+                    "precipitation_probability": _optional_int(
+                        (period.get("probabilityOfPrecipitation") or {}).get("value")
                     ),
-                    "wind_kph": (float(wind_match.group()) if wind_match else 0.0) * 1.609344,
-                    "wind_direction": self._direction(str(period.get("windDirection", "N"))),
+                    "wind_kph": (
+                        float(wind_match.group()) * 1.609344 if wind_match else None
+                    ),
+                    "wind_direction": self._direction(period.get("windDirection")),
                     "summary": str(period.get("shortForecast", "Forecast unavailable")),
                 }
             )
@@ -343,8 +516,8 @@ class NWSProvider:
             {
                 "start_time": str(period["startTime"]),
                 "temperature_c": temperature_c(period),
-                "precipitation_probability": int(
-                    (period.get("probabilityOfPrecipitation") or {}).get("value") or 0
+                "precipitation_probability": _optional_int(
+                    (period.get("probabilityOfPrecipitation") or {}).get("value")
                 ),
                 "summary": str(period.get("shortForecast", "Mixed")),
             }
@@ -440,7 +613,7 @@ class WeatherService:
             if cached and now - cached[2] <= self.config.max_age_hours * 3600:
                 self._mark_cached_provider(cached[1])
                 return self._snapshot(cached[0], cached[1], cached[2], now, stale=True)
-            raise RuntimeError("Weather unavailable; no safe cached forecast.") from None
+            raise RuntimeError("Weather unavailable; no safe cached conditions.") from None
         await self.database.write(
             """INSERT INTO env_cache(cache_key,provider,payload,fetched_at,expires_at)
                VALUES(?,?,?,?,?) ON CONFLICT(cache_key) DO UPDATE SET
@@ -503,13 +676,25 @@ class WeatherService:
         payload: dict[str, Any], provider: str, fetched_at: int, now: int, *, stale: bool = False
     ) -> ForecastSnapshot:
         return ForecastSnapshot(
-            provider,
-            payload["daily"],
-            payload["hourly"],
-            fetched_at,
-            max(0, now - fetched_at),
-            stale,
+            provider=provider,
+            daily=payload["daily"],
+            hourly=payload["hourly"],
+            fetched_at=fetched_at,
+            age_seconds=max(0, now - fetched_at),
+            stale=stale,
         )
+
+    @staticmethod
+    def _valid_age(value: object, now: int) -> int | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return max(0, now - int(parsed.timestamp()))
 
     def _snapshot(
         self,
@@ -520,12 +705,26 @@ class WeatherService:
         *,
         stale: bool = False,
     ) -> WeatherSnapshot:
+        normalized = dict(payload)
+        normalized.setdefault(
+            "source_kind",
+            "forecast"
+            if provider == "nws"
+            else "estimate"
+            if provider == "open-meteo"
+            else "observation",
+        )
+        normalized.setdefault("summary", None)
+        normalized.setdefault("source_detail", None)
+        observed_at = normalized.get("observed_at") or normalized.pop("valid_at", "")
+        normalized["observed_at"] = str(observed_at)
         return WeatherSnapshot(
             provider=provider,
             fetched_at=fetched_at,
+            valid_age_seconds=self._valid_age(observed_at, now),
             age_seconds=max(0, now - fetched_at),
             stale=stale,
-            **payload,
+            **normalized,
         )
 
     def provider_health(self) -> dict[str, dict[str, Any]]:

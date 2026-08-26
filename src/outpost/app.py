@@ -7,6 +7,7 @@ import secrets
 from collections import defaultdict, deque
 from collections.abc import Coroutine
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from outpost.bbs.admin import BBSAdmin
@@ -643,6 +644,11 @@ class OutpostApp:
                 )
             }, {
                 "provider": snapshot.provider,
+                "source_kind": snapshot.source_kind,
+                "delivery_kind": "peer",
+                "valid_at": snapshot.observed_at,
+                "valid_age_seconds": snapshot.valid_age_seconds,
+                "cached": snapshot.stale,
                 "fetched_at": snapshot.fetched_at,
                 "serving_outpost": self.federation.local_mesh_id,
             }
@@ -681,6 +687,64 @@ class OutpostApp:
             "c": "weather_code",
         }
         return {names.get(str(name), str(name)): value for name, value in result.items()}
+
+    @staticmethod
+    def _service_provenance_to_wire(
+        service: str, provenance: dict[str, object]
+    ) -> dict[str, object]:
+        if service != "weather":
+            return provenance
+        valid_at = provenance.get("valid_at")
+        valid_epoch: int | None = None
+        if valid_at:
+            try:
+                parsed = datetime.fromisoformat(str(valid_at).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=UTC)
+                valid_epoch = int(parsed.timestamp())
+            except ValueError:
+                pass
+        source = {"observation": "o", "forecast": "f", "estimate": "e", "peer": "p"}
+        return {
+            "p": provenance.get("provider"),
+            "k": source.get(str(provenance.get("source_kind")), "u"),
+            "v": valid_epoch,
+            "c": provenance.get("cached") is True,
+            "f": provenance.get("fetched_at"),
+        }
+
+    @staticmethod
+    def _service_provenance_from_wire(
+        service: str, provenance: object, now: int, sender: str
+    ) -> object:
+        if service != "weather" or not isinstance(provenance, dict):
+            return provenance
+        if "p" not in provenance:
+            expanded = dict(provenance)
+            expanded.setdefault("delivery_kind", "peer")
+            expanded.setdefault("serving_outpost", sender)
+            return expanded
+        valid_epoch = provenance.get("v")
+        valid_at = None
+        valid_age = None
+        if isinstance(valid_epoch, int | float):
+            valid_at = datetime.fromtimestamp(valid_epoch, UTC).isoformat()
+            valid_age = max(0, now - int(valid_epoch))
+        return {
+            "provider": provenance.get("p"),
+            "source_kind": {
+                "o": "observation",
+                "f": "forecast",
+                "e": "estimate",
+                "p": "peer",
+            }.get(str(provenance.get("k")), "unknown"),
+            "delivery_kind": "peer",
+            "valid_at": valid_at,
+            "valid_age_seconds": valid_age,
+            "cached": provenance.get("c") is True,
+            "fetched_at": provenance.get("f"),
+            "serving_outpost": sender,
+        }
 
     async def _federation_service_loop(self) -> None:
         while True:
@@ -1245,7 +1309,9 @@ class OutpostApp:
                 "mesh_id": self.federation.local_mesh_id,
                 "ok": response_ok,
                 "result": self._service_result_to_wire(service, response_result),
-                "provenance": response_provenance,
+                "provenance": self._service_provenance_to_wire(
+                    service, response_provenance
+                ),
                 "error": response_error,
             }
             content_bytes = len(json.dumps(value, separators=(",", ":"), sort_keys=True).encode())
@@ -1454,7 +1520,12 @@ class OutpostApp:
                     self._service_result_from_wire(rows[0]["service"], value.get("result", {})),
                     separators=(",", ":"),
                 ),
-                json.dumps(value.get("provenance", {}), separators=(",", ":")),
+                json.dumps(
+                    self._service_provenance_from_wire(
+                        rows[0]["service"], value.get("provenance", {}), now, sender
+                    ),
+                    separators=(",", ":"),
+                ),
                 str(value.get("error") or "")[:160] or None,
                 now,
                 now,

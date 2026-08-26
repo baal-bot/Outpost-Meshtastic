@@ -21,6 +21,14 @@ phones and desktops and uses bundled assets so its interface remains available w
 Discovered radios are not members. Member counts, welfare recipients, and member-map markers should
 use admitted members only.
 
+## Weather provenance
+
+Weather cards label station observations, near-term forecasts, and model estimates separately.
+They show the provider, valid time/age, and cached state; missing measurements render as unavailable
+rather than as zero. Peer-service weather is additionally marked as peer-provided while preserving
+the original provider and observation/forecast kind. The weather API includes a `measurements`
+object with the availability and provenance metadata for each value.
+
 ## Authentication
 
 The first login requires the short-lived token shown by `sudo outpost-setup-token show`, followed

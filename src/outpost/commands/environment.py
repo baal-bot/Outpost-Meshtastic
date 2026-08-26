@@ -53,49 +53,82 @@ def specs(
             else:
                 value = await service.current(location.lat, location.lon)
         except RuntimeError:
-            return Response(ResponseKind.ERROR, [Line("WX unavailable · no safe cached forecast.")])
+            return Response(
+                ResponseKind.ERROR, [Line("WX unavailable · no safe cached conditions.")]
+            )
         imperial = config.node.units == "imperial"
 
-        def temp(value: float) -> str:
+        def temp(value: float | None) -> str:
+            if value is None:
+                return "—"
             converted = value * 9 / 5 + 32 if imperial else value
             return f"{converted:.0f}°{'F' if imperial else 'C'}"
+
+        def optional_float(value: object) -> float | None:
+            try:
+                return float(value) if value is not None else None
+            except (TypeError, ValueError):
+                return None
 
         if mode in {"TODAY", "TOMORROW"}:
             index = 0 if mode == "TODAY" else 1
             if len(forecast.daily) <= index:
                 return Response(ResponseKind.ERROR, [Line(f"WX {mode.lower()} unavailable.")])
             day = forecast.daily[index]
-            wind = float(day["wind_kph"]) / 1.609344 if imperial else float(day["wind_kph"])
+            raw_wind = day.get("wind_kph")
+            wind = (
+                float(raw_wind) / 1.609344 if imperial else float(raw_wind)
+            ) if raw_wind is not None else None
+            rain = day.get("precipitation_probability")
             cached = " cached" if forecast.stale else ""
+            rain_text = f"{rain}%" if rain is not None else "—"
+            wind_text = (
+                f"{wind:.0f}{'mph' if imperial else 'km/h'}" if wind is not None else "—"
+            )
             text = (
-                f"{mode.title()} {temp(float(day['high_c']))}/{temp(float(day['low_c']))} · "
-                f"{day['summary']} · rain {day['precipitation_probability']}% · "
-                f"wind {wind:.0f}{'mph' if imperial else 'km/h'}{cached}"
+                f"{mode.title()} {temp(optional_float(day.get('high_c')))}/"
+                f"{temp(optional_float(day.get('low_c')))} · {day['summary']} · "
+                f"rain {rain_text} · wind {wind_text}{cached}"
             )
             return Response(ResponseKind.DETAIL, [Line(text)])
         if mode == "HOURLY":
             periods = forecast.hourly[:6]
-            values = " · ".join(
-                f"{str(period['start_time'])[11:16]} "
-                f"{temp(float(period['temperature_c']))} "
-                f"{period['precipitation_probability']}%"
-                for period in periods
-            )
+            def hourly_text(period: dict[str, object]) -> str:
+                rain = period.get("precipitation_probability")
+                rain_text = f"{rain}%" if rain is not None else "—"
+                return (
+                    f"{str(period['start_time'])[11:16]} "
+                    f"{temp(optional_float(period.get('temperature_c')))} {rain_text}"
+                )
+
+            values = " · ".join(hourly_text(period) for period in periods)
             return Response(ResponseKind.DETAIL, [Line(f"Next hours · {values}")])
-        age = "now" if value.age_seconds < 60 else f"{value.age_seconds // 60}m"
+        age_seconds = value.valid_age_seconds
+        age = (
+            "time unknown"
+            if age_seconds is None
+            else "now"
+            if age_seconds < 60
+            else f"{age_seconds // 60}m"
+        )
         stale = " cached" if value.stale else ""
-        if imperial:
-            temperature = value.temperature_c * 9 / 5 + 32
-            apparent = value.apparent_c * 9 / 5 + 32
-            wind = value.wind_kph / 1.609344
-            units, wind_units = "F", "mph"
-        else:
-            temperature, apparent, wind = value.temperature_c, value.apparent_c, value.wind_kph
-            units, wind_units = "C", "km/h"
+        kind = {
+            "observation": "observed",
+            "forecast": "forecast",
+            "estimate": "model",
+            "peer": "peer",
+        }.get(value.source_kind, value.source_kind)
+        measurements = [f"WX {temp(value.temperature_c)}"]
+        if value.apparent_c is not None:
+            measurements.append(f"feels {temp(value.apparent_c)}")
+        if value.wind_kph is not None:
+            wind = value.wind_kph / 1.609344 if imperial else value.wind_kph
+            direction = f" {value.wind_direction}°" if value.wind_direction is not None else ""
+            measurements.append(f"wind {wind:.0f}{'mph' if imperial else 'km/h'}{direction}")
+        elif value.temperature_c is None:
+            measurements.append("measurements unavailable")
         text = (
-            f"WX {temperature:.0f}{units} feels {apparent:.0f}{units} · "
-            f"wind {wind:.0f}{wind_units} {value.wind_direction}° · "
-            f"{value.provider}{stale} age {age}"
+            f"{' · '.join(measurements)} · {value.provider} {kind}{stale} · valid {age}"
         )
         return Response(ResponseKind.DETAIL, [Line(_fit_radio(text))])
 
@@ -119,9 +152,11 @@ def specs(
             return Response(ResponseKind.ERROR, [Line("FC unavailable · no safe cached forecast.")])
         imperial = config.node.units == "imperial"
 
-        def temperature(value: object) -> int:
+        def temperature(value: object) -> str:
+            if value is None:
+                return "—"
             celsius = float(value)
-            return round(celsius * 9 / 5 + 32 if imperial else celsius)
+            return str(round(celsius * 9 / 5 + 32 if imperial else celsius))
 
         summaries = {
             "partly cloudy": "pcldy",
@@ -140,10 +175,12 @@ def specs(
 
         parts = []
         for day in result.daily[:days]:
+            precipitation = day.get("precipitation_probability")
+            precipitation_text = f"{precipitation}%" if precipitation is not None else "—"
             parts.append(
                 f"{str(day['name'])[:3]} {temperature(day['high_c'])}/"
                 f"{temperature(day['low_c'])} {summary(day['summary'])} "
-                f"{day['precipitation_probability']}%"
+                f"{precipitation_text}"
             )
         if not parts:
             return Response(ResponseKind.ERROR, [Line("FC unavailable.")])

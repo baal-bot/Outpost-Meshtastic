@@ -31,6 +31,10 @@ Additional exit gates:
 ## Implemented reliability behavior
 
 - NWS is primary and Open-Meteo is fallback, with provider health surfaced in the dashboard.
+- NWS current conditions use the latest available observation station. If no station is available,
+  the first hourly period is explicitly labeled as a near-term forecast rather than an observation.
+- Weather values carry provider, source kind, valid time/age, and cached/availability state; missing
+  measurements are never synthesized as zero.
 - Current conditions and forecasts persist in SQLite and survive process restarts.
 - Stale values carry age labels and are refused after the configured safety limit.
 - Provider HTTP requests are host-allowlisted, identify the operator, send conditional headers,
