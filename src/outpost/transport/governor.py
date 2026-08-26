@@ -29,6 +29,12 @@ TTL_SECONDS = {
     TrafficClass.DIGEST: 3_600,
     TrafficClass.FEDERATION: 1_800,
 }
+ALERT_SEVERITY_ORDER = (
+    Severity.CRITICAL,
+    Severity.URGENT,
+    Severity.CAUTION,
+    Severity.INFO,
+)
 
 
 @dataclass
@@ -44,6 +50,7 @@ class OutboundItem:
     expires_at: float = 0.0
     supersedes: str | None = None
     queue_key: str | None = None
+    dedupe_token: str | None = None
     item_id: int = 0
     binary_payload: bytes | None = None
     portnum: int | None = None
@@ -99,11 +106,13 @@ class AirtimeGovernor:
 
     def enqueue(self, item: OutboundItem) -> int | None:
         now = self.clock.monotonic()
-        if sum(map(len, self.queues.values())) >= self.config.queue_max_items:
-            self.metrics.dropped[(item.traffic_class, "queue_full")] += 1
-            OUTBOUND_DROPPED.labels(item.traffic_class.value, "queue_full").inc()
-            return None
-        payload = item.binary_payload if item.binary_payload is not None else item.text.encode()
+        payload = (
+            item.dedupe_token.encode()
+            if item.dedupe_token is not None
+            else item.binary_payload
+            if item.binary_payload is not None
+            else item.text.encode()
+        )
         digest = hashlib.sha256(payload).hexdigest()
         dedupe_key = (item.dest, item.channel, digest)
         if self._recent.get(dedupe_key, float("-inf")) + self.config.dedupe_window_s > now:
@@ -117,6 +126,10 @@ class AirtimeGovernor:
                 )
                 queue.clear()
                 queue.extend(retained)
+        if sum(map(len, self.queues.values())) >= self.config.queue_max_items:
+            self.metrics.dropped[(item.traffic_class, "queue_full")] += 1
+            OUTBOUND_DROPPED.labels(item.traffic_class.value, "queue_full").inc()
+            return None
         item.item_id = self._next_id
         self._next_id += 1
         item.created_at = now
@@ -130,7 +143,13 @@ class AirtimeGovernor:
 
     def enqueue_many(self, items: list[OutboundItem]) -> list[int] | None:
         """Atomically admit a complete multi-part response (REQ-TRANSPORT-035)."""
-        available = self.config.queue_max_items - sum(map(len, self.queues.values()))
+        superseded = {item.supersedes for item in items if item.supersedes is not None}
+        retained = sum(
+            existing.queue_key not in superseded
+            for queue in self.queues.values()
+            for existing in queue
+        )
+        available = self.config.queue_max_items - retained
         if len(items) > available:
             for item in items:
                 self.metrics.dropped[(item.traffic_class, "queue_full")] += 1
@@ -139,7 +158,13 @@ class AirtimeGovernor:
         now = self.clock.monotonic()
         batch_keys: set[tuple[str, int, str]] = set()
         for item in items:
-            payload = item.binary_payload if item.binary_payload is not None else item.text.encode()
+            payload = (
+                item.dedupe_token.encode()
+                if item.dedupe_token is not None
+                else item.binary_payload
+                if item.binary_payload is not None
+                else item.text.encode()
+            )
             digest = hashlib.sha256(payload).hexdigest()
             key = (item.dest, item.channel, digest)
             if key in batch_keys or (
@@ -225,6 +250,15 @@ class AirtimeGovernor:
                 return cls
         return None
 
+    @staticmethod
+    def _pop_alert(queue: deque[OutboundItem]) -> OutboundItem:
+        for severity in ALERT_SEVERITY_ORDER:
+            item = next((queued for queued in queue if queued.severity == severity), None)
+            if item is not None:
+                queue.remove(item)
+                return item
+        raise AssertionError("non-empty alert queue has no severity")
+
     async def tick(self) -> OutboundItem | None:
         now = self.clock.monotonic()
         self._prune_history(now)
@@ -246,9 +280,8 @@ class AirtimeGovernor:
                 self.metrics.throttled["budget" if only_critical else "utilisation"] += 1
             return None
         queue = self.queues[cls]
-        if cls == TrafficClass.ALERT and only_critical:
-            item = next(item for item in queue if item.severity == Severity.CRITICAL)
-            queue.remove(item)
+        if cls == TrafficClass.ALERT:
+            item = self._pop_alert(queue)
         else:
             item = queue.popleft()
         if item.expires_at <= now:
@@ -260,19 +293,6 @@ class AirtimeGovernor:
         # Preflight prevents a packet from crossing either rolling ceiling.
         critical = cls == TrafficClass.ALERT and item.severity == Severity.CRITICAL
         ceiling = total_s if critical else budget_s
-        if (
-            self.used_airtime + cost > ceiling
-            and cls == TrafficClass.ALERT
-            and not critical
-            and any(queued.severity == Severity.CRITICAL for queued in queue)
-        ):
-            queue.appendleft(item)
-            item = next(queued for queued in queue if queued.severity == Severity.CRITICAL)
-            queue.remove(item)
-            cost = toa(item.payload_size, self.preset)
-            item.estimated_toa = cost
-            critical = True
-            ceiling = total_s
         if self.used_airtime + cost > ceiling:
             queue.appendleft(item)
             self.metrics.throttled[cls] += 1

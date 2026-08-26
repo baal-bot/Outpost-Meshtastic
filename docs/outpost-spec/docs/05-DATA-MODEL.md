@@ -458,7 +458,10 @@ CREATE TABLE alert (
   escalation_stage INTEGER NOT NULL DEFAULT 0,
   next_escalation_at INTEGER,
   ack_required INTEGER NOT NULL DEFAULT 0,
-  broadcast_count INTEGER NOT NULL DEFAULT 0
+  broadcast_count INTEGER NOT NULL DEFAULT 0,
+  repeat_count INTEGER NOT NULL DEFAULT 0,
+  all_clear_at INTEGER,
+  all_clear_queued INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_alert_active ON alert(expires_at, cancelled_at);
 
@@ -490,6 +493,9 @@ CREATE TABLE watch_event (
   roster_policy TEXT NOT NULL DEFAULT 'all'  -- all | responders | subscribed
 );
 ```
+
+`alert_audience` records each distinct destination/channel admitted for an alert so an all-clear
+uses the same audience footprint rather than only the first configured channel.
 
 **REQ-DATA-022** — `local_ref` **MUST** be a small integer, unique among *currently visible*
 incidents, recycled only after the incident leaves the active window. Users type `I 31`, not

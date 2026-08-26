@@ -16,6 +16,11 @@ def test_health_is_minimal_and_status_has_detail() -> None:
     assert client.get("/api/v1/status").json()["radio"] == "down"
     assert health.headers["x-frame-options"] == "DENY"
 
+    failed_tasks = TestClient(create_web_app(lambda: {"radio": "up", "tasks_healthy": False})).get(
+        "/api/v1/health"
+    )
+    assert failed_tasks.json() == {"status": "degraded", "version": "0.1.0"}
+
 
 @pytest.mark.asyncio
 async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp_path) -> None:

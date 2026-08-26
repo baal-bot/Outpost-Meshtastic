@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
+from collections.abc import Callable
 
 from outpost.clock import Clock
 
@@ -21,7 +22,13 @@ def notify(message: str) -> bool:
         client.close()
 
 
-async def watchdog(clock: Clock, interval_s: float = 60) -> None:
+async def watchdog(
+    clock: Clock,
+    healthy: Callable[[], bool] | None = None,
+    interval_s: float = 60,
+) -> None:
     while True:
+        if healthy is not None and not healthy():
+            return
         notify("WATCHDOG=1")
         await clock.sleep(interval_s)

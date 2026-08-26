@@ -15,16 +15,39 @@ def main() -> None:
 
     async def serve() -> None:
         await application.startup()
-        watchdog_task = asyncio.create_task(watchdog(application.clock), name="systemd-watchdog")
+        watchdog_task = asyncio.create_task(
+            watchdog(application.clock, application.background_tasks_healthy),
+            name="systemd-watchdog",
+        )
         server = uvicorn.Server(
             uvicorn.Config(
                 application.web, host=config.web.bind, port=config.web.port, log_level="info"
             )
         )
         notify("READY=1")
+        server_task = asyncio.create_task(server.serve(), name="web-server")
+        failure_task = asyncio.create_task(
+            application.wait_for_task_failure(), name="background-task-failure"
+        )
         try:
-            await server.serve()
+            done, _ = await asyncio.wait(
+                {server_task, failure_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if failure_task in done:
+                reason = failure_task.result()
+                server.should_exit = True
+                await server_task
+                raise RuntimeError(f"critical Outpost task failed: {reason}")
+            failure_task.cancel()
+            await asyncio.gather(failure_task, return_exceptions=True)
+            await server_task
         finally:
+            if not server_task.done():
+                server.should_exit = True
+                await server_task
+            if not failure_task.done():
+                failure_task.cancel()
+                await asyncio.gather(failure_task, return_exceptions=True)
             watchdog_task.cancel()
             await asyncio.gather(watchdog_task, return_exceptions=True)
             await application.shutdown()

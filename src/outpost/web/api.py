@@ -386,7 +386,11 @@ def create_web_app(
     async def health() -> dict[str, str]:
         status = status_provider()
         radio = status.get("radio", "down")
-        return {"status": "ok" if radio == "up" else "degraded", "version": __version__}
+        tasks_healthy = status.get("tasks_healthy", True) is not False
+        return {
+            "status": "ok" if radio == "up" and tasks_healthy else "degraded",
+            "version": __version__,
+        }
 
     if federation is not None:
         if federation_mail_send is not None and database is not None:
@@ -1376,7 +1380,7 @@ def create_web_app(
                     "VALUES('web','operator','alert.cancel',?,?,unixepoch())",
                     (f"alert:{value.id}", body.resolution[:160]),
                 )
-                return value.json()
+                return await alerts.operational_json(value)
 
             @app.post("/api/v1/alerts/{alert_id}/halt", response_model=None)
             async def alert_halt(alert_id: int) -> dict[str, Any] | Response:

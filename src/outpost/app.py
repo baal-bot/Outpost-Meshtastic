@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+from collections.abc import Coroutine
 from dataclasses import dataclass
+from typing import Any
 
 from outpost.bbs.admin import BBSAdmin
 from outpost.bbs.channels import ChannelDirectory
@@ -70,6 +72,11 @@ class OutpostApp:
     config: Config
 
     def __post_init__(self) -> None:
+        self._tasks: list[asyncio.Task[None]] = []
+        self._task_health: dict[str, dict[str, object]] = {}
+        self._task_failure = asyncio.Event()
+        self._fatal_task_error: str | None = None
+        self._shutting_down = False
         self.clock = SystemClock()
         self.database = Database(self.config.store.path)
         self.radio = MeshtasticRadioLink(self.config.radio, self.clock)
@@ -78,6 +85,7 @@ class OutpostApp:
             self.config.radio.reconnect,
             self.clock,
             self.config.radio.liveness_timeout_s,
+            lambda: self._task_progress("radio-supervisor"),
         )
         self.inbound_pipeline = InboundPipeline("", set(self.config.radio.bridge_node_ids))
         self.governor = AirtimeGovernor(self.radio, self.config.airtime, self.clock)
@@ -184,7 +192,55 @@ class OutpostApp:
             self.import_federation_inbox,
             self.send_federation_mail,
         )
-        self._tasks: list[asyncio.Task[None]] = []
+
+    def _start_background_task(
+        self, name: str, coroutine: Coroutine[Any, Any, None]
+    ) -> asyncio.Task[None]:
+        now = int(self.clock.now().timestamp())
+        self._task_health[name] = {
+            "state": "running",
+            "started_at": now,
+            "last_ok_at": None,
+            "stopped_at": None,
+            "error": None,
+        }
+        task = asyncio.create_task(coroutine, name=name)
+        task.add_done_callback(self._background_task_done)
+        return task
+
+    def _task_progress(self, name: str) -> None:
+        health = self._task_health.get(name)
+        if health is not None and health["state"] == "running":
+            health["last_ok_at"] = int(self.clock.now().timestamp())
+
+    def _background_task_done(self, task: asyncio.Task[None]) -> None:
+        name = task.get_name()
+        health = self._task_health.get(name)
+        if health is None:
+            return
+        now = int(self.clock.now().timestamp())
+        health["stopped_at"] = now
+        if self._shutting_down or task.cancelled():
+            health["state"] = "stopped"
+            return
+        error = task.exception()
+        detail = (
+            f"{type(error).__name__}: {error}" if error is not None else "task exited unexpectedly"
+        )
+        detail = detail[:240]
+        health.update({"state": "failed", "error": detail})
+        if self._fatal_task_error is None:
+            self._fatal_task_error = f"{name}: {detail}"
+        self._task_failure.set()
+
+    def background_tasks_healthy(self) -> bool:
+        return bool(self._task_health) and all(
+            health["state"] == "running" for health in self._task_health.values()
+        )
+
+    async def wait_for_task_failure(self) -> str:
+        await self._task_failure.wait()
+        return self._fatal_task_error or "background task failed"
 
     async def import_federation_inbox(self, item_id: int) -> str:
         return await self.federation_sync.import_inbox(
@@ -261,24 +317,26 @@ class OutpostApp:
         if initial_password:
             print(f"OUTPOST INITIAL OPERATOR PASSWORD: {initial_password}", flush=True)
         self._tasks = [
-            asyncio.create_task(self.supervisor.run(), name="radio-supervisor"),
-            asyncio.create_task(self._governor_loop(), name="airtime-governor"),
-            asyncio.create_task(self._inbound_loop(), name="inbound-router"),
-            asyncio.create_task(self._digest_loop(), name="bbs-digests"),
-            asyncio.create_task(self._maintenance_loop(), name="store-maintenance"),
-            asyncio.create_task(self._watch_loop(), name="watch-scheduler"),
-            asyncio.create_task(self._environment_loop(), name="environment-poller"),
-            asyncio.create_task(self._federation_hello_loop(), name="federation-discovery"),
-            asyncio.create_task(self._federation_service_loop(), name="federation-services"),
-            asyncio.create_task(self._federation_sync_loop(), name="federation-sync"),
-            asyncio.create_task(self._federation_delivery_loop(), name="federation-delivery"),
+            self._start_background_task("radio-supervisor", self.supervisor.run()),
+            self._start_background_task("airtime-governor", self._governor_loop()),
+            self._start_background_task("inbound-router", self._inbound_loop()),
+            self._start_background_task("bbs-digests", self._digest_loop()),
+            self._start_background_task("store-maintenance", self._maintenance_loop()),
+            self._start_background_task("watch-scheduler", self._watch_loop()),
+            self._start_background_task("environment-poller", self._environment_loop()),
+            self._start_background_task("federation-discovery", self._federation_hello_loop()),
+            self._start_background_task("federation-services", self._federation_service_loop()),
+            self._start_background_task("federation-sync", self._federation_sync_loop()),
+            self._start_background_task("federation-delivery", self._federation_delivery_loop()),
         ]
 
     async def _federation_hello_loop(self) -> None:
         while True:
             if self.config.modules.fed.enabled and self._queue_federation_hello("^all"):
+                self._task_progress("federation-discovery")
                 await self.clock.sleep(self.config.fed.hello_interval_hours * 3_600)
             else:
+                self._task_progress("federation-discovery")
                 await self.clock.sleep(30)
 
     def _queue_federation_hello(
@@ -594,6 +652,7 @@ class OutpostApp:
                     )
                 except ValueError:
                     continue
+            self._task_progress("federation-services")
             await self.clock.sleep(15)
 
     async def _send_federation_value(
@@ -619,6 +678,7 @@ class OutpostApp:
     async def _federation_sync_loop(self) -> None:
         while True:
             if self.config.modules.fed.enabled and not self.radio.local_node_id:
+                self._task_progress("federation-sync")
                 await self.clock.sleep(30)
                 continue
             if self.config.modules.fed.enabled:
@@ -685,6 +745,7 @@ class OutpostApp:
                         )
                     except (FrameError, ValueError):
                         continue
+            self._task_progress("federation-sync")
             await self.clock.sleep(30)
 
     async def _federation_delivery_loop(self) -> None:
@@ -754,6 +815,7 @@ class OutpostApp:
                             "WHERE peer_id=? AND post_id=?",
                             (now, str(error)[:120], row["peer_id"], row["post_id"]),
                         )
+            self._task_progress("federation-delivery")
             await self.clock.sleep(30)
 
     async def _handle_federation_discovery(self, message: object) -> None:
@@ -1228,12 +1290,14 @@ class OutpostApp:
                     await self.seismic.poll(location.lat, location.lon)
                 except OSError as error:
                     print(f"USGS earthquake poll failed: {error}", flush=True)
+            self._task_progress("environment-poller")
             await self.clock.sleep(300)
 
     async def _watch_loop(self) -> None:
         while True:
             await self.alerts.advance_due()
             await self.incidents.expire_due()
+            self._task_progress("watch-scheduler")
             await self.clock.sleep(15)
 
     async def reconnect_radio(self) -> None:
@@ -1261,6 +1325,7 @@ class OutpostApp:
                 )
                 if scheduled is not None:
                     await self.digests.mark_scheduled(delivery)
+            self._task_progress("bbs-digests")
             await self.clock.sleep(30)
 
     async def _maintenance_loop(self) -> None:
@@ -1270,9 +1335,11 @@ class OutpostApp:
                     await self.maintenance.run()
             except Exception as error:
                 print(f"Outpost maintenance failed: {error}", flush=True)
+            self._task_progress("store-maintenance")
             await self.clock.sleep(60)
 
     async def shutdown(self) -> None:
+        self._shutting_down = True
         await self.supervisor.stop()
         for task in self._tasks:
             task.cancel()
@@ -1296,6 +1363,7 @@ class OutpostApp:
                     outcome=result.outcome if result else "timeout",
                     is_direct=item.dest != "^all",
                 )
+            self._task_progress("airtime-governor")
             await self.clock.sleep(0.25)
 
     async def _inbound_loop(self) -> None:
@@ -1306,6 +1374,7 @@ class OutpostApp:
             if message is None:
                 continue
             await self.message_log.record_inbound(message)
+            self._task_progress("inbound-router")
             INBOUND.labels(
                 str(message.portnum), str(message.channel), str(message.is_direct).lower()
             ).inc()
@@ -1442,6 +1511,9 @@ class OutpostApp:
             "airtime_used_ratio": self.governor.used_airtime / 3_600,
             "queues": self.governor.queue_depths(),
             "alert_delivery": self.governor.alert_delivery_status(),
+            "tasks_healthy": self.background_tasks_healthy(),
+            "task_failure": self._fatal_task_error,
+            "tasks": {name: dict(health) for name, health in self._task_health.items()},
             "radio_config": {
                 "node_id": self.radio.snapshot.node_id,
                 "region": self.radio.snapshot.region,

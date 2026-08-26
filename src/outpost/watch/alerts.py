@@ -30,6 +30,9 @@ class Alert:
     next_escalation_at: int | None
     ack_required: int
     broadcast_count: int
+    repeat_count: int
+    all_clear_at: int | None
+    all_clear_queued: int
     ack_count: int
     lat: float | None
     lon: float | None
@@ -70,11 +73,19 @@ class AlertService:
                JOIN member m ON m.id=aa.member_id WHERE aa.alert_id=? ORDER BY aa.acked_at""",
             (alert.id,),
         )
+        audiences = await self.database.read(
+            "SELECT destination,channel,first_admitted_at,last_admitted_at,admissions "
+            "FROM alert_audience WHERE alert_id=? ORDER BY destination,channel",
+            (alert.id,),
+        )
         value.update(
             {
                 "stage_total": len(policy.stages),
                 "next_action": next_stage.model_dump() if next_stage else None,
+                "repeat_max": self.config.watch.alert_repeat_max,
+                "repeat_remaining": max(0, self.config.watch.alert_repeat_max - alert.repeat_count),
                 "acknowledgements": [dict(row) for row in rows],
+                "audiences": [dict(row) for row in audiences],
             }
         )
         return value
@@ -196,10 +207,12 @@ class AlertService:
         stage: EscalationStage,
         channels: list[int] | None = None,
         supersedes: str | None = None,
+        dedupe_token: str | None = None,
     ) -> int:
         text = self.render(alert.severity, alert.headline)
         severity = Severity(alert.severity)
         admitted = 0
+        now = int(self.clock.now().timestamp())
         destinations = await self._destinations(stage.notify)
         for destination in destinations:
             for channel in channels or stage.channels:
@@ -213,10 +226,19 @@ class AlertService:
                         want_ack=destination != "^all",
                         queue_key=f"alert:{alert.id}:repeat",
                         supersedes=supersedes,
+                        dedupe_token=dedupe_token,
                     )
                 )
                 supersedes = None
-                admitted += int(item_id is not None)
+                if item_id is not None:
+                    admitted += 1
+                    await self.database.write(
+                        "INSERT INTO alert_audience(alert_id,destination,channel,"
+                        "first_admitted_at,last_admitted_at,admissions) VALUES(?,?,?,?,?,1) "
+                        "ON CONFLICT(alert_id,destination,channel) DO UPDATE SET "
+                        "last_admitted_at=excluded.last_admitted_at,admissions=admissions+1",
+                        (alert.id, destination, int(channel), now, now),
+                    )
         if admitted:
             await self.database.write(
                 "UPDATE alert SET broadcast_count=broadcast_count+? WHERE id=?",
@@ -246,16 +268,39 @@ class AlertService:
                 "UPDATE alert SET next_escalation_at=NULL WHERE id=?", (alert.id,)
             )
             return False
-        await self._broadcast(alert, policy.stages[stage_index], override_channels, supersedes)
-        next_stage = stage_index + 1
-        next_at = (
-            alert.raised_at + policy.stages[next_stage].after_minutes * 60
-            if next_stage < len(policy.stages)
-            else None
+        stage = policy.stages[stage_index]
+        repeat_count = alert.repeat_count
+        delivery_key = f"alert:{alert.id}:stage:{stage_index}:repeat:{repeat_count}"
+        await self._broadcast(
+            alert,
+            stage,
+            override_channels,
+            supersedes or (f"alert:{alert.id}:repeat" if stage.repeat else None),
+            delivery_key,
         )
+        now = int(self.clock.now().timestamp())
+        if stage.repeat:
+            repeat_count += 1
+            if repeat_count < self.config.watch.alert_repeat_max:
+                next_stage = stage_index
+                next_at = now + self.config.watch.alert_repeat_interval_minutes * 60
+            else:
+                next_stage = stage_index + 1
+                next_at = (
+                    max(now, alert.raised_at + policy.stages[next_stage].after_minutes * 60)
+                    if next_stage < len(policy.stages)
+                    else None
+                )
+        else:
+            next_stage = stage_index + 1
+            next_at = (
+                alert.raised_at + policy.stages[next_stage].after_minutes * 60
+                if next_stage < len(policy.stages)
+                else None
+            )
         await self.database.write(
-            "UPDATE alert SET escalation_stage=?,next_escalation_at=? WHERE id=?",
-            (next_stage, next_at, alert.id),
+            "UPDATE alert SET escalation_stage=?,next_escalation_at=?,repeat_count=? WHERE id=?",
+            (next_stage, next_at, repeat_count, alert.id),
         )
         return True
 
@@ -311,19 +356,35 @@ class AlertService:
         if alert is None or alert.cancelled_at is not None:
             raise ValueError("No active alert.")
         now = int(self.clock.now().timestamp())
-        await self.database.write(
-            "UPDATE alert SET cancelled_at=?,next_escalation_at=NULL WHERE id=?", (now, alert.id)
+        audiences = await self.database.read(
+            "SELECT destination,channel FROM alert_audience WHERE alert_id=? "
+            "ORDER BY destination,channel",
+            (alert.id,),
         )
-        self.governor.enqueue(
+        if not audiences:
+            audiences = [
+                {"destination": "^all", "channel": channel}
+                for channel in json.loads(alert.channels)
+            ]
+        text = f"ALL CLEAR {resolution[:120]} {self.config.node.short_name}"
+        items = [
             OutboundItem(
-                text=f"ALL CLEAR {resolution[:120]} {self.config.node.short_name}",
-                dest="^all",
-                channel=json.loads(alert.channels)[0],
+                text=text,
+                dest=str(audience["destination"]),
+                channel=int(audience["channel"]),
                 traffic_class=TrafficClass.ALERT,
                 severity=Severity(alert.severity),
-                want_ack=False,
-                supersedes=f"alert:{alert.id}:repeat",
+                want_ack=str(audience["destination"]) != "^all",
+                supersedes=f"alert:{alert.id}:repeat" if index == 0 else None,
+                dedupe_token=f"alert:{alert.id}:all-clear",
             )
+            for index, audience in enumerate(audiences)
+        ]
+        queued = self.governor.enqueue_many(items)
+        await self.database.write(
+            "UPDATE alert SET cancelled_at=?,next_escalation_at=NULL,all_clear_at=?,"
+            "all_clear_queued=? WHERE id=?",
+            (now, now, len(queued) if queued is not None else 0, alert.id),
         )
         if alert.incident_id:
             await self.database.write(

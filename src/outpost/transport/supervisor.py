@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 
 from outpost.clock import Clock
 from outpost.config import ReconnectConfig
@@ -16,10 +17,16 @@ class RadioSupervisor:
         reconnect: ReconnectConfig,
         clock: Clock,
         liveness_timeout_s: float = 300,
+        on_progress: Callable[[], None] | None = None,
     ) -> None:
         self.link, self.reconnect, self.clock = link, reconnect, clock
         self.liveness_timeout_s = liveness_timeout_s
+        self.on_progress = on_progress
         self.running = False
+
+    def _progress(self) -> None:
+        if self.on_progress is not None:
+            self.on_progress()
 
     def is_stale(self) -> bool:
         return self.clock.monotonic() - self.link.last_activity >= self.liveness_timeout_s
@@ -31,8 +38,10 @@ class RadioSupervisor:
             try:
                 await self.link.connect()
                 failures = 0
+                self._progress()
                 while self.running and self.link.state.value == "up":
                     await self.clock.sleep(1)
+                    self._progress()
                     if self.is_stale():
                         await self.link.close()
                         break

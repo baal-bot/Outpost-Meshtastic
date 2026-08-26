@@ -24,6 +24,38 @@ async def test_alert_preempts_reply_and_broadcast_has_no_ack() -> None:
 
 
 @pytest.mark.asyncio
+async def test_alerts_are_severity_ordered_and_fifo_within_severity() -> None:
+    clock, link = VirtualClock(), SimulatedRadioLink()
+    await link.connect()
+    governor = AirtimeGovernor(link, AirtimeConfig(min_gap_s=0), clock)
+    for text, severity in (
+        ("caution-1", Severity.CAUTION),
+        ("urgent-1", Severity.URGENT),
+        ("critical-1", Severity.CRITICAL),
+        ("critical-2", Severity.CRITICAL),
+        ("urgent-2", Severity.URGENT),
+        ("info-1", Severity.INFO),
+    ):
+        governor.enqueue(OutboundItem(text, "!peer", 0, TrafficClass.ALERT, severity))
+
+    sent: list[str] = []
+    for _ in range(6):
+        item = await governor.tick()
+        assert item is not None
+        sent.append(item.text)
+        clock.advance(60)
+
+    assert sent == [
+        "critical-1",
+        "critical-2",
+        "urgent-1",
+        "urgent-2",
+        "caution-1",
+        "info-1",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_high_utilisation_only_allows_alerts() -> None:
     clock, link = VirtualClock(), SimulatedRadioLink()
     await link.connect()
@@ -113,6 +145,40 @@ def test_all_clear_supersedes_queued_alert_repeats() -> None:
     )
     queued = governor.queued_items()
     assert [item.text for item in queued] == ["ALL CLEAR"]
+
+
+def test_atomic_all_clear_can_replace_repeats_in_a_full_queue() -> None:
+    governor = AirtimeGovernor(
+        SimulatedRadioLink(), AirtimeConfig(queue_max_items=2), VirtualClock()
+    )
+    for channel in (0, 3):
+        governor.enqueue(
+            OutboundItem(
+                "repeat",
+                "^all",
+                channel,
+                TrafficClass.ALERT,
+                Severity.CRITICAL,
+                queue_key="alert:42:repeat",
+            )
+        )
+    all_clears = [
+        OutboundItem(
+            "ALL CLEAR",
+            "^all",
+            channel,
+            TrafficClass.ALERT,
+            Severity.CRITICAL,
+            supersedes="alert:42:repeat" if index == 0 else None,
+        )
+        for index, channel in enumerate((0, 3))
+    ]
+
+    assert governor.enqueue_many(all_clears) is not None
+    assert [(item.text, item.channel) for item in governor.queued_items()] == [
+        ("ALL CLEAR", 0),
+        ("ALL CLEAR", 3),
+    ]
 
 
 def test_multipart_enqueue_is_atomic() -> None:
