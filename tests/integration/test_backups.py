@@ -23,9 +23,7 @@ from outpost.web.auth import WebAuthService
 def test_backup_routes_are_independent_from_optional_checkins(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     backups = BackupService(database)
-    with_backups = create_web_app(
-        lambda: {"radio": "up"}, database=database, backups=backups
-    )
+    with_backups = create_web_app(lambda: {"radio": "up"}, database=database, backups=backups)
     backup_paths = {route.path for route in with_backups.routes}
     assert {
         "/api/v1/backups",
@@ -40,9 +38,7 @@ def test_backup_routes_are_independent_from_optional_checkins(tmp_path) -> None:
         AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock),
         clock,
     )
-    without_backups = create_web_app(
-        lambda: {"radio": "up"}, database=database, checkins=checkins
-    )
+    without_backups = create_web_app(lambda: {"radio": "up"}, database=database, checkins=checkins)
     assert not any(route.path.startswith("/api/v1/backups") for route in without_backups.routes)
 
 
@@ -102,9 +98,7 @@ async def test_failed_restore_automatically_recovers_safety_snapshot(tmp_path) -
     with pytest.raises(RestoreRecoveredError, match="injected restore failure") as raised:
         await service.restore_quiesced(candidate.name)
     assert raised.value.safety_backup.startswith("outpost-")
-    rows = await database.read(
-        "SELECT value FROM runtime_setting WHERE key='restore.guard'"
-    )
+    rows = await database.read("SELECT value FROM runtime_setting WHERE key='restore.guard'")
     assert rows[0]["value"] == "present"
     assert (await database.validate_current())["integrity"] == "ok"
     await database.close()

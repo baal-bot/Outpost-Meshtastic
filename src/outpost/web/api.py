@@ -448,9 +448,7 @@ def create_web_app(
         status = status_provider()
         recovery = status.get("recovery")
         if isinstance(recovery, dict) and recovery.get("active") is True:
-            return JSONResponse(
-                {"status": "maintenance", "version": __version__}, status_code=503
-            )
+            return JSONResponse({"status": "maintenance", "version": __version__}, status_code=503)
         radio = status.get("radio", "down")
         tasks_healthy = status.get("tasks_healthy", True) is not False
         return {
@@ -1230,9 +1228,7 @@ def create_web_app(
                     path,
                     filename=path.name,
                     media_type="application/x-sqlite3",
-                    headers={
-                        "X-Outpost-Data-Classification": "sensitive-includes-location-data"
-                    },
+                    headers={"X-Outpost-Data-Classification": "sensitive-includes-location-data"},
                 )
 
             @app.get("/api/v1/backups/{name}/validate", response_model=None)
@@ -1246,9 +1242,7 @@ def create_web_app(
                     )
 
             @app.post("/api/v1/backups/{name}/restore", response_model=None)
-            async def backup_restore(
-                name: str, body: RestoreBody
-            ) -> dict[str, object] | Response:
+            async def backup_restore(name: str, body: RestoreBody) -> dict[str, object] | Response:
                 if restore_coordinator is None:
                     return JSONResponse(
                         {
@@ -2125,17 +2119,14 @@ def create_web_app(
                 )
                 count = int(rows[0]["count"])
                 pending_rows = await transaction.read(
-                    "SELECT COUNT(*) AS count FROM pending_incident_location "
-                    "WHERE expires_at<=?",
+                    "SELECT COUNT(*) AS count FROM pending_incident_location WHERE expires_at<=?",
                     (now,),
                 )
                 pending_count = int(pending_rows[0]["count"])
                 await transaction.write(
                     "DELETE FROM pending_incident_location WHERE expires_at<=?", (now,)
                 )
-                await transaction.write(
-                    "DELETE FROM member_position WHERE expires_at<=?", (now,)
-                )
+                await transaction.write("DELETE FROM member_position WHERE expires_at<=?", (now,))
                 await transaction.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
                     "VALUES('web','operator','member.position_purge','member_position',?,?)",

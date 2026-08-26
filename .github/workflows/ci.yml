@@ -14,6 +14,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e '.[dev,radio]'
+      - run: python -m playwright install --with-deps chromium
       - run: ruff format --check src tests
       - run: ruff check src tests
       - run: mypy

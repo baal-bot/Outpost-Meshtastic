@@ -71,9 +71,7 @@ def test_release_recovery_restores_snapshot_across_schema_migration(tmp_path: Pa
     connection.commit()
     connection.close()
 
-    plan = plan_rollback(
-        metadata, current_release=new_release, target_release=old_release
-    )
+    plan = plan_rollback(metadata, current_release=new_release, target_release=old_release)
     assert plan["action"] == "restore"
     safety = tmp_path / "safety.db"
     snapshot_database(live, safety)
@@ -108,8 +106,6 @@ def test_release_recovery_skips_data_restore_without_schema_change(tmp_path: Pat
         upgrade_schema_cap=1,
     )
 
-    plan = plan_rollback(
-        metadata, current_release=new_release, target_release=old_release
-    )
+    plan = plan_rollback(metadata, current_release=new_release, target_release=old_release)
     assert plan["action"] == "code-only"
     assert plan["candidate"] is None

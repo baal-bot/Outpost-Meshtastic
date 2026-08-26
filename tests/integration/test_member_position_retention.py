@@ -31,14 +31,11 @@ def test_expiry_migration_suppresses_legacy_exact_positions(tmp_path: Path) -> N
            INSERT INTO member_position VALUES(1,40,-80,123,'position_app');"""
     )
     migration = (
-        Path(__file__).parents[2]
-        / "src/outpost/store/migrations/0138_member_position_expiry.sql"
+        Path(__file__).parents[2] / "src/outpost/store/migrations/0138_member_position_expiry.sql"
     ).read_text()
     connection.executescript(migration)
 
-    assert connection.execute(
-        "SELECT expires_at=received_at FROM member_position"
-    ).fetchone()[0]
+    assert connection.execute("SELECT expires_at=received_at FROM member_position").fetchone()[0]
     connection.close()
 
 
@@ -123,9 +120,7 @@ async def test_operator_position_lifecycle_and_sensitive_export_disclosure(tmp_p
     situational = client.get("/api/v1/watch/map").json()
     assert situational["nodes"][0]["mesh_id"] == member.mesh_id
     download = client.get(f"/api/v1/backups/{backup.name}")
-    assert download.headers["x-outpost-data-classification"] == (
-        "sensitive-includes-location-data"
-    )
+    assert download.headers["x-outpost-data-classification"] == ("sensitive-includes-location-data")
     roster = client.get(f"/api/v1/events/{event.id}/roster.csv")
     assert "lat,lon" in roster.text
     assert roster.headers["x-outpost-data-classification"] == (
@@ -159,9 +154,7 @@ async def test_operator_position_lifecycle_and_sensitive_export_disclosure(tmp_p
         json={"confirmation": "PURGE EXPIRED POSITIONS"},
     )
     assert purged.status_code == 200 and purged.json()["deleted"] == 1
-    assert await database.read(
-        "SELECT 1 FROM audit_log WHERE action='member.position_purge'"
-    )
+    assert await database.read("SELECT 1 FROM audit_log WHERE action='member.position_purge'")
     script = client.get("/member-map.js").text
     assert "Scheduled deletion" in script and "Delete exact position" in script
     await database.close()

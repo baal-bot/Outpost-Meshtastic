@@ -54,10 +54,109 @@ const links = [
 ];
 const navigation = document.querySelector(".rail nav");
 if (navigation) {
+  navigation.id = "primary-navigation";
+  navigation.setAttribute("aria-label", "Primary navigation");
   navigation.innerHTML = links.map(([href, icon, label]) => {
-    const active = (path === "/" && href === "/") || path === href;
-    return `<a ${active ? 'class="active"' : ""} href="${href}" aria-label="${label}" title="${label}"><i aria-hidden="true">${icon}</i><span>${label}</span></a>`;
+    return `<a href="${href}" aria-label="${label}" title="${label}"><i aria-hidden="true">${icon}</i><span>${label}</span></a>`;
   }).join("");
+}
+
+function updateCurrentPage() {
+  if (!navigation) return;
+  const candidates = [...navigation.querySelectorAll("a")];
+  let current = null;
+  if (window.location.hash) {
+    current = candidates.find(link => {
+      const target = new URL(link.href);
+      return target.pathname === path && target.hash === window.location.hash;
+    });
+  }
+  current ||= candidates.find(link => {
+    const target = new URL(link.href);
+    return target.pathname === path && !target.hash;
+  });
+  for (const link of candidates) {
+    const active = link === current;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
+}
+
+updateCurrentPage();
+window.addEventListener("hashchange", updateCurrentPage);
+
+const rail = document.querySelector(".rail");
+const mobileNavigation = window.matchMedia("(max-width: 820px)");
+let navigationOpen = false;
+let navigationToggle = null;
+let navigationBackdrop = null;
+
+function setNavigationOpen(open, restoreFocus = false) {
+  if (!navigation || !navigationToggle || !navigationBackdrop) return;
+  navigationOpen = Boolean(open && mobileNavigation.matches);
+  navigation.classList.toggle("mobile-open", navigationOpen);
+  navigationToggle.classList.toggle("active", navigationOpen);
+  navigationToggle.setAttribute("aria-expanded", String(navigationOpen));
+  navigationToggle.setAttribute(
+    "aria-label",
+    navigationOpen ? "Close navigation" : "Open navigation",
+  );
+  navigationToggle.querySelector("span").textContent = navigationOpen ? "Close" : "Menu";
+  navigationBackdrop.hidden = !navigationOpen;
+  document.body.classList.toggle("mobile-nav-open", navigationOpen);
+  document.querySelector(".shell")?.toggleAttribute("inert", navigationOpen);
+  if (navigationOpen) {
+    window.requestAnimationFrame(() => {
+      (navigation.querySelector("a[aria-current='page']") || navigation.querySelector("a"))?.focus();
+    });
+  } else if (restoreFocus) {
+    navigationToggle.focus();
+  }
+}
+
+if (navigation && rail) {
+  navigationToggle = document.createElement("button");
+  navigationToggle.type = "button";
+  navigationToggle.className = "mobile-nav-toggle";
+  navigationToggle.setAttribute("aria-controls", navigation.id);
+  navigationToggle.setAttribute("aria-expanded", "false");
+  navigationToggle.setAttribute("aria-label", "Open navigation");
+  navigationToggle.innerHTML = '<span>Menu</span><i aria-hidden="true"><b></b><b></b><b></b></i>';
+  rail.insertBefore(navigationToggle, navigation);
+
+  navigationBackdrop = document.createElement("div");
+  navigationBackdrop.className = "mobile-nav-backdrop";
+  navigationBackdrop.hidden = true;
+  navigationBackdrop.setAttribute("aria-hidden", "true");
+  document.body.appendChild(navigationBackdrop);
+
+  navigationToggle.addEventListener("click", () => setNavigationOpen(!navigationOpen));
+  navigationBackdrop.addEventListener("click", () => setNavigationOpen(false, true));
+  navigation.addEventListener("click", event => {
+    if (event.target.closest("a")) setNavigationOpen(false);
+  });
+  mobileNavigation.addEventListener("change", () => setNavigationOpen(false));
+  document.addEventListener("keydown", event => {
+    if (!navigationOpen) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setNavigationOpen(false, true);
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const items = [...navigation.querySelectorAll("a:not([aria-disabled='true'])")];
+    if (!items.length) return;
+    const first = items[0];
+    const last = items.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
 }
 
 const reviewTargets = {

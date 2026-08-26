@@ -29,6 +29,7 @@ dev = [
   "hypothesis>=6.138,<7",
   "mypy>=1.17,<2",
   "pip-audit>=2.9,<3",
+  "playwright>=1.55,<2",
   "pytest>=9.0.3,<10",
   "pytest-asyncio>=1.1,<2",
   "pytest-cov>=6.2,<7",

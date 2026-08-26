@@ -29,9 +29,7 @@ def main() -> None:
         failure_task = asyncio.create_task(
             application.wait_for_task_failure(), name="background-task-failure"
         )
-        restart_task = asyncio.create_task(
-            application.wait_for_restart(), name="recovery-restart"
-        )
+        restart_task = asyncio.create_task(application.wait_for_restart(), name="recovery-restart")
         try:
             done, _ = await asyncio.wait(
                 {server_task, failure_task, restart_task}, return_when=asyncio.FIRST_COMPLETED

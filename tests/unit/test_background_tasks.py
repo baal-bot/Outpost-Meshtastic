@@ -75,8 +75,6 @@ async def test_restore_quiesces_background_work_before_database_replacement(tmp_
     assert drained.is_set()
     assert app._tasks == []
     assert result["restored"] == candidate.name
-    assert not await app.database.read(
-        "SELECT 1 FROM runtime_setting WHERE key='after.backup'"
-    )
+    assert not await app.database.read("SELECT 1 FROM runtime_setting WHERE key='after.backup'")
     assert app._task_failure.is_set() is False
     await app.database.close()
