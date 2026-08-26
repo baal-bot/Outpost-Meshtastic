@@ -31,6 +31,19 @@ def test_installer_stages_health_checked_release_with_rollback() -> None:
     assert "sudo outpost-setup-token show" in script
     assert "sudo outpost-setup-token reset" in script
     assert "New release failed health verification; rolling back." in script
+    assert "Python 3.12 or 3.13 is required" in script
+
+
+def test_acceptance_host_installer_keeps_test_tools_out_of_production() -> None:
+    script = (Path(__file__).parents[2] / "deploy" / "install-test-host.sh").read_text()
+
+    assert "TEST_ENV=${OUTPOST_TEST_VENV:-$PROJECT_DIR/.venv}" in script
+    assert 'pip" install -e "$PROJECT_DIR[dev,radio]"' in script
+    assert "run as the normal checkout user, not root or sudo" in script
+    assert "Python 3.12 or 3.13 is required" in script
+    assert "playwright install chromium" in script
+    assert "systemctl" not in script
+    assert "/opt/outpost/current (unchanged)" in script
 
 
 def test_service_uses_atomic_current_release() -> None:

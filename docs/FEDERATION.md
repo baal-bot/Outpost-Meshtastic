@@ -50,6 +50,16 @@ Both nodes should pass independent health, backup, dashboard, and radio checks. 
 operator outside the mesh pairing path. Agree on shared data, incident radius, retention, transport
 cost, and revocation.
 
+For a physical acceptance host, keep test dependencies out of the production service environment:
+
+```sh
+sudo ./deploy/install.sh
+./deploy/install-test-host.sh
+```
+
+The supported helper and optional browser setup are documented in
+[Installation](INSTALLATION.md#federation-acceptance-host).
+
 ## Pairing workflow
 
 1. Enable federation on both nodes.

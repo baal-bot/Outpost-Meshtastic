@@ -44,7 +44,7 @@ config, database, API/channel key, member export, precise location, or tile cach
 .venv/bin/mypy
 .venv/bin/pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json
 .venv/bin/python tools/check_critical_coverage.py coverage.json
-sh -n deploy/install.sh deploy/smoke-package.sh
+sh -n deploy/install.sh deploy/install-test-host.sh deploy/smoke-package.sh
 sh deploy/smoke-package.sh
 .venv/bin/pip-audit
 ```

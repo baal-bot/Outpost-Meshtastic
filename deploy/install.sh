@@ -16,7 +16,8 @@ fail() { echo "Outpost install: $*" >&2; exit 1; }
 for command in python3 getent groupadd useradd usermod install systemctl ln mv readlink curl; do
   command -v "$command" >/dev/null 2>&1 || fail "missing required command: $command"
 done
-python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 12))' || fail "Python 3.12 or newer is required"
+python3 -c 'import sys; raise SystemExit(not ((3, 12) <= sys.version_info < (3, 14)))' || \
+  fail "Python 3.12 or 3.13 is required"
 python3 -m venv --help >/dev/null 2>&1 || fail "Python venv support is missing; install python3-venv"
 
 if command -v git >/dev/null 2>&1 && git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1; then

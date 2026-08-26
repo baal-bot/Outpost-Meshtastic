@@ -5,8 +5,8 @@
 Use a dedicated Linux host where practical. Confirm reliable power, adequate storage, LAN access,
 and a supported Meshtastic radio. Record radio firmware and channel configuration first.
 
-Required software is Python 3.12+, Python `venv`/`pip`, Git, systemd, and standard Linux account
-tools. The installer stops when Python is too old or required commands are absent.
+Required software is Python 3.12 or 3.13, Python `venv`/`pip`, Git, systemd, and standard Linux
+account tools. The installer stops when Python is unsupported or required commands are absent.
 
 ## Connect the radio
 
@@ -49,17 +49,20 @@ previous code and pre-upgrade database. `git pull` alone never updates the runni
 ## Federation acceptance host
 
 Keep development tools separate from the minimal production environment. From the repository
-checkout on a test host:
+checkout on a test host, first install or update the production service and then prepare the
+checkout-local acceptance environment as the normal (non-root) checkout owner:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -e '.[dev,radio]'
-.venv/bin/pip check
+sudo ./deploy/install.sh
+./deploy/install-test-host.sh
 ```
 
-The checkout-local `.venv` runs tests and linting. The systemd service uses
-`/opt/outpost/current`. After pulling application changes, rerun `sudo ./deploy/install.sh`; running
-tests from `.venv` does not upgrade or restart the production service.
+Pass `--with-browser` when the host will run Playwright dashboard tests. Set
+`OUTPOST_TEST_VENV=/another/path` to choose a different test environment. The helper refuses root,
+validates its dependencies, and never writes to `/opt/outpost`, changes configuration, or restarts
+the service. The checkout-local `.venv` runs tests and linting while systemd continues to use the
+minimal `/opt/outpost/current` release. After pulling changes, rerun the helper to refresh test
+tools; rerun `sudo ./deploy/install.sh` separately only when you intend to update the service.
 
 ## First configuration
 
