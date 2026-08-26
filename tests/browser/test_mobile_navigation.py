@@ -1206,6 +1206,57 @@ def test_settings_save_is_functional_and_browser_clean(browser: object, dashboar
             status=200, content_type="application/json", body='{"items":[]}'
         ),
     )
+
+    def environment_route(route: object) -> None:
+        path = urlparse(route.request.url).path
+        bodies = {
+            "/api/v1/environment/weather": {
+                "provider": "nws",
+                "source_kind": "observation",
+                "temperature_c": 20,
+                "apparent_c": 20,
+                "precipitation_mm": 0,
+                "wind_kph": 0,
+                "wind_direction": 0,
+                "valid_age_seconds": 0,
+                "age_seconds": 0,
+                "stale": False,
+                "units": "metric",
+            },
+            "/api/v1/environment/forecast": {
+                "provider": "nws",
+                "age_seconds": 0,
+                "stale": False,
+                "units": "metric",
+                "daily": [],
+                "hourly": [],
+            },
+            "/api/v1/environment/astronomy": {
+                "date": "2026-08-26",
+                "timezone": "America/New_York",
+                "sunrise": None,
+                "sunset": None,
+                "civil_dawn": None,
+                "civil_dusk": None,
+                "daylight_minutes": 720,
+                "moon_illumination": 50,
+                "moon_phase": "First quarter",
+                "moon_age_days": 7,
+            },
+            "/api/v1/environment/earthquakes": {
+                "items": [],
+                "health": {"last_error": None, "last_poll_at": None},
+                "radius_km": 250,
+            },
+            "/api/v1/environment/providers": {"items": {}},
+        }
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(bodies[path]),
+        )
+
+    page.route("**/api/v1/environment/**", environment_route)
     health = BrowserHealth(page)
     try:
         page.goto(dashboard_url, wait_until="domcontentloaded")
@@ -1217,6 +1268,9 @@ def test_settings_save_is_functional_and_browser_clean(browser: object, dashboar
         dialog.get_by_label("°C", exact=True).check()
         dialog.get_by_role("button", name="Save identity settings").click()
         dialog.wait_for(state="hidden")
+        # Let the staggered overview provider refreshes run so their network
+        # and console state is part of this functional gate as well.
+        page.wait_for_timeout(2_250)
 
         assert len(mutations) == 1
         assert mutations[0]["name"] == "Allegheny Outpost"
