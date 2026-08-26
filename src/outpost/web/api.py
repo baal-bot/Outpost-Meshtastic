@@ -28,6 +28,7 @@ from outpost.store import Database
 from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.watch import AlertService, CheckinService, IncidentService
 from outpost.web.auth import WebAuthService
+from outpost.web.operator_inbox import OperatorInboxService
 from outpost.web.settings import RuntimeSettings
 
 
@@ -240,6 +241,14 @@ class FederationMailBody(BaseModel):
     body: str = Field(min_length=1, max_length=800)
 
 
+class MailConversationStateBody(BaseModel):
+    state: Literal["read", "unread", "archive", "active"]
+
+
+class MailConversationReplyBody(BaseModel):
+    body: str = Field(min_length=1, max_length=800)
+
+
 def _timestamp(value: int) -> str:
     return datetime.fromtimestamp(value, UTC).isoformat().replace("+00:00", "Z")
 
@@ -310,6 +319,9 @@ def create_web_app(
     ) = None,
     restore_coordinator: RestoreCoordinator | None = None,
     module_provider: Callable[[], dict[str, bool]] | None = None,
+    federation_mail_reply: (
+        Callable[[str, str, str, str, str, str, str], Awaitable[dict[str, object]]] | None
+    ) = None,
 ) -> FastAPI:
     app = FastAPI(title="Outpost API", version=__version__, docs_url="/api/docs")
 
@@ -2357,6 +2369,106 @@ def create_web_app(
                     if item[key] is not None:
                         item[key] = _timestamp(item[key])
             return {"items": items, "next_cursor": cursor + limit if len(rows) > limit else None}
+
+        operator_inbox = OperatorInboxService(database)
+
+        @app.get("/api/v1/mail/conversations")
+        async def mail_conversations(
+            q: str = Query(default="", max_length=100),
+            status: Literal["all", "unread", "read", "failed"] = "all",
+            archive: Literal["active", "archived", "all"] = "active",
+            route: Literal["all", "local", "federated"] = "all",
+            kind: Literal["all", "member", "system"] = "all",
+            limit: int = Query(default=100, ge=1, le=200),
+        ) -> dict[str, Any]:
+            result = await operator_inbox.list(
+                query=q,
+                status=status,
+                archive=archive,
+                route=route,
+                kind=kind,
+                limit=limit,
+            )
+            for item in result["items"]:
+                for key in ("created_at", "updated_at", "archived_at"):
+                    if item[key] is not None:
+                        item[key] = _timestamp(item[key])
+            return result
+
+        @app.get("/api/v1/mail/conversations/{conversation_key}", response_model=None)
+        async def mail_conversation(conversation_key: str) -> dict[str, Any] | Response:
+            result = await operator_inbox.open(conversation_key)
+            if result is None:
+                return JSONResponse(
+                    {"error": {"code": "not_found", "message": "Conversation not found."}},
+                    status_code=404,
+                )
+            conversation = result["conversation"]
+            for key in ("created_at", "updated_at", "archived_at"):
+                if conversation[key] is not None:
+                    conversation[key] = _timestamp(conversation[key])
+            for item in result["messages"]:
+                for key in ("created_at", "delivered_at", "operator_read_at", "archived_at"):
+                    if item[key] is not None:
+                        item[key] = _timestamp(item[key])
+            return result
+
+        @app.patch("/api/v1/mail/conversations/{conversation_key}", response_model=None)
+        async def mail_conversation_state(
+            conversation_key: str, body: MailConversationStateBody
+        ) -> dict[str, bool] | Response:
+            if not await operator_inbox.set_state(conversation_key, body.state):
+                return JSONResponse(
+                    {"error": {"code": "not_found", "message": "Conversation not found."}},
+                    status_code=404,
+                )
+            return {"ok": True}
+
+        @app.post("/api/v1/mail/conversations/{conversation_key}/reply", response_model=None)
+        async def mail_conversation_reply(
+            conversation_key: str, body: MailConversationReplyBody
+        ) -> dict[str, object] | Response:
+            route = await operator_inbox.reply_route(conversation_key)
+            if route is None or federation_mail_reply is None:
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "reply_unavailable",
+                            "message": "This conversation has no safe federated reply route.",
+                        }
+                    },
+                    status_code=409,
+                )
+            try:
+                result = await federation_mail_reply(
+                    route["source_peer_mesh_id"],
+                    route["reply_recipient_handle"],
+                    route["subject"] or "Mesh reply",
+                    body.body,
+                    route["federation_conversation_id"],
+                    route["message_kind"],
+                    route["participant_handle"],
+                )
+            except ValueError as error:
+                return JSONResponse(
+                    {"error": {"code": "mail_reply_failed", "message": str(error)}},
+                    status_code=409,
+                )
+            await database.write(
+                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                "VALUES('web','operator','mail.conversation.reply',?,?,unixepoch())",
+                (
+                    f"conversation:{conversation_key}",
+                    json.dumps(
+                        {
+                            "peer_mesh_id": route["source_peer_mesh_id"],
+                            "recipient": route["reply_recipient_handle"],
+                        },
+                        separators=(",", ":"),
+                    ),
+                ),
+            )
+            return result
 
         @app.get("/api/v1/mail/{mail_id}")
         async def mail_detail(mail_id: int) -> Response:

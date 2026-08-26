@@ -7,7 +7,8 @@ phones and desktops and uses bundled assets so its interface remains available w
 
 - **Overview:** identity, service/radio state, message activity, weather, and operational summary.
 - **Members:** actual members, discovered radios, trust/approval controls, and member map.
-- **BBS and Mail:** boards, threads, moderation, stored mail, and message detail.
+- **BBS and Mail:** boards, threads, moderation, and a conversation-based operations inbox with
+  member/system identity, route previews, delivery state, search, unread state, and archiving.
 - **Watch:** incident map/list, monitoring state, alerts, acknowledgements, and welfare events.
 - **Environment:** separate environmental map, weather/forecast, official alerts, earthquakes,
   astronomy, and editable waypoints.
@@ -59,6 +60,15 @@ Time, actor, action, target, and outcome filters run on the server and remain ac
 Structured details are formatted behind a disclosure control, and **Copy details** copies the same
 credential-redacted representation shown on screen.
 
+The Mail workspace is an operator-only operations inbox. Local and federated messages group into
+conversations without treating the catch-all `@operator` address as a member. Each conversation
+shows the named member or remote Outpost operator, peer, observed LoRa/MQTT paths, message state,
+and receipts. A federated reply uses the conversation's stored peer, wire conversation ID, and
+reply address; the UI previews all three before sending. Search includes message text but list
+responses do not expose bodies. Opening a conversation, changing read/archive state, and replying
+are audited. Messages explicitly addressed to a named member remain available through that
+member's mesh mailbox; system messages addressed to `@operator` remain web-only.
+
 ## API
 
 The JSON API is rooted at `/api/v1`. Important read surfaces include:
@@ -68,7 +78,8 @@ The JSON API is rooted at `/api/v1`. Important read surfaces include:
 - `/api/v1/dashboard/overview`
 - `/api/v1/members`, `/api/v1/members/map`, and `/api/v1/mesh/messages`
 - `/api/v1/mesh/queue` and `/api/v1/mesh/airtime`
-- `/api/v1/boards`, `/api/v1/mail`, `/api/v1/incidents`, `/api/v1/events`
+- `/api/v1/boards`, `/api/v1/mail`, `/api/v1/mail/conversations`, `/api/v1/incidents`,
+  `/api/v1/events`
 - `/api/v1/environment/weather`, `/forecast`, `/alerts`, `/earthquakes`, `/waypoints`
 - `/api/v1/backups`, `/api/v1/audit`, and federation endpoints under `/api/v1/federation`
 

@@ -26,8 +26,26 @@ class FederationMailService:
     def _handle(value: object) -> str:
         return str(value).strip().removeprefix("@").strip().lower()
 
+    @staticmethod
+    def _validate_identity(recipient: str, kind: str, participant: str) -> None:
+        if kind == "system" and (recipient != "operator" or participant != "operator"):
+            raise ValueError("system mail must use the operator catch-all identity")
+        if kind == "member" and participant == "operator":
+            raise ValueError("member mail requires a named member participant")
+
     async def seal(
-        self, peer_id: str, recipient: str, sender: str, subject: str, body: str
+        self,
+        peer_id: str,
+        recipient: str,
+        sender: str,
+        subject: str,
+        body: str,
+        *,
+        conversation_id: str | None = None,
+        message_kind: str | None = None,
+        participant_handle: str | None = None,
+        reply_to: str | None = None,
+        operator_actor: str = "web:operator",
     ) -> dict[str, Any]:
         peer = await self.peers.by_mesh_id(peer_id)
         if peer.state != "active" or not peer.relay_mail:
@@ -44,21 +62,73 @@ class FederationMailService:
         if int(recent[0]["count"]) >= peer.quota_mail_per_hour:
             raise ValueError("peer mail relay quota exceeded")
         relay_id, nonce = secrets.token_hex(16), secrets.token_bytes(12)
+        conversation_id = str(conversation_id or relay_id).strip()
+        if not conversation_id or len(conversation_id) > 64:
+            raise ValueError("invalid federation mail conversation")
+        kind = message_kind or ("system" if recipient == "operator" else "member")
+        if kind not in {"member", "system"}:
+            raise ValueError("invalid federation mail message kind")
+        participant = self._handle(participant_handle or recipient)
+        if not participant or len(participant) > 40:
+            raise ValueError("invalid federation mail participant")
+        self._validate_identity(recipient, kind, participant)
+        reply_handle = self._handle(reply_to or sender.split("@", 1)[0])
+        if not reply_handle or len(reply_handle) > 40:
+            raise ValueError("invalid federation mail reply address")
         plaintext = json.dumps(
-            {"to": recipient, "from": sender[:80], "subject": subject[:120], "body": body},
+            {
+                "to": recipient,
+                "from": sender[:80],
+                "subject": subject[:120],
+                "body": body,
+                "conversation_id": conversation_id,
+                "message_kind": kind,
+                "participant": participant,
+                "reply_to": reply_handle,
+                "operator_actor": operator_actor[:120],
+            },
             separators=(",", ":"),
         ).encode()
         secret = await self.peers.secret(peer_id)
         ciphertext = AESGCM(self._key(secret, self.peers.local_mesh_id, peer_id)).encrypt(
             nonce, plaintext, relay_id.encode()
         )
-        await self.database.write(
-            "INSERT INTO fed_mail_delivery(relay_id,peer_id,direction,recipient_handle,state,"
-            "created_at,updated_at,expires_at) VALUES(?,?,'out',?,'queued',?,?,?)",
-            (relay_id, peer.id, recipient, now, now, now + 86_400),
-        )
+        async with self.database.transaction() as transaction:
+            mail_id = await transaction.write(
+                "INSERT INTO mail(uid,from_label,to_label,to_node,subject,body,created_at,state,"
+                "expires_at,conversation_key,federation_conversation_id,operator_read_at,"
+                "message_kind,mail_direction,source_peer_mesh_id,reply_recipient_handle,"
+                "participant_handle,operator_actor) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'out',?,?,?,?)",
+                (
+                    f"fed-out:{relay_id}",
+                    sender[:80],
+                    recipient,
+                    peer_id,
+                    subject[:120],
+                    body,
+                    now,
+                    "queued",
+                    now + 180 * 86_400,
+                    f"fed:{peer_id}:{conversation_id}",
+                    conversation_id,
+                    now,
+                    kind,
+                    peer_id,
+                    recipient,
+                    participant,
+                    operator_actor[:120],
+                ),
+            )
+            await transaction.write(
+                "INSERT INTO fed_mail_delivery(relay_id,peer_id,direction,mail_id,"
+                "recipient_handle,state,created_at,updated_at,expires_at) "
+                "VALUES(?,?,'out',?,?,'queued',?,?,?)",
+                (relay_id, peer.id, mail_id, recipient, now, now, now + 86_400),
+            )
         return {
             "relay_id": relay_id,
+            "conversation_id": conversation_id,
             "nonce": nonce,
             "ciphertext": ciphertext,
             "expires_at": now + 86_400,
@@ -83,12 +153,30 @@ class FederationMailService:
         )
         message = json.loads(plaintext)
         recipient = self._handle(message["to"])
+        if not recipient or len(recipient) > 40:
+            raise ValueError("invalid federation mail recipient")
+        conversation_id = str(message.get("conversation_id") or relay_id).strip()
+        if not conversation_id or len(conversation_id) > 64:
+            raise ValueError("invalid federation mail conversation")
+        message_kind = str(
+            message.get("message_kind") or ("system" if recipient == "operator" else "member")
+        )
+        if message_kind not in {"member", "system"}:
+            raise ValueError("invalid federation mail message kind")
+        participant = self._handle(message.get("participant") or recipient)
+        reply_recipient = self._handle(
+            message.get("reply_to") or str(message.get("from") or "").split("@", 1)[0]
+        )
+        if (
+            not participant
+            or len(participant) > 40
+            or not reply_recipient
+            or len(reply_recipient) > 40
+        ):
+            raise ValueError("invalid federation mail routing metadata")
+        self._validate_identity(recipient, message_kind, participant)
         if recipient == "operator":
-            members = await self.database.read(
-                "SELECT id,handle FROM member WHERE trust='operator' AND handle IS NOT NULL "
-                "ORDER BY id LIMIT 1"
-            )
-            recipient_id = members[0]["id"] if members else None
+            recipient_id = None
             recipient_label = "operator"
         else:
             members = await self.database.read(
@@ -108,8 +196,10 @@ class FederationMailService:
                 return relay_id, str(concurrent[0]["state"])
             mail_id = await transaction.write(
                 "INSERT INTO mail(uid,from_label,to_id,to_label,subject,body,created_at,"
-                "delivered_at,state,expires_at,reply_peer_mesh_id) "
-                "VALUES(?,?,?,?,?,?,?,?,'delivered',?,?)",
+                "delivered_at,state,expires_at,reply_peer_mesh_id,conversation_key,"
+                "federation_conversation_id,message_kind,mail_direction,source_peer_mesh_id,"
+                "reply_recipient_handle,participant_handle,operator_actor) "
+                "VALUES(?,?,?,?,?,?,?,?,'delivered',?,?,?,?,?,'in',?,?,?,?)",
                 (
                     f"fed:{relay_id}",
                     str(message["from"]),
@@ -121,6 +211,13 @@ class FederationMailService:
                     now,
                     now + 180 * 86400,
                     peer_id,
+                    f"fed:{peer_id}:{conversation_id}",
+                    conversation_id,
+                    message_kind,
+                    peer_id,
+                    reply_recipient[:40],
+                    participant[:40],
+                    str(message.get("operator_actor") or "")[:120] or None,
                 ),
             )
             await transaction.write(

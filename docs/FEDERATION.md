@@ -1,7 +1,8 @@
 # Federation
 
-Federation connects independently operated Outposts without one central administrator. It remains
-experimental until the two-node hardware backlog is complete.
+Federation connects independently operated Outposts without one central administrator. Two physical
+Outposts have exercised pairing, board/incident catch-up, peer services, MQTT discovery, and mail;
+the feature remains experimental until the complete acceptance backlog is run.
 
 ## Trust model
 
@@ -76,7 +77,17 @@ capable peer. IDs, expiry, limits, origin, and TTL prevent loops. Peers cannot i
 tools, shell commands, operator controls, private positions, or unconstrained prompts.
 
 Federated mail uses a mail-specific key derived from peer trust material, with receipts, quotas,
-expiry, and duplicate suppression. Both features have automated coverage but need two-node testing.
+expiry, and duplicate suppression. These paths have automated and two-Outpost field coverage; the
+long-duration acceptance backlog still remains. The encrypted envelope also carries a bounded opaque
+conversation ID, message kind, participant, and reply address. Those fields preserve the exact
+peer/member return route without inventing a member named `operator` or parsing a display label.
+
+The dashboard's operations inbox groups this traffic into audited conversations. Outpost-to-Outpost
+messages addressed to `@operator` are web-only system traffic. Mail addressed to a named member is
+still member mail; when that member uses `RR`, their handle remains the sender and the response
+returns to the initiating operator conversation. Operator replies preview the stored address and
+observed LoRa/MQTT paths before sending. Read/unread and archive state are local operator workflow
+metadata and are never federated.
 
 ## Revocation
 

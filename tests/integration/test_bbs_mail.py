@@ -46,6 +46,16 @@ async def test_thread_reply_search_and_mail_lifecycle(tmp_path) -> None:
     assert inbox[0].id == mail_id
     read = await mail.read(ray, mail_id)
     assert read is not None and read.body == "Can you check the culvert?"
+    await mail.reply(ray, mail_id, "dana", "The culvert is clear.")
+    conversation = await database.read(
+        "SELECT conversation_key,in_reply_to,participant_handle,operator_actor FROM mail "
+        "ORDER BY id"
+    )
+    assert len(conversation) == 2
+    assert conversation[0]["conversation_key"] == conversation[1]["conversation_key"]
+    assert conversation[1]["in_reply_to"] == mail_id
+    assert conversation[1]["participant_handle"] == "ray"
+    assert conversation[1]["operator_actor"] == "member:@ray"
     assert await mail.delete(ray, mail_id) is True
     assert await mail.delete(ray, mail_id) is False
     assert await bbs.remove_own_post(created.id, 1, dana, 30) is True
@@ -78,10 +88,12 @@ async def test_reply_uses_preserved_federation_peer_route(tmp_path) -> None:
     members = MemberRepo(database, clock)
     recipient = await members.resolve("!00000001")
     recipient = await members.claim_handle(recipient.mesh_id, "lead")
-    replies: list[tuple[str, str]] = []
+    replies: list[tuple[str, str, str, str, str]] = []
 
-    async def relay(peer_id: str, body: str) -> None:
-        replies.append((peer_id, body))
+    async def relay(
+        peer_id: str, member: str, conversation_id: str, subject: str, body: str
+    ) -> None:
+        replies.append((peer_id, member, conversation_id, subject, body))
 
     service = MailService(database, members, clock, "local", federated_reply=relay)
     mail_id = await database.write(
@@ -93,7 +105,7 @@ async def test_reply_uses_preserved_federation_peer_route(tmp_path) -> None:
 
     await service.reply(recipient, mail_id, "operator@ALPHA", "All clear.")
 
-    assert replies == [("!aaaaaaaa", "All clear.")]
+    assert replies == [("!aaaaaaaa", "lead", "test", "Mesh reply", "All clear.")]
     await database.close()
 
 

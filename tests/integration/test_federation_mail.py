@@ -140,3 +140,39 @@ async def test_named_operator_member_mail_remains_member_mail(tmp_path) -> None:
     }
     await first_db.close()
     await second_db.close()
+
+
+@pytest.mark.asyncio
+async def test_federated_mail_rejects_member_system_identity_confusion(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    peers = FederationPeerService(database, VirtualClock(), "!local")
+    await peers.discover("!remote", "Remote", 1, {}, "radio")
+    await database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,relay_mail=1 WHERE mesh_id='!remote'",
+        (bytes(32),),
+    )
+    mail = FederationMailService(database, peers, VirtualClock())
+
+    with pytest.raises(ValueError, match="operator catch-all"):
+        await mail.seal(
+            "!remote",
+            "666",
+            "operator@LOCAL",
+            "Invalid",
+            "Body",
+            message_kind="system",
+            participant_handle="666",
+        )
+    with pytest.raises(ValueError, match="named member"):
+        await mail.seal(
+            "!remote",
+            "operator",
+            "operator@LOCAL",
+            "Invalid",
+            "Body",
+            message_kind="member",
+            participant_handle="operator",
+        )
+    assert await database.read("SELECT 1 FROM mail") == []
+    await database.close()

@@ -27,7 +27,8 @@ publishes a compatibility policy and a 1.0 release.
 
 - Meshtastic command router with direct-message and configured-channel support
 - Member handles, trust levels, approval controls, and recently heard radios
-- Bulletin boards, threaded posts, subscriptions, search, digests, and private mail
+- Bulletin boards, threaded posts, subscriptions, search, digests, private mail, and an audited
+  operator operations inbox
 - Incident reporting, confirmations, disputes, responder alerts, and map operations
 - Welfare events, check-ins, reviewed solicitation, rosters, and CSV export
 - Weather, forecasts, CAP alerts, astronomy, earthquakes, member positions, and waypoints

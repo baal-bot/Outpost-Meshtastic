@@ -377,10 +377,22 @@ CREATE TABLE mail (
               -- queued | notified | read | expired | undeliverable | forwarded
   attempts    INTEGER NOT NULL DEFAULT 0,
   expires_at  INTEGER NOT NULL,
-  in_reply_to INTEGER REFERENCES mail(id) ON DELETE SET NULL
+  in_reply_to INTEGER REFERENCES mail(id) ON DELETE SET NULL,
+  reply_peer_mesh_id TEXT,
+  conversation_key TEXT,                    -- local grouping key
+  federation_conversation_id TEXT,          -- bounded opaque wire ID
+  operator_read_at INTEGER,                 -- independent of member read_at
+  archived_at INTEGER,
+  message_kind TEXT NOT NULL DEFAULT 'member', -- member | system
+  mail_direction TEXT NOT NULL DEFAULT 'local', -- local | in | out
+  source_peer_mesh_id TEXT,
+  reply_recipient_handle TEXT,
+  participant_handle TEXT,
+  operator_actor TEXT
 );
 CREATE INDEX idx_mail_to    ON mail(to_id, state, created_at DESC);
 CREATE INDEX idx_mail_state ON mail(state, expires_at);
+CREATE INDEX idx_mail_conversation ON mail(conversation_key, created_at, id);
 ```
 
 **REQ-DATA-020** — Mail is **store-and-notify**, not store-and-push. The node **MUST NOT**
@@ -390,6 +402,11 @@ backed on their next interaction where possible) and transmits the body on `READ
 **REQ-DATA-021** — Mail bodies are **not** end-to-end encrypted and this **MUST** be stated
 in `HELP MAIL` and on the dashboard. The node operator can read all mail. Meshtastic PKI
 protects the radio hop; the node itself is a plaintext store. See doc 12 §7.
+
+**REQ-DATA-021a** — The web operator inbox **MUST** keep its read/archive state separate from
+member delivery and `read_at`. A federated conversation **MUST** retain its authenticated peer,
+opaque wire conversation ID, participant, message kind, and explicit reply handle. System mail to
+the `operator` catch-all **MUST** have `to_id = NULL`; it is not a radio member mailbox.
 
 ---
 

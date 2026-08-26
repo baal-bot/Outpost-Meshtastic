@@ -214,6 +214,16 @@ originating node, and against `fed_peer` quotas on the receiving node.
 **REQ-FED-032** — Mail relay **MUST** be disableable per peer, and a peer **MUST** be able to
 refuse relayed mail entirely without breaking board federation.
 
+**REQ-FED-032a** — A `MAIL_RELAY` conversation **MUST** carry a bounded opaque conversation ID,
+the member/system distinction, the named participant, and an explicit reply handle inside the
+authenticated encrypted payload. The receiver **MUST NOT** infer routing from display labels.
+Messages to the `operator` catch-all are web-operator-only. A named member's contextual reply
+**MUST** retain that member's handle and return to the initiating operator conversation.
+
+**REQ-FED-032b** — The operator inbox **MUST** preview the stored peer, recipient, and available
+transport before a reply. It **MUST** expose delivery/receipt state, unread/read, archive, search,
+member/system filters, and audit conversation views, workflow changes, and replies.
+
 ---
 
 ## 7. Incident and alert propagation

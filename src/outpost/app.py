@@ -233,6 +233,7 @@ class OutpostApp:
             self.send_federation_mail,
             self.restore_coordinator,
             module_provider=self.config.modules.enabled_map,
+            federation_mail_reply=self.reply_federation_mail,
         )
 
     def _start_background_task(
@@ -307,27 +308,92 @@ class OutpostApp:
         )
 
     async def send_federation_mail(
-        self, peer_id: str, recipient: str, subject: str, body: str
+        self,
+        peer_id: str,
+        recipient: str,
+        subject: str,
+        body: str,
+        *,
+        sender: str | None = None,
+        conversation_id: str | None = None,
+        message_kind: str | None = None,
+        participant_handle: str | None = None,
+        reply_to: str | None = None,
+        operator_actor: str = "web:operator",
     ) -> dict[str, object]:
         if not self.config.modules.fed.enabled:
             raise ValueError("federation module is disabled")
         envelope = await self.federation_mail.seal(
-            peer_id, recipient, f"operator@{self.config.node.short_name}", subject, body
+            peer_id,
+            recipient,
+            sender or f"operator@{self.config.node.short_name}",
+            subject,
+            body,
+            conversation_id=conversation_id,
+            message_kind=message_kind,
+            participant_handle=participant_handle,
+            reply_to=reply_to,
+            operator_actor=operator_actor,
         )
         await self._send_federation_value(
             peer_id,
             MessageType.MAIL_RELAY,
             {"mesh_id": self.federation.local_mesh_id, **envelope},
         )
-        await self.database.write(
-            "UPDATE fed_mail_delivery SET state='sent',attempts=1,updated_at=unixepoch() "
-            "WHERE relay_id=?",
-            (envelope["relay_id"],),
-        )
-        return {"relay_id": str(envelope["relay_id"]), "state": "sent"}
+        async with self.database.transaction() as transaction:
+            await transaction.write(
+                "UPDATE fed_mail_delivery SET state='sent',attempts=1,updated_at=unixepoch() "
+                "WHERE relay_id=?",
+                (envelope["relay_id"],),
+            )
+            await transaction.write(
+                "UPDATE mail SET state='sent' WHERE id=(SELECT mail_id FROM fed_mail_delivery "
+                "WHERE relay_id=?)",
+                (envelope["relay_id"],),
+            )
+        return {
+            "relay_id": str(envelope["relay_id"]),
+            "conversation_id": str(envelope["conversation_id"]),
+            "state": "sent",
+        }
 
-    async def _send_federated_operator_reply(self, peer_id: str, body: str) -> None:
-        await self.send_federation_mail(peer_id, "operator", "Mesh reply", body)
+    async def _send_federated_operator_reply(
+        self, peer_id: str, member_handle: str, conversation_id: str, subject: str, body: str
+    ) -> None:
+        await self.send_federation_mail(
+            peer_id,
+            "operator",
+            subject,
+            body,
+            sender=f"{member_handle}@{self.config.node.short_name}",
+            conversation_id=conversation_id,
+            message_kind="member",
+            participant_handle=member_handle,
+            reply_to=member_handle,
+            operator_actor=f"member:@{member_handle}",
+        )
+
+    async def reply_federation_mail(
+        self,
+        peer_id: str,
+        recipient: str,
+        subject: str,
+        body: str,
+        conversation_id: str,
+        message_kind: str,
+        participant_handle: str,
+    ) -> dict[str, object]:
+        return await self.send_federation_mail(
+            peer_id,
+            recipient,
+            subject,
+            body,
+            conversation_id=conversation_id,
+            message_kind=message_kind,
+            participant_handle=participant_handle,
+            reply_to="operator",
+            operator_actor="web:operator",
+        )
 
     async def _notify_board_change(self, slug: str, post_id: int) -> None:
         if not self.config.modules.fed.enabled:
@@ -1317,15 +1383,23 @@ class OutpostApp:
             elif msg_type is MessageType.MAIL_RECEIPT:
                 state = str(value.get("state", ""))
                 if state in {"delivered", "failed"}:
-                    await self.database.write(
-                        "UPDATE fed_mail_delivery SET state=?,error=?,updated_at=unixepoch() "
-                        "WHERE relay_id=? AND direction='out'",
-                        (
-                            state,
-                            str(value.get("error") or "")[:120] or None,
-                            str(value["relay_id"]),
-                        ),
-                    )
+                    relay_id = str(value["relay_id"])
+                    async with self.database.transaction() as transaction:
+                        await transaction.write(
+                            "UPDATE fed_mail_delivery SET state=?,error=?,updated_at=unixepoch() "
+                            "WHERE relay_id=? AND direction='out'",
+                            (
+                                state,
+                                str(value.get("error") or "")[:120] or None,
+                                relay_id,
+                            ),
+                        )
+                        await transaction.write(
+                            "UPDATE mail SET state=?,delivered_at=CASE WHEN ?='delivered' "
+                            "THEN unixepoch() ELSE delivered_at END WHERE id=(SELECT mail_id "
+                            "FROM fed_mail_delivery WHERE relay_id=? AND direction='out')",
+                            (state, state, relay_id),
+                        )
         except (FrameError, KeyError, TypeError, ValueError) as error:
             packet_id = getattr(message, "packet_id", None)
             if packet_id is not None:

@@ -8,15 +8,15 @@ Outpost is pre-release. This table distinguishes implementation from field valid
 | Command routing | DM/channel parsing, sessions, paging, trust and module gates | Automated integration and acceptance coverage |
 | Airtime control | Durable priority queue, budgets, reserve, quiet hours, limits, dedupe, restart recovery | Automated restart and failure-injection tests; extended channel calibration pending |
 | Identity | Handles, trust, approvals, recently heard discovery | Implemented and tested |
-| BBS and mail | Boards, threads, posts, subscriptions, digests, stored mail | Implemented and tested |
+| BBS and mail | Boards, threads, posts, subscriptions, digests, stored mail, operator conversation inbox | Implemented and tested |
 | Community Watch | Incidents, maps, confirmation/dispute, responder alerts | Implemented; tabletop scale exercise recommended |
 | Welfare | Events, roster, check-ins, reviewed solicitation, CSV | Implemented and tested |
 | Environment | Weather, CAP, astronomy, earthquakes, maps, waypoints | Implemented; external providers required after cache expiry |
 | Dashboard | Responsive operator pages and authenticated API | Implemented; trusted-LAN deployment assumed |
 | Backups | Online backup, rotation, validation, guarded restore | Implemented and tested |
-| Federation | Pairing, authenticated framing, policy, sync, services, mail | Automated tests; two physical Outposts pending |
+| Federation | Pairing, authenticated framing, policy, sync, services, mail | Automated tests and two physical Outposts exercised; full acceptance backlog pending |
 | Meshtastic MQTT | Optional discovery/transport through radio firmware | Implemented controls; multi-node validation pending |
-| SAME/RTL-SDR | Configuration and integration points | Additional hardware pending |
+| SAME/RTL-SDR | Configuration and integration points | Hardware available; integration deferred during issue remediation |
 | Local AI | Provider adapters and policy surface | Optional; quality is model/hardware-specific |
 
 ## Boundaries

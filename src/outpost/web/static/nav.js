@@ -286,7 +286,7 @@ const reviewTargets = {
 const reviewArea = (stream) => stream.startsWith("board:") ? "board" : stream;
 const reviewLabel = (count) => count > 99 ? "99+" : String(count);
 
-function setReviewBadge(href, count) {
+function setReviewBadge(href, count, label = "pending reviews") {
   const link = navigation?.querySelector(`a[href="${href}"]`);
   if (!link) return;
   let badge = link.querySelector(".nav-review-badge");
@@ -301,7 +301,7 @@ function setReviewBadge(href, count) {
     link.appendChild(badge);
   }
   badge.textContent = reviewLabel(count);
-  badge.setAttribute("aria-label", `${count} pending review${count === 1 ? "" : "s"}`);
+  badge.setAttribute("aria-label", `${count} ${label}`);
   link.classList.add("needs-review");
 }
 
@@ -340,3 +340,18 @@ async function refreshFederationReviews() {
 refreshFederationReviews();
 setInterval(refreshFederationReviews, 30000);
 window.addEventListener("outpost:federation-reviewed", refreshFederationReviews);
+
+async function refreshOperationsInboxBadge() {
+  try {
+    const response = await fetch("/api/v1/mail/conversations?limit=1");
+    if (!response.ok) return;
+    const count = Number((await response.json()).counts?.actionable || 0);
+    setReviewBadge("/mail.html", count, "actionable mail conversations");
+  } catch (_) {
+    // Navigation remains usable while the backend reconnects.
+  }
+}
+
+refreshOperationsInboxBadge();
+setInterval(refreshOperationsInboxBadge, 30000);
+window.addEventListener("outpost:mail-updated", refreshOperationsInboxBadge);

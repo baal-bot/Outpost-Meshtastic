@@ -671,6 +671,215 @@ def test_desktop_audit_retains_dense_scanning_columns(browser: object, dashboard
         page.close()
 
 
+def route_operations_inbox(page: object, mutations: list[tuple[str, object]]) -> None:
+    conversation = {
+        "conversation_key": "fed:!bbbbbbbb:abc123",
+        "subject": "Moderation review",
+        "message_kind": "member",
+        "participant_handle": "666",
+        "operator_actor": "web:operator",
+        "route_kind": "federated",
+        "peer_mesh_id": "!bbbbbbbb",
+        "peer_name": "Denver Outpost",
+        "transports": ["radio", "mqtt"],
+        "latest_from": "666@DEN",
+        "latest_to": "operator",
+        "latest_direction": "in",
+        "latest_state": "delivered",
+        "created_at": "2026-08-26T18:00:00Z",
+        "updated_at": "2026-08-26T18:05:00Z",
+        "message_count": 2,
+        "unread_count": 1,
+        "failed_count": 0,
+        "action_required": True,
+        "archived_at": None,
+        "reply_available": True,
+        "reply_address": "666",
+    }
+    messages = [
+        {
+            "id": 1,
+            "uid": "fed-out:one",
+            "conversation_key": conversation["conversation_key"],
+            "federation_conversation_id": "abc123",
+            "from_label": "operator@PIT",
+            "to_label": "666",
+            "subject": "Moderation review",
+            "body": "Please review the reported post.",
+            "created_at": "2026-08-26T18:00:00Z",
+            "delivered_at": "2026-08-26T18:01:00Z",
+            "operator_read_at": "2026-08-26T18:00:00Z",
+            "archived_at": None,
+            "state": "delivered",
+            "message_kind": "member",
+            "mail_direction": "out",
+            "source_peer_mesh_id": "!bbbbbbbb",
+            "reply_recipient_handle": "666",
+            "participant_handle": "666",
+            "operator_actor": "web:operator",
+            "node_name": "Denver Outpost",
+            "transports": ["radio", "mqtt"],
+        },
+        {
+            "id": 2,
+            "uid": "fed:two",
+            "conversation_key": conversation["conversation_key"],
+            "federation_conversation_id": "abc123",
+            "from_label": "666@DEN",
+            "to_label": "operator",
+            "subject": "Moderation review",
+            "body": "I reviewed it and removed the post.",
+            "created_at": "2026-08-26T18:05:00Z",
+            "delivered_at": "2026-08-26T18:05:00Z",
+            "operator_read_at": None,
+            "archived_at": None,
+            "state": "delivered",
+            "message_kind": "member",
+            "mail_direction": "in",
+            "source_peer_mesh_id": "!bbbbbbbb",
+            "reply_recipient_handle": "666",
+            "participant_handle": "666",
+            "operator_actor": "member:@666",
+            "node_name": "Denver Outpost",
+            "transports": ["radio", "mqtt"],
+        },
+    ]
+
+    def mail(route: object) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        if path == "/api/v1/mail/conversations":
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "items": [conversation],
+                        "total": 1,
+                        "counts": {"unread": 1, "actionable": 1, "failed": 0},
+                    }
+                ),
+            )
+        elif path.endswith("/reply"):
+            mutations.append(("reply", request.post_data_json))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"relay_id":"reply","state":"sent"}',
+            )
+        elif request.method == "PATCH":
+            mutations.append(("state", request.post_data_json))
+            route.fulfill(status=200, content_type="application/json", body='{"ok":true}')
+        else:
+            detail = {**conversation, "unread_count": 0}
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"conversation": detail, "messages": messages}),
+            )
+
+    page.route("**/api/v1/mail/conversations**", mail)
+    page.route(
+        "**/api/v1/federation/peers*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": [
+                        {
+                            "mesh_id": "!bbbbbbbb",
+                            "node_name": "Denver Outpost",
+                            "state": "active",
+                            "relay_mail": True,
+                            "discovery_transports": ["radio", "mqtt"],
+                        }
+                    ]
+                }
+            ),
+        ),
+    )
+
+    def compose(route: object) -> None:
+        mutations.append(("compose", route.request.post_data_json))
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"relay_id":"new","state":"sent"}',
+        )
+
+    page.route("**/api/v1/federation/mail", compose)
+
+
+@pytest.mark.parametrize(
+    ("width", "theme"),
+    ((390, "daylight"), (1280, "dark"), (1280, "daylight"), (1280, "night")),
+)
+def test_operations_inbox_conversation_reply_compose_and_responsive_layout(
+    browser: object, dashboard_url: str, width: int, theme: str
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme=theme)
+    mutations: list[tuple[str, object]] = []
+    page_errors: list[str] = []
+    page.on("pageerror", lambda error: page_errors.append(str(error)))
+    route_operations_inbox(page, mutations)
+    try:
+        page.goto(f"{dashboard_url}/mail.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.get_by_role("button", name="Moderation review").wait_for()
+        assert page.locator("#unread-count").text_content() == "1"
+        assert page.locator(".mail-badge.unread").is_visible()
+        nav_badge = page.locator('.rail nav a[href="/mail.html"] .nav-review-badge')
+        nav_badge.wait_for(state="attached")
+        assert nav_badge.get_attribute("aria-label") == "1 actionable mail conversations"
+        page.get_by_role("button", name="Moderation review").click()
+        page.wait_for_timeout(250)
+        assert page_errors == []
+        page.locator(".conversation-detail").wait_for()
+        assert "MEMBER · @666" in page.locator(".identity-row").text_content()
+        assert "@666 at Denver Outpost" in page.locator(".conversation-reply").text_content()
+        assert page.locator(".mail-message").count() == 2
+        page.locator("#reply-body").fill("Thank you for handling it.")
+        with page.expect_request(lambda request: request.url.endswith("/reply")):
+            page.locator("#conversation-reply").get_by_role("button", name="Send reply").click()
+        assert ("reply", {"body": "Thank you for handling it."}) in mutations
+
+        page.get_by_role("button", name="New message").click()
+        dialog = page.get_by_role("dialog", name="New operations message")
+        dialog.wait_for()
+        dialog.get_by_label("Recipient").select_option("member")
+        dialog.get_by_label("Member handle").fill("777")
+        dialog.get_by_label("Subject / context").fill("Admin follow-up")
+        dialog.get_by_label("Message").fill("Please contact the operator.")
+        assert "@777 at Denver Outpost" in dialog.locator(".route-preview").text_content()
+        dialog.get_by_role("button", name="Queue encrypted message").click()
+        page.wait_for_function("() => !document.querySelector('#compose-dialog').open")
+        assert (
+            "compose",
+            {
+                "peer_mesh_id": "!bbbbbbbb",
+                "recipient_handle": "777",
+                "subject": "Admin follow-up",
+                "body": "Please contact the operator.",
+            },
+        ) in mutations
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        if width == 1280:
+            results = Axe().run(
+                page,
+                options={
+                    "runOnly": {
+                        "type": "tag",
+                        "values": ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+                    },
+                    "resultTypes": ["violations"],
+                },
+            )
+            assert results.violations_count == 0, results.generate_report()
+    finally:
+        page.close()
+
+
 def route_federation_policy_workspace(page: object, applied: list[dict[str, object]]) -> None:
     peer = {
         "id": 1,
