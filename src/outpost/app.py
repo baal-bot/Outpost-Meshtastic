@@ -674,7 +674,10 @@ class OutpostApp:
             msg_type = MessageType(payload[2])
             secret = None
             if msg_type is MessageType.PAIR_CONFIRM:
-                secret = await self.federation.pairing_secret(sender)
+                try:
+                    secret = await self.federation.pairing_secret(sender)
+                except ValueError:
+                    secret = await self.federation.secret(sender)
             elif msg_type in {
                 MessageType.SERVICE_QUERY,
                 MessageType.SERVICE_RESPONSE,
@@ -749,16 +752,17 @@ class OutpostApp:
                     sender, bytes(value["public_key"]), bytes(value["nonce"])
                 )
             elif msg_type is MessageType.PAIR_CONFIRM and value.get("approved") is True:
-                before = await self.federation.by_mesh_id(sender)
-                secret = await self.federation.pairing_secret(sender)
                 peer = await self.federation.confirm_remote(sender)
-                if peer.local_approved and not before.remote_approved:
+                if peer.local_approved and not value.get("receipt", False):
+                    if secret is None:
+                        raise FrameError("pairing confirmation secret is unavailable")
                     confirmation = self.federation_codec.encode(
                         MessageType.PAIR_CONFIRM,
                         {
                             "mesh_id": self.federation.local_mesh_id,
                             "target_mesh_id": sender,
                             "approved": True,
+                            "receipt": True,
                         },
                         0,
                         secret,
