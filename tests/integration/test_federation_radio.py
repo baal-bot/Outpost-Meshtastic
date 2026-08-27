@@ -1,4 +1,6 @@
+import asyncio
 import base64
+import json
 import os
 from datetime import UTC, datetime, timedelta
 
@@ -179,6 +181,132 @@ async def test_trusted_federation_uses_authenticated_broadcast_carrier(tmp_path)
         == counter
     )
     assert (await app.federation.by_mesh_id("!remote")).tx_counter == 1
+    await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_retry_is_single_flight_and_recognizes_legacy_work(tmp_path) -> None:
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "modules": {"fed": {"enabled": True}},
+            "airtime": {"dedupe_window_s": 0},
+            "fed": {"sync_retry_minutes": 10},
+        }
+    )
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    secret = bytes(range(32))
+    peer = await app.federation.discover("!remote", "Remote", 1, {}, "radio")
+    await app.database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,boards='[\"gen\"]',"
+        "local_approved=1,remote_approved=1 WHERE id=?",
+        (secret, peer.id),
+    )
+    now = int(app.clock.now().timestamp())
+    checkpoint = json.dumps({"before": None, "snapshot": now, "pending": True})
+    await app.database.write(
+        "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
+        "VALUES(?,'_reconcile','recv',?,?)",
+        (peer.id, checkpoint, now - 600),
+    )
+
+    # Simulate a request admitted by a release that predates durable control-frame keys.
+    await app._send_federation_value("!remote", MessageType.SYNC_REQ, {"limit": 8})
+    legacy = app.governor.queued_items()[0]
+    assert legacy.queue_key is None
+
+    await app._federation_sync_once()
+    assert [item.item_id for item in app.governor.queued_items()] == [legacy.item_id]
+
+    assert await app.governor.cancel_work(legacy.item_id)
+    await app._federation_sync_once()
+    keyed = app.governor.queued_items()[0]
+    assert keyed.queue_key == "federation:!remote:sync_req"
+
+    assert await app.governor.cancel_work(keyed.item_id)
+    await app._federation_sync_once()
+    assert app.governor.queued_items() == []
+
+    await app.database.write(
+        "UPDATE fed_cursor SET updated_at=? WHERE peer_id=? AND stream='_reconcile'",
+        (now - 600, peer.id),
+    )
+    await app._federation_sync_once()
+    retried = app.governor.queued_items()
+    assert len(retried) == 1
+    await app.database.write(
+        "UPDATE fed_cursor SET updated_at=? WHERE peer_id=? AND stream='_reconcile'",
+        (now - 600, peer.id),
+    )
+    await app._federation_sync_once()
+    assert [item.item_id for item in app.governor.queued_items()] == [retried[0].item_id]
+    await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_repeated_sync_requests_enqueue_one_manifest_response(tmp_path) -> None:
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "airtime": {"dedupe_window_s": 0},
+        }
+    )
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    secret = bytes(range(32))
+    peer = await app.federation.discover("!remote", "Remote", 1, {}, "radio")
+    await app.database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,boards='[\"gen\"]',"
+        "local_approved=1,remote_approved=1 WHERE id=?",
+        (secret, peer.id),
+    )
+    request = {
+        "mesh_id": "!remote",
+        "limit": 8,
+        "budget": 20,
+        "snapshot": int(app.clock.now().timestamp()),
+        "before": None,
+    }
+
+    for packet_id, counter in enumerate((1, 2), start=80):
+        frame = app.federation_codec.encode(MessageType.SYNC_REQ, request, counter, secret)[0]
+        await app._handle_federation_discovery(
+            InboundMessage(
+                packet_id,
+                "!remote",
+                "^all",
+                0,
+                config.radio.federation_portnum,
+                False,
+                None,
+                frame,
+                datetime.now(UTC),
+            )
+        )
+
+    queued = app.governor.queued_items()
+    assert len(queued) == 1
+    assert {item.queue_key for item in queued} == {"federation:!remote:sync_manifest"}
+    assert {
+        app.federation_codec.decode_fragment(item.binary_payload, secret).msg_type
+        for item in queued
+    } == {MessageType.SYNC_MANIFEST}
+
+    results = await asyncio.gather(
+        *(
+            app._queue_federation_control("!remote", MessageType.SYNC_DONE, {"received": 0})
+            for _ in range(4)
+        )
+    )
+    assert results.count(True) == 1
+    assert results.count(False) == 3
+    assert (
+        len([item for item in app.governor.queued_items() if item.queue_key.endswith("sync_done")])
+        == 1
+    )
     await app.database.close()
 
 

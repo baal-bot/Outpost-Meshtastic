@@ -32,7 +32,7 @@ function installInboundHealthCard() {
   const nodeCard = $("radio-node").closest("article");
   nodeCard.insertAdjacentHTML(
     "beforebegin",
-    '<article id="inbound-health"><small>INBOUND BACKLOG</small>' +
+    '<article id="inbound-health"><small>INBOUND WORK QUEUE</small>' +
       '<strong id="inbound-backlog">—</strong>' +
       '<p id="inbound-detail">loading worker health</p></article>',
   );
@@ -81,8 +81,9 @@ async function refresh() {
     Number(inbound.backlog_dropped || 0) +
     Number(radioInbound.dropped || 0) +
     Object.values(pipeline).reduce((sum, value) => sum + Number(value || 0), 0);
-  $("inbound-backlog").textContent = `${inbound.backlog || 0} / ${inbound.capacity || "—"}`;
+  $("inbound-backlog").textContent = `${inbound.backlog || 0} waiting`;
   $("inbound-detail").textContent =
+    `capacity ${inbound.capacity || "—"} · ` +
     `${inbound.busy || 0}/${inbound.workers || 0} workers busy · ${drops} dropped`;
   $("inbound-health").classList.toggle("warning", drops > 0);
 

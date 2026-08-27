@@ -349,7 +349,15 @@ def route_visual_content_api(page: object) -> None:
                 "channels": [],
             },
             "queues": {},
-            "inbound": {},
+            "inbound": {
+                "backlog": 0,
+                "capacity": 256,
+                "busy": 0,
+                "workers": 4,
+                "backlog_dropped": 0,
+                "pipeline_dropped": {},
+                "radio": {"dropped": 0},
+            },
             "alert_delivery": {},
         },
     )
@@ -1611,6 +1619,8 @@ def test_radio_queue_filter_hides_expired_history_by_default(
     try:
         page.goto(f"{dashboard_url}/radio.html", wait_until="networkidle")
         wait_for_navigation(page)
+        assert page.locator("#inbound-backlog").text_content() == "0 waiting"
+        assert "capacity 256" in page.locator("#inbound-detail").text_content()
         queue_filter = page.get_by_label("Queue state filter")
         assert queue_filter.input_value() == "current"
         assert page.locator(".queue-card").count() == 3

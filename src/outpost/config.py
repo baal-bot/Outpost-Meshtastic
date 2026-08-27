@@ -312,6 +312,7 @@ class FedConfig(StrictModel):
     reassembly_timeout_s: int = Field(default=300, ge=30)
     hello_interval_hours: int = Field(default=12, ge=1)
     sync_interval_minutes: int = Field(default=60, ge=5)
+    sync_retry_minutes: int = Field(default=10, ge=5, le=60)
     max_items_per_cycle: int = Field(default=20, ge=1, le=100)
     peer_stale_hours: int = Field(default=72, ge=1)
     incident_radius_km: float = Field(default=25, ge=1, le=500)

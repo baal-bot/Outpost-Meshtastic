@@ -101,6 +101,7 @@ fed:
   reassembly_timeout_s: 300
   hello_interval_hours: 12
   sync_interval_minutes: 60
+  sync_retry_minutes: 10
   max_items_per_cycle: 20
   peer_stale_hours: 72
   incident_radius_km: 25

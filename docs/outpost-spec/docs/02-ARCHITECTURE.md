@@ -417,6 +417,7 @@ env:
 fed:
   hello_interval_hours: 12
   sync_interval_minutes: 60
+  sync_retry_minutes: 10
   max_items_per_cycle: 20
   max_fragments: 8
   reassembly_timeout_s: 300

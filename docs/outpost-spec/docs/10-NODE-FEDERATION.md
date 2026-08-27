@@ -156,7 +156,9 @@ the cycle continued from the cursor rather than the manifest truncated silently.
 
 **REQ-FED-020** — Sync **MUST** be scheduled, not continuous. Default `fed.sync_interval_minutes`
 = 60, jittered, and skipped entirely when utilisation is elevated or the airtime budget is
-spent.
+spent. Reconciliation control frames **MUST** be single-flight per peer. An unanswered request
+MUST remain the only queued request and may be retried no sooner than
+`fed.sync_retry_minutes` (default 10).
 
 **REQ-FED-021** — A per-cycle item cap (`fed.max_items_per_cycle`, default 20) **MUST** be
 enforced, and any truncation **MUST** be logged and surfaced on the dashboard. Silent
