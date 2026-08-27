@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="theme-color" content="#071411">
+    <script src="/theme-boot.js"></script>
+    <title>Access · Outpost</title>
+    <link rel="icon" href="/favicon.svg">
+    <link rel="stylesheet" href="/app.css">
+    <link rel="stylesheet" href="/enhancements.css">
+    <link rel="stylesheet" href="/access.css">
+    <link rel="stylesheet" href="/theme-corrections.css?v=29">
+  </head>
+  <body>
+    <aside class="rail">
+      <a class="brand" href="/"><b>O</b><span>OUTPOST</span></a>
+      <nav></nav>
+      <div class="rail-foot"><i></i>Named accountability<br><small>Least privilege access</small></div>
+    </aside>
+    <div class="shell">
+      <header>
+        <div><p class="eyebrow">IDENTITY & SECURITY</p><h1>Operator access</h1></div>
+        <div id="signed-account" class="signed-account"><i></i><span>Loading account…</span></div>
+      </header>
+      <main>
+        <section class="access-hero panel">
+          <div>
+            <p class="eyebrow">ACCOUNT BOUNDARY</p>
+            <h2 id="welcome-name">Your Outpost identity</h2>
+            <p>Web operator accounts are separate from mesh member identities. Every protected
+              action records the signed-in account in the durable audit trail.</p>
+          </div>
+          <div class="security-score">
+            <span id="security-state">CHECKING</span>
+            <strong id="security-title">Reviewing security</strong>
+            <small id="security-copy">Loading account controls…</small>
+            <button id="change-own-password" type="button">Change my password</button>
+          </div>
+        </section>
+
+        <div class="access-grid">
+          <section class="panel content-panel mfa-panel" aria-labelledby="mfa-title">
+            <div class="heading">
+              <div><p class="eyebrow">STRONG AUTHENTICATION</p><h2 id="mfa-title">Authenticator & recovery</h2></div>
+              <span id="mfa-status" class="access-pill">CHECKING</span>
+            </div>
+            <div id="mfa-summary" class="mfa-summary">
+              <div class="mfa-mark">✣</div>
+              <div><strong>Loading second-factor status…</strong></div>
+            </div>
+            <div id="mfa-enrollment" class="mfa-enrollment" hidden>
+              <p>Add this secret to any standards-compatible authenticator, then enter its
+                current six-digit code.</p>
+              <label>Authenticator secret <code id="mfa-secret"></code></label>
+              <details><summary>Manual setup link</summary><code id="mfa-uri"></code></details>
+              <form id="mfa-confirm-form">
+                <label for="mfa-code">Current verification code</label>
+                <div><input id="mfa-code" inputmode="numeric" autocomplete="one-time-code" required><button type="submit">Confirm & enable</button></div>
+              </form>
+            </div>
+            <div id="recovery-codes" class="recovery-codes" hidden>
+              <strong>Save these recovery codes now</strong>
+              <p>Each code works once. They will not be shown again.</p>
+              <pre id="recovery-list"></pre>
+              <button id="copy-recovery" type="button" class="secondary-button">Copy codes</button>
+            </div>
+            <p id="mfa-message" class="access-message" aria-live="polite"></p>
+          </section>
+
+          <section class="panel content-panel sessions-panel" aria-labelledby="sessions-title">
+            <div class="heading">
+              <div><p class="eyebrow">ACTIVE SIGN-INS</p><h2 id="sessions-title">Session inventory</h2></div>
+              <button id="revoke-all" class="quiet-button" type="button">Sign out everywhere</button>
+            </div>
+            <div id="session-list" class="session-list"><p class="empty">Loading sessions…</p></div>
+          </section>
+        </div>
+
+        <section id="accounts-panel" class="panel content-panel accounts-panel" aria-labelledby="accounts-title" hidden>
+          <div class="heading">
+            <div><p class="eyebrow">ADMINISTRATOR CONTROL</p><h2 id="accounts-title">Operator accounts</h2></div>
+            <button id="show-create-account" class="primary-button" type="button">Add account</button>
+          </div>
+          <div class="role-guide">
+            <article><b>Administrator</b><span>Accounts, restore, policy, and all operations</span></article>
+            <article><b>Operator</b><span>Daily operations without account or restore authority</span></article>
+            <article><b>Read-only / wallboard</b><span>Operational visibility without mutation or private exports</span></article>
+          </div>
+          <form id="create-account-form" class="create-account" hidden>
+            <div><label for="account-username">Username</label><input id="account-username" maxlength="32" required></div>
+            <div><label for="account-display">Display name</label><input id="account-display" maxlength="80" required></div>
+            <div><label for="account-role">Role</label><select id="account-role"><option value="operator">Operator</option><option value="administrator">Administrator</option><option value="viewer">Read-only / wallboard</option></select></div>
+            <div><label for="account-password">Initial password</label><input id="account-password" type="password" minlength="12" autocomplete="new-password" required></div>
+            <footer><button id="cancel-create-account" type="button" class="secondary-button">Cancel</button><button type="submit" class="primary-button">Create account</button></footer>
+          </form>
+          <div id="account-list" class="account-list"><p class="empty">Loading accounts…</p></div>
+          <p id="account-message" class="access-message" aria-live="polite"></p>
+        </section>
+      </main>
+      <footer><span>Operator identities are local to this Outpost.</span><span>Recovery codes should be stored offline.</span></footer>
+    </div>
+    <script src="/access.js" defer></script>
+  </body>
+</html>

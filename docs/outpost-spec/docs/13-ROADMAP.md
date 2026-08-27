@@ -232,7 +232,8 @@ All 16 criteria in [10-NODE-FEDERATION.md](10-NODE-FEDERATION.md) §11, plus:
 
 ### Work items
 
-1. Multi-user auth with roles; API tokens.
+1. Multi-user auth with roles, TOTP, recovery, sessions, and step-up (implemented); scoped API
+   tokens remain pending.
 2. Full settings UI with diff/validate/audit; hot reload.
 3. Backup/restore UI; encrypted backups; `purge_member.py`.
 4. Observability: full metric coverage, a shipped Grafana dashboard JSON, log rotation.

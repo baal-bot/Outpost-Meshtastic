@@ -16,6 +16,8 @@ phones and desktops and uses bundled assets so its interface remains available w
   cancellation, airtime, reconnect, and MQTT.
 - **Federation:** peer directory, pairing, transport policy, per-path transfer telemetry, durable
   retry/recovery health, sync policy/inbox, services, and relay mail.
+- **Access:** named web accounts, roles, authenticator enrollment, one-use recovery codes, and
+  active-session inventory.
 - **Backups/System/Settings:** health, retention, backup/restore, identity, emergency policy, AI, and
   other operator controls.
 
@@ -60,10 +62,19 @@ object with the availability and provenance metadata for each value.
 
 ## Authentication
 
-The first login requires the short-lived token shown by `sudo outpost-setup-token show`, followed
-by a permanent password of at least 12 characters. The token is consumed by that login. Completing
-setup invalidates the bootstrap session and requires a clean sign-in. Sessions expire according to
-`web.auth.session_hours`; state-changing requests require the session's CSRF token.
+The first login uses account name `operator` and the short-lived token shown by
+`sudo outpost-setup-token show`, followed by a permanent password of at least 12 characters. The
+token is consumed by that login. Completing setup invalidates the bootstrap session and requires a
+clean sign-in. Existing single-password databases migrate that credential and its audit continuity
+to the named `operator` Administrator account.
+
+Access supports Administrator, Operator, and Read-only / wallboard roles. Initial passwords for
+new accounts must be changed at first sign-in. TOTP enrollment shows a standards-compatible secret
+and then eight one-use recovery codes exactly once. The session inventory shows source, client,
+last activity, and expiry, and can revoke one sign-in or all sign-ins for the current account.
+Sessions expire according to `web.auth.session_hours`; state-changing requests require CSRF.
+Protected actions additionally use a 10-minute password/TOTP step-up window. The browser asks only
+when that window has expired and safely retries the original request after successful confirmation.
 
 ## Appearance
 
@@ -119,6 +130,8 @@ The JSON API is rooted at `/api/v1`. Important read surfaces include:
 - `/api/v1/backups`, `/api/v1/audit`, and federation endpoints under `/api/v1/federation`
 - `/api/v1/maintenance/storage`, `/api/v1/maintenance/preview`, and
   `/api/v1/maintenance/run`
+- `/api/v1/auth/accounts`, `/api/v1/auth/sessions`, `/api/v1/auth/mfa/*`, and
+  `/api/v1/auth/step-up`
 
 Backups → Live data & retention reports the live database, WAL, verified backups, available disk,
 per-domain rows/allocation, and growth since the last maintenance baseline. Its cleanup preview is

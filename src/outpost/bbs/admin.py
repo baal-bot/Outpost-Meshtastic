@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from outpost.clock import Clock
+from outpost.operator_context import current_actor_ref
 from outpost.store import Database, Transaction
 
 TRUST_LEVELS = {"guest", "member", "trusted", "responder", "operator"}
@@ -56,9 +57,15 @@ class BBSAdmin:
         await store.write(
             """
             INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-            VALUES('web','operator',?,?,?,?)
+            VALUES('web',?,?,?,?,?)
             """,
-            (action, target, json.dumps(detail), int(self.clock.now().timestamp())),
+            (
+                current_actor_ref(),
+                action,
+                target,
+                json.dumps(detail),
+                int(self.clock.now().timestamp()),
+            ),
         )
 
     async def create_board(self, values: dict[str, Any]) -> int:

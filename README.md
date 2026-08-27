@@ -32,7 +32,8 @@ publishes a compatibility policy and a 1.0 release.
 - Incident reporting, confirmations, disputes, responder alerts, and map operations
 - Welfare events, check-ins, reviewed solicitation, rosters, and CSV export
 - Weather, forecasts, CAP alerts, astronomy, earthquakes, member positions, and waypoints
-- Responsive dashboards for operations, radio, members, BBS, mail, environment, and federation
+- Responsive dashboards for operations, radio, members, BBS, mail, environment, federation, and
+  named operator access
 - Airtime budgets, priority queues, deduplication, quiet hours, and emergency reserve
 - SQLite migrations, integrity checks, rotating backups, and audited restore
 - Optional authenticated federation, bounded synchronization, peer services, and mail relay
@@ -97,6 +98,10 @@ Open `http://<outpost-address>:8080/`. First startup creates a short-lived, one-
 retrieve it locally with `sudo outpost-setup-token show`, then choose a permanent password. The
 token is never written to the service journal. Follow the complete
 [installation guide](docs/INSTALLATION.md) for prerequisites, upgrades, and verification.
+
+The migrated first account is named `operator` and has the Administrator role. From **Access**, an
+administrator can create named Administrator, Operator, or Read-only / wallboard accounts, enable
+offline TOTP authentication, save one-use recovery codes, and revoke active browser sessions.
 
 ## Configure
 

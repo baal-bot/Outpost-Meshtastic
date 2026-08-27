@@ -34,6 +34,7 @@ DESTINATIONS = (
     ("Environment", "/environment.html"),
     ("Radio", "/radio.html"),
     ("Federation", "/federation.html"),
+    ("Access", "/access.html"),
     ("Backups", "/backups.html"),
     ("Activity", "/#activity"),
     ("System", "/#system"),
@@ -132,7 +133,27 @@ def prepare_page(
         lambda route: route.fulfill(
             status=200,
             content_type="application/json",
-            body='{"authenticated":true,"csrf_token":"test","must_change":false}',
+            body=json.dumps(
+                {
+                    "authenticated": True,
+                    "csrf_token": "test",
+                    "must_change": False,
+                    "account_id": 1,
+                    "username": "operator",
+                    "display_name": "Operator",
+                    "role": "operator",
+                    "mfa_enabled": False,
+                    "step_up_until": 2_000_000_000,
+                }
+            ),
+        ),
+    )
+    page.route(
+        "**/api/v1/auth/sessions",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"items":[],"count":0}',
         ),
     )
     page.goto(dashboard_url, wait_until="domcontentloaded")
@@ -405,6 +426,139 @@ def test_first_run_uses_one_time_token_and_forces_clean_sign_in(
             "Permanent password saved. Sign in to continue."
         )
         assert page.locator("#current-password").count() == 0
+    finally:
+        page.close()
+
+
+def test_named_login_prompts_for_second_factor_only_after_password(
+    browser: object, dashboard_url: str
+) -> None:
+    page = browser.new_page(viewport={"width": 390, "height": 844})  # type: ignore[attr-defined]
+    submissions: list[dict[str, object]] = []
+    page.route(
+        "**/api/v1/auth/setup",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"required":false,"available":false,"expires_at":null}',
+        ),
+    )
+    page.route(
+        "**/api/v1/auth/session",
+        lambda route: route.fulfill(
+            status=401,
+            content_type="application/json",
+            body='{"error":{"code":"unauthorized"}}',
+        ),
+    )
+
+    def login(route: object) -> None:
+        body = route.request.post_data_json
+        submissions.append(body)
+        if not body.get("code"):
+            route.fulfill(
+                status=202,
+                content_type="application/json",
+                body='{"mfa_required":true,"username":"alice"}',
+            )
+        else:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "csrf_token": "named-csrf",
+                        "must_change": False,
+                        "account_id": 2,
+                        "username": "alice",
+                        "display_name": "Alice Rivera",
+                        "role": "operator",
+                        "mfa_enabled": True,
+                        "step_up_until": 2_000_000_600,
+                    }
+                ),
+            )
+
+    page.route("**/api/v1/auth/login", login)
+    route_shared_operator_api(page)
+    try:
+        page.goto(dashboard_url, wait_until="domcontentloaded")
+        page.get_by_label("Account name").fill("alice")
+        page.get_by_label("Operator password").fill("alice-password-42")
+        page.get_by_role("button", name="Sign in").click()
+        page.locator("#mfa-field").wait_for(state="visible")
+        assert "Password accepted" in page.locator("#login-error").text_content()
+        page.get_by_label("Verification or recovery code").fill("123456")
+        page.get_by_role("button", name="Verify and sign in").click()
+        page.locator("#login-screen").wait_for(state="hidden")
+        assert submissions == [
+            {"username": "alice", "password": "alice-password-42", "code": None},
+            {"username": "alice", "password": "alice-password-42", "code": "123456"},
+        ]
+    finally:
+        page.close()
+
+
+def test_protected_action_prompts_once_then_retries_original_request(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url)
+    route_shared_operator_api(page)
+    attempts: list[dict[str, object]] = []
+    confirmations: list[dict[str, object]] = []
+
+    def protected(route: object) -> None:
+        attempts.append(route.request.post_data_json)
+        if len(attempts) == 1:
+            route.fulfill(
+                status=428,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "error": {
+                            "code": "step_up_required",
+                            "message": "Confirm your operator credentials to continue.",
+                        },
+                        "mfa_required": False,
+                    }
+                ),
+            )
+        else:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"watch":{"emergency_keywords_enabled":true}}',
+            )
+
+    def step_up(route: object) -> None:
+        confirmations.append(route.request.post_data_json)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"ok":true,"step_up_until":2000000600}',
+        )
+
+    page.route("**/api/v1/config/watch", protected)
+    page.route("**/api/v1/auth/step-up", step_up)
+    try:
+        page.evaluate(
+            """() => {
+              window.__protectedResult = null;
+              fetch('/api/v1/config/watch', {
+                method: 'PATCH',
+                headers: {'content-type':'application/json','x-csrf-token':'test'},
+                body: JSON.stringify({emergency_keywords_enabled:true})
+              }).then(async response => {
+                window.__protectedResult = {status: response.status, body: await response.json()};
+              });
+            }"""
+        )
+        dialog = page.get_by_role("dialog", name="Confirm operator credentials")
+        dialog.get_by_label("Account password").fill("operator-password-42")
+        dialog.get_by_role("button", name="Confirm identity").click()
+        page.wait_for_function("() => window.__protectedResult?.status === 200")
+        assert len(attempts) == 2 and attempts[0] == attempts[1]
+        assert confirmations == [{"password": "operator-password-42", "code": None}]
     finally:
         page.close()
 
@@ -1790,6 +1944,150 @@ def test_backup_create_validate_and_restore_confirmation_are_functional_and_clea
         assert ("create", None) in mutations
         assert ("validate", backup["name"]) in mutations
         assert ("restore", {"confirmation": phrase}) in mutations
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("width", (390, 1280))
+def test_access_workspace_enrolls_mfa_and_creates_named_account(
+    browser: object, dashboard_url: str, width: int
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme="daylight")
+    route_shared_operator_api(page)
+    accounts = [
+        {
+            "id": 1,
+            "username": "operator",
+            "display_name": "Pittsburgh Operator",
+            "role": "administrator",
+            "must_change": False,
+            "enabled": True,
+            "mfa_enabled": False,
+            "created_at": 2_000_000_000,
+            "changed_at": None,
+            "last_login_at": 2_000_000_000,
+            "created_by": "local-setup",
+        }
+    ]
+    mutations: list[tuple[str, object]] = []
+
+    page.route(
+        "**/api/v1/auth/session",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "authenticated": True,
+                    "csrf_token": "access-csrf",
+                    "must_change": False,
+                    "account_id": 1,
+                    "username": "operator",
+                    "display_name": "Pittsburgh Operator",
+                    "role": "administrator",
+                    "mfa_enabled": False,
+                    "step_up_until": 2_000_000_000,
+                }
+            ),
+        ),
+    )
+
+    def sessions(route: object) -> None:
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "0123456789abcdef",
+                            "source": "192.0.2.4",
+                            "user_agent": "Outpost field tablet",
+                            "created_at": 2_000_000_000,
+                            "expires_at": 2_000_043_200,
+                            "last_activity_at": 2_000_000_000,
+                            "step_up_until": 2_000_000_600,
+                            "current": True,
+                        }
+                    ],
+                    "count": 1,
+                }
+            ),
+        )
+
+    def account_route(route: object) -> None:
+        if route.request.method == "POST":
+            values = route.request.post_data_json
+            mutations.append(("create", values))
+            accounts.append(
+                {
+                    "id": 2,
+                    "username": values["username"],
+                    "display_name": values["display_name"],
+                    "role": values["role"],
+                    "must_change": True,
+                    "enabled": True,
+                    "mfa_enabled": False,
+                    "created_at": 2_000_000_000,
+                    "changed_at": None,
+                    "last_login_at": None,
+                    "created_by": "operator",
+                }
+            )
+            body = accounts[-1]
+        else:
+            body = {"items": accounts, "count": len(accounts)}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/api/v1/auth/sessions", sessions)
+    page.route("**/api/v1/auth/accounts", account_route)
+    page.route(
+        "**/api/v1/auth/mfa/begin",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "secret": "JBSWY3DPEHPK3PXP",
+                    "otpauth_uri": "otpauth://totp/Outpost:operator?secret=JBSWY3DPEHPK3PXP",
+                }
+            ),
+        ),
+    )
+    page.route(
+        "**/api/v1/auth/mfa/confirm",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "recovery_codes": [f"ABCD-EFGH-{value:04d}" for value in range(8)],
+                }
+            ),
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/access.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.locator("#welcome-name").filter(has_text="Pittsburgh Operator").wait_for()
+        page.get_by_text("This session", exact=True).wait_for()
+        page.get_by_role("button", name="Set up authenticator").click()
+        page.get_by_text("JBSWY3DPEHPK3PXP", exact=True).wait_for()
+        page.get_by_label("Current verification code").fill("123456")
+        page.get_by_role("button", name="Confirm & enable").click()
+        page.get_by_text("Save these recovery codes now", exact=True).wait_for()
+
+        page.get_by_role("button", name="Add account").click()
+        page.get_by_label("Username").fill("dispatch")
+        page.get_by_label("Display name").fill("Dispatch Lead")
+        page.get_by_label("Initial password").fill("dispatch-password-42")
+        page.locator("#create-account-form").get_by_role("button", name="Create account").click()
+        page.get_by_text("Dispatch Lead", exact=True).wait_for()
+        assert mutations[0][0] == "create"
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
     finally:

@@ -4,6 +4,7 @@ import json
 import time
 from typing import Any, Literal
 
+from outpost.operator_context import current_actor_ref
 from outpost.store import Database
 
 
@@ -165,8 +166,9 @@ class OperatorInboxService:
             )
             await transaction.write(
                 "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web','operator','mail.conversation.view',?,?,?)",
+                "VALUES('web',?,'mail.conversation.view',?,?,?)",
                 (
+                    current_actor_ref(),
                     f"conversation:{conversation_key}",
                     json.dumps({"message_count": len(values)}, separators=(",", ":")),
                     now,
@@ -208,8 +210,13 @@ class OperatorInboxService:
             )
             await transaction.write(
                 "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web','operator',?,?,NULL,?)",
-                (f"mail.conversation.{state}", f"conversation:{conversation_key}", now),
+                "VALUES('web',?,?,?,NULL,?)",
+                (
+                    current_actor_ref(),
+                    f"mail.conversation.{state}",
+                    f"conversation:{conversation_key}",
+                    now,
+                ),
             )
         return True
 

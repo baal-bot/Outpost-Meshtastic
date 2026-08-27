@@ -11,6 +11,7 @@ const item = (title, description, badge) => `<div class="item"><div><strong>${sa
 document.querySelector(".kpis").insertAdjacentHTML("afterend", '<section class="panel weather-panel"><div><p id="weather-kind" class="eyebrow">LOCAL CONDITIONS</p><h2 id="weather-title">Weather</h2><p id="weather-summary">Set the Outpost location to enable weather.</p></div><div id="weather-reading" class="weather-reading"><strong>—</strong><span>Not configured</span></div><div id="weather-details" class="weather-details"></div></section>');
 document.querySelector(".weather-panel>div").insertAdjacentHTML("beforeend", '<div id="provider-health" class="provider-health"></div>');
 document.querySelector(".weather-panel").insertAdjacentHTML("afterend", '<section class="panel forecast-panel"><div class="forecast-heading"><div><p class="eyebrow">LOCAL FORECAST</p><h2>What’s ahead</h2></div><span id="forecast-meta">Loading forecast…</span></div><div id="forecast-days" class="forecast-days"></div><div id="forecast-hours" class="forecast-hours"></div></section>');
+document.querySelector(".capability-grid article:last-child").insertAdjacentHTML("beforebegin", '<article><b>Operator access</b><span class="phase now">AVAILABLE</span><p>Named accounts, roles, strong authentication, and active sessions.</p><a class="action" href="/access.html">Manage access</a></article>');
 document.querySelector(".forecast-panel").insertAdjacentHTML("afterend", '<section class="panel astronomy-panel"><div class="astronomy-heading"><p class="eyebrow">OFFLINE ASTRONOMY</p><h2>Daylight & moon</h2><p id="astronomy-date">Calculated locally from the Outpost position.</p></div><div class="astro-metrics"><div><span>Sunrise</span><strong id="astro-rise">—</strong><small id="astro-dawn">Civil dawn —</small></div><div><span>Sunset</span><strong id="astro-set">—</strong><small id="astro-dusk">Civil dusk —</small></div><div><span>Daylight</span><strong id="astro-daylight">—</strong><small>Above the horizon</small></div><div class="moon-metric"><span>Moon</span><strong id="astro-moon">—</strong><small id="astro-phase">Phase unavailable</small></div></div></section>');
 document.querySelector(".astronomy-panel").insertAdjacentHTML("afterend", '<section class="panel seismic-panel"><div class="seismic-heading"><div><p class="eyebrow">USGS SEISMIC MONITOR</p><h2>Nearby earthquakes</h2><p id="seismic-health">Waiting for the first feed update.</p></div><div class="seismic-count"><strong id="seismic-total">0</strong><span>past 24 hours</span></div></div><div id="seismic-list" class="seismic-list"><p class="empty">No nearby earthquakes recorded.</p></div><p class="seismic-credit">Earthquake data courtesy of the U.S. Geological Survey.</p></section>');
 const disclaimerLabel = document.querySelector('label[for="setting-disclaimer"]');
@@ -90,6 +91,7 @@ async function refresh() {
   }
 }
 let csrfToken = "";
+let loginNeedsMfa = false;
 async function configureLogin(message = "") {
   const response = await fetch("/api/v1/auth/setup");
   const setup = response.ok ? await response.json() : {required: false, available: false};
@@ -105,6 +107,10 @@ async function configureLogin(message = "") {
     $("login-copy").textContent = "This dashboard controls community infrastructure on your mesh.";
   }
   $("password-label").textContent = setupMode ? "One-time setup token" : "Operator password";
+  $("username-label").hidden = setupMode;
+  $("username").hidden = setupMode;
+  $("username").required = !setupMode;
+  if (setupMode) $("username").value = "operator";
   $("password").autocomplete = setupMode ? "one-time-code" : "current-password";
   $("login-submit").textContent = setupMode ? "Continue setup" : "Sign in";
   if (message) {
@@ -142,10 +148,27 @@ $("login-form").addEventListener("submit", async (event) => {
   const response = await fetch("/api/v1/auth/login", {
     method: "POST",
     headers: {"content-type": "application/json"},
-    body: JSON.stringify({password: $("password").value}),
+    body: JSON.stringify({
+      username: $("username").value || "operator",
+      password: $("password").value,
+      code: $("login-code").value || null,
+    }),
   });
+  if (response.status === 202) {
+    loginNeedsMfa = true;
+    $("mfa-field").hidden = false;
+    $("login-code").required = true;
+    $("login-submit").textContent = "Verify and sign in";
+    $("login-error").dataset.success = "true";
+    $("login-error").textContent = "Password accepted. Enter an authenticator or recovery code.";
+    $("login-code").focus();
+    return;
+  }
   if (!response.ok) {
-    $("login-error").textContent = "Sign-in failed. Check the password and try again.";
+    delete $("login-error").dataset.success;
+    $("login-error").textContent = loginNeedsMfa
+      ? "Verification failed. Check the code and try again."
+      : "Sign-in failed. Check the account name and password.";
     return;
   }
   const session = await response.json();
@@ -160,6 +183,10 @@ $("login-form").addEventListener("submit", async (event) => {
     startRefreshSchedulers();
   }
   $("password").value = "";
+  $("login-code").value = "";
+  $("mfa-field").hidden = true;
+  $("login-code").required = false;
+  loginNeedsMfa = false;
 });
 
 $("change-form").addEventListener("submit", async (event) => {

@@ -629,3 +629,18 @@ html[data-theme="night"] .login-card {
   background: linear-gradient(145deg, #1d100c, #0d0806);
   border-color: #63372c;
 }
+
+.security-score button {
+  width: max-content;
+  margin-top: 12px;
+  padding: 7px 9px;
+  color: var(--ink);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 700 .54rem Figtree, sans-serif;
+}
+.current-account-note {
+  color: var(--muted);
+  font: .52rem ui-monospace, monospace;
+}

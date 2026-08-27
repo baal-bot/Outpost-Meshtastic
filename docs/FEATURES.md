@@ -12,7 +12,7 @@ Outpost is pre-release. This table distinguishes implementation from field valid
 | Community Watch | Incidents, maps, confirmation/dispute, responder alerts | Implemented; tabletop scale exercise recommended |
 | Welfare | Events, roster, check-ins, reviewed solicitation, CSV | Implemented and tested |
 | Environment | Weather, CAP, astronomy, earthquakes, maps, waypoints | Implemented; external providers required after cache expiry |
-| Dashboard | Responsive operator pages and authenticated API | Implemented; trusted-LAN deployment assumed |
+| Dashboard access | Responsive pages/API; named roles, TOTP/recovery, revocable sessions, protected-action step-up | Implemented and automated; trusted-LAN or TLS/VPN deployment assumed |
 | Backups | Online backup, rotation, validation, guarded restore | Implemented and tested |
 | Federation | Pairing, authenticated framing, policy, sync, services, mail | Automated tests and two physical Outposts exercised; full acceptance backlog pending |
 | Meshtastic MQTT | Optional discovery/transport through radio firmware | Implemented controls; multi-node validation pending |

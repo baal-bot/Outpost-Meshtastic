@@ -3,6 +3,80 @@ import "/a11y.js";
 import {scheduler} from "/refresh-scheduler.js";
 
 initTheme();
+const nativeFetch = window.fetch.bind(window);
+let stepUpPrompt = null;
+
+async function confirmOperatorCredentials(mfaRequired) {
+  const password = await window.OutpostUI?.prompt({
+    eyebrow: "SECURITY CHECK",
+    title: "Confirm operator credentials",
+    message: "This action changes protected Outpost state. Confirmation remains valid for 10 minutes.",
+    label: "Account password",
+    type: "password",
+    autocomplete: "current-password",
+    confirmLabel: "Confirm identity",
+  });
+  if (!password) return false;
+  let code = null;
+  if (mfaRequired) {
+    code = await window.OutpostUI?.prompt({
+      eyebrow: "SECOND FACTOR",
+      title: "Enter a verification code",
+      message: "Use your authenticator app or one unused recovery code.",
+      label: "6-digit or recovery code",
+      autocomplete: "one-time-code",
+      confirmLabel: "Verify",
+    });
+    if (!code) return false;
+  }
+  const sessionResponse = await nativeFetch("/api/v1/auth/session", {cache: "no-store"});
+  if (!sessionResponse.ok) return false;
+  const session = await sessionResponse.json();
+  const response = await nativeFetch("/api/v1/auth/step-up", {
+    method: "POST",
+    headers: {"content-type": "application/json", "x-csrf-token": session.csrf_token},
+    body: JSON.stringify({password, code}),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    await window.OutpostUI?.alert({
+      eyebrow: "VERIFICATION FAILED",
+      title: "Credentials were not confirmed",
+      message: detail.error?.message || "Check the password and verification code, then try again.",
+    });
+    return false;
+  }
+  return true;
+}
+
+window.fetch = async (input, init) => {
+  const request = new Request(input, init);
+  const retry = request.clone();
+  const response = await nativeFetch(request);
+  const url = new URL(request.url, window.location.href);
+  if (response.status === 403 && url.origin === window.location.origin) {
+    const detail = await response.clone().json().catch(() => ({}));
+    if (detail.error?.code === "read_only") {
+      void window.OutpostUI?.alert({
+        eyebrow: "READ-ONLY ACCOUNT",
+        title: "This wallboard cannot make changes",
+        message: detail.error.message,
+      });
+    }
+  }
+  if (
+    response.status !== 428
+    || url.origin !== window.location.origin
+    || !url.pathname.startsWith("/api/v1/")
+    || url.pathname === "/api/v1/auth/step-up"
+  ) return response;
+  const detail = await response.clone().json().catch(() => ({}));
+  stepUpPrompt ||= confirmOperatorCredentials(Boolean(detail.mfa_required))
+    .finally(() => { stepUpPrompt = null; });
+  const verified = await stepUpPrompt;
+  return verified ? nativeFetch(retry) : response;
+};
+
 const path = window.location.pathname;
 if (!document.querySelector('link[rel="icon"]')) {
   document.head.insertAdjacentHTML("beforeend", '<link rel="icon" href="/favicon.svg">');
@@ -62,6 +136,7 @@ const links = [
   ["/environment.html", "☼", "Environment"],
   ["/radio.html", "⌁", "Radio"],
   ["/federation.html", "⤨", "Federation"],
+  ["/access.html", "♜", "Access"],
   ["/backups.html", "▣", "Backups"],
   ["/#activity", "◫", "Activity"],
   ["/#system", "⚙", "System"],
@@ -76,6 +151,37 @@ if (navigation) {
     return `<a href="${href}" aria-label="${label}" title="${label}"><i aria-hidden="true">${icon}</i><span>${label}</span></a>`;
   }).join("");
 }
+
+async function showOperatorIdentity() {
+  try {
+    const response = await nativeFetch("/api/v1/auth/session", {cache: "no-store"});
+    if (!response.ok) return;
+    const session = await response.json();
+    document.body.dataset.operatorRole = session.role || "operator";
+    const footer = document.querySelector(".rail-foot");
+    if (footer && !footer.querySelector(".operator-role-chip")) {
+      const chip = document.createElement("a");
+      chip.className = "operator-role-chip";
+      chip.href = "/access.html";
+      const name = document.createElement("b");
+      name.textContent = session.display_name || session.username || "Operator";
+      const role = document.createElement("small");
+      role.textContent = session.role === "viewer"
+        ? "Read-only / wallboard"
+        : session.role || "Operator";
+      chip.append(name, role);
+      footer.prepend(chip);
+    }
+    if (session.role === "viewer" && !document.querySelector(".read-only-banner")) {
+      const main = document.querySelector("main");
+      main?.insertAdjacentHTML("afterbegin", '<div class="read-only-banner" role="status"><b>Read-only wallboard</b><span>Operational views are available; changes and private exports require an Operator or Administrator.</span></div>');
+    }
+  } catch (_) {
+    // Identity presentation is optional while the authenticated page remains usable.
+  }
+}
+
+showOperatorIdentity();
 
 const moduleLinks = {
   BBS: "bbs",

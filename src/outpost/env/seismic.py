@@ -6,6 +6,7 @@ from typing import Any
 from outpost.clock import Clock
 from outpost.config import EnvConfig
 from outpost.env.weather import _request_json
+from outpost.operator_context import current_actor
 from outpost.store import Database
 from outpost.watch import AlertService
 
@@ -137,7 +138,7 @@ class SeismicService:
         alert = await alerts.raise_alert(
             "urgent" if quake["magnitude"] < 6 else "critical",
             headline,
-            "web:operator",
+            current_actor(),
             source="operator",
             lat=float(quake["latitude"]),
             lon=float(quake["longitude"]),

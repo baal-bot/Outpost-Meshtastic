@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from outpost.config import Config
+from outpost.operator_context import current_actor_ref
 from outpost.store import Database
 
 EDITABLE_NODE_FIELDS = {
@@ -94,9 +95,9 @@ class RuntimeSettings:
         await self.database.write(
             """
             INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-            VALUES('web','operator','config.update','node',?,?)
+            VALUES('web',?,'config.update','node',?,?)
             """,
-            (json.dumps(sorted(values)), now),
+            (current_actor_ref(), json.dumps(sorted(values)), now),
         )
         return self.redacted()["node"]
 
@@ -133,8 +134,8 @@ class RuntimeSettings:
         await self.database.write(
             """
             INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-            VALUES('web','operator','config.update','watch',?,?)
+            VALUES('web',?,'config.update','watch',?,?)
             """,
-            (json.dumps(sorted(values)), now),
+            (current_actor_ref(), json.dumps(sorted(values)), now),
         )
         return self.redacted()["watch"]

@@ -53,9 +53,21 @@ def test_database_secrets_returns_only_auth_redaction_values(tmp_path: Path) -> 
         connection.executescript(
             "CREATE TABLE web_credential(password_hash TEXT);"
             "CREATE TABLE web_session(csrf_token TEXT);"
+            "CREATE TABLE web_account(password_hash TEXT,totp_secret TEXT,"
+            "totp_pending_secret TEXT,recovery_code_hashes TEXT);"
             "INSERT INTO web_credential VALUES('$argon2id$hash');"
             "INSERT INTO web_session VALUES('csrf-secret');"
+            "INSERT INTO web_account VALUES('$argon2id$account','TOTPSECRET',"
+            "'PENDINGSECRET','[\"recovery-hash\"]');"
             "CREATE TABLE mail(body TEXT);"
             "INSERT INTO mail VALUES('not-loaded-by-diagnostics');"
         )
-    assert database_secrets(database) == {"$argon2id$hash", "csrf-secret"}
+    assert database_secrets(database) == {
+        "$argon2id$hash",
+        "$argon2id$account",
+        "csrf-secret",
+        "TOTPSECRET",
+        "PENDINGSECRET",
+        '["recovery-hash"]',
+        "recovery-hash",
+    }

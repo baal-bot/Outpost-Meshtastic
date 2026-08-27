@@ -46,6 +46,7 @@ from outpost.fed import (
     Peer,
     Reassembler,
 )
+from outpost.operator_context import current_actor
 from outpost.radio_operations import RadioOperations
 from outpost.render.renderer import render_response
 from outpost.router.models import Line, Response, ResponseKind
@@ -305,7 +306,7 @@ class OutpostApp:
         if not self.config.modules.fed.enabled:
             raise ValueError("federation module is disabled")
         return await self.federation_sync.import_inbox(
-            item_id, "web:operator", int(self.clock.now().timestamp())
+            item_id, current_actor(), int(self.clock.now().timestamp())
         )
 
     async def send_federation_mail(
@@ -320,7 +321,7 @@ class OutpostApp:
         message_kind: str | None = None,
         participant_handle: str | None = None,
         reply_to: str | None = None,
-        operator_actor: str = "web:operator",
+        operator_actor: str | None = None,
     ) -> dict[str, object]:
         if not self.config.modules.fed.enabled:
             raise ValueError("federation module is disabled")
@@ -334,7 +335,7 @@ class OutpostApp:
             message_kind=message_kind,
             participant_handle=participant_handle,
             reply_to=reply_to,
-            operator_actor=operator_actor,
+            operator_actor=operator_actor or current_actor(),
         )
         await self._send_federation_value(
             peer_id,
@@ -393,7 +394,7 @@ class OutpostApp:
             message_kind=message_kind,
             participant_handle=participant_handle,
             reply_to="operator",
-            operator_actor="web:operator",
+            operator_actor=current_actor(),
         )
 
     async def _notify_board_change(self, slug: str, post_id: int) -> None:
@@ -605,7 +606,7 @@ class OutpostApp:
         if not self.config.modules.fed.enabled:
             raise ValueError("federation module is disabled")
         secret = await self.federation.pairing_secret(mesh_id)
-        peer = await self.federation.approve_local(mesh_id, "web:operator", code)
+        peer = await self.federation.approve_local(mesh_id, current_actor(), code)
         frames = self.federation_codec.encode(
             MessageType.PAIR_CONFIRM,
             {

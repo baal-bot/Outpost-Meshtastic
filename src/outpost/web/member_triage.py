@@ -358,9 +358,9 @@ class MemberTriageService:
             await transaction.write(
                 """
                 INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web','operator','member.update',?,?,?)
+                VALUES('web',?,'member.update',?,?,?)
                 """,
-                (before["mesh_id"], detail, now),
+                (actor.removeprefix("web:"), before["mesh_id"], detail, now),
             )
         return {"ok": True}
 
@@ -401,9 +401,10 @@ class MemberTriageService:
             await transaction.write(
                 """
                 INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web','operator',?,?,?,?)
+                VALUES('web',?,?,?,?,?)
                 """,
                 (
+                    actor.removeprefix("web:"),
                     f"member.{action}",
                     row["mesh_id"],
                     json.dumps(
@@ -458,9 +459,10 @@ class MemberTriageService:
             await transaction.write(
                 """
                 INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web','operator',?,'member:bulk',?,?)
+                VALUES('web',?,?,'member:bulk',?,?)
                 """,
                 (
+                    actor.removeprefix("web:"),
                     f"member.bulk_{action}",
                     json.dumps(
                         {
@@ -488,7 +490,9 @@ class MemberTriageService:
             return f"'{value}"
         return value
 
-    async def export(self, member_ids: Sequence[int]) -> tuple[str, int]:
+    async def export(
+        self, member_ids: Sequence[int], *, actor: str = "web:operator"
+    ) -> tuple[str, int]:
         ids: tuple[int, ...] = tuple(dict.fromkeys(member_ids))
         if not ids or len(ids) > 200 or any(member_id <= 0 for member_id in ids):
             raise MemberTriageError("invalid_selection", "Select between 1 and 200 identities.")
@@ -523,8 +527,11 @@ class MemberTriageService:
         await self.database.write(
             """
             INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-            VALUES('web','operator','member.export','member:bulk',?,unixepoch())
+            VALUES('web',?,'member.export','member:bulk',?,unixepoch())
             """,
-            (json.dumps({"count": len(rows), "ids": list(ids)}, separators=(",", ":")),),
+            (
+                actor.removeprefix("web:"),
+                json.dumps({"count": len(rows), "ids": list(ids)}, separators=(",", ":")),
+            ),
         )
         return output.getvalue(), len(rows)

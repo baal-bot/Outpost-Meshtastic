@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
+import json
 import os
+import re
 import secrets
 import string
+import struct
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+from urllib.parse import quote
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import InvalidHashError, VerificationError
 
 from outpost.store import Database
 
@@ -23,14 +30,48 @@ def _initial_password() -> str:
     return "".join(secrets.choice(alphabet) for _ in range(24))
 
 
+def _normalize_username(username: str) -> str:
+    value = username.strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,31}", value):
+        raise ValueError("Username must be 2-32 letters, numbers, dots, dashes, or underscores.")
+    return value
+
+
+def _totp(secret: str, at: int, *, period: int = 30, digits: int = 6) -> str:
+    key = base64.b32decode(secret.upper() + "=" * (-len(secret) % 8))
+    digest = hmac.new(key, struct.pack(">Q", at // period), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    number = struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF
+    return str(number % (10**digits)).zfill(digits)
+
+
+def _normalize_recovery_code(code: str) -> str:
+    return "".join(character for character in code.upper() if character.isalnum())
+
+
 SETUP_SECRET_TTL_SECONDS = 3_600
 SETUP_FILE_NAME = "setup-token"
+STEP_UP_SECONDS = 600
+RECOVERY_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+ROLES = {"administrator", "operator", "viewer"}
 
 
 @dataclass(frozen=True)
 class WebSession:
     csrf_token: str
     must_change: bool
+    account_id: int
+    username: str
+    display_name: str
+    role: str
+    mfa_enabled: bool
+    step_up_until: int | None
+
+
+@dataclass(frozen=True)
+class MfaChallenge:
+    username: str
+    mfa_required: bool = True
 
 
 @dataclass(frozen=True)
@@ -53,6 +94,7 @@ class WebAuthService:
         self.setup_ttl_seconds = setup_ttl_seconds
         self.setup_path = Path(setup_path or database.path.parent / SETUP_FILE_NAME)
         self.hasher = PasswordHasher()
+        self._dummy_hash = self.hasher.hash(secrets.token_urlsafe(24))
 
     def _remove_setup_file(self) -> None:
         self.setup_path.unlink(missing_ok=True)
@@ -76,8 +118,19 @@ class WebAuthService:
             temporary.unlink(missing_ok=True)
             raise
 
+    async def _audit(
+        self, actor: str, action: str, target: str | None, detail: object = None
+    ) -> None:
+        encoded = None if detail is None else json.dumps(detail, separators=(",", ":"))
+        await self.database.write(
+            "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+            "VALUES('web',?,?,?,?,unixepoch())",
+            (actor, action, target, encoded),
+        )
+
     async def issue_setup_secret(self) -> SetupSecret:
         token = secrets.token_urlsafe(24)
+        password_hash = self.hasher.hash(token)
         now = int(time.time())
         expires_at = now + self.setup_ttl_seconds
         self._write_setup_file(token)
@@ -88,14 +141,32 @@ class WebAuthService:
                     await transaction.write(
                         "UPDATE web_credential SET password_hash=?,must_change=1,changed_at=NULL,"
                         "bootstrap_expires_at=?,bootstrap_consumed_at=NULL WHERE id=1",
-                        (self.hasher.hash(token), expires_at),
+                        (password_hash, expires_at),
                     )
                 else:
                     await transaction.write(
                         "INSERT INTO web_credential("
                         "id,password_hash,must_change,created_at,bootstrap_expires_at"
                         ") VALUES(1,?,1,?,?)",
-                        (self.hasher.hash(token), now, expires_at),
+                        (password_hash, now, expires_at),
+                    )
+                accounts = await transaction.read("SELECT 1 FROM web_account WHERE id=1")
+                if accounts:
+                    await transaction.write(
+                        "UPDATE web_account SET password_hash=?,must_change=1,enabled=1,"
+                        "role='administrator',changed_at=NULL,bootstrap_expires_at=?,"
+                        "bootstrap_consumed_at=NULL,totp_secret=NULL,"
+                        "totp_pending_secret=NULL,totp_confirmed_at=NULL,"
+                        "recovery_code_hashes='[]' "
+                        "WHERE id=1",
+                        (password_hash, expires_at),
+                    )
+                else:
+                    await transaction.write(
+                        "INSERT INTO web_account(id,username,display_name,role,password_hash,"
+                        "must_change,enabled,bootstrap_expires_at,created_at,created_by) "
+                        "VALUES(1,'operator','Operator','administrator',?,1,1,?,?,'local-setup')",
+                        (password_hash, expires_at, now),
                     )
                 await transaction.write("DELETE FROM web_session")
         except BaseException:
@@ -106,7 +177,7 @@ class WebAuthService:
     async def ensure_credential(self) -> SetupSecret | None:
         rows = await self.database.read(
             "SELECT must_change,bootstrap_expires_at,bootstrap_consumed_at "
-            "FROM web_credential WHERE id=1"
+            "FROM web_account WHERE id=1"
         )
         if rows:
             row = rows[0]
@@ -114,10 +185,9 @@ class WebAuthService:
                 self._remove_setup_file()
                 return None
             expires_at = row["bootstrap_expires_at"]
-            consumed_at = row["bootstrap_consumed_at"]
             if expires_at is None:
                 return await self.issue_setup_secret()
-            if consumed_at is not None or int(expires_at) <= int(time.time()):
+            if row["bootstrap_consumed_at"] is not None or int(expires_at) <= int(time.time()):
                 self._remove_setup_file()
                 return None
             if not self.setup_path.is_file():
@@ -129,7 +199,7 @@ class WebAuthService:
     async def setup_status(self) -> dict[str, bool | int | None]:
         rows = await self.database.read(
             "SELECT must_change,bootstrap_expires_at,bootstrap_consumed_at "
-            "FROM web_credential WHERE id=1"
+            "FROM web_account WHERE id=1"
         )
         if not rows or not bool(rows[0]["must_change"]):
             self._remove_setup_file()
@@ -149,82 +219,180 @@ class WebAuthService:
             "expires_at": int(expires_at) if expires_at is not None else None,
         }
 
-    async def login(self, password: str, source: str) -> tuple[str, WebSession] | None:
+    def _password_valid(self, password_hash: str, password: str) -> bool:
+        try:
+            return self.hasher.verify(password_hash, password)
+        except (InvalidHashError, VerificationError):
+            return False
+
+    def _totp_valid(self, secret: str, code: str, now: int) -> bool:
+        clean = "".join(character for character in code if character.isdigit())
+        return len(clean) == 6 and any(
+            hmac.compare_digest(_totp(secret, now + offset * 30), clean) for offset in (-1, 0, 1)
+        )
+
+    async def _mfa_valid(self, account: Any, code: str, now: int) -> bool:
+        secret = account["totp_secret"]
+        if secret and self._totp_valid(str(secret), code, now):
+            return True
+        clean = _normalize_recovery_code(code)
+        if not clean:
+            return False
+        match = _token_hash(f"{account['id']}:{clean}")
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT recovery_code_hashes FROM web_account WHERE id=?", (account["id"],)
+            )
+            recovery = json.loads(rows[0]["recovery_code_hashes"] or "[]") if rows else []
+            if match not in recovery:
+                return False
+            recovery.remove(match)
+            await transaction.write(
+                "UPDATE web_account SET recovery_code_hashes=? WHERE id=?",
+                (json.dumps(recovery, separators=(",", ":")), account["id"]),
+            )
+        return True
+
+    async def login(
+        self,
+        password: str,
+        source: str,
+        *,
+        username: str = "operator",
+        code: str | None = None,
+        user_agent: str | None = None,
+    ) -> tuple[str, WebSession] | MfaChallenge | None:
+        try:
+            clean_username = _normalize_username(username)
+        except ValueError:
+            clean_username = username.strip().lower()[:32]
         now = int(time.time())
         failures = await self.database.read(
-            """
-            SELECT COUNT(*) AS count FROM web_login_attempt
-            WHERE source=? AND successful=0 AND created_at>?
-            """,
-            (source, now - 900),
+            "SELECT COUNT(*) AS count FROM web_login_attempt "
+            "WHERE source=? AND username=? AND successful=0 AND created_at>?",
+            (source, clean_username, now - 900),
         )
         if int(failures[0]["count"]) >= 5:
             return None
         rows = await self.database.read(
-            "SELECT password_hash,must_change,bootstrap_expires_at,bootstrap_consumed_at "
-            "FROM web_credential WHERE id=1"
+            "SELECT * FROM web_account WHERE username=? COLLATE NOCASE", (clean_username,)
         )
-        valid = False
-        bootstrap = bool(rows and rows[0]["must_change"])
-        if rows:
-            active = not bootstrap or bool(
-                rows[0]["bootstrap_expires_at"] is not None
-                and int(rows[0]["bootstrap_expires_at"]) > now
-                and rows[0]["bootstrap_consumed_at"] is None
+        account = rows[0] if rows else None
+        password_valid = self._password_valid(
+            str(account["password_hash"]) if account else self._dummy_hash, password
+        )
+        bootstrap = bool(account and account["must_change"])
+        active = bool(
+            account
+            and account["enabled"]
+            and (
+                not bootstrap
+                or (
+                    account["bootstrap_expires_at"] is None
+                    or (
+                        int(account["bootstrap_expires_at"]) > now
+                        and account["bootstrap_consumed_at"] is None
+                    )
+                )
             )
-            if active:
-                try:
-                    valid = self.hasher.verify(rows[0]["password_hash"], password)
-                except VerifyMismatchError:
-                    pass
-        await self.database.write(
-            "INSERT INTO web_login_attempt(source,successful,created_at) VALUES(?,?,?)",
-            (source, int(valid), now),
         )
-        if not valid:
+        valid = bool(password_valid and active)
+        if valid and account["totp_secret"]:
+            if not code:
+                return MfaChallenge(str(account["username"]))
+            valid = await self._mfa_valid(account, code, now)
+        await self.database.write(
+            "INSERT INTO web_login_attempt(source,successful,created_at,username) VALUES(?,?,?,?)",
+            (source, int(valid), now, clean_username),
+        )
+        if not valid or account is None:
             return None
         token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
+        placeholder_hash = self.hasher.hash(_initial_password()) if bootstrap else None
         async with self.database.transaction() as transaction:
             if bootstrap:
-                credential = await transaction.read(
-                    "SELECT bootstrap_expires_at,bootstrap_consumed_at "
-                    "FROM web_credential WHERE id=1"
+                current = await transaction.read(
+                    "SELECT bootstrap_expires_at,bootstrap_consumed_at FROM web_account WHERE id=?",
+                    (account["id"],),
                 )
-                if (
-                    not credential
-                    or credential[0]["bootstrap_consumed_at"] is not None
-                    or credential[0]["bootstrap_expires_at"] is None
-                    or int(credential[0]["bootstrap_expires_at"]) <= now
-                ):
+                if not current or current[0]["bootstrap_consumed_at"] is not None:
                     return None
-                await transaction.write("DELETE FROM web_session")
+                expiry = current[0]["bootstrap_expires_at"]
+                if expiry is not None and int(expiry) <= now:
+                    return None
                 await transaction.write(
-                    "UPDATE web_credential SET password_hash=?,bootstrap_consumed_at=? WHERE id=1",
-                    (self.hasher.hash(_initial_password()), now),
+                    "DELETE FROM web_session WHERE account_id=?", (account["id"],)
                 )
+                await transaction.write(
+                    "UPDATE web_account SET password_hash=?,bootstrap_consumed_at=? WHERE id=?",
+                    (placeholder_hash, now, account["id"]),
+                )
+                if int(account["id"]) == 1:
+                    await transaction.write(
+                        "UPDATE web_credential SET password_hash=?,bootstrap_consumed_at=? "
+                        "WHERE id=1",
+                        (placeholder_hash, now),
+                    )
             await transaction.write(
-                """
-                INSERT INTO web_session(token_hash,csrf_token,created_at,expires_at,last_seen_at)
-                VALUES(?,?,?,?,?)
-                """,
-                (_token_hash(token), csrf, now, now + self.session_seconds, now),
+                "INSERT INTO web_session(token_hash,csrf_token,created_at,expires_at,last_seen_at,"
+                "account_id,source,user_agent,step_up_until) VALUES(?,?,?,?,?,?,?,?,?)",
+                (
+                    _token_hash(token),
+                    csrf,
+                    now,
+                    now + self.session_seconds,
+                    now,
+                    account["id"],
+                    source[:128],
+                    (user_agent or "")[:300],
+                    now + STEP_UP_SECONDS,
+                ),
+            )
+            await transaction.write(
+                "UPDATE web_account SET last_login_at=? WHERE id=?", (now, account["id"])
             )
         if bootstrap:
             self._remove_setup_file()
-        return token, WebSession(csrf, bool(rows[0]["must_change"]))
+        return token, WebSession(
+            csrf,
+            bootstrap,
+            int(account["id"]),
+            str(account["username"]),
+            str(account["display_name"]),
+            str(account["role"]),
+            bool(account["totp_secret"]),
+            now + STEP_UP_SECONDS,
+        )
 
     async def session(self, token: str | None) -> WebSession | None:
         if not token:
             return None
         now = int(time.time())
         rows = await self.database.read(
-            """
-            SELECT s.csrf_token,c.must_change FROM web_session s CROSS JOIN web_credential c
-            WHERE s.token_hash=? AND s.expires_at>?
-            """,
+            "SELECT s.csrf_token,s.step_up_until,s.last_seen_at,a.id account_id,a.username,"
+            "a.display_name,a.role,a.must_change,a.totp_secret FROM web_session s "
+            "JOIN web_account a ON a.id=s.account_id "
+            "WHERE s.token_hash=? AND s.expires_at>? AND a.enabled=1",
             (_token_hash(token), now),
         )
-        return WebSession(rows[0]["csrf_token"], bool(rows[0]["must_change"])) if rows else None
+        if not rows:
+            return None
+        row = rows[0]
+        if int(row["last_seen_at"]) < now - 60:
+            await self.database.write(
+                "UPDATE web_session SET last_seen_at=? WHERE token_hash=?",
+                (now, _token_hash(token)),
+            )
+        return WebSession(
+            str(row["csrf_token"]),
+            bool(row["must_change"]),
+            int(row["account_id"]),
+            str(row["username"]),
+            str(row["display_name"]),
+            str(row["role"]),
+            bool(row["totp_secret"]),
+            int(row["step_up_until"]) if row["step_up_until"] is not None else None,
+        )
 
     async def logout(self, token: str | None) -> None:
         if token:
@@ -236,30 +404,256 @@ class WebAuthService:
         if len(replacement) < 12:
             return False
         rows = await self.database.read(
-            "SELECT password_hash,must_change FROM web_credential WHERE id=1"
+            "SELECT a.id,a.username,a.password_hash,a.must_change FROM web_account a "
+            "JOIN web_session s ON s.account_id=a.id "
+            "WHERE s.token_hash=? AND s.expires_at>? AND a.enabled=1",
+            (_token_hash(token), int(time.time())),
         )
         if not rows:
             return False
-        if bool(rows[0]["must_change"]):
-            sessions = await self.database.read(
-                "SELECT 1 FROM web_session WHERE token_hash=? AND expires_at>?",
-                (_token_hash(token), int(time.time())),
-            )
-            valid = bool(sessions)
-        else:
-            try:
-                valid = self.hasher.verify(rows[0]["password_hash"], current)
-            except VerifyMismatchError:
-                valid = False
+        account = rows[0]
+        valid = bool(account["must_change"]) or self._password_valid(
+            str(account["password_hash"]), current
+        )
         if not valid:
             return False
         now = int(time.time())
+        password_hash = self.hasher.hash(replacement)
         async with self.database.transaction() as transaction:
             await transaction.write(
-                "UPDATE web_credential SET password_hash=?,must_change=0,changed_at=?,"
-                "bootstrap_expires_at=NULL,bootstrap_consumed_at=NULL WHERE id=1",
-                (self.hasher.hash(replacement), now),
+                "UPDATE web_account SET password_hash=?,must_change=0,changed_at=?,"
+                "bootstrap_expires_at=NULL,bootstrap_consumed_at=NULL WHERE id=?",
+                (password_hash, now, account["id"]),
             )
-            await transaction.write("DELETE FROM web_session")
+            if int(account["id"]) == 1:
+                await transaction.write(
+                    "UPDATE web_credential SET password_hash=?,must_change=0,changed_at=?,"
+                    "bootstrap_expires_at=NULL,bootstrap_consumed_at=NULL WHERE id=1",
+                    (password_hash, now),
+                )
+            await transaction.write("DELETE FROM web_session WHERE account_id=?", (account["id"],))
         self._remove_setup_file()
+        await self._audit(
+            str(account["username"]), "auth.password_change", f"account:{account['id']}"
+        )
         return True
+
+    async def accounts(self) -> list[dict[str, object]]:
+        rows = await self.database.read(
+            "SELECT id,username,display_name,role,must_change,enabled,totp_confirmed_at,"
+            "created_at,changed_at,last_login_at,created_by FROM web_account ORDER BY username"
+        )
+        return [
+            {
+                **dict(row),
+                "must_change": bool(row["must_change"]),
+                "enabled": bool(row["enabled"]),
+                "mfa_enabled": row["totp_confirmed_at"] is not None,
+            }
+            for row in rows
+        ]
+
+    async def create_account(
+        self, username: str, display_name: str, role: str, password: str, actor: str
+    ) -> dict[str, object]:
+        clean = _normalize_username(username)
+        label = display_name.strip()
+        if not 1 <= len(label) <= 80:
+            raise ValueError("Display name must be 1-80 characters.")
+        if role not in ROLES:
+            raise ValueError("Unknown account role.")
+        if len(password) < 12:
+            raise ValueError("Initial password must contain at least 12 characters.")
+        now = int(time.time())
+        try:
+            account_id = await self.database.write(
+                "INSERT INTO web_account(username,display_name,role,password_hash,must_change,"
+                "enabled,created_at,created_by) VALUES(?,?,?,?,1,1,?,?)",
+                (clean, label, role, self.hasher.hash(password), now, actor),
+            )
+        except Exception as error:
+            if "UNIQUE" in str(error):
+                raise ValueError("That username is already in use.") from error
+            raise
+        await self._audit(actor, "auth.account_create", f"account:{account_id}", {"role": role})
+        return next(item for item in await self.accounts() if item["id"] == account_id)
+
+    async def update_account(
+        self,
+        account_id: int,
+        *,
+        display_name: str | None,
+        role: str | None,
+        enabled: bool | None,
+        actor: str,
+    ) -> dict[str, object]:
+        rows = await self.database.read("SELECT * FROM web_account WHERE id=?", (account_id,))
+        if not rows:
+            raise ValueError("Account not found.")
+        current = rows[0]
+        new_role = role or str(current["role"])
+        new_enabled = bool(current["enabled"]) if enabled is None else enabled
+        label = str(current["display_name"]) if display_name is None else display_name.strip()
+        if new_role not in ROLES or not 1 <= len(label) <= 80:
+            raise ValueError("Account role or display name is invalid.")
+        removing_admin = current["role"] == "administrator" and (
+            new_role != "administrator" or not new_enabled
+        )
+        if removing_admin:
+            count = await self.database.read(
+                "SELECT COUNT(*) count FROM web_account "
+                "WHERE role='administrator' AND enabled=1 AND id<>?",
+                (account_id,),
+            )
+            if int(count[0]["count"]) == 0:
+                raise ValueError("At least one enabled administrator is required.")
+        await self.database.write(
+            "UPDATE web_account SET display_name=?,role=?,enabled=? WHERE id=?",
+            (label, new_role, int(new_enabled), account_id),
+        )
+        if not new_enabled:
+            await self.database.write("DELETE FROM web_session WHERE account_id=?", (account_id,))
+        await self._audit(
+            actor,
+            "auth.account_update",
+            f"account:{account_id}",
+            {"role": new_role, "enabled": new_enabled},
+        )
+        return next(item for item in await self.accounts() if item["id"] == account_id)
+
+    async def reset_password(self, account_id: int, password: str, actor: str) -> None:
+        if len(password) < 12:
+            raise ValueError("Temporary password must contain at least 12 characters.")
+        rows = await self.database.read(
+            "SELECT username FROM web_account WHERE id=?", (account_id,)
+        )
+        if not rows:
+            raise ValueError("Account not found.")
+        await self.database.write(
+            "UPDATE web_account SET password_hash=?,must_change=1,changed_at=unixepoch(),"
+            "bootstrap_expires_at=NULL,bootstrap_consumed_at=NULL WHERE id=?",
+            (self.hasher.hash(password), account_id),
+        )
+        await self.database.write("DELETE FROM web_session WHERE account_id=?", (account_id,))
+        await self._audit(actor, "auth.password_reset", f"account:{account_id}")
+
+    async def sessions(self, account_id: int, current_token: str) -> list[dict[str, object]]:
+        now = int(time.time())
+        current_hash = _token_hash(current_token)
+        rows = await self.database.read(
+            "SELECT token_hash,source,user_agent,created_at,expires_at,last_seen_at,step_up_until "
+            "FROM web_session WHERE account_id=? AND expires_at>? ORDER BY last_seen_at DESC",
+            (account_id, now),
+        )
+        return [
+            {
+                "id": str(row["token_hash"])[:16],
+                "source": row["source"] or "unknown",
+                "user_agent": row["user_agent"] or "unknown client",
+                "created_at": row["created_at"],
+                "expires_at": row["expires_at"],
+                "last_activity_at": row["last_seen_at"],
+                "step_up_until": row["step_up_until"],
+                "current": hmac.compare_digest(str(row["token_hash"]), current_hash),
+            }
+            for row in rows
+        ]
+
+    async def revoke_session(self, account_id: int, session_id: str, actor: str) -> bool:
+        rows = await self.database.read(
+            "SELECT token_hash FROM web_session WHERE account_id=?", (account_id,)
+        )
+        matches = [
+            str(row["token_hash"]) for row in rows if str(row["token_hash"]).startswith(session_id)
+        ]
+        if len(matches) != 1:
+            return False
+        await self.database.write("DELETE FROM web_session WHERE token_hash=?", (matches[0],))
+        await self._audit(actor, "auth.session_revoke", f"session:{session_id}")
+        return True
+
+    async def revoke_all_sessions(self, account_id: int, actor: str) -> int:
+        rows = await self.database.read(
+            "SELECT COUNT(*) count FROM web_session WHERE account_id=?", (account_id,)
+        )
+        count = int(rows[0]["count"])
+        await self.database.write("DELETE FROM web_session WHERE account_id=?", (account_id,))
+        await self._audit(actor, "auth.sessions_revoke", f"account:{account_id}", {"count": count})
+        return count
+
+    async def begin_mfa(self, account_id: int, username: str) -> dict[str, str]:
+        secret = base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+        await self.database.write(
+            "UPDATE web_account SET totp_pending_secret=? WHERE id=?", (secret, account_id)
+        )
+        label = quote(f"Outpost:{username}")
+        return {
+            "secret": secret,
+            "otpauth_uri": f"otpauth://totp/{label}?secret={secret}&issuer=Outpost&digits=6&period=30",
+        }
+
+    async def confirm_mfa(self, account_id: int, username: str, code: str) -> list[str]:
+        rows = await self.database.read(
+            "SELECT totp_pending_secret FROM web_account WHERE id=?", (account_id,)
+        )
+        secret = str(rows[0]["totp_pending_secret"] or "") if rows else ""
+        if not secret or not self._totp_valid(secret, code, int(time.time())):
+            raise ValueError("The authenticator code is invalid or expired.")
+        codes = [
+            "".join(secrets.choice(RECOVERY_ALPHABET) for _ in range(4))
+            + "-"
+            + "".join(secrets.choice(RECOVERY_ALPHABET) for _ in range(4))
+            + "-"
+            + "".join(secrets.choice(RECOVERY_ALPHABET) for _ in range(4))
+            for _ in range(8)
+        ]
+        hashes = [_token_hash(f"{account_id}:{_normalize_recovery_code(code)}") for code in codes]
+        await self.database.write(
+            "UPDATE web_account SET totp_secret=?,totp_pending_secret=NULL,"
+            "totp_confirmed_at=unixepoch(),recovery_code_hashes=? WHERE id=?",
+            (secret, json.dumps(hashes, separators=(",", ":")), account_id),
+        )
+        await self._audit(username, "auth.mfa_enable", f"account:{account_id}")
+        return codes
+
+    async def disable_mfa(self, account_id: int, username: str) -> None:
+        await self.database.write(
+            "UPDATE web_account SET totp_secret=NULL,totp_pending_secret=NULL,"
+            "totp_confirmed_at=NULL,recovery_code_hashes='[]' WHERE id=?",
+            (account_id,),
+        )
+        await self._audit(username, "auth.mfa_disable", f"account:{account_id}")
+
+    async def step_up(
+        self, token: str, password: str, code: str | None, *, source: str = "step-up"
+    ) -> WebSession | None:
+        session = await self.session(token)
+        if session is None or session.must_change:
+            return None
+        now = int(time.time())
+        failures = await self.database.read(
+            "SELECT COUNT(*) count FROM web_login_attempt WHERE source=? AND username=? "
+            "AND successful=0 AND created_at>?",
+            (source, session.username, now - 900),
+        )
+        if int(failures[0]["count"]) >= 5:
+            return None
+        rows = await self.database.read(
+            "SELECT * FROM web_account WHERE id=?", (session.account_id,)
+        )
+        valid = bool(rows and self._password_valid(str(rows[0]["password_hash"]), password))
+        if valid and rows[0]["totp_secret"]:
+            valid = bool(code and await self._mfa_valid(rows[0], code, now))
+        await self.database.write(
+            "INSERT INTO web_login_attempt(source,successful,created_at,username) VALUES(?,?,?,?)",
+            (source, int(valid), now, session.username),
+        )
+        if not valid:
+            return None
+        until = now + STEP_UP_SECONDS
+        await self.database.write(
+            "UPDATE web_session SET step_up_until=? WHERE token_hash=?",
+            (until, _token_hash(token)),
+        )
+        await self._audit(session.username, "auth.step_up", f"account:{session.account_id}")
+        return WebSession(**{**session.__dict__, "step_up_until": until})

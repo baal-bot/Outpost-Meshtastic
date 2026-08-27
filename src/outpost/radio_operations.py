@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from outpost.clock import Clock
+from outpost.operator_context import current_actor_ref
 from outpost.store import Database
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.models import TrafficClass
@@ -94,7 +95,13 @@ class RadioOperations:
         await self.database.write(
             """
             INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-            VALUES('web','operator',?,?,?,?)
+            VALUES('web',?,?,?,?,?)
             """,
-            (action, target, json.dumps(detail), int(self.clock.now().timestamp())),
+            (
+                current_actor_ref(),
+                action,
+                target,
+                json.dumps(detail),
+                int(self.clock.now().timestamp()),
+            ),
         )

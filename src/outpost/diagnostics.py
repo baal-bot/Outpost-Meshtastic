@@ -79,6 +79,16 @@ def database_secrets(database_path: Path) -> set[str]:
                 for row in connection.execute("SELECT password_hash FROM web_credential")
                 if row[0]
             )
+        if "web_account" in tables:
+            for row in connection.execute(
+                "SELECT password_hash,totp_secret,totp_pending_secret,recovery_code_hashes "
+                "FROM web_account"
+            ):
+                values.update(str(value) for value in row if value)
+                try:
+                    values.update(str(value) for value in json.loads(str(row[3] or "[]")))
+                except (json.JSONDecodeError, TypeError):
+                    pass
         return values
     finally:
         connection.close()

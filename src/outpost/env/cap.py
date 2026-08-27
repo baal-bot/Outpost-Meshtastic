@@ -9,6 +9,7 @@ from typing import Any
 from outpost.clock import Clock
 from outpost.config import EnvConfig
 from outpost.env.weather import NWS_HOST, _request_json
+from outpost.operator_context import current_actor
 from outpost.store import Database
 from outpost.watch import AlertService
 
@@ -406,7 +407,9 @@ class CapAlertService:
         if item["msg_type"] == "Cancel":
             assert previous is not None
             value = await alerts.cancel(
-                int(previous["linked_alert_id"]), f"NWS cancelled {item['event']}", "web:operator"
+                int(previous["linked_alert_id"]),
+                f"NWS cancelled {item['event']}",
+                current_actor(),
             )
             await self.database.write(
                 "UPDATE cap_alert SET review_state='approved',linked_alert_id=?,"
@@ -423,7 +426,7 @@ class CapAlertService:
         value = await alerts.raise_alert(
             "critical" if item["severity"] == "Extreme" else "urgent",
             headline,
-            "web:operator",
+            current_actor(),
             source="cap",
             supersedes_alert_id=(
                 int(previous["linked_alert_id"])

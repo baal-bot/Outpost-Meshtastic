@@ -97,10 +97,10 @@ enforced by a lint rule (doc 14 §6).
   startup, fail-fast on invalid values. Hot-reloadable subset marked in the model.
 - **`store`** — SQLite (WAL). Repository classes per aggregate; no ORM. Raw
   parameterised SQL, migrations as numbered `.sql` files applied at startup. See doc 05.
-- **`security`** — identity resolution, trust levels, authorisation, rate-limiting
-  primitives. Authorisation in v1 is **trust-level based** (six ordered levels, doc 12 §3),
-  not a general role/permission matrix; multi-role web accounts arrive in Phase 6 and map
-  onto the same trust levels. See doc 12.
+- **`security`** — mesh identity resolution, trust levels, authorisation, and rate-limiting
+  primitives. Mesh authorization uses six ordered trust levels (doc 12 §3). Dashboard access uses
+  a separate named-account role boundary; web roles deliberately do not map onto or mutate member
+  trust. See docs 11 and 12.
 - **`events`** — in-process pub/sub (`EventBus`). Typed dataclass events, async handlers,
   fan-out with per-subscriber error isolation. This is how modules talk to each other and
   to the WebSocket hub without importing each other.

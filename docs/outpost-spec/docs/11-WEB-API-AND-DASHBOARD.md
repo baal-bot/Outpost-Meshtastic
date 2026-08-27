@@ -33,8 +33,8 @@ field with a phone on the node's Wi-Fi is a primary scenario during an event.
 
 | Mode | Behaviour |
 |---|---|
-| `password` (default) | Single operator password, Argon2id-hashed, set on first run |
-| `users` | Multiple accounts with roles (Phase 6) |
+| `password` (default) | Named local accounts with Argon2id passwords and roles; the first account is `operator` |
+| `users` | Compatibility name for the named-account mode; no cloud identity dependency |
 | `none` | Only permitted when bound to `127.0.0.1`; **MUST** refuse to start otherwise |
 
 **REQ-API-006** — First run **MUST** generate a short-lived one-time setup token, retain only its
@@ -44,7 +44,16 @@ password, and completion **MUST** invalidate every bootstrap and dashboard sessi
 requires local privileged access.
 
 **REQ-API-007** — Sessions **MUST** be HttpOnly, SameSite=Lax cookies with a configurable
-lifetime (default 12 h), server-side revocable, and invalidated on password change.
+lifetime (default 12 h), server-side revocable individually or per account, attributed to a named
+account, and invalidated on password change.
+
+**REQ-API-007a** — Web accounts **MUST** support Administrator, Operator, and Read-only / wallboard
+roles. Web authority is separate from mesh member trust. The last enabled Administrator **MUST NOT**
+be demoted or disabled.
+
+**REQ-API-007b** — Accounts **MUST** support offline TOTP and one-use recovery codes. Sensitive
+trust, federation-policy, restore, and emergency actions **MUST** require a recent password and,
+when configured, second-factor confirmation.
 
 **REQ-API-008** — All state-changing endpoints **MUST** require a CSRF token or an
 `Authorization: Bearer` API token. Login **MUST** be rate-limited (5 attempts / 15 min per
@@ -72,6 +81,10 @@ POST   /api/v1/auth/login                 # permanent password or active one-tim
 GET    /api/v1/auth/session
 POST   /api/v1/auth/password              # completes setup/change; invalidates every session
 POST   /api/v1/auth/logout
+POST   /api/v1/auth/step-up               # short protected-action confirmation window
+GET/POST/PATCH /api/v1/auth/accounts...   # administrator-only account lifecycle
+GET/DELETE /api/v1/auth/sessions...       # inventory and revocation
+POST/DELETE /api/v1/auth/mfa...           # TOTP enrollment/confirmation/disable
 ```
 
 **System**

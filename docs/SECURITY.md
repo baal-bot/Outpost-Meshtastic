@@ -6,7 +6,9 @@ trusted local service, not an anonymous public web application.
 ## Baseline
 
 - Maintain the OS, Python, Meshtastic firmware, and Outpost revision.
-- Complete the short-lived local setup-token flow and set a permanent dashboard password.
+- Complete the short-lived local setup-token flow, set a permanent dashboard password, and create
+  a named account for each person who operates the node.
+- Enable TOTP for administrator accounts and store their one-use recovery codes offline.
 - Limit port 8080 and `/metrics` to a LAN, VPN, or authenticated TLS proxy.
 - Protect `/etc/outpost`, `/var/lib/outpost`, backups, and radio keys.
 - Retain the dedicated non-login service account installed by the project.
@@ -21,15 +23,40 @@ allowing supported radio/accelerator devices.
 First startup stores a short-lived setup token in a mode-0600 local file and only its Argon2 hash in
 the database. The token never enters normal logs, expires after 60 minutes, and is consumed by its
 first successful login. Setting the permanent password removes every bootstrap and dashboard
-session secret. Local root can recover with `outpost-setup-token reset`. State changes use CSRF
-tokens and login failures are limited by source. `auth.mode: none` works only on loopback and must
-not be placed behind an unauthenticated public proxy.
+session secret. Local root can recover the original `operator` administrator with
+`outpost-setup-token reset`. This invalidates all sessions and clears MFA only for that bootstrap
+account; other named accounts and audit history remain intact.
+
+The Access workspace manages three local web roles:
+
+- **Administrator** can manage accounts and perform database restore in addition to operations.
+- **Operator** can perform day-to-day radio, member, watch, and federation operations but cannot
+  manage accounts or restore a database.
+- **Read-only / wallboard** can view ordinary operational state but cannot mutate it or read
+  private mail detail, audit records, backups, identity exports, or exact member detail.
+
+These web accounts are intentionally separate from Meshtastic member handles and mesh trust. Audit
+records use the signed-in web username, while member-originated actions keep their mesh identity.
+The migrated account is `operator`; create personal accounts rather than sharing it.
+
+Passwords are Argon2-hashed. TOTP uses the standard 30-second, six-digit format and remains usable
+without internet. Enrollment produces eight recovery codes that are displayed once; only their
+hashes are stored, and each is consumed on use. A successful login establishes a 10-minute strong
+authentication window. After it expires, trust changes, federation trust/policy changes, restore,
+emergency escalation, and other protected actions require password confirmation plus TOTP or a
+recovery code when enabled. The original action is retried only after confirmation.
+
+Sessions have an absolute configured expiry and record creation time, last activity, source, and
+client description. Operators can revoke one session or all sessions from Access. Password reset,
+password change, and disabling an account revoke that account's sessions. State changes use CSRF
+tokens and login failures are limited by source and username. `auth.mode: none` works only on
+loopback and must not be placed behind an unauthenticated public proxy.
 
 `sudo outpost-diagnostics --output /path/to/outpost-diagnostics.zip` creates a mode-0600 support
 bundle containing a bounded journal excerpt and non-secret configuration summary. The exporter
-redacts legacy bootstrap passwords, current setup values, password hashes, session cookies, bearer
-tokens, and CSRF values. Review any bundle before sharing because ordinary operational messages can
-still contain community-sensitive information.
+redacts legacy bootstrap passwords, current setup values, account password hashes, TOTP secrets,
+recovery-code hashes, session cookies, bearer tokens, and CSRF values. Review any bundle before
+sharing because ordinary operational messages can still contain community-sensitive information.
 
 The audit API and dashboard redact credential-shaped keys and assignments before displaying or
 copying structured detail. This is a defense in depth, not permission to write secrets into audit

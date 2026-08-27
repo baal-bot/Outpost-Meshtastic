@@ -169,6 +169,15 @@ SQL injection (REQ-DATA-034), and XSS (SPA escapes by default; no `dangerouslySe
 **REQ-SEC-026** — Dependency scanning (`pip-audit`) **MUST** run in CI and **MUST** fail the
 build on a known high-severity vulnerability.
 
+**REQ-SEC-026a** — A web operator account and a mesh member identity are distinct security
+principals. Audit rows for dashboard actions **MUST** name the authenticated web account; granting
+mesh trust `operator` **MUST NOT** grant dashboard access, and creating a web Operator **MUST NOT**
+change mesh trust.
+
+**REQ-SEC-026b** — TOTP recovery values **MUST** be suitable for offline field transcription,
+displayed only at issuance, stored only as hashes, and consumed atomically on use. Diagnostic
+bundles **MUST** redact account password hashes, TOTP secrets, and recovery-code hashes.
+
 ---
 
 ## 7. What encryption does and does not give you

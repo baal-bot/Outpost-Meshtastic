@@ -87,9 +87,10 @@ Discovery never grants trust. See [Federation](FEDERATION.md).
 
 ### `web`
 
-Password authentication is the expected LAN mode. `auth.mode: none` is valid only on loopback. Do
-not expose port 8080 directly to the internet; use an authenticated VPN or carefully configured TLS
-proxy for remote administration.
+Named password authentication is the expected LAN mode; account roles, MFA, and sessions are
+managed in the Access workspace rather than YAML. `auth.session_hours` sets the absolute browser
+session lifetime. `auth.mode: none` is valid only on loopback. Do not expose port 8080 directly to
+the internet; use an authenticated VPN or carefully configured TLS proxy for remote administration.
 
 ### `store`
 

@@ -20,6 +20,21 @@ curl -fsS http://127.0.0.1:8080/api/v1/health
 Prometheus metrics are mounted at `/metrics`. Restrict them to trusted networks because labels and
 traffic characteristics can reveal operational patterns.
 
+## Operator access and shift changes
+
+Use one named account per human operator. Administrators should review **Access** periodically for
+disabled staff, unexpected source addresses or clients, stale sessions, and accounts without MFA.
+Do not use mesh member handles as shared dashboard credentials; mesh trust and web authority are
+separate controls.
+
+For a shift handoff, create or enable the incoming operator's own account and have them change the
+temporary password. When access ends, disable that account; doing so revokes all of its sessions.
+Use **Sign out everywhere** after a lost terminal, and reset the affected password. Keep recovery
+codes offline and cross them off after use. If every dashboard credential is lost, a local root
+operator can run `sudo outpost-setup-token reset` to recover the original `operator` administrator;
+this invalidates dashboard sessions and clears that bootstrap account's MFA enrollment. Other named
+accounts, their MFA credentials, and audit history are preserved.
+
 Create a credential-redacted diagnostic archive with:
 
 ```sh

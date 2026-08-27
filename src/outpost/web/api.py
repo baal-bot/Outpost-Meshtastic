@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -24,24 +25,58 @@ from outpost.env import (
     WeatherService,
 )
 from outpost.fed import FederationPeerService
+from outpost.operator_context import (
+    current_actor,
+    current_actor_ref,
+    reset_current_actor,
+    set_current_actor,
+)
 from outpost.radio_operations import RadioOperations
 from outpost.store import Database
 from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.store.maintenance import MaintenanceService
 from outpost.watch import AlertService, CheckinService, IncidentService
-from outpost.web.auth import WebAuthService
+from outpost.web.auth import MfaChallenge, WebAuthService
 from outpost.web.member_triage import MemberTriageError, MemberTriageService
 from outpost.web.operator_inbox import OperatorInboxService
 from outpost.web.settings import RuntimeSettings
 
 
 class LoginBody(BaseModel):
+    username: str = Field(default="operator", min_length=1, max_length=32)
     password: str
+    code: str | None = Field(default=None, max_length=32)
 
 
 class PasswordBody(BaseModel):
     current_password: str
     new_password: str
+
+
+class StepUpBody(BaseModel):
+    password: str
+    code: str | None = Field(default=None, max_length=32)
+
+
+class AccountCreateBody(BaseModel):
+    username: str = Field(min_length=2, max_length=32)
+    display_name: str = Field(min_length=1, max_length=80)
+    role: Literal["administrator", "operator", "viewer"]
+    initial_password: str = Field(min_length=12, max_length=512)
+
+
+class AccountPatchBody(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+    role: Literal["administrator", "operator", "viewer"] | None = None
+    enabled: bool | None = None
+
+
+class AccountPasswordBody(BaseModel):
+    temporary_password: str = Field(min_length=12, max_length=512)
+
+
+class MfaConfirmBody(BaseModel):
+    code: str = Field(min_length=6, max_length=32)
 
 
 class NodeSettingsBody(BaseModel):
@@ -375,6 +410,35 @@ def create_web_app(
             None,
         )
 
+    def step_up_path(method: str, path: str) -> bool:
+        if method in {"GET", "HEAD", "OPTIONS"}:
+            return False
+        return (
+            path.startswith("/api/v1/auth/accounts")
+            or path.startswith("/api/v1/auth/mfa")
+            or path.startswith("/api/v1/federation/peers")
+            or path.startswith("/api/v1/federation/mqtt")
+            or path.startswith("/api/v1/federation/origins")
+            or path.startswith("/api/v1/config/watch")
+            or path.startswith("/api/v1/alerts")
+            or path.startswith("/api/v1/environment/cap")
+            or path.startswith("/api/v1/environment/earthquakes")
+            or (path.startswith("/api/v1/backups/") and path.endswith("/restore"))
+            or (path.startswith("/api/v1/members/") and method in {"PATCH", "DELETE"})
+        )
+
+    def viewer_private_path(path: str) -> bool:
+        return (
+            path.startswith("/api/v1/auth/accounts")
+            or path.startswith("/api/v1/auth/sessions")
+            or path.startswith("/api/v1/audit")
+            or path.startswith("/api/v1/backups")
+            or path.startswith("/api/v1/mail/")
+            or path.startswith("/api/v1/members/export")
+            or re.fullmatch(r"/api/v1/members/\d+", path) is not None
+            or path.endswith("/csv")
+        )
+
     @app.middleware("http")
     async def security_headers(request: Any, call_next: Any) -> Any:
         response = await call_next(request)
@@ -387,6 +451,8 @@ def create_web_app(
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         if request.url.path.endswith((".html", ".js", ".css")) or request.url.path == "/":
             response.headers["Cache-Control"] = "no-cache"
+        if request.url.path.startswith("/api/v1/auth/"):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.middleware("http")
@@ -405,6 +471,7 @@ def create_web_app(
                     status_code=401,
                 )
             auth_path = path.startswith("/api/v1/auth/")
+            request.state.web_session = session
             if session.must_change and not auth_path:
                 return JSONResponse(
                     {
@@ -421,6 +488,62 @@ def create_web_app(
                         {"error": {"code": "csrf", "message": "Invalid CSRF token."}},
                         status_code=403,
                     )
+            self_service = path in {
+                "/api/v1/auth/logout",
+                "/api/v1/auth/password",
+                "/api/v1/auth/step-up",
+                "/api/v1/auth/mfa/begin",
+                "/api/v1/auth/mfa/confirm",
+                "/api/v1/auth/mfa",
+                "/api/v1/auth/sessions",
+            } or path.startswith("/api/v1/auth/sessions/")
+            if session.role == "viewer" and (
+                (request.method not in {"GET", "HEAD", "OPTIONS"} and not self_service)
+                or (
+                    request.method in {"GET", "HEAD"}
+                    and viewer_private_path(path)
+                    and not self_service
+                )
+            ):
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "read_only",
+                            "message": (
+                                "This read-only wallboard account cannot access that operation."
+                            ),
+                        }
+                    },
+                    status_code=403,
+                )
+            admin_only = path.startswith("/api/v1/auth/accounts") or (
+                request.method == "POST"
+                and path.startswith("/api/v1/backups/")
+                and path.endswith("/restore")
+            )
+            if admin_only and session.role != "administrator":
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "administrator_required",
+                            "message": "An administrator account is required.",
+                        }
+                    },
+                    status_code=403,
+                )
+            if step_up_path(request.method, path) and (
+                session.step_up_until is None or session.step_up_until <= int(time.time())
+            ):
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "step_up_required",
+                            "message": "Confirm your operator credentials to continue.",
+                        },
+                        "mfa_required": session.mfa_enabled,
+                    },
+                    status_code=428,
+                )
         module = api_module(path)
         if module is not None and not effective_modules().get(module, True):
             return JSONResponse(
@@ -440,7 +563,14 @@ def create_web_app(
                 },
                 status_code=409,
             )
-        return await call_next(request)
+        actor_token = None
+        if auth is not None and hasattr(request.state, "web_session"):
+            actor_token = set_current_actor(f"web:{request.state.web_session.username}")
+        try:
+            return await call_next(request)
+        finally:
+            if actor_token is not None:
+                reset_current_actor(actor_token)
 
     if restore_coordinator is not None:
 
@@ -525,11 +655,21 @@ def create_web_app(
             body: LoginBody, request: Request, response: Response
         ) -> dict[str, Any] | Response:
             source = request.client.host if request.client else "unknown"
-            result = await auth.login(body.password, source)
+            result = await auth.login(
+                body.password,
+                source,
+                username=body.username,
+                code=body.code,
+                user_agent=request.headers.get("user-agent"),
+            )
             if result is None:
                 return JSONResponse(
                     {"error": {"code": "invalid_login", "message": "Invalid credentials."}},
                     status_code=401,
+                )
+            if isinstance(result, MfaChallenge):
+                return JSONResponse(
+                    {"mfa_required": True, "username": result.username}, status_code=202
                 )
             token, session = result
             response.set_cookie(
@@ -540,13 +680,156 @@ def create_web_app(
                 secure=request.url.scheme == "https",
                 max_age=auth.session_seconds,
             )
-            return {"csrf_token": session.csrf_token, "must_change": session.must_change}
+            return session.__dict__
 
         @app.get("/api/v1/auth/session")
         async def auth_session(request: Request) -> dict[str, Any]:
             session = await auth.session(request.cookies.get("outpost_session"))
             assert session is not None
             return {"authenticated": True, **session.__dict__}
+
+        @app.post("/api/v1/auth/step-up", response_model=None)
+        async def auth_step_up(body: StepUpBody, request: Request) -> dict[str, Any] | Response:
+            session = await auth.step_up(
+                request.cookies.get("outpost_session", ""),
+                body.password,
+                body.code,
+                source=request.client.host if request.client else "unknown",
+            )
+            if session is None:
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "step_up_failed",
+                            "message": "Password or verification code is invalid.",
+                        }
+                    },
+                    status_code=401,
+                )
+            return {"ok": True, "step_up_until": session.step_up_until}
+
+        @app.get("/api/v1/auth/accounts")
+        async def auth_accounts() -> dict[str, Any]:
+            items = await auth.accounts()
+            return {"items": items, "count": len(items)}
+
+        @app.post("/api/v1/auth/accounts", response_model=None)
+        async def auth_account_create(
+            body: AccountCreateBody, request: Request
+        ) -> dict[str, object] | Response:
+            session = request.state.web_session
+            try:
+                return await auth.create_account(
+                    body.username,
+                    body.display_name,
+                    body.role,
+                    body.initial_password,
+                    session.username,
+                )
+            except ValueError as error:
+                return JSONResponse(
+                    {"error": {"code": "account_invalid", "message": str(error)}},
+                    status_code=422,
+                )
+
+        @app.patch("/api/v1/auth/accounts/{account_id}", response_model=None)
+        async def auth_account_update(
+            account_id: int, body: AccountPatchBody, request: Request
+        ) -> dict[str, object] | Response:
+            try:
+                return await auth.update_account(
+                    account_id,
+                    display_name=body.display_name,
+                    role=body.role,
+                    enabled=body.enabled,
+                    actor=request.state.web_session.username,
+                )
+            except ValueError as error:
+                return JSONResponse(
+                    {"error": {"code": "account_invalid", "message": str(error)}},
+                    status_code=422,
+                )
+
+        @app.post("/api/v1/auth/accounts/{account_id}/password", response_model=None)
+        async def auth_account_password(
+            account_id: int, body: AccountPasswordBody, request: Request
+        ) -> dict[str, bool] | Response:
+            try:
+                await auth.reset_password(
+                    account_id,
+                    body.temporary_password,
+                    request.state.web_session.username,
+                )
+            except ValueError as error:
+                return JSONResponse(
+                    {"error": {"code": "account_invalid", "message": str(error)}},
+                    status_code=422,
+                )
+            return {"ok": True}
+
+        @app.get("/api/v1/auth/sessions")
+        async def auth_sessions(request: Request) -> dict[str, Any]:
+            session = request.state.web_session
+            items = await auth.sessions(
+                session.account_id, request.cookies.get("outpost_session", "")
+            )
+            return {"items": items, "count": len(items)}
+
+        @app.delete("/api/v1/auth/sessions/{session_id}", response_model=None)
+        async def auth_session_revoke(
+            session_id: str, request: Request, response: Response
+        ) -> dict[str, bool] | Response:
+            session = request.state.web_session
+            current = next(
+                (
+                    item
+                    for item in await auth.sessions(
+                        session.account_id, request.cookies.get("outpost_session", "")
+                    )
+                    if item["id"] == session_id
+                ),
+                None,
+            )
+            if not await auth.revoke_session(session.account_id, session_id, session.username):
+                return JSONResponse(
+                    {"error": {"code": "not_found", "message": "Session not found."}},
+                    status_code=404,
+                )
+            if current and current["current"]:
+                response.delete_cookie("outpost_session")
+            return {"ok": True}
+
+        @app.delete("/api/v1/auth/sessions")
+        async def auth_sessions_revoke(request: Request, response: Response) -> dict[str, int]:
+            session = request.state.web_session
+            count = await auth.revoke_all_sessions(session.account_id, session.username)
+            response.delete_cookie("outpost_session")
+            return {"revoked": count}
+
+        @app.post("/api/v1/auth/mfa/begin")
+        async def auth_mfa_begin(request: Request) -> dict[str, str]:
+            session = request.state.web_session
+            return await auth.begin_mfa(session.account_id, session.username)
+
+        @app.post("/api/v1/auth/mfa/confirm", response_model=None)
+        async def auth_mfa_confirm(
+            body: MfaConfirmBody, request: Request
+        ) -> dict[str, object] | Response:
+            session = request.state.web_session
+            try:
+                codes = await auth.confirm_mfa(session.account_id, session.username, body.code)
+            except ValueError as error:
+                return JSONResponse(
+                    {"error": {"code": "mfa_invalid", "message": str(error)}},
+                    status_code=422,
+                )
+            return {"ok": True, "recovery_codes": codes}
+
+        @app.delete("/api/v1/auth/mfa")
+        async def auth_mfa_disable(request: Request) -> dict[str, bool]:
+            session = request.state.web_session
+            await auth.disable_mfa(session.account_id, session.username)
+            return {"ok": True}
 
         @app.post("/api/v1/auth/logout")
         async def logout(request: Request, response: Response) -> dict[str, bool]:
@@ -650,8 +933,8 @@ def create_web_app(
             if database is not None:
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','federation.peer_state',?,?,unixepoch())",
-                    (f"fed_peer:{peer.id}", body.state),
+                    "VALUES('web',?,'federation.peer_state',?,?,unixepoch())",
+                    (current_actor_ref(), f"fed_peer:{peer.id}", body.state),
                 )
             return peer.__dict__
 
@@ -668,8 +951,8 @@ def create_web_app(
             if database is not None:
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','federation.peer_forget',?,?,unixepoch())",
-                    (f"fed_peer:{peer.mesh_id}", peer.node_name),
+                    "VALUES('web',?,'federation.peer_forget',?,?,unixepoch())",
+                    (current_actor_ref(), f"fed_peer:{peer.mesh_id}", peer.node_name),
                 )
             return {"ok": True}
 
@@ -768,15 +1051,15 @@ def create_web_app(
                 await database.write(
                     "INSERT INTO fed_peer_successor(old_mesh_id,successor_peer_id,"
                     "old_node_name,adopted_at,adopted_by) VALUES(?,?,?,unixepoch(),"
-                    "'web:operator') ON CONFLICT(old_mesh_id) DO UPDATE SET "
+                    "?) ON CONFLICT(old_mesh_id) DO UPDATE SET "
                     "successor_peer_id=excluded.successor_peer_id,old_node_name=excluded.old_node_name,"
                     "adopted_at=excluded.adopted_at,adopted_by=excluded.adopted_by",
-                    (body.old_mesh_id.lower(), peer.id, body.old_node_name),
+                    (body.old_mesh_id.lower(), peer.id, body.old_node_name, current_actor()),
                 )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','federation.origin_adopt',?,?,unixepoch())",
-                    (f"fed_peer:{peer.id}", body.old_mesh_id.lower()),
+                    "VALUES('web',?,'federation.origin_adopt',?,?,unixepoch())",
+                    (current_actor_ref(), f"fed_peer:{peer.id}", body.old_mesh_id.lower()),
                 )
                 return {
                     "ok": True,
@@ -806,7 +1089,7 @@ def create_web_app(
                     mesh_id,
                     **values,
                     policy_review_at=int(review_at.timestamp()) if review_at else None,
-                    applied_by="web:operator",
+                    applied_by=current_actor(),
                 )
             except ValueError as error:
                 return JSONResponse(
@@ -1017,8 +1300,8 @@ def create_web_app(
                     return {"state": "imported", "stream": stream}
                 await database.write(
                     "UPDATE fed_inbox_item SET state='rejected',reviewed_at=unixepoch(),"
-                    "reviewed_by='web:operator',rejection_reason=? WHERE id=?",
-                    (body.reason, item_id),
+                    "reviewed_by=?,rejection_reason=? WHERE id=?",
+                    (current_actor(), body.reason, item_id),
                 )
                 return {"state": "rejected"}
 
@@ -1381,8 +1664,9 @@ def create_web_app(
                 await database.write(
                     """
                     INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                    VALUES('web','operator','radio.reconnect','radio',NULL,unixepoch())
-                    """
+                    VALUES('web',?,'radio.reconnect','radio',NULL,unixepoch())
+                    """,
+                    (current_actor_ref(),),
                 )
                 return {"status": "reconnecting"}
 
@@ -1398,9 +1682,9 @@ def create_web_app(
                 await database.write(
                     """
                     INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                    VALUES('web','operator','backup.create',?,NULL,unixepoch())
+                    VALUES('web',?,'backup.create',?,NULL,unixepoch())
                     """,
-                    (path.name,),
+                    (current_actor_ref(), path.name),
                 )
                 return {"backup": backups.list()[0]}
 
@@ -1475,7 +1759,7 @@ def create_web_app(
                         status_code=422,
                     )
                 try:
-                    result = await maintenance.run(actor_kind="web", actor_ref="operator")
+                    result = await maintenance.run(actor_kind="web", actor_ref=current_actor_ref())
                 except RuntimeError as error:
                     return JSONResponse(
                         {"error": {"code": "maintenance_busy", "message": str(error)}},
@@ -1602,7 +1886,7 @@ def create_web_app(
             async def incident_create(body: IncidentCreateBody) -> dict[str, Any] | Response:
                 try:
                     created, similar = await incidents.create(
-                        body.text, None, force=body.force, operator_label="web:operator"
+                        body.text, None, force=body.force, operator_label=current_actor()
                     )
                 except ValueError as error:
                     return JSONResponse(
@@ -1614,8 +1898,8 @@ def create_web_app(
                 assert created is not None
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','incident.create',?,?,unixepoch())",
-                    (f"incident:{created.id}", created.title),
+                    "VALUES('web',?,'incident.create',?,?,unixepoch())",
+                    (current_actor_ref(), f"incident:{created.id}", created.title),
                 )
                 return created.json()
 
@@ -1650,9 +1934,8 @@ def create_web_app(
                     assignments.append("status=?")
                     params.append(body.status)
                     if body.status in {"resolved", "false_alarm"}:
-                        assignments.extend(
-                            ["resolved_at=unixepoch()", "resolved_by='web:operator'"]
-                        )
+                        assignments.extend(["resolved_at=unixepoch()", "resolved_by=?"])
+                        params.append(current_actor())
                 if body.severity:
                     assignments.append("severity=?")
                     params.append(body.severity)
@@ -1667,8 +1950,8 @@ def create_web_app(
                 )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','incident.update',?,?,unixepoch())",
-                    (f"incident:{incident_id}", ",".join(changes)),
+                    "VALUES('web',?,'incident.update',?,?,unixepoch())",
+                    (current_actor_ref(), f"incident:{incident_id}", ",".join(changes)),
                 )
                 updated = await incidents.by_id(incident_id)
                 assert updated is not None
@@ -1679,7 +1962,9 @@ def create_web_app(
                 incident_id: int, body: IncidentUpdateBody
             ) -> dict[str, Any] | Response:
                 try:
-                    value = await incidents.operator_update(incident_id, body.kind, body.note)
+                    value = await incidents.operator_update(
+                        incident_id, body.kind, body.note, actor=current_actor()
+                    )
                 except ValueError as error:
                     return JSONResponse(
                         {"error": {"code": "invalid_update", "message": str(error)}},
@@ -1687,8 +1972,9 @@ def create_web_app(
                     )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator',?,?,?,unixepoch())",
+                    "VALUES('web',?,?,?, ?,unixepoch())",
                     (
+                        current_actor_ref(),
                         f"incident.{body.kind}",
                         f"incident:{incident_id}",
                         body.note[:500] or None,
@@ -1712,7 +1998,7 @@ def create_web_app(
                     value = await alerts.raise_alert(
                         body.severity,
                         body.headline,
-                        "web:operator",
+                        current_actor(),
                         incident_ref=body.incident_ref,
                         channels=body.channels,
                         source="incident" if body.incident_ref else "operator",
@@ -1727,8 +2013,8 @@ def create_web_app(
                     )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','alert.raise',?,?,unixepoch())",
-                    (f"alert:{value.id}", value.headline),
+                    "VALUES('web',?,'alert.raise',?,?,unixepoch())",
+                    (current_actor_ref(), f"alert:{value.id}", value.headline),
                 )
                 return value.json()
 
@@ -1737,7 +2023,7 @@ def create_web_app(
                 alert_id: int, body: AlertCancelBody
             ) -> dict[str, Any] | Response:
                 try:
-                    value = await alerts.cancel(alert_id, body.resolution, "web:operator")
+                    value = await alerts.cancel(alert_id, body.resolution, current_actor())
                 except ValueError as error:
                     return JSONResponse(
                         {"error": {"code": "invalid_alert", "message": str(error)}},
@@ -1745,8 +2031,8 @@ def create_web_app(
                     )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','alert.cancel',?,?,unixepoch())",
-                    (f"alert:{value.id}", body.resolution[:160]),
+                    "VALUES('web',?,'alert.cancel',?,?,unixepoch())",
+                    (current_actor_ref(), f"alert:{value.id}", body.resolution[:160]),
                 )
                 return await alerts.operational_json(value)
 
@@ -1761,8 +2047,8 @@ def create_web_app(
                     )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,created_at) "
-                    "VALUES('web','operator','alert.escalation_halt',?,unixepoch())",
-                    (f"alert:{value.id}",),
+                    "VALUES('web',?,'alert.escalation_halt',?,unixepoch())",
+                    (current_actor_ref(), f"alert:{value.id}"),
                 )
                 return await alerts.operational_json(value)
 
@@ -1822,8 +2108,8 @@ def create_web_app(
                         )
                     await database.write(
                         "INSERT INTO audit_log(actor_kind,actor_ref,action,target,created_at) "
-                        "VALUES('web','operator','cap.approve',?,unixepoch())",
-                        (f"cap:{cap_id}",),
+                        "VALUES('web',?,'cap.approve',?,unixepoch())",
+                        (current_actor_ref(), f"cap:{cap_id}"),
                     )
                     return value
 
@@ -1852,7 +2138,9 @@ def create_web_app(
             @app.post("/api/v1/events", response_model=None)
             async def event_create(body: EventCreateBody) -> dict[str, Any] | Response:
                 try:
-                    value = await checkins.open_event(body.name, body.roster_policy, "web:operator")
+                    value = await checkins.open_event(
+                        body.name, body.roster_policy, current_actor()
+                    )
                 except ValueError as error:
                     return JSONResponse(
                         {"error": {"code": "invalid_event", "message": str(error)}},
@@ -1860,8 +2148,8 @@ def create_web_app(
                     )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','event.open',?,?,unixepoch())",
-                    (f"event:{value.id}", value.name),
+                    "VALUES('web',?,'event.open',?,?,unixepoch())",
+                    (current_actor_ref(), f"event:{value.id}", value.name),
                 )
                 return value.json()
 
@@ -1876,8 +2164,8 @@ def create_web_app(
                     )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','event.close',?,?,unixepoch())",
-                    (f"event:{value.id}", value.name),
+                    "VALUES('web',?,'event.close',?,?,unixepoch())",
+                    (current_actor_ref(), f"event:{value.id}", value.name),
                 )
                 return value.json()
 
@@ -1956,8 +2244,12 @@ def create_web_app(
                     )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','event.solicit',?,?,unixepoch())",
-                    (f"event:{event_id}", f"recipients:{result['recipient_count']}"),
+                    "VALUES('web',?,'event.solicit',?,?,unixepoch())",
+                    (
+                        current_actor_ref(),
+                        f"event:{event_id}",
+                        f"recipients:{result['recipient_count']}",
+                    ),
                 )
                 return result
 
@@ -2016,8 +2308,12 @@ def create_web_app(
                     )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','federation.board_policy',?,?,unixepoch())",
-                    (f"board:{board_id}", json.dumps({"slug": slug, "enabled": enabled})),
+                    "VALUES('web',?,'federation.board_policy',?,?,unixepoch())",
+                    (
+                        current_actor_ref(),
+                        f"board:{board_id}",
+                        json.dumps({"slug": slug, "enabled": enabled}),
+                    ),
                 )
 
             @app.post("/api/v1/boards", response_model=None)
@@ -2316,8 +2612,8 @@ def create_web_app(
                 )
                 await transaction.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','member.position_delete',?,?,unixepoch())",
-                    (row["mesh_id"], detail),
+                    "VALUES('web',?,'member.position_delete',?,?,unixepoch())",
+                    (current_actor_ref(), row["mesh_id"], detail),
                 )
             return {"deleted": True}
 
@@ -2352,8 +2648,9 @@ def create_web_app(
                 await transaction.write("DELETE FROM member_position WHERE expires_at<=?", (now,))
                 await transaction.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web','operator','member.position_purge','member_position',?,?)",
+                    "VALUES('web',?,'member.position_purge','member_position',?,?)",
                     (
+                        current_actor_ref(),
                         f"deleted={count};pending_deleted={pending_count};"
                         f"expired_at_or_before={now}",
                         now,
@@ -2394,7 +2691,7 @@ def create_web_app(
         async def member_export(ids: str = Query(min_length=1, max_length=1400)) -> Response:
             try:
                 member_ids = [int(value) for value in ids.split(",")]
-                content, count = await member_triage.export(member_ids)
+                content, count = await member_triage.export(member_ids, actor=current_actor())
             except (ValueError, MemberTriageError) as error:
                 code = error.code if isinstance(error, MemberTriageError) else "invalid_selection"
                 return JSONResponse(
@@ -2412,7 +2709,9 @@ def create_web_app(
         @app.post("/api/v1/members/bulk", response_model=None)
         async def member_bulk(body: MemberBulkBody) -> dict[str, Any] | Response:
             try:
-                return await member_triage.bulk(body.member_ids, body.action, body.reason)
+                return await member_triage.bulk(
+                    body.member_ids, body.action, body.reason, actor=current_actor()
+                )
             except MemberTriageError as error:
                 return JSONResponse(
                     {"error": {"code": error.code, "message": str(error)}}, status_code=422
@@ -2446,7 +2745,9 @@ def create_web_app(
         @app.post("/api/v1/members/{member_id}/state", response_model=None)
         async def member_state(member_id: int, body: MemberStateBody) -> dict[str, Any] | Response:
             try:
-                return await member_triage.set_state(member_id, body.action, body.reason)
+                return await member_triage.set_state(
+                    member_id, body.action, body.reason, actor=current_actor()
+                )
             except MemberTriageError as error:
                 status = 404 if error.code == "not_found" else 422
                 return JSONResponse(
@@ -2604,8 +2905,9 @@ def create_web_app(
                 )
             await database.write(
                 "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web','operator','mail.conversation.reply',?,?,unixepoch())",
+                "VALUES('web',?,'mail.conversation.reply',?,?,unixepoch())",
                 (
+                    current_actor_ref(),
                     f"conversation:{conversation_key}",
                     json.dumps(
                         {
@@ -2639,9 +2941,9 @@ def create_web_app(
             await database.write(
                 """
                 INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web','operator','mail.view',?,NULL,unixepoch())
+                VALUES('web',?,'mail.view',?,NULL,unixepoch())
                 """,
-                (f"mail:{mail_id}",),
+                (current_actor_ref(), f"mail:{mail_id}"),
             )
             return JSONResponse(item)
 
@@ -2692,6 +2994,7 @@ def create_web_app(
                     notes=body.notes,
                     notes_supplied=notes_supplied,
                     reason=body.reason,
+                    actor=current_actor(),
                 )
             except MemberTriageError as error:
                 status = 404 if error.code == "not_found" else 422
@@ -2713,7 +3016,7 @@ def create_web_app(
             row = rows[0]
             await database.write(
                 "UPDATE post SET hidden=?,hidden_by=?,hidden_reason=? WHERE id=?",
-                (int(body.hidden), "web:operator", body.reason[:160], post_id),
+                (int(body.hidden), current_actor(), body.reason[:160], post_id),
             )
             if row["seq"] == 1:
                 await database.write(
@@ -2723,9 +3026,10 @@ def create_web_app(
             await database.write(
                 """
                 INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web','operator',?,?,?,unixepoch())
+                VALUES('web',?,?,?, ?,unixepoch())
                 """,
                 (
+                    current_actor_ref(),
                     "bbs.hide" if body.hidden else "bbs.unhide",
                     f"post:{post_id}",
                     body.reason[:160],

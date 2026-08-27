@@ -40,7 +40,8 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | Domain | Tables | Policy |
 |---|---|---|
 | System/security | `schema_version`, `runtime_setting` | Preserve; migration evidence and current settings are naturally bounded. |
-| System/security | `web_credential` | Preserve and protect; one current credential record. |
+| System/security | `web_credential` | Preserve and protect as the legacy local-recovery bridge. |
+| System/security | `web_account` | Preserve and protect named identities, roles, password/TOTP hashes, and audit continuity. |
 | System/security | `web_session` | Expire at its stored deadline. |
 | System/security | `web_login_attempt` | Retain for `authentication_days`. |
 | System/security | `message_log` | Compact by age and absolute row ceiling. |

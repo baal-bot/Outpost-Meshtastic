@@ -225,7 +225,8 @@ function openApplicationDialog(options) {
   dialogParts.error.textContent = "";
   const field = options.multiline ? dialogParts.textarea : dialogParts.input;
   field.value = options.defaultValue || "";
-  field.autocomplete = "off";
+  field.type = options.type || "text";
+  field.autocomplete = options.autocomplete || "off";
   return new Promise(resolve => {
     dialogState = {...options, resolve};
     applicationDialog.showModal();

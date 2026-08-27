@@ -83,7 +83,8 @@ sudo journalctl -u outpost -n 100 --no-pager
 
 First startup creates a mode-0600 setup token beside the database. It expires after 60 minutes and
 is never written to the service journal. Retrieve it through local root access, open
-`http://<host>:8080/`, and choose a permanent password:
+`http://<host>:8080/`, leave the initial account name as `operator`, and choose a permanent
+password:
 
 ```sh
 sudo outpost-setup-token show
@@ -96,6 +97,13 @@ issue a replacement locally; this also revokes existing dashboard sessions:
 ```sh
 sudo outpost-setup-token reset
 ```
+
+The local reset restores the original `operator` as an Administrator and clears that account's MFA
+enrollment. It preserves other named accounts and audit history.
+
+After the clean sign-in, open **Access** to create personal named accounts and enroll an
+authenticator. Store the recovery codes outside the Pi. Keep at least one enabled Administrator;
+Outpost prevents disabling or demoting the last one.
 
 ## Verify
 
