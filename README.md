@@ -67,8 +67,9 @@ Read the [architecture guide](docs/ARCHITECTURE.md) for component and data-flow 
 - Meshtastic-compatible radio over USB serial, TCP, or BLE
 - Storage for the database, backups, and optional offline map tiles
 
-Serial is recommended for a fixed installation. BLE is best-effort. RTL-SDR/SAME support is
-optional and remains hardware-gated.
+Serial is recommended for a fixed installation. BLE is best-effort. Optional RTL-SDR/SAME support
+is receive-only, review-gated, and validated on Raspberry Pi hardware; local antenna/transmitter
+coverage still determines field reliability.
 
 ## Install
 
@@ -79,9 +80,10 @@ sudo ./deploy/install.sh
 systemctl status outpost
 ```
 
-The installer creates a restricted service account, installs into `/opt/outpost/venv`, creates
-`/etc/outpost/config.yaml` from the public template on first install, and starts a hardened systemd
-service. Edit the node identity and radio configuration, then restart:
+The installer creates a restricted service account, stages versioned releases under
+`/opt/outpost/releases`, creates `/etc/outpost/config.yaml` from the public template on first
+install, and starts a hardened systemd service. Edit the node identity and radio configuration,
+then restart:
 
 ```sh
 sudoedit /etc/outpost/config.yaml

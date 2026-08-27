@@ -103,6 +103,7 @@ class AlertService:
         lon: float | None = None,
         radius_km: float = 1.0,
         supersedes_alert_id: int | None = None,
+        expires_at: int | None = None,
     ) -> Alert:
         if severity not in {"caution", "urgent", "critical"}:
             raise ValueError("Alert severity must be caution, urgent, or critical.")
@@ -146,6 +147,9 @@ class AlertService:
             if previous is None or previous.cancelled_at is not None:
                 raise ValueError("Superseded alert is not active.")
         now = int(self.clock.now().timestamp())
+        alert_expires_at = expires_at if expires_at is not None else now + 6 * 3600
+        if alert_expires_at <= now:
+            raise ValueError("Alert expiry must be in the future.")
         ack_required = policy.ack_threshold
         alert_id = await self.database.write(
             """INSERT INTO alert(uid,incident_id,severity,headline,source,channels,raised_by,
@@ -161,7 +165,7 @@ class AlertService:
                 raised_by,
                 now,
                 now,
-                now + 6 * 3600,
+                alert_expires_at,
                 0,
                 now,
                 ack_required,

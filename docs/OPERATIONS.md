@@ -92,6 +92,30 @@ Review welfare recipients before sending; only actual members should be eligible
 professional dispatch. Close test events. For alerts, verify severity, linked incident, channels,
 escalation stages, and acknowledgement threshold before approval.
 
+## SAME receiver operations
+
+The Environment page is the normal receiver console. `listening` means both decoder processes are
+running. `up` additionally means audio crossed the signal threshold. `no_signal` means the silence
+window was exceeded; `backoff` means a failed or stalled pipeline is waiting for its bounded
+restart. The status API includes `same_receiver`, with last audio/signal/decode times, last process
+error, restart count, next restart, and a bounded stderr tail.
+
+```sh
+curl -fsS http://127.0.0.1:8080/api/v1/status
+sudo journalctl -u outpost --since '30 minutes ago' --no-pager | grep 'SAME receiver\|SAME new'
+rtl_test -d 51231467 -t
+```
+
+Stop Outpost before opening the dongle with `rtl_test` or another SDR application. If the carrier
+is absent, verify antenna, device serial, NWR frequency, automatic/manual gain, and PPM correction.
+If audio stalls, the pipeline restarts after `audio_stall_seconds`; repeated failures back off to
+`restart_max_seconds` and remain visible instead of silently disabling the receiver.
+
+Every decoded header is deduplicated. Out-of-area messages and required tests/demos are retained as
+non-actionable evidence. County-matched live warnings require explicit approval and are
+deduplicated against NWS CAP by event, SAME location code, and expiry. Never approve a warning
+solely because it appeared through a second source.
+
 ## Privacy and retention
 
 Retention covers completed operational, provider, federation, authentication, BBS, mail, and watch

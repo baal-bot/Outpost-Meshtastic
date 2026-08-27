@@ -11,3 +11,8 @@
 - Ten power removals during writes, each followed by `PRAGMA integrity_check`
 - 72-hour Phase 0 unattended soak with stable RSS and no restarts
 - Six-participant Community Watch exercise in `PHASE3_TABLETOP.md`
+- `python tools/verify_same_audio.py` decodes the checksum-pinned NPT fixture
+- RTL-SDR is identified by serial and opens without root
+- Correct local NOAA Weather Radio frequency produces sustained PCM audio above the silence floor
+- Unplugging the RTL-SDR produces bounded backoff; reconnecting restores `listening` without a service restart
+- A received RWT/RMT/NPT is visible as log-only and never enters an outbound queue

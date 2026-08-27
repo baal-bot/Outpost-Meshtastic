@@ -442,11 +442,17 @@ function renderReviewCallout(count, kinds) {
 
 async function refreshFederationReviews() {
   try {
-    const reviews = (await loadNavigationStatus()).reviews;
+    const navigationState = await loadNavigationStatus();
+    const reviews = navigationState.reviews;
     const counts = {board: reviews.board, incidents: reviews.incidents, alerts: reviews.alerts};
     setReviewBadge("/federation.html", reviews.total);
     setReviewBadge("/bbs.html", counts.board);
     setReviewBadge("/watch.html", counts.incidents + counts.alerts);
+    setReviewBadge(
+      "/environment.html",
+      Number(navigationState.environment?.same_pending || 0),
+      "SAME alerts pending review",
+    );
     const target = reviewTargets[path];
     if (target) {
       const kinds = [...target].filter(kind => counts[kind]).map(kind => kind === "incidents" ? "incident" : kind === "alerts" ? "alert" : "BBS item");
@@ -459,6 +465,7 @@ async function refreshFederationReviews() {
 
 refreshFederationReviews();
 window.addEventListener("outpost:federation-reviewed", refreshFederationReviews);
+window.addEventListener("outpost:reviews-updated", refreshFederationReviews);
 
 async function refreshOperationsInboxBadge() {
   try {

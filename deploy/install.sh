@@ -13,7 +13,7 @@ NONINTERACTIVE=${OUTPOST_NONINTERACTIVE:-0}
 fail() { echo "Outpost install: $*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || fail "run as root: sudo $0"
-for command in python3 getent groupadd useradd usermod install systemctl ln mv readlink curl; do
+for command in python3 getent groupadd useradd usermod install systemctl udevadm ln mv readlink curl; do
   command -v "$command" >/dev/null 2>&1 || fail "missing required command: $command"
 done
 python3 -c 'import sys; raise SystemExit(not ((3, 12) <= sys.version_info < (3, 14)))' || \
@@ -32,11 +32,16 @@ PREVIOUS_LINK=$PREFIX/previous
 OLD_TARGET=$(readlink "$CURRENT_LINK" 2>/dev/null || true)
 
 getent group outpost >/dev/null 2>&1 || groupadd --system outpost
+getent group outpost-sdr >/dev/null 2>&1 || groupadd --system outpost-sdr
 getent passwd outpost >/dev/null 2>&1 || useradd --system --gid outpost --home "$STATE_DIR" --shell /usr/sbin/nologin outpost
 getent group dialout >/dev/null 2>&1 && usermod -a -G dialout outpost
+usermod -a -G outpost-sdr outpost
 install -d -m 0755 "$PREFIX" "$PREFIX/releases"
 install -d -m 0750 -o outpost -g outpost "$STATE_DIR" "$STATE_DIR/.data" "$STATE_DIR/backups" /var/log/outpost
 install -d -m 0750 -o root -g outpost "$CONFIG_DIR"
+install -m 0644 "$SCRIPT_DIR/70-outpost-rtl-sdr.rules" /etc/udev/rules.d/70-outpost-rtl-sdr.rules
+udevadm control --reload-rules
+udevadm trigger --subsystem-match=usb --action=change
 
 echo "Staging Outpost release $RELEASE_ID"
 python3 -m venv "$RELEASE_DIR"
@@ -65,6 +70,48 @@ else
   echo "First-run wizard skipped; edit $CONFIG_DIR/config.yaml before production use."
 fi
 OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" -c 'from outpost.config import load_config; load_config(); print("Configuration validated")'
+SAME_ENABLED=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
+from outpost.config import load_config
+print("1" if load_config().modules.env.enabled and load_config().env.same.enabled else "0")
+PY
+)
+if [ "$SAME_ENABLED" -eq 1 ]; then
+  echo "Installing the receive-only RTL-SDR/SAME toolchain"
+  for command in apt-get sha256sum uname mktemp; do
+    command -v "$command" >/dev/null 2>&1 || fail "SAME receiver requires: $command"
+  done
+  if ! command -v rtl_fm >/dev/null 2>&1; then
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends rtl-sdr
+  fi
+  SAMEDEC_VERSION=0.4.2
+  case "$(uname -m)" in
+    aarch64|arm64)
+      SAMEDEC_TARGET=aarch64-unknown-linux-gnu
+      SAMEDEC_SHA256=1f4fabefac5e246bbe26671fb7dcf9e3b677651f1eab2cbbfdbc37c014f499ed
+      ;;
+    armv7l|armv7*)
+      SAMEDEC_TARGET=armv7-unknown-linux-gnueabihf
+      SAMEDEC_SHA256=2a2a7108b633fa4c8afbead1674416f08ab70ed1c7fcdf17b167a228d2734140
+      ;;
+    x86_64|amd64)
+      SAMEDEC_TARGET=x86_64-unknown-linux-gnu
+      SAMEDEC_SHA256=355168cf3658d73c4363d94d8652da7821f0f282f67ec7ec3cb0cf24a36e206e
+      ;;
+    *) fail "samedec $SAMEDEC_VERSION has no supported build for $(uname -m)" ;;
+  esac
+  SAMEDEC_TEMP=$(mktemp /tmp/outpost-samedec.XXXXXX)
+  trap 'rm -f "$SAMEDEC_TEMP"' EXIT HUP INT TERM
+  curl -fL --proto '=https' --tlsv1.2 \
+    "https://github.com/cbs228/sameold/releases/download/samedec-$SAMEDEC_VERSION/samedec-$SAMEDEC_TARGET" \
+    -o "$SAMEDEC_TEMP"
+  printf '%s  %s\n' "$SAMEDEC_SHA256" "$SAMEDEC_TEMP" | sha256sum -c -
+  install -m 0755 "$SAMEDEC_TEMP" /usr/local/bin/samedec
+  rm -f "$SAMEDEC_TEMP"
+  trap - EXIT HUP INT TERM
+  rtl_fm -h >/dev/null 2>&1 || true
+  samedec --version
+fi
 if [ -z "$HEALTH_URL" ]; then
   HEALTH_URL=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
 from outpost.config import load_config

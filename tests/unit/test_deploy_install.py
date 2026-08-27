@@ -32,6 +32,10 @@ def test_installer_stages_health_checked_release_with_rollback() -> None:
     assert "sudo outpost-setup-token reset" in script
     assert "New release failed health verification; rolling back." in script
     assert "Python 3.12 or 3.13 is required" in script
+    assert "apt-get install -y --no-install-recommends rtl-sdr" in script
+    assert "samedec-$SAMEDEC_VERSION/samedec-$SAMEDEC_TARGET" in script
+    assert "sha256sum -c -" in script
+    assert 'SAME_ENABLED" -eq 1' in script
 
 
 def test_acceptance_host_installer_keeps_test_tools_out_of_production() -> None:
@@ -51,6 +55,11 @@ def test_service_uses_atomic_current_release() -> None:
 
     assert "ExecStart=/opt/outpost/current/bin/python -m outpost" in unit
     assert "ExecStartPre=/opt/outpost/current/bin/python" in unit
+    assert "SupplementaryGroups=dialout outpost-sdr" in unit
+    assert "DeviceAllow=char-usb_device rw" in unit
+    rules = (Path(__file__).parents[2] / "deploy" / "70-outpost-rtl-sdr.rules").read_text()
+    assert 'GROUP="outpost-sdr"' in rules
+    assert 'ATTR{idProduct}=="2838"' in rules
 
 
 def test_service_startup_never_prints_reusable_dashboard_credentials() -> None:

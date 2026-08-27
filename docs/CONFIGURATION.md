@@ -71,8 +71,29 @@ gap, multipart pacing, queue capacity, and traffic-class shares. Budget plus res
 ### `env`
 
 Set a descriptive `user_agent` with operator contact. Refresh, cache age, timeout, earthquake
-radius, and review magnitude are bounded. SAME is disabled unless configured with RTL-SDR tools
-and county codes.
+radius, and review magnitude are bounded.
+
+`env.same` controls the receive-only NOAA Weather Radio decoder:
+
+| Key | Meaning |
+|---|---|
+| `enabled` | Starts the receiver only when this and `modules.env.enabled` are true. |
+| `frequency_mhz` | One of the seven NWR channels from 162.400 through 162.550 MHz. |
+| `county_codes` | Six-digit SAME location codes; required when enabled. `000000` national messages are always relevant. |
+| `device` | Prefer the RTL-SDR serial printed by `rtl_eeprom`, not an unstable device index. |
+| `sample_rate` | Decoder PCM rate; 48,000 is the tested default. |
+| `oversampling` | `rtl_fm` demodulation oversampling; 4 is the tested default. |
+| `gain_db` | `null` uses automatic gain. Set measured dB only when field testing requires it. |
+| `ppm` | Tuner frequency correction, from -200 to 200. |
+| `signal_rms_threshold` | Audio level that counts as a received signal. |
+| `audio_stall_seconds` | Restarts a hung pipeline after this many seconds without PCM audio. |
+| `silence_alarm_minutes` | Marks health `no_signal` after sustained below-threshold audio. |
+| `restart_initial_seconds`, `restart_max_seconds` | Bounded exponential restart backoff. |
+| `rtl_fm_path`, `samedec_path` | Decoder executable names or explicit paths. |
+
+The installer supplies `rtl_fm` and a checksum-pinned `samedec` when SAME is enabled. Required
+tests and demo messages are log-only. A live county-matched warning remains pending until an
+operator approves it in Environment; approval then uses the normal alert policy and airtime gate.
 
 ### `watch`
 
@@ -130,4 +151,6 @@ precise private positions.
 - MQTT carries Meshtastic traffic through infrastructure outside local control.
 - AI can be incorrect and must not autonomously trigger emergency action.
 - Provider data can be delayed; preserve timestamps and provenance.
+- SAME is an additional warning source, not an emergency service; antenna, frequency, county code,
+  silence state, and receiver restarts require routine checks.
 - Federation trust permits bounded exchange and must be reviewed per peer.

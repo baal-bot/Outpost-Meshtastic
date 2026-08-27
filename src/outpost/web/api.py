@@ -20,6 +20,7 @@ from outpost.bbs.admin import BBSAdmin
 from outpost.env import (
     AstronomyService,
     CapAlertService,
+    SameService,
     SeismicService,
     WaypointService,
     WeatherService,
@@ -377,6 +378,8 @@ def create_web_app(
     federation_mail_reply: (
         Callable[[str, str, str, str, str, str, str], Awaitable[dict[str, object]]] | None
     ) = None,
+    same_events: SameService | None = None,
+    same_receiver_health: Callable[[], dict[str, Any]] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Outpost API", version=__version__, docs_url="/api/docs")
 
@@ -423,6 +426,7 @@ def create_web_app(
             or path.startswith("/api/v1/alerts")
             or path.startswith("/api/v1/environment/cap")
             or path.startswith("/api/v1/environment/earthquakes")
+            or path.startswith("/api/v1/environment/same")
             or (path.startswith("/api/v1/backups/") and path.endswith("/restore"))
             or (path.startswith("/api/v1/members/") and method in {"PATCH", "DELETE"})
         )
@@ -1389,6 +1393,7 @@ def create_web_app(
     async def dashboard_poll(request: Request) -> Response:
         reviews = {"total": 0, "board": 0, "incidents": 0, "alerts": 0}
         actionable_mail = 0
+        same_pending = 0
         if database is not None:
             rows = await database.read(
                 """WITH reviews AS (
@@ -1402,11 +1407,14 @@ def create_web_app(
                      (SELECT COUNT(DISTINCT conversation_key) FROM mail
                       WHERE conversation_key IS NOT NULL AND archived_at IS NULL AND
                         ((operator_read_at IS NULL AND mail_direction<>'out')
-                         OR state IN ('failed','undeliverable'))) actionable
+                         OR state IN ('failed','undeliverable'))) actionable,
+                     (SELECT COUNT(*) FROM same_event
+                      WHERE review_state='pending') same_pending
                    FROM reviews"""
             )
             reviews = {key: int(rows[0][key]) for key in ("total", "board", "incidents", "alerts")}
             actionable_mail = int(rows[0]["actionable"])
+            same_pending = int(rows[0]["same_pending"])
         value = {
             "modules": {
                 "items": {
@@ -1416,6 +1424,7 @@ def create_web_app(
                 "change_policy": "restart_required",
             },
             "reviews": reviews,
+            "environment": {"same_pending": same_pending},
             "mail": {"actionable": actionable_mail},
         }
         encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
@@ -2090,7 +2099,10 @@ def create_web_app(
                             status_code=409,
                         )
                     try:
-                        return await cap_alerts.poll(location.lat, location.lon)
+                        result = await cap_alerts.poll(location.lat, location.lon)
+                        if same_events is not None:
+                            result["same_reconciled"] = await same_events.reconcile_cap_duplicates()
+                        return result
                     except OSError as error:
                         return JSONResponse(
                             {"error": {"code": "provider_unavailable", "message": str(error)}},
@@ -2101,6 +2113,8 @@ def create_web_app(
                 async def environment_alert_approve(cap_id: int) -> dict[str, Any] | Response:
                     try:
                         value = await cap_alerts.approve(cap_id, alerts)
+                        if same_events is not None:
+                            await same_events.reconcile_cap_duplicates()
                     except ValueError as error:
                         return JSONResponse(
                             {"error": {"code": "not_eligible", "message": str(error)}},
@@ -2122,6 +2136,52 @@ def create_web_app(
                             {"error": {"code": "not_pending", "message": str(error)}},
                             status_code=422,
                         )
+                    return {"status": "dismissed"}
+
+            if same_events is not None:
+
+                @app.get("/api/v1/environment/same")
+                async def environment_same(include_expired: bool = False) -> dict[str, Any]:
+                    health = (
+                        same_receiver_health()
+                        if same_receiver_health is not None
+                        else same_events.health()
+                    )
+                    return {
+                        "items": await same_events.list(include_expired=include_expired),
+                        "health": health,
+                    }
+
+                @app.post("/api/v1/environment/same/{same_id}/approve", response_model=None)
+                async def environment_same_approve(same_id: int) -> dict[str, Any] | Response:
+                    try:
+                        value = await same_events.approve(same_id, alerts)
+                    except ValueError as error:
+                        return JSONResponse(
+                            {"error": {"code": "not_eligible", "message": str(error)}},
+                            status_code=422,
+                        )
+                    await database.write(
+                        "INSERT INTO audit_log(actor_kind,actor_ref,action,target,created_at) "
+                        "VALUES('web',?,'same.approve',?,unixepoch())",
+                        (current_actor_ref(), f"same:{same_id}"),
+                    )
+                    return value
+
+                @app.post("/api/v1/environment/same/{same_id}/dismiss", response_model=None)
+                async def environment_same_dismiss(same_id: int) -> dict[str, str] | Response:
+                    try:
+                        await same_events.dismiss(same_id)
+                    except ValueError as error:
+                        return JSONResponse(
+                            {"error": {"code": "not_pending", "message": str(error)}},
+                            status_code=422,
+                        )
+                    await database.write(
+                        "INSERT INTO audit_log(actor_kind,actor_ref,action,target,created_at) "
+                        "VALUES('web',?,'same.dismiss',?,unixepoch())",
+                        (current_actor_ref(), f"same:{same_id}"),
+                    )
                     return {"status": "dismissed"}
 
         if checkins is not None:

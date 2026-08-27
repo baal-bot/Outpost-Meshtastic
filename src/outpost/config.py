@@ -186,8 +186,32 @@ class SameConfig(StrictModel):
     frequency_mhz: float = Field(default=162.55, ge=162.4, le=162.55)
     county_codes: list[str] = Field(default_factory=list)
     silence_alarm_minutes: int = Field(default=720, ge=5)
+    device: str = Field(default="0", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    sample_rate: Literal[22050, 24000, 32000, 44100, 48000] = 48000
+    oversampling: int = Field(default=4, ge=1, le=16)
+    gain_db: float | None = Field(default=None, ge=0, le=50)
+    ppm: int = Field(default=0, ge=-200, le=200)
+    signal_rms_threshold: int = Field(default=300, ge=0, le=32767)
+    audio_stall_seconds: int = Field(default=15, ge=5, le=300)
+    restart_initial_seconds: int = Field(default=2, ge=1, le=60)
+    restart_max_seconds: int = Field(default=120, ge=5, le=900)
     rtl_fm_path: str = "rtl_fm"
     samedec_path: str = "samedec"
+
+    @model_validator(mode="after")
+    def validate_receiver(self) -> SameConfig:
+        frequencies = {162.400, 162.425, 162.450, 162.475, 162.500, 162.525, 162.550}
+        if round(self.frequency_mhz, 3) not in frequencies:
+            raise ValueError("env.same.frequency_mhz must be a NOAA Weather Radio channel")
+        if any(len(code) != 6 or not code.isdigit() for code in self.county_codes):
+            raise ValueError("env.same.county_codes entries must be six digits")
+        if len(set(self.county_codes)) != len(self.county_codes):
+            raise ValueError("env.same.county_codes must not contain duplicates")
+        if self.enabled and not self.county_codes:
+            raise ValueError("env.same.county_codes is required when the receiver is enabled")
+        if self.restart_max_seconds < self.restart_initial_seconds:
+            raise ValueError("env.same.restart_max_seconds must be >= restart_initial_seconds")
+        return self
 
 
 class EnvConfig(StrictModel):

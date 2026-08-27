@@ -40,6 +40,7 @@ sudo ./deploy/install.sh
 | Service unit | `/etc/systemd/system/outpost.service` |
 
 The first interactive install opens a guided identity, units, radio, and optional location wizard.
+If a supported RTL-SDR is attached, the wizard also offers receive-only SAME setup.
 Set `OUTPOST_NONINTERACTIVE=1` for automated provisioning. Later runs preserve active configuration
 and stage a new, isolated release under `/opt/outpost/releases`. The installer validates the
 package and configuration, creates an integrity-checked pre-upgrade database backup, switches the
@@ -114,6 +115,38 @@ sudo journalctl -u outpost --since '10 minutes ago' --no-pager
 
 Send `PING` and `HELP` by direct message from a member device. Verify the dashboard Radio page
 shows the intended local node, transport, firmware information, utilization, and reconnect state.
+
+## Optional RTL-SDR weather warning receiver
+
+Attach a Realtek RTL2832/RTL2838-compatible dongle and its weather-band antenna before the first
+interactive install. If SAME is enabled, the installer adds only the `outpost` service account to
+the dedicated `outpost-sdr` group, installs a vendor/product-scoped udev rule, installs Debian's
+`rtl-sdr` package, and downloads `samedec` 0.4.2 for the host architecture with a pinned SHA-256
+check. The systemd cgroup permits the dynamic USB character-device class, while normal device
+permissions restrict the service account to the supported SDR IDs.
+
+Use the SDR serial shown below as `env.same.device`:
+
+```sh
+rtl_eeprom 2>&1 | sed -n '/Serial number/p'
+```
+
+Set `env.same.frequency_mhz` to the strongest local NWR channel and add the six-digit SAME codes
+for the installation's counties. The first digit is the SAME county subdivision (normally `0`),
+followed by the two-digit state FIPS and three-digit county FIPS. Confirm codes and transmitter
+coverage with official NOAA/NWS material; do not guess a code.
+
+After restart, Environment → NOAA Weather Radio · SAME shows frequency, signal, last decode, and
+restart count. These receive-only acceptance commands do not send mesh traffic:
+
+```sh
+python tools/verify_same_audio.py
+sudo -u outpost /opt/outpost/current/bin/python "$PWD/tools/check_same_hardware.py" \
+  --device 51231467 --frequency 162.550 --county 042003
+```
+
+Run the tools from the repository checkout. The first command fetches a checksum-pinned National
+Periodic Test audio fixture; the second uses a temporary database and requires sustained PCM audio.
 
 ## Offline maps
 

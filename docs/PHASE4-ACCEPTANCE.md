@@ -1,8 +1,8 @@
 # Phase 4 — Environment acceptance evidence
 
-Status: **automated reliability gate passed; field/hardware items pending**
+Status: **automated reliability and RTL-SDR hardware gates passed; extended field items pending**
 
-Validated on 2026-08-24 with `ruff check src tests tools` and 90 passing pytest tests.
+RTL-SDR/SAME hardware validated on 2026-08-26 with a Nooelec NESDR SMArt v5 on a Raspberry Pi.
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
@@ -14,9 +14,9 @@ Validated on 2026-08-24 with `ruff check src tests tools` and 90 passing pytest 
 | 6 | CAP Update supersedes; Cancel issues all-clear | Pass | `test_cap_update_supersedes_and_cancel_issues_all_clear` |
 | 7 | User-Agent, conditional requests, and 304 reuse | Pass | `_request_json`; `test_provider_conditional_request_reuses_body_on_304` |
 | 8 | Open-Meteo attribution in dashboard and `ABOUT`, not weather replies | Pass | Environment footer and environment-enabled command context attribution |
-| 9 | Injected SAME test decodes/logs without broadcast | Software pass; tone pending | Header injection is parsed, logged once, and test-suppressed; audio pipeline awaits hardware/tooling |
-| 10 | SAME warning deduplicates against NWS CAP | Partial | SAME header dedupe and county relevance pass; cross-source live warning validation awaits receiver |
-| 11 | SDR restart supervision and silence warning | Partial | Durable config and silence health logic pass; subprocess/hardware restart validation awaits receiver |
+| 9 | Injected SAME test decodes/logs without broadcast | Pass | Checksum-pinned upstream NPT audio decodes with `samedec`; NPT/RWT/RMT/demo policy is log-only and cannot be approved |
+| 10 | SAME warning deduplicates against NWS CAP | Pass | Both source-arrival orders converge on one linked alert; event, SAME code, and expiry must match |
+| 11 | SDR restart supervision and silence warning | Pass | 162.550 MHz produced sustained 48 kHz PCM; forced USB-driver loss triggered the 15-second audio watchdog, 2/4/8-second backoff, and automatic recovery after rebind |
 | 12 | Solar reference accuracy and explicit polar behavior | Pass | Five-location independent reference matrix and explicit polar tests |
 | 13 | Distance/bearing including antimeridian | Pass | `test_distance_bearing_handles_antimeridian_and_polar_routes` |
 | 14 | State-clipped zone/county GeoJSON under 5 MB | Pass | Official NWS PA zone/county pack is 683,575 bytes; builder and artifact tests |
@@ -43,12 +43,13 @@ Additional exit gates:
 - Astronomy is computed locally and explicitly reports unavailable sunrise/sunset at polar
   locations.
 - Environment command output is constrained to one 200-byte radio part.
-- SAME headers are parsed, county-filtered, deduplicated, test-suppressed, persisted, and expose
-  silence health before receiver activation.
+- SAME uses a supervised, shell-free `rtl_fm` → `samedec` process pair with audio-stall detection,
+  bounded restart backoff, county/review gates, CAP cross-source deduplication, persisted evidence,
+  and dashboard/API health.
 - The Pennsylvania pack was built from the official NWS public-zone and county shapefiles
   valid 2026-04-16 using `tools/build_region_data.py`.
 
 ## Remaining work before the complete Phase 4 exit gate
 
-1. Implement and validate SAME ingest when the ordered RTL-SDR hardware arrives.
-2. Accumulate the 30-day NWS field observation and one full WAN-down field day.
+1. Accumulate the 30-day NWS field observation and one full WAN-down field day.
+2. Observe at least one real local SAME warning/test over the antenna and retain its field evidence.

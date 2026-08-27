@@ -15,6 +15,21 @@ def ask(label: str, default: str) -> str:
     return value or default
 
 
+def detect_rtl_sdr() -> list[str]:
+    devices: list[str] = []
+    for vendor_path in sorted(Path("/sys/bus/usb/devices").glob("*/idVendor")):
+        product_path = vendor_path.with_name("idProduct")
+        if not product_path.exists():
+            continue
+        if vendor_path.read_text().strip().lower() != "0bda":
+            continue
+        if product_path.read_text().strip().lower() not in {"2832", "2838"}:
+            continue
+        serial_path = vendor_path.with_name("serial")
+        devices.append(serial_path.read_text().strip() if serial_path.exists() else "0")
+    return devices
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Configure a new Outpost installation")
     parser.add_argument("--config", type=Path, required=True)
@@ -45,6 +60,20 @@ def main() -> None:
         if not lat or not lon:
             raise SystemExit("Both latitude and longitude are required when setting a location")
         node["location"] = {"lat": float(lat), "lon": float(lon)}
+    rtl_devices = detect_rtl_sdr()
+    if rtl_devices:
+        same = data["env"]["same"]
+        enabled = ask("Enable detected RTL-SDR weather warning receiver (yes/no)", "no")
+        if enabled.lower() in {"y", "yes"}:
+            same["enabled"] = True
+            same["device"] = ask("RTL-SDR serial", rtl_devices[0])
+            same["frequency_mhz"] = float(
+                ask("NOAA Weather Radio frequency MHz", str(same["frequency_mhz"]))
+            )
+            county = ask("Six-digit SAME county code", "").strip()
+            if not county:
+                raise SystemExit("A SAME county code is required when the receiver is enabled")
+            same["county_codes"] = [value.strip() for value in county.split(",") if value.strip()]
     Config.model_validate(data)
     temporary = args.config.with_suffix(".yaml.new")
     temporary.write_text(yaml.safe_dump(data, sort_keys=False))

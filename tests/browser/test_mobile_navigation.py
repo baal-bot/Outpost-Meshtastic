@@ -393,6 +393,17 @@ def route_visual_content_api(page: object) -> None:
     fulfill("**/api/v1/environment/providers", {"items": {}})
     fulfill("**/api/v1/environment/alerts*", {"items": [], "health": {}})
     fulfill("**/api/v1/environment/earthquakes*", {"items": []})
+    fulfill(
+        "**/api/v1/environment/same*",
+        {
+            "items": [],
+            "health": {
+                "status": "disabled",
+                "frequency_mhz": 162.55,
+                "restart_count": 0,
+            },
+        },
+    )
     fulfill("**/api/v1/environment/waypoints*", {"items": []})
     fulfill(
         "**/api/v1/config",
@@ -2381,6 +2392,7 @@ def test_environment_waypoint_create_and_map_card_are_functional_and_browser_cle
     route_shared_operator_api(page)
     mutations: list[dict[str, object]] = []
     waypoints: list[dict[str, object]] = []
+    same_state = {"review_state": "pending"}
 
     def environment_route(route: object) -> None:
         request = route.request
@@ -2394,6 +2406,31 @@ def test_environment_waypoint_create_and_map_card_are_functional_and_browser_cle
             body = value
         elif path == "/api/v1/environment/waypoints":
             body = {"items": waypoints}
+        elif path == "/api/v1/environment/same/9/approve" and request.method == "POST":
+            same_state["review_state"] = "approved"
+            body = {"id": 3, "source": "same", "headline": "NWR Tornado Warning"}
+        elif path == "/api/v1/environment/same":
+            body = {
+                "health": {
+                    "status": "up",
+                    "frequency_mhz": 162.55,
+                    "last_signal_at": 2_000_000_000,
+                    "last_decode_at": 2_000_000_000,
+                    "restart_count": 0,
+                },
+                "items": [
+                    {
+                        "id": 9,
+                        "event_code": "TOR",
+                        "event_name": "Tornado Warning",
+                        "location_codes": ["042003"],
+                        "callsign": "KPBZ/NWS",
+                        "received_at": 2_000_000_000,
+                        "gate_reasons": [],
+                        "review_state": same_state["review_state"],
+                    }
+                ],
+            }
         elif path == "/api/v1/environment/weather":
             body = {
                 "provider": "nws",
@@ -2476,6 +2513,11 @@ def test_environment_waypoint_create_and_map_card_are_functional_and_browser_cle
         card.get_by_role("button", name="Close").click()
         page.locator('[data-marker-id="quake-us7000test"]').click()
         card.get_by_role("heading", name="M3.2 · 12 km north of Pittsburgh").wait_for()
+        page.get_by_role("button", name="Approve alert").click()
+        page.get_by_label("Broadcast confirmation").fill("BROADCAST SAME 9")
+        page.get_by_role("button", name="Queue warning").click()
+        page.get_by_role("button", name="Approve alert").wait_for(state="detached")
+        assert same_state["review_state"] == "approved"
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
     finally:

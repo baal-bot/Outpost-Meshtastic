@@ -1,0 +1,3 @@
+# Grant Outpost access only to the two Realtek USB IDs supported by librtlsdr.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0bda", ATTR{idProduct}=="2832", MODE="0660", GROUP="outpost-sdr"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0bda", ATTR{idProduct}=="2838", MODE="0660", GROUP="outpost-sdr"

@@ -65,6 +65,17 @@ env:
     frequency_mhz: 162.550
     county_codes: []
     silence_alarm_minutes: 720
+    device: "0"
+    sample_rate: 48000
+    oversampling: 4
+    gain_db: null # automatic tuner gain; set dB only when field measurements require it
+    ppm: 0
+    signal_rms_threshold: 300
+    audio_stall_seconds: 15
+    restart_initial_seconds: 2
+    restart_max_seconds: 120
+    rtl_fm_path: rtl_fm
+    samedec_path: samedec
 fed:
   max_fragments: 8
   reassembly_timeout_s: 300

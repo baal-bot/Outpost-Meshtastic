@@ -16,7 +16,7 @@ Outpost is pre-release. This table distinguishes implementation from field valid
 | Backups | Online backup, rotation, validation, guarded restore | Implemented and tested |
 | Federation | Pairing, authenticated framing, policy, sync, services, mail | Automated tests and two physical Outposts exercised; full acceptance backlog pending |
 | Meshtastic MQTT | Optional discovery/transport through radio firmware | Implemented controls; multi-node validation pending |
-| SAME/RTL-SDR | Configuration and integration points | Hardware available; integration deferred during issue remediation |
+| SAME/RTL-SDR | Supervised decoder, county/review gates, CAP dedupe, health UI/API, scoped installation | Audio fixture, live carrier, process failure, USB loss, and automatic recovery validated on Pi hardware; extended field observation pending |
 | Local AI | Provider adapters and policy surface | Optional; quality is model/hardware-specific |
 
 ## Boundaries

@@ -43,3 +43,38 @@ def test_unsafe_no_auth_is_rejected() -> None:
 def test_safety_floor_policy_has_safe_bounds(security: dict[str, int]) -> None:
     with pytest.raises(ValidationError):
         Config.model_validate({"security": security})
+
+
+@pytest.mark.parametrize(
+    "same",
+    [
+        {"enabled": True},
+        {"frequency_mhz": 162.41},
+        {"county_codes": ["42003"]},
+        {"county_codes": ["042003", "042003"]},
+        {"device": "../../dev/null"},
+        {"sample_rate": 96000},
+        {"audio_stall_seconds": 2},
+        {"restart_initial_seconds": 30, "restart_max_seconds": 10},
+    ],
+)
+def test_invalid_same_receiver_config_is_rejected(same: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        Config.model_validate({"env": {"same": same}})
+
+
+def test_same_receiver_config_accepts_noaa_channel_serial_and_county() -> None:
+    config = Config.model_validate(
+        {
+            "env": {
+                "same": {
+                    "enabled": True,
+                    "frequency_mhz": 162.55,
+                    "county_codes": ["042003"],
+                    "device": "51231467",
+                    "sample_rate": 48000,
+                }
+            }
+        }
+    )
+    assert config.env.same.enabled

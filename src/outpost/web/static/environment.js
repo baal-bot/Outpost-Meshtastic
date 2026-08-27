@@ -10,14 +10,30 @@ function showQuakeCard(value){environmentMapController.select(`quake-${value.id}
 const time=(stamp)=>stamp?new Date(stamp).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"—";
 const weatherSource=(kind)=>({observation:"Station observation",forecast:"Near-term forecast",estimate:"Current model estimate",peer:"Peer-provided conditions"})[kind]||"Weather data";
 const weatherAge=(seconds)=>seconds==null?"valid time unavailable":seconds<60?"valid now":seconds<3600?`valid ${Math.floor(seconds/60)}m ago`:`valid ${Math.floor(seconds/3600)}h ago`;
+const receiverLabels={disabled:"Not configured",stopped:"Stopped",starting:"Starting",listening:"Listening",monitoring:"Listening · awaiting signal",up:"Signal detected",no_signal:"Signal overdue",backoff:"Restarting"};
+function renderSame(same){
+  const health=same.health||{},status=health.status||"stopped",state=$("same-receiver-state");
+  state.textContent=receiverLabels[status]||status;state.className=`ui-pill ${["up","listening","monitoring"].includes(status)?"ui-pill--success":status==="disabled"?"":"ui-pill--warning"}`;
+  $("same-frequency").textContent=health.frequency_mhz?`${Number(health.frequency_mhz).toFixed(3)} MHz`:"—";
+  $("same-signal").textContent=health.last_signal_at?new Date(health.last_signal_at*1000).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):status==="disabled"?"Disabled":"Awaiting signal";
+  $("same-last-decode").textContent=health.last_decode_at?new Date(health.last_decode_at*1000).toLocaleString():"None recorded";
+  $("same-restarts").textContent=String(health.restart_count||0);
+  const items=same.items||[];
+  $("same-event-list").innerHTML=items.map(value=>`<article class="same-event ${safe(value.review_state)}"><div class="same-event-code">${safe(value.event_code)}</div><div><h3>${safe(value.event_name)}</h3><p>${safe((value.location_codes||[]).join(", "))} · ${safe(value.callsign)} · ${new Date(value.received_at*1000).toLocaleString()}</p>${(value.gate_reasons||[]).length?`<small>${safe(value.gate_reasons.join(" · "))}</small>`:""}</div><span class="ui-pill">${safe(value.review_state)}</span>${value.review_state==="pending"?`<div class="same-event-actions"><button data-same-approve="${safe(value.id)}">Approve alert</button><button class="secondary" data-same-dismiss="${safe(value.id)}">Dismiss</button></div>`:""}</article>`).join("")||'<p class="ui-empty empty">No SAME messages recorded.</p>';
+  document.querySelectorAll("[data-same-approve]").forEach(button=>button.onclick=()=>sameAction(button.dataset.sameApprove,"approve"));
+  document.querySelectorAll("[data-same-dismiss]").forEach(button=>button.onclick=()=>sameAction(button.dataset.sameDismiss,"dismiss"));
+  return items.filter(value=>value.review_state==="pending").length;
+}
+async function sameAction(id,action){if(action==="approve"){const phrase=`BROADCAST SAME ${id}`,confirmation=await window.OutpostUI.prompt({title:"Broadcast radio warning?",message:"Confirm the event, county code, and timestamp. This enters the warning into the normal alert delivery and escalation policy.",label:"Broadcast confirmation",verification:phrase,confirmLabel:"Queue warning",danger:true});if(confirmation!==phrase)return;}const response=await fetch(`/api/v1/environment/same/${id}/${action}`,{method:"POST",headers:{"x-csrf-token":csrfToken}});if(!response.ok){const body=await response.json();await window.OutpostUI.alert({title:"SAME review failed",message:body.error?.message||"The receiver record could not be updated."});return;}window.dispatchEvent(new Event("outpost:reviews-updated"));await refresh();}
 async function refresh(){
   const responses=await Promise.all([
     fetch("/api/v1/environment/weather"),fetch("/api/v1/environment/forecast"),
     fetch("/api/v1/environment/astronomy"),fetch("/api/v1/environment/providers"),
     fetch("/api/v1/environment/alerts"),fetch("/api/v1/environment/earthquakes"),
+    fetch("/api/v1/environment/same"),
   ]);
   if(responses.some(response=>response.status===401)){location.href="/";return;}
-  const[weather,forecast,astronomy,providers,alerts,quakes]=await Promise.all(
+  const[weather,forecast,astronomy,providers,alerts,quakes,same]=await Promise.all(
     responses.map(response=>response.json()),
   );
   const imperial=weather.units==="imperial",tempUnit=imperial?"F":"C",windUnit=imperial?"MPH":"KM/H";
@@ -49,7 +65,7 @@ async function refresh(){
 
   $("env-dawn").textContent=time(astronomy.civil_dawn);$("env-rise").textContent=time(astronomy.sunrise);$("env-set").textContent=time(astronomy.sunset);$("env-dusk").textContent=time(astronomy.civil_dusk);$("env-moon").textContent=`${safe(astronomy.moon_illumination)}%`;$("env-phase").textContent=`${safe(astronomy.moon_phase)} · ${safe(astronomy.moon_age_days)} days`;
   const daylight=astronomy.daylight_minutes;$("env-daylight").textContent=daylight==null?"Daylight unavailable":`${Math.floor(daylight/60)}h ${daylight%60}m daylight`;$("daylight-fill").style.width=`${Math.max(0,Math.min(100,(daylight||0)/1440*100))}%`;
-  const alertValues=alerts.items||[];$("env-alert-accepted").textContent=alertValues.filter(value=>value.decision==="accepted").length;$("env-alert-withheld").textContent=alertValues.filter(value=>value.decision==="withheld").length;$("env-alert-pending").textContent=alertValues.filter(value=>value.review_state==="pending").length;$("hero-alerts").textContent=alertValues.filter(value=>value.decision==="accepted"&&value.review_state==="pending").length;$("env-alert-list").innerHTML=alertValues.slice(0,4).map(value=>`<article class="env-event"><b>!</b><div><strong>${safe(value.event)}</strong><p>${safe(value.area_desc||"Area unavailable")}</p></div><span>${safe(value.decision)}</span></article>`).join("")||'<p class="ui-empty empty">No active public alerts for this location.</p>';
+  const alertValues=alerts.items||[],samePending=renderSame(same);$("env-alert-accepted").textContent=alertValues.filter(value=>value.decision==="accepted").length;$("env-alert-withheld").textContent=alertValues.filter(value=>value.decision==="withheld").length;$("env-alert-pending").textContent=alertValues.filter(value=>value.review_state==="pending").length;$("hero-alerts").textContent=alertValues.filter(value=>value.decision==="accepted"&&value.review_state==="pending").length+samePending;$("env-alert-list").innerHTML=alertValues.slice(0,4).map(value=>`<article class="env-event"><b>!</b><div><strong>${safe(value.event)}</strong><p>${safe(value.area_desc||"Area unavailable")}</p></div><span>${safe(value.decision)}</span></article>`).join("")||'<p class="ui-empty empty">No active public alerts for this location.</p>';
   const quakeValues=quakes.items||[];$("hero-quakes").textContent=quakeValues.length;$("env-quake-list").innerHTML=quakeValues.slice(0,5).map(value=>`<article class="env-event"><b>M${Number(value.magnitude).toFixed(1)}</b><div><strong>${safe(value.place)}</strong><p>${Number(value.distance_km).toFixed(0)} km · ${Number(value.depth_km).toFixed(1)} km deep</p></div><span>${safe(value.review_state)}</span></article>`).join("")||'<p class="ui-empty empty">No nearby earthquakes in the past 24 hours.</p>';
   $("env-state").className="ui-pill status up";$("env-state").innerHTML="<i></i> Monitoring";$("env-updated").textContent=`Updated ${new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}`;
 }

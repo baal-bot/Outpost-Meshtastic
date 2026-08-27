@@ -32,6 +32,8 @@ from outpost.env import (
     FallbackWeatherProvider,
     NWSProvider,
     OpenMeteoProvider,
+    SameReceiver,
+    SameService,
     SeismicService,
     WaypointService,
     WeatherService,
@@ -154,6 +156,13 @@ class OutpostApp:
             ),
         )
         self.cap_alerts = CapAlertService(self.database, self.clock, self.config.env)
+        self.same_events = SameService(self.database, self.clock, self.config.env.same)
+        self.same_receiver = SameReceiver(
+            self.same_events,
+            self.config.env.same,
+            self.clock,
+            on_progress=lambda: self._task_progress("same-receiver"),
+        )
         self.astronomy = AstronomyService(self.clock)
         self.seismic = SeismicService(self.database, self.clock, self.config.env)
         self.waypoints = WaypointService(self.database, self.clock)
@@ -236,6 +245,8 @@ class OutpostApp:
             self.maintenance,
             module_provider=self.config.modules.enabled_map,
             federation_mail_reply=self.reply_federation_mail,
+            same_events=self.same_events,
+            same_receiver_health=self.same_receiver.health,
         )
 
     def _start_background_task(
@@ -468,6 +479,11 @@ class OutpostApp:
             *(
                 [self._start_background_task("environment-poller", self._environment_loop())]
                 if self.config.modules.env.enabled
+                else []
+            ),
+            *(
+                [self._start_background_task("same-receiver", self.same_receiver.run())]
+                if self.config.modules.env.enabled and self.config.env.same.enabled
                 else []
             ),
             *(
@@ -1662,7 +1678,8 @@ class OutpostApp:
             if self.config.modules.env.enabled and location is not None:
                 try:
                     await self.cap_alerts.poll(location.lat, location.lon)
-                except OSError as error:
+                    await self.same_events.reconcile_cap_duplicates()
+                except (OSError, ValueError) as error:
                     print(f"NWS alert poll failed: {error}", flush=True)
                 try:
                     await self.seismic.poll(location.lat, location.lon)
@@ -1965,6 +1982,7 @@ class OutpostApp:
             "airtime_used_ratio": self.governor.used_airtime / 3_600,
             "queues": self.governor.queue_depths(),
             "alert_delivery": self.governor.alert_delivery_status(),
+            "same_receiver": self.same_receiver.health(),
             "tasks_healthy": self.background_tasks_healthy(),
             "task_failure": self._fatal_task_error,
             "recovery": self.restore_coordinator.maintenance_status(),
