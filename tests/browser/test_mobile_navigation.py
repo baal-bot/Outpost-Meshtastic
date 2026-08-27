@@ -1535,6 +1535,108 @@ def test_disabled_module_pages_are_explained_and_inert(
         page.close()
 
 
+@pytest.mark.parametrize("width", (390, 1280))
+def test_radio_queue_filter_hides_expired_history_by_default(
+    browser: object, dashboard_url: str, width: int
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    queue_items = [
+        {
+            "id": 1,
+            "state": "pending",
+            "text": "Current payload",
+            "destination": "!00000001",
+            "channel": 0,
+            "traffic_class": "federation",
+            "created_at": 2_000_000_000,
+            "attempts": 0,
+            "cancellable": True,
+        },
+        {
+            "id": 2,
+            "state": "awaiting_ack",
+            "text": "Awaiting payload",
+            "destination": "!00000002",
+            "channel": 0,
+            "traffic_class": "reply",
+            "created_at": 2_000_000_001,
+            "attempts": 1,
+            "cancellable": True,
+        },
+        {
+            "id": 3,
+            "state": "failed",
+            "text": "Failed payload",
+            "destination": "!00000003",
+            "channel": 0,
+            "traffic_class": "bulletin",
+            "created_at": 2_000_000_002,
+            "attempts": 3,
+            "cancellable": True,
+        },
+        {
+            "id": 4,
+            "state": "expired",
+            "text": "Expired payload one",
+            "destination": "!00000004",
+            "channel": 0,
+            "traffic_class": "federation",
+            "created_at": 2_000_000_003,
+            "attempts": 0,
+            "cancellable": False,
+        },
+        {
+            "id": 5,
+            "state": "expired",
+            "text": "Expired payload two",
+            "destination": "!00000005",
+            "channel": 0,
+            "traffic_class": "federation",
+            "created_at": 2_000_000_004,
+            "attempts": 0,
+            "cancellable": False,
+        },
+    ]
+    page.route(
+        "**/api/v1/mesh/queue*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"items": queue_items}),
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/radio.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        queue_filter = page.get_by_label("Queue state filter")
+        assert queue_filter.input_value() == "current"
+        assert page.locator(".queue-card").count() == 3
+        assert not page.get_by_text("Expired payload one").is_visible()
+
+        queue_filter.select_option("active")
+        page.get_by_text("Awaiting payload").wait_for()
+        assert page.locator(".queue-card").count() == 2
+
+        queue_filter.select_option("failed")
+        page.get_by_text("Failed payload").wait_for()
+        assert page.locator(".queue-card").count() == 1
+
+        queue_filter.select_option("expired")
+        page.get_by_text("Expired payload one").wait_for()
+        assert page.locator(".queue-card").count() == 2
+
+        queue_filter.select_option("all")
+        page.get_by_text("Current payload").wait_for()
+        assert page.locator(".queue-card").count() == 5
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
 def test_capability_cards_reflect_disabled_modules(browser: object, dashboard_url: str) -> None:
     page = prepare_page(browser, 1280, dashboard_url, theme="dark")
     states = {
@@ -2587,7 +2689,18 @@ def test_environment_waypoint_create_and_map_card_are_functional_and_browser_cle
                 "units": "imperial",
             }
         elif path == "/api/v1/environment/forecast":
-            body = {"provider": "nws", "stale": False, "daily": [], "hourly": []}
+            body = {
+                "provider": "nws",
+                "stale": False,
+                "daily": [],
+                "hourly": [
+                    {
+                        "start_time": "2030-01-01T14:00:00-05:00",
+                        "temperature_c": 21,
+                        "precipitation_probability": 10,
+                    }
+                ],
+            }
         elif path == "/api/v1/environment/astronomy":
             body = {
                 "civil_dawn": None,
@@ -2630,6 +2743,9 @@ def test_environment_waypoint_create_and_map_card_are_functional_and_browser_cle
     try:
         page.goto(f"{dashboard_url}/environment.html", wait_until="domcontentloaded")
         wait_for_navigation(page)
+        hourly_time = page.locator("#env-hourly time")
+        hourly_time.wait_for()
+        assert ":00" in hourly_time.text_content()
         page.get_by_label("Name").fill("Riverview Spring")
         page.get_by_label("Latitude").fill("40.446")
         page.get_by_label("Longitude").fill("-80.010")

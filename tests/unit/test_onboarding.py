@@ -26,6 +26,7 @@ def _config():
 def test_checklist_is_complete_resumable_and_records_requirements(tmp_path: Path) -> None:
     state = tmp_path / "onboarding.json"
     config = _config()
+    config.store.path = str(tmp_path / "missing-outpost.db")
 
     initial = checklist(config, state)
     assert [value["id"] for value in initial] == [

@@ -18,6 +18,16 @@ const api = async (url, options = {}) =>
     },
   });
 
+const activeQueueStates = new Set(["pending", "held", "sending", "awaiting_ack"]);
+
+function queueItemMatches(item, filter) {
+  const state = item.state || "pending";
+  if (filter === "active") return activeQueueStates.has(state);
+  if (filter === "failed" || filter === "expired") return state === filter;
+  if (filter === "all") return true;
+  return state !== "expired";
+}
+
 function installInboundHealthCard() {
   const nodeCard = $("radio-node").closest("article");
   nodeCard.insertAdjacentHTML(
@@ -93,8 +103,17 @@ async function refresh() {
     failed: "Failed",
     expired: "Expired",
   };
+  const queueFilter = $("filter-queue-state").value;
+  const visibleQueue = queue.items.filter((item) => queueItemMatches(item, queueFilter));
+  const emptyQueueCopy = {
+    current: "No current or failed outbound work.",
+    active: "No active outbound work.",
+    failed: "No failed outbound work.",
+    expired: "No expired outbound history.",
+    all: "No outbound work records.",
+  };
   $("queue-list").innerHTML =
-    queue.items
+    visibleQueue
       .map((item) => {
         const stateName = item.state || "pending";
         const created = item.created_at
@@ -120,7 +139,7 @@ async function refresh() {
           `</article>`
         );
       })
-      .join("") || '<p class="ui-empty empty">No queued, failed, or stale work.</p>';
+      .join("") || `<p class="ui-empty empty">${emptyQueueCopy[queueFilter]}</p>`;
   document.querySelectorAll("[data-cancel]").forEach((button) =>
     button.addEventListener("click", async () => {
       await api(`/api/v1/mesh/queue/${button.dataset.cancel}`, { method: "DELETE" });
@@ -166,6 +185,7 @@ $("send-form").addEventListener("submit", async (event) => {
 
 installInboundHealthCard();
 $("refresh-radio").addEventListener("click", refresh);
+$("filter-queue-state").addEventListener("change", refresh);
 $("filter-direction").addEventListener("change", refresh);
 $("filter-channel").addEventListener("change", refresh);
 initialize();
