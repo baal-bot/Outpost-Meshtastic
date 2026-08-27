@@ -75,6 +75,12 @@ from outpost.config import load_config
 print("1" if load_config().modules.env.enabled and load_config().env.same.enabled else "0")
 PY
 )
+AI_PROVIDER=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
+from outpost.config import load_config
+config = load_config()
+print(config.ai.provider if config.modules.ai.enabled else "disabled")
+PY
+)
 if [ "$SAME_ENABLED" -eq 1 ]; then
   echo "Installing the receive-only RTL-SDR/SAME toolchain"
   for command in apt-get sha256sum uname mktemp; do
@@ -111,6 +117,15 @@ if [ "$SAME_ENABLED" -eq 1 ]; then
   trap - EXIT HUP INT TERM
   rtl_fm -h >/dev/null 2>&1 || true
   samedec --version
+fi
+if [ "$AI_PROVIDER" = hailo ]; then
+  command -v hailo-ollama >/dev/null 2>&1 || fail \
+    "Hailo AI requires hailo-h10-all and hailo-gen-ai-model-zoo; see docs/INSTALLATION.md"
+  [ -e /dev/hailo0 ] || fail \
+    "Hailo-10H is not ready at /dev/hailo0; install its runtime and reboot first"
+  install -m 0644 "$SCRIPT_DIR/hailo-ollama.service" \
+    /etc/systemd/system/hailo-ollama.service
+  chown -R outpost:outpost /usr/share/hailo-ollama/models
 fi
 if [ -z "$HEALTH_URL" ]; then
   HEALTH_URL=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
@@ -187,6 +202,10 @@ install -m 0755 "$SCRIPT_DIR/release_recovery.py" /usr/local/lib/outpost/release
 printf '%s\n' "$PROJECT_DIR" > "$CONFIG_DIR/install-source"
 chmod 0640 "$CONFIG_DIR/install-source"
 systemctl daemon-reload
+if [ "$AI_PROVIDER" = hailo ]; then
+  systemctl enable hailo-ollama.service
+  systemctl restart hailo-ollama.service
+fi
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
 

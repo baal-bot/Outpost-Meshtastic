@@ -78,3 +78,25 @@ def test_same_receiver_config_accepts_noaa_channel_serial_and_county() -> None:
         }
     )
     assert config.env.same.enabled
+
+
+def test_ai_runtime_policy_defaults_are_bounded() -> None:
+    config = Config()
+    assert config.ai.max_concurrency == 1
+    assert config.ai.queue_depth == 3
+    assert config.ai.max_tool_rounds == 2
+    assert config.ai.hailo.context_tokens == 2048
+
+
+@pytest.mark.parametrize(
+    "ai",
+    [
+        {"provider": "hailo", "hailo": {"context_tokens": 1599}},
+        {"max_concurrency": 0},
+        {"max_tool_rounds": 3},
+        {"openai_compat": {"api_key_env": "not a safe env name"}},
+    ],
+)
+def test_invalid_ai_runtime_policy_is_rejected(ai: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        Config.model_validate({"ai": ai})

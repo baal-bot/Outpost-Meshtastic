@@ -33,6 +33,7 @@ config, database, API/channel key, member export, precise location, or tile cach
 | `src/outpost/store` | Database and migrations |
 | `src/outpost/web` | API, auth, settings, dashboard |
 | `src/outpost/fed` | Federation framing, peers, sync, mail |
+| `src/outpost/ai` | Provider adapters, budgets, retrieval, safety and agent runtime |
 | `tests` | Unit, integration, acceptance, hardware procedures |
 | `deploy` | Installer, service, package smoke test |
 
@@ -47,6 +48,14 @@ config, database, API/channel key, member export, precise location, or tile cach
 sh -n deploy/install.sh deploy/install-test-host.sh deploy/smoke-package.sh
 sh deploy/smoke-package.sh
 .venv/bin/pip-audit
+```
+
+Provider adapter tests use recorded/mock HTTP responses and never contact a live model. Hardware
+quality runs are explicit and excluded from normal CI:
+
+```sh
+.venv/bin/python tools/bench_inference.py --provider hailo --runs 3
+.venv/bin/python tools/bench_inference.py --provider hailo --runs 5 --eval
 ```
 
 The global coverage floor is supplemented by weighted line-coverage floors in

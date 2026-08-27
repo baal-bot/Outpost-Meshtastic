@@ -36,6 +36,9 @@ def test_installer_stages_health_checked_release_with_rollback() -> None:
     assert "samedec-$SAMEDEC_VERSION/samedec-$SAMEDEC_TARGET" in script
     assert "sha256sum -c -" in script
     assert 'SAME_ENABLED" -eq 1' in script
+    assert 'AI_PROVIDER" = hailo' in script
+    assert "Hailo-10H is not ready at /dev/hailo0" in script
+    assert "hailo-ollama.service" in script
 
 
 def test_acceptance_host_installer_keeps_test_tools_out_of_production() -> None:
@@ -60,6 +63,11 @@ def test_service_uses_atomic_current_release() -> None:
     rules = (Path(__file__).parents[2] / "deploy" / "70-outpost-rtl-sdr.rules").read_text()
     assert 'GROUP="outpost-sdr"' in rules
     assert 'ATTR{idProduct}=="2838"' in rules
+
+    ai_unit = (Path(__file__).parents[2] / "deploy" / "hailo-ollama.service").read_text()
+    assert "Environment=OLLAMA_HOST=127.0.0.1:8000" in ai_unit
+    assert "ConditionPathExists=/dev/hailo0" in ai_unit
+    assert "DeviceAllow=/dev/hailo0 rw" in ai_unit
 
 
 def test_service_startup_never_prints_reusable_dashboard_credentials() -> None:

@@ -37,6 +37,7 @@ publishes a compatibility policy and a 1.0 release.
 - Airtime budgets, priority queues, deduplication, quiet hours, and emergency reserve
 - SQLite migrations, integrity checks, rotating backups, and audited restore
 - Optional authenticated federation, bounded synchronization, peer services, and mail relay
+- Local AI provider adapters and target-hardware benchmark/evaluation tooling (assistant runtime in progress)
 - Prometheus metrics and systemd watchdog integration
 
 See [Features and maturity](docs/FEATURES.md) for implementation and validation details.

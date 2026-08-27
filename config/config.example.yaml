@@ -51,10 +51,29 @@ modules:
 ai:
   provider: hailo
   model: "qwen2.5-instruct:1.5b"
-  hailo: {base_url: "http://127.0.0.1:8000"}
-  llamacpp: {base_url: "http://127.0.0.1:8080"}
-  ollama: {base_url: "http://127.0.0.1:11434"}
-  openai_compat: {base_url: ""}
+  timeout_s: 45
+  max_concurrency: 1
+  queue_depth: 3
+  max_tool_rounds: 2
+  max_output_tokens: 220
+  budget:
+    system_tokens: 240
+    tool_tokens: 160
+    evidence_tokens: 820
+    history_tokens: 200
+    question_tokens: 110
+    reserve_output_tokens: 220
+    safety_margin_percent: 15
+  keep_warm: {enabled: true, interval_s: 240}
+  embeddings: {enabled: false, model: "all-MiniLM-L6-v2", queue_max: 100}
+  circuit_breaker: {failures: 5, window_minutes: 10, open_minutes: 15}
+  persona_addendum: ""
+  cold_placeholder_threshold_s: 15
+  cold_placeholder_enabled: false
+  hailo: {base_url: "http://127.0.0.1:8000", context_tokens: 2048, supports_tools: false}
+  llamacpp: {base_url: "http://127.0.0.1:8080", context_tokens: 4096, supports_tools: true}
+  ollama: {base_url: "http://127.0.0.1:11434", context_tokens: 4096, supports_tools: true}
+  openai_compat: {base_url: "", context_tokens: 4096, supports_tools: true, api_key_env: "OUTPOST_AI_API_KEY"}
 env:
   user_agent: "Outpost/0.1 (operator: operator@example.org)"
   refresh_minutes: 15

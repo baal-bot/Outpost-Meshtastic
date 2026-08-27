@@ -30,6 +30,18 @@ def detect_rtl_sdr() -> list[str]:
     return devices
 
 
+def detect_hailo10h() -> bool:
+    for vendor_path in sorted(Path("/sys/bus/pci/devices").glob("*/vendor")):
+        device_path = vendor_path.with_name("device")
+        if not device_path.exists():
+            continue
+        if vendor_path.read_text().strip().lower() == "0x1e60" and (
+            device_path.read_text().strip().lower() == "0x45c4"
+        ):
+            return True
+    return False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Configure a new Outpost installation")
     parser.add_argument("--config", type=Path, required=True)
@@ -74,6 +86,11 @@ def main() -> None:
             if not county:
                 raise SystemExit("A SAME county code is required when the receiver is enabled")
             same["county_codes"] = [value.strip() for value in county.split(",") if value.strip()]
+    if detect_hailo10h():
+        enabled = ask("Enable detected Hailo-10H local AI provider (yes/no)", "no")
+        if enabled.lower() in {"y", "yes"}:
+            data["modules"]["ai"]["enabled"] = True
+            data["ai"]["provider"] = "hailo"
     Config.model_validate(data)
     temporary = args.config.with_suffix(".yaml.new")
     temporary.write_text(yaml.safe_dump(data, sort_keys=False))

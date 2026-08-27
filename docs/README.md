@@ -12,6 +12,7 @@ detailed intended product design.
 5. [Data retention and storage](RETENTION.md)
 6. [Troubleshooting](TROUBLESHOOTING.md)
 7. [Dashboard and API](DASHBOARD.md)
+8. [Local AI](AI.md)
 
 ## Members and responders
 

@@ -168,17 +168,82 @@ class ModulesConfig(StrictModel):
         return self.enabled_map().get(name, True)
 
 
-class BaseUrl(StrictModel):
+class AIProviderEndpoint(StrictModel):
     base_url: str = ""
+    context_tokens: int = Field(default=2048, ge=256)
+    supports_tools: bool = False
+    api_key_env: str = Field(default="", pattern=r"^[A-Z][A-Z0-9_]*$|^$")
+
+
+class AIBudgetConfig(StrictModel):
+    system_tokens: int = Field(default=240, ge=64, le=260)
+    tool_tokens: int = Field(default=160, ge=0, le=512)
+    evidence_tokens: int = Field(default=820, ge=0, le=4096)
+    history_tokens: int = Field(default=200, ge=0, le=512)
+    question_tokens: int = Field(default=110, ge=32, le=512)
+    reserve_output_tokens: int = Field(default=220, ge=64, le=512)
+    safety_margin_percent: float = Field(default=15, ge=15, le=40)
+
+
+class AIKeepWarmConfig(StrictModel):
+    enabled: bool = True
+    interval_s: int = Field(default=240, ge=30, le=3600)
+
+
+class AIEmbeddingConfig(StrictModel):
+    enabled: bool = False
+    model: str = "all-MiniLM-L6-v2"
+    queue_max: int = Field(default=100, ge=1, le=10_000)
+
+
+class AICircuitBreakerConfig(StrictModel):
+    failures: int = Field(default=5, ge=1, le=20)
+    window_minutes: int = Field(default=10, ge=1, le=60)
+    open_minutes: int = Field(default=15, ge=1, le=120)
 
 
 class AIConfig(StrictModel):
     provider: Literal["hailo", "llamacpp", "ollama", "openai_compat", "null"] = "hailo"
     model: str = "qwen2.5-instruct:1.5b"
-    hailo: BaseUrl = Field(default_factory=lambda: BaseUrl(base_url="http://127.0.0.1:8000"))
-    llamacpp: BaseUrl = Field(default_factory=lambda: BaseUrl(base_url="http://127.0.0.1:8080"))
-    ollama: BaseUrl = Field(default_factory=lambda: BaseUrl(base_url="http://127.0.0.1:11434"))
-    openai_compat: BaseUrl = Field(default_factory=BaseUrl)
+    timeout_s: float = Field(default=45, gt=0, le=180)
+    max_concurrency: int = Field(default=1, ge=1, le=4)
+    queue_depth: int = Field(default=3, ge=0, le=20)
+    max_tool_rounds: int = Field(default=2, ge=0, le=2)
+    max_output_tokens: int = Field(default=220, ge=32, le=512)
+    budget: AIBudgetConfig = Field(default_factory=AIBudgetConfig)
+    keep_warm: AIKeepWarmConfig = Field(default_factory=AIKeepWarmConfig)
+    embeddings: AIEmbeddingConfig = Field(default_factory=AIEmbeddingConfig)
+    circuit_breaker: AICircuitBreakerConfig = Field(default_factory=AICircuitBreakerConfig)
+    persona_addendum: str = Field(default="", max_length=200)
+    cold_placeholder_threshold_s: int = Field(default=15, ge=5, le=120)
+    cold_placeholder_enabled: bool = False
+    hailo: AIProviderEndpoint = Field(
+        default_factory=lambda: AIProviderEndpoint(base_url="http://127.0.0.1:8000")
+    )
+    llamacpp: AIProviderEndpoint = Field(
+        default_factory=lambda: AIProviderEndpoint(
+            base_url="http://127.0.0.1:8080", context_tokens=4096, supports_tools=True
+        )
+    )
+    ollama: AIProviderEndpoint = Field(
+        default_factory=lambda: AIProviderEndpoint(
+            base_url="http://127.0.0.1:11434", context_tokens=4096, supports_tools=True
+        )
+    )
+    openai_compat: AIProviderEndpoint = Field(
+        default_factory=lambda: AIProviderEndpoint(
+            context_tokens=4096, supports_tools=True, api_key_env="OUTPOST_AI_API_KEY"
+        )
+    )
+
+    @model_validator(mode="after")
+    def validate_provider_budget(self) -> AIConfig:
+        endpoint = getattr(self, self.provider, None)
+        if endpoint is not None and endpoint.context_tokens < 1600:
+            raise ValueError("ai provider context_tokens must be at least 1600")
+        if self.max_output_tokens > self.budget.reserve_output_tokens:
+            raise ValueError("ai.max_output_tokens must not exceed budget.reserve_output_tokens")
+        return self
 
 
 class SameConfig(StrictModel):

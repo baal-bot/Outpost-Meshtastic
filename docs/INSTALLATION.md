@@ -148,6 +148,16 @@ sudo -u outpost /opt/outpost/current/bin/python "$PWD/tools/check_same_hardware.
 Run the tools from the repository checkout. The first command fetches a checksum-pinned National
 Periodic Test audio fixture; the second uses a temporary database and requires sustained PCM audio.
 
+## Optional Hailo AI HAT+ 2
+
+The first-run wizard detects a Hailo-10H and can enable its local provider, but the operating-system
+runtime must already be installed and the Pi rebooted. Follow [Local AI](AI.md) for the pinned
+Hailo-10H runtime, GenAI package, loopback-only service, model pull, and hardware benchmark. Do not
+install the Hailo-8 `hailo-all` package on an AI HAT+ 2.
+
+Leave AI disabled until the model passes the safety evaluation. The radio, BBS, mail, Watch,
+Environment, and federation features do not require the accelerator or any inference provider.
+
 ## Offline maps
 
 When `node.location` exists at installation, the installer seeds a bounded USGS pack. Later:

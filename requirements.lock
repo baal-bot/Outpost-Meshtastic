@@ -15,6 +15,8 @@ cryptography==50.0.0
 dbus-fast==5.0.22
 fastapi==0.141.1
 h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
 idna==3.19
 meshtastic==2.7.11
 packaging==26.3

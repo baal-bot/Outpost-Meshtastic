@@ -13,6 +13,7 @@ dependencies = [
   "cbor2>=5.7,<6",
   "cryptography>=50,<51",
   "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
   "pydantic>=2.11,<3",
   "pydantic-settings>=2.10,<3",
   "PyYAML>=6.0,<7",
@@ -26,7 +27,6 @@ radio = ["meshtastic>=2.7,<3"]
 dev = [
   "axe-playwright-python>=0.1.8,<0.2",
   "astral>=3.2,<4",
-  "httpx>=0.28,<1",
   "hypothesis>=6.138,<7",
   "mypy>=1.17,<2",
   "pip-audit>=2.9,<3",
@@ -52,6 +52,7 @@ artifacts = ["src/outpost/web/static/**"]
 addopts = "-q --strict-markers"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["eval: requires an explicitly configured live inference provider"]
 
 [tool.ruff]
 target-version = "py312"

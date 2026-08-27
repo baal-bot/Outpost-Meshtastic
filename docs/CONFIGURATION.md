@@ -68,6 +68,22 @@ The governor enforces an Outpost-originated budget, reserve, channel-utilization
 gap, multipart pacing, queue capacity, and traffic-class shares. Budget plus reserve may not exceed
 20% and must stay below the utilization ceiling. Conservative settings protect other mesh users.
 
+### `ai`
+
+The provider is one of `hailo`, `llamacpp`, `ollama`, `openai_compat`, or `null`. Each endpoint has
+a base URL, configured context fallback, tool-capability flag, and optional API-key environment
+variable name. A selected provider context below 1,600 tokens is invalid.
+
+Runtime bounds include a 45-second timeout, concurrency of one, queue depth of three, at most two
+tool rounds, a 220-token output ceiling, keep-warm policy, embedding queue, and circuit breaker.
+The token budget reserves system, tool, evidence, history, question, output, and at least 15%
+safety-margin allocations. The future dashboard may tune bounded values but cannot remove safety,
+grounding, attribution, or emergency clauses.
+
+`openai_compat` is an explicit external-data choice. Put its secret only in the environment named
+by `api_key_env`; never place a credential in `base_url` or commit it. See [Local AI](AI.md) for
+hardware setup and the mandatory benchmark.
+
 ### `env`
 
 Set a descriptive `user_agent` with operator contact. Refresh, cache age, timeout, earthquake
