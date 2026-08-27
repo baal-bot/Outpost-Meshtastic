@@ -1,10 +1,5 @@
-const memberMapCss = document.createElement("link");
-memberMapCss.rel = "stylesheet";
-memberMapCss.href = "/member-map.css?v=3";
-document.head.appendChild(memberMapCss);
-
 const memberMapPanel = document.createElement("section");
-memberMapPanel.className = "panel member-map-panel";
+memberMapPanel.className = "ui-card panel member-map-panel";
 memberMapPanel.innerHTML = `
   <div class="member-map-heading">
     <div><p class="eyebrow">APPROVED MEMBER POSITIONS</p><h2>Members map</h2></div>
@@ -26,7 +21,7 @@ memberMapPanel.innerHTML = `
   <div id="member-map" class="outpost-map member-position-map" tabindex="0" aria-label="Interactive members map. Use arrow keys to pan, plus and minus to zoom, and zero to fit visible members.">
     <div id="member-map-tiles" class="outpost-map-tiles"></div>
     <div id="member-map-markers" class="outpost-map-markers"></div>
-    <div class="outpost-map-controls">
+    <div class="ui-map-controls outpost-map-controls">
       <button id="member-map-in" data-map-action="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
       <button id="member-map-out" data-map-action="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
       <button id="member-map-fit" data-map-action="fit" title="Fit visible members" aria-label="Fit visible members">⌖</button>

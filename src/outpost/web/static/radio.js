@@ -53,7 +53,7 @@ async function refresh() {
     api(`/api/v1/mesh/messages?limit=100&${query}`).then((response) => response.json()),
   ]);
   const state = $("link-state");
-  state.className = `status ${status.radio}`;
+  state.className = `ui-pill status ${status.radio}`;
   state.innerHTML = `<i></i>${safe(status.radio)}`;
   $("radio-node").textContent = status.radio_config.node_id || "—";
   $("radio-preset").textContent =
@@ -120,7 +120,7 @@ async function refresh() {
           `</article>`
         );
       })
-      .join("") || '<p class="empty">No queued, failed, or stale work.</p>';
+      .join("") || '<p class="ui-empty empty">No queued, failed, or stale work.</p>';
   document.querySelectorAll("[data-cancel]").forEach((button) =>
     button.addEventListener("click", async () => {
       await api(`/api/v1/mesh/queue/${button.dataset.cancel}`, { method: "DELETE" });

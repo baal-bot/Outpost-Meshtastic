@@ -180,6 +180,7 @@ field acceptance.
 - [Configuration](docs/CONFIGURATION.md)
 - [Mesh commands](docs/COMMANDS.md)
 - [Dashboard and API](docs/DASHBOARD.md)
+- [Dashboard design system](docs/UI-DESIGN-SYSTEM.md)
 - [Operations](docs/OPERATIONS.md)
 - [Data retention and storage](docs/RETENTION.md)
 - [Architecture](docs/ARCHITECTURE.md)

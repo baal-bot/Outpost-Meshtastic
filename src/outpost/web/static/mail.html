@@ -6,10 +6,10 @@
   <meta name="theme-color" content="#071411">
   <script src="/theme-boot.js"></script>
   <title>Operations inbox · Outpost</title>
-  <link rel="stylesheet" href="/app.css">
-  <link rel="stylesheet" href="/enhancements.css">
+  <link rel="stylesheet" href="/base.css?v=1">
+  <link rel="stylesheet" href="/layout.css?v=1">
   <link rel="stylesheet" href="/mail.css?v=2">
-  <link rel="stylesheet" href="/theme-corrections.css?v=29">
+  <link rel="stylesheet" href="/components.css?v=1">
 </head>
 <body>
   <aside class="rail">
@@ -21,7 +21,7 @@
     <header>
       <div><p class="eyebrow">STORE · ROUTE · RESPOND</p><h1>Operations inbox</h1></div>
       <div class="mail-header-actions">
-        <button id="refresh-mail" class="secondary-button">Refresh</button>
+        <button id="refresh-mail" class="ui-button secondary-button">Refresh</button>
         <button id="compose-mail">New message</button>
       </div>
     </header>
@@ -31,7 +31,7 @@
         <article><small>ACTIONABLE</small><strong id="action-count">—</strong><p>Unread or failed delivery</p></article>
         <article><small>VISIBLE</small><strong id="mail-count">—</strong><p>Matching the current filters</p></article>
       </section>
-      <section class="privacy-banner">
+      <section class="ui-notice privacy-banner">
         <strong>Operator-readable plaintext</strong>
         <p>System-to-system traffic stays in this workspace. Messages addressed to a named member remain member mail. Opening a conversation and every operator reply are permanently audited.</p>
       </section>
@@ -43,11 +43,11 @@
         <label><span>Folder</span><select id="archive-filter"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All folders</option></select></label>
       </section>
       <div class="mail-grid">
-        <section class="panel mailbox" aria-label="Conversation list">
+        <section class="ui-card panel mailbox" aria-label="Conversation list">
           <div class="mailbox-head"><div><p class="eyebrow">CONVERSATIONS</p><h2>Operator queue</h2></div><span id="filter-summary">Loading</span></div>
-          <div id="mail-list" class="mail-list"><p class="empty">Loading conversations…</p></div>
+          <div id="mail-list" class="mail-list"><p class="ui-empty empty">Loading conversations…</p></div>
         </section>
-        <section class="panel mail-detail" aria-live="polite">
+        <section class="ui-card panel mail-detail" aria-live="polite">
           <div id="mail-detail" class="mail-empty-state">
             <span aria-hidden="true">✉</span>
             <h2>Select a conversation</h2>
@@ -71,7 +71,7 @@
         <div id="compose-preview" class="route-preview">Select an Outpost to preview the route.</div>
         <p id="compose-result" class="form-result" role="status"></p>
       </div>
-      <footer><button type="button" class="secondary-button dialog-cancel">Cancel</button><button type="submit">Queue encrypted message</button></footer>
+      <footer><button type="button" class="ui-button secondary-button dialog-cancel">Cancel</button><button type="submit">Queue encrypted message</button></footer>
     </form>
   </dialog>
   <script src="/mail.js?v=2" defer></script>

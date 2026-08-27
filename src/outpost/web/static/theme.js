@@ -1,17 +1,4 @@
 const storageKey = "outpost.appearance.theme";
-let corrections = document.querySelector('link[href^="/theme-corrections.css"]');
-if (!corrections) {
-  corrections = document.createElement("link");
-  corrections.rel = "stylesheet";
-  corrections.href = "/theme-corrections.css?v=29";
-  document.head.appendChild(corrections);
-}
-if (!corrections.sheet) {
-  await new Promise(resolve => {
-    corrections.addEventListener("load", resolve, {once: true});
-    corrections.addEventListener("error", resolve, {once: true});
-  });
-}
 const allowed = new Set(["system", "dark", "daylight", "night"]);
 const media = window.matchMedia("(prefers-color-scheme: light)");
 

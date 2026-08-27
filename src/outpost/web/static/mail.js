@@ -81,7 +81,7 @@ async function loadConversations() {
 }
 
 function renderEmpty() {
-  $("mail-detail").className = "mail-empty-state";
+  $("mail-detail").className = "ui-empty mail-empty-state";
   $("mail-detail").innerHTML = `<span aria-hidden="true">✉</span><h2>Select a conversation</h2>` +
     `<p>Message bodies are loaded only when an operator opens the conversation.</p>`;
 }
@@ -102,7 +102,7 @@ function messageCard(message) {
 async function openConversation(key) {
   selectedKey = key;
   $("mail-detail").className = "mail-loading";
-  $("mail-detail").innerHTML = `<p class="empty">Opening conversation and recording audit event…</p>`;
+  $("mail-detail").innerHTML = `<p class="ui-empty empty">Opening conversation and recording audit event…</p>`;
   await loadConversations();
   const response = await api(`/api/v1/mail/conversations/${encodeURIComponent(key)}`);
   if (!response.ok) {

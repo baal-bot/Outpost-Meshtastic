@@ -2,16 +2,16 @@
   position: relative;
   height: 440px;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid var(--ui-border);
   border-radius: 10px;
-  background: var(--surface);
+  background: var(--ui-surface);
   cursor: grab;
   touch-action: none;
   isolation: isolate;
 }
 
 .outpost-map.dragging { cursor: grabbing; }
-.outpost-map:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
+.outpost-map:focus-visible { outline: 3px solid var(--ui-focus); outline-offset: 3px; }
 .outpost-map-tiles,
 .outpost-map-markers { position: absolute; inset: 0; }
 .outpost-map-tiles { z-index: 0; overflow: hidden; }
@@ -35,9 +35,9 @@
   left: 12px;
   display: grid;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid var(--ui-border);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--raised) 94%, transparent);
+  background: color-mix(in srgb, var(--ui-surface-raised) 94%, transparent);
   box-shadow: 0 6px 20px color-mix(in srgb, #000 35%, transparent);
 }
 
@@ -50,31 +50,31 @@
   min-width: 36px;
   padding: 0;
   border: 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--ui-border);
   border-radius: 0;
   background: transparent;
-  color: var(--ink);
+  color: var(--ui-text);
   font-size: 1rem;
   line-height: 1;
 }
 
 .outpost-map-controls button:last-child { border-bottom: 0; }
-.outpost-map-controls button:hover { background: var(--soft); }
+.outpost-map-controls button:hover { background: var(--ui-surface-subtle); }
 
 .outpost-map-marker {
-  --marker-color: var(--green);
-  --marker-border: var(--surface);
+  --marker-color: var(--ui-success-text);
+  --marker-border: var(--ui-surface);
   position: absolute;
   z-index: 3;
-  width: 36px !important;
-  height: 36px !important;
+  width: 36px;
+  height: 36px;
   min-width: 36px;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 50% !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  transform: translate(-50%, -50%) !important;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  transform: translate(-50%, -50%);
   cursor: pointer;
   pointer-events: auto;
   touch-action: manipulation;
@@ -105,7 +105,7 @@
 
 .outpost-map-marker:focus-visible { outline: none; }
 .outpost-map-marker:focus-visible .outpost-map-marker-symbol {
-  outline: 3px solid var(--ink);
+  outline: 3px solid var(--ui-text);
   outline-offset: 3px;
 }
 
@@ -165,10 +165,10 @@
   bottom: 9px;
   left: 10px;
   padding: 5px 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--ui-border);
   border-radius: 5px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  color: var(--muted);
+  background: color-mix(in srgb, var(--ui-surface) 92%, transparent);
+  color: var(--ui-text-muted);
   font: .62rem ui-monospace, monospace;
 }
 
@@ -196,7 +196,7 @@
   place-items: center;
   margin: 0;
   padding: 50px;
-  color: var(--muted);
+  color: var(--ui-text-muted);
   text-align: center;
 }
 .outpost-map-empty[hidden] { display: none; }
@@ -205,10 +205,10 @@
   left: 58px;
   margin: 0;
   padding: 6px 9px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--ui-border);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  color: var(--muted);
+  background: color-mix(in srgb, var(--ui-surface) 92%, transparent);
+  color: var(--ui-text-muted);
   font-size: .6rem;
 }
 
@@ -220,16 +220,16 @@
   width: min(320px, calc(100% - 70px));
   box-sizing: border-box;
   padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--green) 38%, var(--line));
+  border: 1px solid var(--ui-success-border);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  background: color-mix(in srgb, var(--ui-surface) 96%, transparent);
   box-shadow: 0 12px 38px color-mix(in srgb, #000 60%, transparent);
-  color: var(--ink);
+  color: var(--ui-text);
   cursor: default;
 }
-.outpost-map-detail h3 { margin: 2px 30px 8px 0; color: var(--ink); }
-.outpost-map-detail p { margin: 6px 0; color: var(--muted); font-size: .72rem; line-height: 1.45; }
-.outpost-map-detail .eyebrow { color: var(--green); font-size: .56rem; }
+.outpost-map-detail h3 { margin: 2px 30px 8px 0; color: var(--ui-text); }
+.outpost-map-detail p { margin: 6px 0; color: var(--ui-text-muted); font-size: .72rem; line-height: 1.45; }
+.outpost-map-detail .eyebrow { color: var(--ui-success-text); font-size: .56rem; }
 .outpost-map-detail .outpost-map-detail-close,
 .outpost-map-detail .close-map,
 .outpost-map-detail .close {
@@ -250,11 +250,11 @@
 }
 .outpost-map-detail .detail-actions button,
 .outpost-map-detail .waypoint-card-actions button { padding: 7px 10px; font-size: .66rem; }
-.outpost-map-detail [data-alert] { border-color: var(--green); background: var(--green); color: var(--surface); }
+.outpost-map-detail [data-alert] { border-color: var(--ui-primary); background: var(--ui-primary); color: var(--ui-on-primary); }
 .outpost-map-detail [data-resolve] {
-  border-color: color-mix(in srgb, var(--red) 50%, var(--line));
-  background: color-mix(in srgb, var(--red) 12%, var(--raised));
-  color: var(--red);
+  border-color: var(--ui-danger-border);
+  background: var(--ui-danger-surface);
+  color: var(--ui-danger-text);
 }
 
 html[data-theme="night"] .outpost-map-tile {

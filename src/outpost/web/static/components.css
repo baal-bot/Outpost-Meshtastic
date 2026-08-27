@@ -1,0 +1,465 @@
+/* Reusable controls and content primitives. Loaded after page layout styles. */
+
+/* Cards and surfaces */
+:is(.ui-card, .panel) {
+  color: var(--ui-text);
+  background: linear-gradient(145deg, var(--ui-surface-raised), var(--ui-surface));
+  border-color: var(--ui-border);
+}
+
+/* Form controls */
+:is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  color: var(--ui-text);
+  background: var(--ui-surface-inset);
+  border-color: var(--ui-border);
+}
+:is(input:not([type="checkbox"]):not([type="radio"]), select, textarea):focus {
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  border-color: var(--ui-focus);
+}
+:is(input, textarea)::placeholder { color: var(--ui-text-muted); }
+
+/* Buttons: neutral unless an explicit semantic intent is supplied. */
+:is(button, .action, .ui-button, .primary-button, .secondary-button, .small-button) {
+  color: var(--ui-text);
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-border);
+}
+:is(button, .action, .ui-button, .primary-button, .secondary-button, .small-button):not(:disabled):hover {
+  filter: brightness(1.1);
+}
+:is(.ui-button--primary, .button-primary, .primary-button, button[type="submit"]) {
+  color: var(--ui-on-primary);
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+  font-weight: 750;
+}
+:is(.ui-button--danger, .button-danger, .danger-button, .danger, .restore) {
+  color: var(--ui-danger-text);
+  background: var(--ui-danger-surface);
+  border-color: var(--ui-danger-border);
+}
+:is(button, .action, .ui-button, .primary-button, .secondary-button, .small-button):disabled {
+  color: var(--ui-disabled-text);
+  background: var(--ui-disabled-surface);
+  border-color: var(--ui-disabled-border);
+  opacity: 1;
+}
+:is(.ui-icon-button, .icon-button, .dialog-close, button.close) {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  line-height: 1;
+}
+
+/* Compact state indicators */
+:is(.ui-pill, .status, .chip, .pill, .phase, .lifecycle-badge, .review-state, .gate-pill) {
+  color: var(--ui-text-muted);
+  background: var(--ui-surface-subtle);
+  border-color: var(--ui-border);
+}
+:is(.ui-pill--success, .status.up, .chip.active, .pill.live, .phase.now, .gate-pill.accepted) {
+  color: var(--ui-success-text);
+  background: var(--ui-success-surface);
+  border-color: var(--ui-success-border);
+}
+:is(.ui-pill--warning, .chip.warn, .chip.pending, .gate-pill.withheld, .provider-health .unknown) {
+  color: var(--ui-warning-text);
+  background: var(--ui-warning-surface);
+  border-color: var(--ui-warning-border);
+}
+:is(.ui-pill--danger, .chip.bad, .status.down, .provider-health .down) {
+  color: var(--ui-danger-text);
+  background: var(--ui-danger-surface);
+  border-color: var(--ui-danger-border);
+}
+:is(.ui-pill--info, .lifecycle-badge.monitoring) {
+  color: var(--ui-info-text);
+  background: var(--ui-info-surface);
+  border-color: var(--ui-info-border);
+}
+
+/* Notices */
+:is(.ui-notice, .privacy-banner, .trust-note, .safety-banner, .risk-copy, .solicitation-status) {
+  color: var(--ui-warning-text);
+  background: var(--ui-warning-surface);
+  border-color: var(--ui-warning-border);
+}
+:is(.ui-notice--danger, .restore-warning) {
+  color: var(--ui-danger-text);
+  background: var(--ui-danger-surface);
+  border-color: var(--ui-danger-border);
+}
+:is(.ui-notice--info, .read-only-banner) {
+  color: var(--ui-info-text);
+  background: var(--ui-info-surface);
+  border-color: var(--ui-info-border);
+}
+
+/* Dialogs and action rows */
+:is(.ui-dialog, .application-dialog-card, dialog > form, .login-card) {
+  color: var(--ui-text);
+  background: linear-gradient(145deg, var(--ui-surface-raised), var(--ui-surface));
+  border-color: var(--ui-border);
+}
+:is(.ui-action-bar, .heading-actions, .dialog-actions, .detail-actions, .backup-actions) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+:is(.ui-empty, .empty, .mail-empty-state, .outpost-map-empty) {
+  color: var(--ui-text-muted);
+}
+
+/* Map controls share the same instrument primitive as ordinary icon groups. */
+:is(.ui-map-controls, .outpost-map-controls) {
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--ui-surface-raised) 94%, transparent);
+  border-color: var(--ui-border);
+}
+
+.theme-options button {
+  width: auto;
+  margin-top: 0;
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--ui-surface) 82%, transparent);
+  border: 1px solid var(--ui-border);
+}
+.theme-options button.selected {
+  color: var(--ui-text);
+  border-color: var(--ui-success-border);
+  background: var(--ui-success-surface);
+}
+
+.login-screen { background: var(--ui-overlay); }
+.appearance-settings { border-color: var(--ui-border); }
+:is(.location-settings, .temperature-units, .emergency-card .escalation-editor) {
+  color: var(--ui-text);
+  background: var(--ui-surface-subtle);
+  border-color: var(--ui-border);
+}
+.temperature-units label {
+  color: var(--ui-text-muted);
+  background: var(--ui-surface-raised);
+  border-color: var(--ui-border);
+}
+.temperature-units label:has(input:checked) {
+  color: var(--ui-success-text);
+  background: var(--ui-success-surface);
+  border-color: var(--ui-success-border);
+}
+.emergency-card {
+  background: linear-gradient(145deg, var(--ui-surface-raised), var(--ui-surface));
+  border-color: var(--ui-warning-border);
+}
+:is(.emergency-card .policy-card, .emergency-card .stage-row) {
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  border-color: var(--ui-border);
+}
+.emergency-card :is(.policy-card header small, .policy-card header label, .stage-row label span, .stage-row label small, .advanced-toggle small) {
+  color: var(--ui-text-muted);
+}
+.emergency-card .advanced-toggle { border-top-color: var(--ui-border); }
+.emergency-card .advanced-policy textarea {
+  color: var(--ui-text);
+  background: var(--ui-surface-inset);
+  border-color: var(--ui-border);
+}
+.emergency-card [data-add-stage] {
+  color: var(--ui-text);
+  background: var(--ui-surface-raised);
+  border-color: var(--ui-border);
+}
+.emergency-card [data-remove-stage] {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  line-height: 1;
+}
+.settings-card .close,
+.emergency-card .close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  line-height: 1;
+}
+
+
+/* Existing markup adapters. New work should use the ui-* primitives above. */
+:is(
+  #open-emergency,
+  #save-watch-settings,
+  #create-backup,
+  #create-backup-page,
+  #new-board,
+  #new-thread,
+  #save-board,
+  #save-thread,
+  #approve-solicitation,
+  .compose-panel form > button,
+  .event-empty form > button,
+  .alert-submit button,
+  .send-form button,
+  .mqtt-form > button,
+  .service-form > button,
+  .policy-form > button,
+  .relay-mail-form > button,
+  [data-pair],
+  [data-approve],
+  [data-import],
+  [data-quake-approve],
+  [data-cap-approve]
+) {
+  color: var(--ui-on-primary);
+  background: var(--ui-primary);
+  border-color: var(--ui-primary);
+  font-weight: 750;
+}
+:is(
+  .secondary,
+  .button-secondary,
+  .small-button,
+  [value="cancel"],
+  [id^="refresh-"],
+  #open-settings,
+  #reconnect-radio,
+  #alert-use-map,
+  #waypoint-use-center,
+  [data-waypoint-focus],
+  [data-waypoint-edit],
+  [data-waypoint-card-center],
+  [data-waypoint-card-edit],
+  [data-center]
+) {
+  color: var(--ui-text);
+  background: var(--ui-surface-raised);
+  border-color: var(--ui-border);
+}
+:is(
+  .danger,
+  .restore,
+  .button-danger,
+  .danger-button,
+  .member-map-danger,
+  #close-event,
+  [data-waypoint-delete],
+  [data-reject],
+  [data-state="rejected"],
+  [data-remove-stage],
+  [data-halt-alert],
+  [data-cancel-alert],
+  [data-resolve]
+) {
+  color: var(--ui-danger-text);
+  background: var(--ui-danger-surface);
+  border-color: var(--ui-danger-border);
+}
+#application-dialog-confirm.danger {
+  color: var(--ui-on-primary);
+  background: var(--ui-danger-text);
+  border-color: var(--ui-danger-border);
+}
+
+/* Legacy domain components now consume the shared semantic tokens. */
+:is(
+  .item,
+  .capability-grid article,
+  .queue-card,
+  .mail-meta,
+  .mail-body,
+  .incident-card,
+  .env-day,
+  .env-hourly div,
+  .environment-counts div,
+  .waypoint-row,
+  .peer-card,
+  .path-grid article
+) {
+  color: var(--ui-text);
+  background: var(--ui-surface-subtle);
+  border-color: var(--ui-border);
+}
+:is(
+  .board-row:hover,
+  .thread-row:hover,
+  .board-row.active,
+  .thread-row.active,
+  .mail-row:hover,
+  .mail-row.active
+) { background: color-mix(in srgb, var(--ui-primary) 8%, var(--ui-surface)); }
+:is(.gauge, .queue-track, .env-hero-stats div, .environment-counts, .env-hourly) {
+  background: var(--ui-surface-inset);
+}
+:is(
+  .current-metrics strong,
+  .env-day strong,
+  .env-hourly strong,
+  .environment-counts strong,
+  .daylight-values strong,
+  .moon-row strong,
+  .env-event strong,
+  .waypoint-row h3,
+  .weather-reading strong,
+  .weather-details b,
+  .forecast-day > strong,
+  .forecast-hours strong,
+  .cap-summary b,
+  .solicitation-message p,
+  .map-timeline strong
+) { color: var(--ui-text); }
+:is(
+  .current-metrics span,
+  .env-day > span,
+  .env-day p,
+  .env-day div,
+  .env-hourly time,
+  .env-hourly span,
+  .daylight-values span,
+  .moon-row span,
+  .moon-row b,
+  .waypoint-row p,
+  .credit,
+  .map-credit,
+  .weather-panel p,
+  .weather-reading span,
+  .weather-details span,
+  .weather-details em,
+  .forecast-heading > span,
+  .forecast-day > span,
+  .forecast-day p,
+  .forecast-day div,
+  .forecast-day > strong small,
+  .forecast-hours time,
+  .forecast-hours span,
+  .watch-kpis small,
+  .watch-kpis p,
+  .operation-grid small,
+  .operation-grid span,
+  .operations-alert footer,
+  .cap-card header > span,
+  .cap-card footer > span,
+  .cap-card p,
+  .quake-review-card p,
+  .roster-counts span,
+  .roster-person span,
+  .solicitation-recipient code,
+  .solicitation-message small,
+  .active-alert p,
+  .active-alert small,
+  #event-result:not(:empty),
+  .alert-location-fields label,
+  .alert-delivery,
+  .map-timeline div
+) { color: var(--ui-text-muted); }
+.forecast-day div b { color: var(--ui-success-text); }
+:is(.env-provider-health span, .provider-health span) {
+  color: var(--ui-text-muted);
+  background: var(--ui-surface-subtle);
+  border-color: var(--ui-border);
+}
+:is(.env-provider-health .up, .env-provider-health .cached, .provider-health .up, .provider-health .cached) {
+  color: var(--ui-success-text);
+  background: var(--ui-success-surface);
+  border-color: var(--ui-success-border);
+}
+.env-hero-stats { background: var(--ui-border); border-color: var(--ui-border); }
+.env-hero-stats div { background: var(--ui-surface-subtle); }
+.env-hero-stats span { color: var(--ui-text-muted); }
+.env-hero-stats strong { color: var(--ui-text); }
+.trust-note :is(strong, span) { color: inherit; }
+:is(.kpis em, .direction) { background: var(--ui-surface-inset); border-color: var(--ui-border); }
+:is(.badge, .live, .monitoring-heading span, .safety-note, .delivery-state) {
+  color: var(--ui-success-text);
+}
+.phase.later { color: var(--violet); background: var(--ui-info-surface); border-color: var(--ui-info-border); }
+:is(
+  .watch-kpis article,
+  .operation-grid > div,
+  .cap-summary span,
+  .cap-card,
+  .quake-review-card,
+  .roster-counts article,
+  .roster-person,
+  .solicitation-review,
+  .solicitation-message,
+  .active-alert
+) {
+  color: var(--ui-text);
+  background: var(--ui-surface-subtle);
+  border-color: var(--ui-border);
+}
+:is(.cap-summary, .monitoring-list) {
+  background: var(--ui-surface-inset);
+  border-color: var(--ui-border);
+}
+:is(.alert-location-fields, .alert-delivery) {
+  color: var(--ui-text-muted);
+  background: var(--ui-surface-subtle);
+  border-color: var(--ui-border);
+}
+.alert-delivery.delayed {
+  color: var(--ui-warning-text);
+  background: var(--ui-warning-surface);
+  border-color: var(--ui-warning-border);
+}
+.alert-delivery.attention,
+.roster-person.need_help,
+.active-alert {
+  color: var(--ui-danger-text);
+  background: var(--ui-danger-surface);
+  border-color: var(--ui-danger-border);
+}
+.ack-progress { background: var(--ui-surface-inset); }
+.stage-pill { color: var(--ui-text-muted); border-color: var(--ui-border); }
+.incident-panel .filters { display: flex; align-items: center; column-gap: 9px; }
+.backup-actions :is(a, button),
+.capability-grid :is(.action, button, #create-backup, #open-emergency) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  line-height: 1;
+}
+.restore-warning p { color: inherit; }
+.environment-counts span { color: var(--ui-text-muted); }
+.map-attribution a { text-decoration: underline; text-underline-offset: 2px; }
+:is(.close-map, .waypoint-card-close, .member-map-detail .close) {
+  min-width: 32px;
+  min-height: 32px;
+}
+.member-map-row-open { min-height: 32px; margin: 7px 0 0 10px; padding: 5px 9px; font-size: .62rem; }
+.incident-card { grid-template-columns: 72px minmax(0, 1fr) auto auto; }
+.incident-map-open { align-self: center; white-space: nowrap; }
+@media(max-width:900px) {
+  .incident-card { grid-template-columns: 58px 1fr; }
+  .incident-map-open { grid-column: 2; justify-self: start; }
+}
+
+.security-score button {
+  width: max-content;
+  margin-top: 12px;
+  padding: 7px 9px;
+  color: var(--ui-text);
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  font: 700 .54rem Figtree, sans-serif;
+}
+.current-account-note {
+  color: var(--ui-text-muted);
+  font: .52rem ui-monospace, monospace;
+}

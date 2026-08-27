@@ -34,7 +34,7 @@ function installSafetyFloorPanel() {
       '<h2>Repeat coalescing</h2></div>' +
       '<p id="safety-floor-summary" class="safety-floor-summary">Loading…</p></div>' +
       '<div id="safety-floor-list" class="audit-list safety-floor-list">' +
-      '<p class="empty">Loading…</p></div></section>',
+      '<p class="ui-empty empty">Loading…</p></div></section>',
   );
 }
 
@@ -97,7 +97,7 @@ function renderMemberRows() {
       `<small>${member.position_expires_at ? `Until ${safe(exactTime(member.position_expires_at))}` : "No retained coordinate"}</small></td>` +
       `<td><span class="trust-pill ${safe(member.trust)}">${safe(member.trust)}</span></td>` +
       `<td><button type="button" class="small-button secondary" data-review-member="${safe(member.id)}">Review</button></td></tr>`;
-  }).join("") || '<tr><td colspan="7" class="empty">No identities match this view.</td></tr>';
+  }).join("") || '<tr><td colspan="7" class="ui-empty empty">No identities match this view.</td></tr>';
   $("member-more").hidden = memberCursor === null;
   updateSelectionBar();
 }
@@ -200,7 +200,7 @@ function detailMetric(label, value, hint = "") {
 }
 
 function renderActivity(items) {
-  if (!items.length) return '<p class="empty">No retained activity for this identity.</p>';
+  if (!items.length) return '<p class="ui-empty empty">No retained activity for this identity.</p>';
   return items.map(item => `<li><div><span class="activity-direction ${safe(item.direction)}">${safe(item.direction)}</span>` +
     `<strong>${safe(item.command || `Port ${item.portnum ?? "—"}`)}</strong></div>` +
     `<span>${safe(item.outcome || item.drop_reason || "recorded")} · ${safe(item.transport || "radio")}</span>` +
@@ -208,7 +208,7 @@ function renderActivity(items) {
 }
 
 function renderTrustHistory(items) {
-  if (!items.length) return '<p class="empty">No reviewed trust changes recorded.</p>';
+  if (!items.length) return '<p class="ui-empty empty">No reviewed trust changes recorded.</p>';
   return items.map(item => `<li><div><strong>${safe(item.from_trust)} → ${safe(item.to_trust)}</strong>` +
     `<span>${safe(item.reason)}</span></div><small>${safe(item.changed_by)} · ${safe(relative(item.created_at))}</small></li>`).join("");
 }
@@ -272,11 +272,11 @@ function renderDetail(result) {
 }
 
 async function openMemberDetail(memberId) {
-  $("detail-body").innerHTML = '<p class="empty">Loading identity evidence…</p>';
+  $("detail-body").innerHTML = '<p class="ui-empty empty">Loading identity evidence…</p>';
   if (!$("member-detail").open) $("member-detail").showModal();
   const response = await fetch(`/api/v1/members/${memberId}`);
   if (!response.ok) {
-    $("detail-body").innerHTML = `<p class="empty">${safe(await apiError(response, "Member details could not be loaded."))}</p>`;
+    $("detail-body").innerHTML = `<p class="ui-empty empty">${safe(await apiError(response, "Member details could not be loaded."))}</p>`;
     return;
   }
   renderDetail(await response.json());
@@ -369,7 +369,7 @@ function renderAudit(total) {
       `<div class="audit-value audit-actor"><small>Actor</small><span>${safe(actor)}</span></div>` +
       `<div class="audit-value audit-target"><small>Target</small><span>${safe(event.target || "system")}</span></div>` +
       `<time datetime="${safe(event.created_at)}" title="${safe(exactTime(event.created_at))}">${safe(relative(event.created_at))}</time>${auditDetail(event, index)}</article>`;
-  }).join("") || '<p class="empty">No audit events match these filters.</p>';
+  }).join("") || '<p class="ui-empty empty">No audit events match these filters.</p>';
   $("audit-count").textContent = total;
   $("audit-summary").textContent = `Showing ${auditItems.length} of ${total} matching events`;
   $("audit-more").hidden = auditCursor === null;
@@ -410,7 +410,7 @@ function renderSafety(safety) {
     `<div class="audit-event safety-floor-event"><code>${safe(event.command)}</code>` +
     `<p>${safe(event.member_mesh_id)} · ${safe(event.coalesced_count)} repeats coalesced from ${safe(event.attempt_count)} attempts</p>` +
     `<time>${safe(relative(event.last_seen_at))}</time></div>`,
-  ).join("") || '<p class="empty">No repeated safety commands in the retained activity window.</p>';
+  ).join("") || '<p class="ui-empty empty">No repeated safety commands in the retained activity window.</p>';
 }
 
 async function load() {

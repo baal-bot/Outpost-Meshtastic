@@ -26,9 +26,9 @@
   font-size: .63rem;
 }
 .member-map-danger {
-  border: 1px solid color-mix(in srgb, var(--red) 45%, var(--line)) !important;
-  background: color-mix(in srgb, var(--red) 10%, var(--raised)) !important;
-  color: var(--red) !important;
+  border: 1px solid color-mix(in srgb, var(--red) 45%, var(--line)) ;
+  background: color-mix(in srgb, var(--red) 10%, var(--raised)) ;
+  color: var(--red) ;
 }
 .outpost-map-detail .delete-position { width: 100%; margin-top: 8px; padding: 8px; }
 .outpost-map-detail p b { color: var(--ink); font-weight: 650; }

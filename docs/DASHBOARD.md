@@ -82,6 +82,10 @@ Settings → Appearance offers Outpost Dark, high-contrast Daylight, low-light N
 Follow System option. The preference is stored in the current browser rather than the Outpost
 database so a wall display, phone, and operator workstation can each use the appropriate mode.
 Night Ops reduces map brightness; it does not change incident severity or provider data.
+Shared cards, buttons, pills, notices, dialogs, action bars, empty states, and map controls consume
+the same semantic surface, text, border, focus, state, and disabled tokens in every theme. The
+[dashboard design system](UI-DESIGN-SYSTEM.md) documents the contributor contract and visual
+regression matrix.
 
 ## Map controls
 

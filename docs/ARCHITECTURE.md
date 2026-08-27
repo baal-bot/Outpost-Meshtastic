@@ -59,6 +59,11 @@ pan/zoom, selection, empty state, and mouse/touch/keyboard input. Page adapters 
 marker definitions and detail-card actions. Pointer movement is animation-frame coalesced; a pan
 repositions existing DOM and creates or removes tiles only when the viewport crosses a tile edge.
 
+Dashboard CSS follows a fixed cascade: structural `base.css`, shared `layout.css`, domain layout,
+then semantic `components.css`. Theme blocks assign shared tokens instead of correcting individual
+widgets, and pages never inject stylesheets at runtime. See the
+[dashboard design system](UI-DESIGN-SYSTEM.md) for the component and visual-test contract.
+
 ## Trust boundaries
 
 - A heard radio is not automatically a member.

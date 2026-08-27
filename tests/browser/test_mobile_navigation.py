@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import base64
+import io
 import json
+import os
 import shutil
 import socket
 import threading
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
 import uvicorn
 from axe_playwright_python.sync_playwright import Axe
+from PIL import Image
 
 from outpost.web.api import create_web_app
 
@@ -45,6 +50,27 @@ OPERATOR_PAGES = tuple(
     dict.fromkeys(target.split("#", 1)[0] for _label, target in DESTINATIONS[:-1])
 )
 THEMES = ("dark", "daylight", "night")
+VISUAL_PAGES = (
+    ("overview", "/"),
+    ("members", "/operator.html"),
+    ("bbs", "/bbs.html"),
+    ("mail", "/mail.html"),
+    ("watch", "/watch.html"),
+    ("environment", "/environment.html"),
+    ("radio", "/radio.html"),
+    ("federation", "/federation.html"),
+    ("access", "/access.html"),
+    ("backups", "/backups.html"),
+)
+VISUAL_VIEWPORTS = (
+    ("mobile", 390, 844),
+    ("tablet", 768, 1024),
+    ("desktop", 1280, 900),
+)
+VISUAL_BASELINES = Path(__file__).with_name("visual_baselines.json")
+UPDATE_VISUAL_BASELINES = os.environ.get("OUTPOST_UPDATE_VISUAL_BASELINES") == "1"
+VISUAL_ARTIFACT_DIR = os.environ.get("OUTPOST_VISUAL_ARTIFACT_DIR")
+STATIC_ROOT = Path(__file__).parents[2] / "src" / "outpost" / "web" / "static"
 ACTION_SECTIONS = (
     ("/federation.html", "Nearby and paired Outposts"),
     ("/operator.html", "Community members"),
@@ -88,6 +114,37 @@ def wait_for_navigation(page: object) -> None:
         f"() => document.querySelectorAll('.rail nav a[aria-label]').length === {len(DESTINATIONS)}"
     )
     page.wait_for_function("() => !document.querySelector('.rail')?.inert")
+
+
+def visual_signature(png: bytes) -> dict[str, object]:
+    """Create a renderer-tolerant perceptual baseline without committing large PNGs."""
+    with Image.open(io.BytesIO(png)) as source:
+        image = source.convert("RGB")
+        preview = image.resize((32, 24), Image.Resampling.LANCZOS)
+        return {
+            "width": image.width,
+            "height": image.height,
+            "preview": base64.b64encode(preview.tobytes()).decode("ascii"),
+        }
+
+
+def assert_visual_signature(
+    current: dict[str, object], expected: dict[str, object], *, key: str
+) -> None:
+    assert (current["width"], current["height"]) == (
+        expected["width"],
+        expected["height"],
+    ), key
+    current_bytes = base64.b64decode(str(current["preview"]))
+    expected_bytes = base64.b64decode(str(expected["preview"]))
+    assert len(current_bytes) == len(expected_bytes)
+    deltas = [abs(left - right) for left, right in zip(current_bytes, expected_bytes, strict=True)]
+    mean_delta = sum(deltas) / len(deltas)
+    changed_ratio = sum(delta > 32 for delta in deltas) / len(deltas)
+    assert mean_delta <= 12, f"{key}: mean screenshot delta {mean_delta:.2f} exceeds 12"
+    assert changed_ratio <= 0.18, (
+        f"{key}: {changed_ratio:.1%} of screenshot channels changed materially"
+    )
 
 
 @pytest.fixture(scope="module")
@@ -173,7 +230,11 @@ class BrowserHealth:
         page.on(
             "console",
             lambda message: (
-                self.console_errors.append(message.text) if message.type == "error" else None
+                self.console_errors.append(
+                    f"{message.text} ({message.location.get('url', 'unknown')})"
+                )
+                if message.type == "error"
+                else None
             ),
         )
         page.on(
@@ -192,10 +253,13 @@ class BrowserHealth:
         )
 
     def assert_clean(self) -> None:
-        assert self.page_errors == []
-        assert self.console_errors == []
-        assert self.failed_requests == []
-        assert self.failed_api_responses == []
+        failures = {
+            "page_errors": self.page_errors,
+            "console_errors": self.console_errors,
+            "failed_requests": self.failed_requests,
+            "failed_api_responses": self.failed_api_responses,
+        }
+        assert all(not values for values in failures.values()), failures
 
 
 def route_shared_operator_api(page: object) -> None:
@@ -218,6 +282,32 @@ def route_shared_operator_api(page: object) -> None:
             route.fulfill(status=200, content_type="image/png", body=empty_png)
 
     page.route("**/favicon.ico", lambda route: route.fulfill(status=204))
+    page.route(
+        "**/api/v1/dashboard/overview",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "traffic_24h": {"inbound": {"count": 0}, "outbound": {"count": 0}},
+                    "members": {"heard_24h": 0, "heard_7d": 0, "members_total": 0},
+                    "activity": [],
+                }
+            ),
+        ),
+    )
+    page.route(
+        "**/api/v1/boards*",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body='{"items":[]}'
+        ),
+    )
+    page.route(
+        "**/api/v1/channels*",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body='{"items":[]}'
+        ),
+    )
     page.route("**/tiles/**", local_tiles)
     page.route(
         "https://tile.openstreetmap.org/**",
@@ -232,6 +322,187 @@ def route_shared_operator_api(page: object) -> None:
             body=dashboard_poll_body(),
         ),
     )
+
+
+def route_visual_content_api(page: object) -> None:
+    """Supply deterministic empty-domain responses for the full visual matrix."""
+
+    def fulfill(pattern: str, body: dict[str, object]) -> None:
+        page.route(
+            pattern,
+            lambda route: route.fulfill(
+                status=200, content_type="application/json", body=json.dumps(body)
+            ),
+        )
+
+    fulfill(
+        "**/api/v1/status",
+        {
+            "node": "Pittsburgh Outpost",
+            "radio": "up",
+            "airtime_used_ratio": 0.08,
+            "radio_config": {
+                "node_id": "!699c2f30",
+                "region": "US",
+                "preset": "LongFast",
+                "channels": [],
+            },
+            "queues": {},
+            "inbound": {},
+            "alert_delivery": {},
+        },
+    )
+    fulfill("**/api/v1/incidents*", {"items": []})
+    fulfill("**/api/v1/alerts*", {"items": []})
+    fulfill("**/api/v1/events*", {"current": None})
+    fulfill("**/api/v1/watch/map*", {"incidents": [], "nodes": [], "alerts": []})
+
+    fulfill(
+        "**/api/v1/environment/weather",
+        {
+            "provider": "nws",
+            "source_kind": "observation",
+            "temperature_c": 20,
+            "apparent_c": 20,
+            "precipitation_mm": 0,
+            "wind_kph": 8,
+            "wind_direction": 270,
+            "valid_age_seconds": 120,
+            "age_seconds": 120,
+            "stale": False,
+            "units": "imperial",
+        },
+    )
+    fulfill(
+        "**/api/v1/environment/forecast",
+        {"provider": "nws", "stale": False, "daily": [], "hourly": []},
+    )
+    fulfill(
+        "**/api/v1/environment/astronomy",
+        {
+            "civil_dawn": None,
+            "sunrise": None,
+            "sunset": None,
+            "civil_dusk": None,
+            "moon_illumination": 50,
+            "moon_phase": "First quarter",
+            "moon_age_days": 7,
+            "daylight_minutes": 720,
+        },
+    )
+    fulfill("**/api/v1/environment/providers", {"items": {}})
+    fulfill("**/api/v1/environment/alerts*", {"items": [], "health": {}})
+    fulfill("**/api/v1/environment/earthquakes*", {"items": []})
+    fulfill("**/api/v1/environment/waypoints*", {"items": []})
+    fulfill(
+        "**/api/v1/config",
+        {"node": {"location": {"lat": 40.4406, "lon": -79.9959}}},
+    )
+
+    fulfill("**/api/v1/mesh/airtime", {"used_seconds": 0, "by_class_seconds": {}})
+    fulfill("**/api/v1/mesh/queue*", {"items": []})
+    fulfill("**/api/v1/mesh/messages*", {"items": []})
+
+    fulfill("**/api/v1/federation/peers*", {"items": []})
+    fulfill(
+        "**/api/v1/federation/mqtt",
+        {
+            "available": True,
+            "enabled": False,
+            "address": "",
+            "root": "msh",
+            "tls_enabled": False,
+            "channels": [
+                {
+                    "index": 0,
+                    "name": "Primary",
+                    "uplink_enabled": True,
+                    "downlink_enabled": True,
+                }
+            ],
+        },
+    )
+    fulfill("**/api/v1/federation/services*", {"items": []})
+    fulfill("**/api/v1/federation/inbox*", {"items": []})
+    fulfill(
+        "**/api/v1/federation/sync-status",
+        {"items": [], "outbound": {"frames_24h": 0, "last_at": None}},
+    )
+    fulfill("**/api/v1/federation/origins", {"items": []})
+    fulfill("**/api/v1/federation/mail", {"items": []})
+
+    fulfill("**/api/v1/auth/accounts", {"items": []})
+    fulfill("**/api/v1/auth/sessions", {"items": [], "count": 0})
+    fulfill("**/api/v1/backups", {"items": []})
+    fulfill(
+        "**/api/v1/maintenance/storage",
+        {
+            "database_bytes": 0,
+            "wal_bytes": 0,
+            "backup_count": 0,
+            "backup_bytes": 0,
+            "disk_free_bytes": 1_000_000_000,
+            "domains": [],
+            "growth_since": None,
+            "cleanup": {"total_rows": 0, "estimated_bytes": 0, "rules": []},
+            "policies": [],
+            "last_maintenance": None,
+        },
+    )
+
+
+def test_operator_styles_follow_static_component_contract() -> None:
+    expected_baselines = {
+        f"{page_name}/{viewport_name}/{theme}"
+        for page_name, _target in VISUAL_PAGES
+        for viewport_name, _width, _height in VISUAL_VIEWPORTS
+        for theme in THEMES
+    }
+    assert set(json.loads(VISUAL_BASELINES.read_text())) == expected_baselines
+
+    for _page_name, target in VISUAL_PAGES:
+        filename = "index.html" if target == "/" else target.removeprefix("/")
+        markup = (STATIC_ROOT / filename).read_text()
+        base = markup.index("/base.css?v=1")
+        layout = markup.index("/layout.css?v=1")
+        components = markup.index("/components.css?v=1")
+        assert base < layout < components, filename
+        for obsolete in ("/app.css", "/enhancements.css", "/theme-corrections.css"):
+            assert obsolete not in markup, filename
+
+    component_css = (STATIC_ROOT / "components.css").read_text()
+    for primitive in (
+        ".ui-card",
+        ".ui-button",
+        ".ui-icon-button",
+        ".ui-pill",
+        ".ui-notice",
+        ".ui-dialog",
+        ".ui-action-bar",
+        ".ui-empty",
+        ".ui-map-controls",
+    ):
+        assert primitive in component_css
+    assert "html[data-theme" not in component_css
+    assert "!important" not in component_css
+
+    layout_css = (STATIC_ROOT / "layout.css").read_text()
+    for token in (
+        "--ui-surface",
+        "--ui-text",
+        "--ui-border",
+        "--ui-focus",
+        "--ui-success-surface",
+        "--ui-warning-surface",
+        "--ui-danger-surface",
+        "--ui-disabled-surface",
+    ):
+        assert token in layout_css
+
+    for script in STATIC_ROOT.glob("*.js"):
+        source = script.read_text()
+        assert 'createElement("link")' not in source, script.name
+        assert "createElement('link')" not in source, script.name
 
 
 @pytest.mark.parametrize("width", VIEWPORTS)
@@ -283,6 +554,91 @@ def test_operator_pages_pass_wcag_axe_rules(
                 },
             )
             assert results.violations_count == 0, f"{theme} {target}\n{results.generate_report()}"
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("theme", THEMES)
+@pytest.mark.parametrize(
+    ("viewport_name", "width", "height"),
+    VISUAL_VIEWPORTS,
+    ids=[item[0] for item in VISUAL_VIEWPORTS],
+)
+@pytest.mark.parametrize(
+    ("page_name", "target"), VISUAL_PAGES, ids=[item[0] for item in VISUAL_PAGES]
+)
+def test_operator_page_visual_baseline_and_browser_health(
+    browser: object,
+    dashboard_url: str,
+    theme: str,
+    viewport_name: str,
+    width: int,
+    height: int,
+    page_name: str,
+    target: str,
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme=theme)
+    page.set_viewport_size({"width": width, "height": height})
+    page.emulate_media(reduced_motion="reduce")
+    route_shared_operator_api(page)
+    route_operator_workspace(page, [])
+    route_operations_inbox(page, [])
+    route_visual_content_api(page)
+    health = BrowserHealth(page)
+    key = f"{page_name}/{viewport_name}/{theme}"
+    try:
+        page.goto(f"{dashboard_url}{target}", wait_until="networkidle")
+        wait_for_navigation(page)
+        page.add_style_tag(
+            content=(
+                "*,*::before,*::after{animation:none!important;transition:none!important;}"
+                "input,textarea{caret-color:transparent!important;}"
+            )
+        )
+        page.evaluate("document.fonts.ready")
+        page.evaluate("window.scrollTo(0, 0)")
+
+        overflow = page.evaluate(
+            "() => ({document: document.documentElement.scrollWidth, viewport: innerWidth})"
+        )
+        assert overflow["document"] <= overflow["viewport"] + 1, f"{key}: document overflows"
+
+        page.evaluate("document.activeElement?.blur()")
+        page.keyboard.press("Tab")
+        focus = page.evaluate(
+            """() => {
+              const element = document.activeElement;
+              const style = getComputedStyle(element);
+              return {
+                tag: element?.tagName,
+                outlineStyle: style.outlineStyle,
+                outlineWidth: parseFloat(style.outlineWidth),
+                outlineColor: style.outlineColor,
+              };
+            }"""
+        )
+        assert focus["tag"] not in {None, "BODY", "HTML"}, f"{key}: no keyboard focus target"
+        assert focus["outlineStyle"] != "none" and focus["outlineWidth"] >= 2, (
+            f"{key}: focus is not visibly outlined ({focus})"
+        )
+        assert focus["outlineColor"] not in {"rgba(0, 0, 0, 0)", "transparent"}
+
+        screenshot = page.screenshot(animations="disabled")
+        if VISUAL_ARTIFACT_DIR:
+            artifact_dir = Path(VISUAL_ARTIFACT_DIR)
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            (artifact_dir / f"{page_name}-{viewport_name}-{theme}.png").write_bytes(screenshot)
+        signature = visual_signature(screenshot)
+        baselines = json.loads(VISUAL_BASELINES.read_text()) if VISUAL_BASELINES.exists() else {}
+        if UPDATE_VISUAL_BASELINES:
+            baselines[key] = signature
+            VISUAL_BASELINES.write_text(json.dumps(baselines, indent=2, sort_keys=True) + "\n")
+        else:
+            assert key in baselines, (
+                f"missing {key}; run with OUTPOST_UPDATE_VISUAL_BASELINES=1 to approve it"
+            )
+            assert_visual_signature(signature, baselines[key], key=key)
+        health.assert_clean()
     finally:
         page.close()
 
@@ -1070,9 +1426,8 @@ def test_capability_cards_reflect_disabled_modules(browser: object, dashboard_ur
 
 
 def route_operator_workspace(page: object, seen_audit_urls: list[str]) -> None:
-    page.route(
-        "**/api/v1/members*",
-        lambda route: route.fulfill(
+    def members(route: object) -> None:
+        route.fulfill(
             status=200,
             content_type="application/json",
             body=json.dumps(
@@ -1089,8 +1444,10 @@ def route_operator_workspace(page: object, seen_audit_urls: list[str]) -> None:
                     "saved_filters": [],
                 }
             ),
-        ),
-    )
+        )
+
+    page.route("**/api/v1/members*", members)
+    page.route("**/api/v1/members/map", members)
     page.route(
         "**/api/v1/security/safety-floor",
         lambda route: route.fulfill(

@@ -6,10 +6,12 @@
   <meta name="theme-color" content="#071411">
   <script src="/theme-boot.js"></script>
   <title>Community · Outpost</title>
-  <link rel="stylesheet" href="/app.css">
-  <link rel="stylesheet" href="/enhancements.css">
+  <link rel="stylesheet" href="/base.css?v=1">
+  <link rel="stylesheet" href="/layout.css?v=1">
   <link rel="stylesheet" href="/operator.css?v=8">
-  <link rel="stylesheet" href="/theme-corrections.css?v=29">
+  <link rel="stylesheet" href="/member-map.css?v=4">
+  <link rel="stylesheet" href="/map-controller.css?v=2">
+  <link rel="stylesheet" href="/components.css?v=1">
 </head>
 <body>
   <aside class="rail">
@@ -37,7 +39,7 @@
         <article><small>AUDIT EVENTS FOUND</small><strong id="audit-count">—</strong></article>
       </section>
 
-      <section id="member-directory" class="panel content-panel operator-panel directory-panel">
+      <section id="member-directory" class="ui-card panel content-panel operator-panel directory-panel">
         <div class="heading directory-heading">
           <div>
             <p class="eyebrow">IDENTITY & TRUST</p>
@@ -58,8 +60,8 @@
         <div id="saved-filters" class="saved-filters" role="group" aria-label="Saved triage filters"></div>
         <form id="member-search" class="member-search" role="search">
           <label><span class="sr-only">Search identities</span><input id="member-query" maxlength="100" placeholder="Search mesh ID, name, handle, or notes"></label>
-          <button type="submit" class="small-button">Search</button>
-          <button id="member-search-clear" type="button" class="small-button secondary">Clear</button>
+          <button type="submit" class="ui-button small-button">Search</button>
+          <button id="member-search-clear" type="button" class="ui-button small-button secondary">Clear</button>
           <p id="member-summary" aria-live="polite">Loading directory…</p>
         </form>
         <div id="discovered-note" class="discovered-note" hidden>
@@ -69,10 +71,10 @@
           <strong><span id="selected-count">0</span> selected</strong>
           <span>Export includes every selection. Archive and Ignore safely skip enrolled members.</span>
           <div>
-            <button type="button" class="small-button secondary" data-bulk="export">Export CSV</button>
-            <button type="button" class="small-button secondary" data-bulk="archive">Archive</button>
-            <button type="button" class="small-button danger" data-bulk="ignore">Ignore</button>
-            <button id="clear-selection" type="button" class="small-button secondary">Clear</button>
+            <button type="button" class="ui-button small-button secondary" data-bulk="export">Export CSV</button>
+            <button type="button" class="ui-button small-button secondary" data-bulk="archive">Archive</button>
+            <button type="button" class="ui-button small-button danger" data-bulk="ignore">Ignore</button>
+            <button id="clear-selection" type="button" class="ui-button small-button secondary">Clear</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -81,10 +83,10 @@
             <tbody id="member-rows"><tr><td colspan="7">Loading…</td></tr></tbody>
           </table>
         </div>
-        <button id="member-more" class="small-button directory-more" type="button" hidden>Load more identities</button>
+        <button id="member-more" class="ui-button small-button directory-more" type="button" hidden>Load more identities</button>
       </section>
 
-      <section id="audit" class="panel content-panel operator-panel audit-panel">
+      <section id="audit" class="ui-card panel content-panel operator-panel audit-panel">
         <div class="heading"><div><p class="eyebrow">ACCOUNTABILITY</p><h2>Audit trail</h2></div><p id="audit-summary" class="audit-summary" aria-live="polite">Loading…</p></div>
         <form id="audit-filters" class="audit-filters">
           <label><span>Time</span><select id="audit-time"><option value="24">Past 24 hours</option><option value="1">Past hour</option><option value="168">Past 7 days</option><option value="720">Past 30 days</option><option value="">All retained</option></select></label>
@@ -92,11 +94,11 @@
           <label><span>Action</span><input id="audit-action" maxlength="100" placeholder="incident.update"></label>
           <label><span>Target</span><input id="audit-target" maxlength="160" placeholder="incident:42"></label>
           <label><span>Outcome</span><select id="audit-outcome"><option value="">All outcomes</option><option value="success">Success</option><option value="denied">Denied</option><option value="failure">Failure</option></select></label>
-          <div class="audit-filter-actions"><button type="submit">Apply filters</button><button id="clear-audit-filters" class="small-button" type="button">Clear</button></div>
+          <div class="audit-filter-actions"><button type="submit">Apply filters</button><button id="clear-audit-filters" class="ui-button small-button" type="button">Clear</button></div>
         </form>
         <div class="audit-columns" aria-hidden="true"><span>Action</span><span>Actor</span><span>Target</span><span>Time</span></div>
-        <div id="audit-list" class="audit-list"><p class="empty">Loading…</p></div>
-        <button id="audit-more" class="small-button audit-more" type="button" hidden>Load more events</button>
+        <div id="audit-list" class="audit-list"><p class="ui-empty empty">Loading…</p></div>
+        <button id="audit-more" class="ui-button small-button audit-more" type="button" hidden>Load more events</button>
       </section>
     </main>
     <footer><span>Every operator mutation is recorded.</span><span>Outpost · local community infrastructure</span></footer>
@@ -106,12 +108,11 @@
     <div class="detail-frame">
       <header class="detail-header">
         <div><p class="eyebrow">IDENTITY REVIEW</p><h2 id="detail-title">Radio details</h2><p id="detail-subtitle"></p></div>
-        <button id="detail-close" class="icon-button" type="button" aria-label="Close member details">×</button>
+        <button id="detail-close" class="ui-icon-button icon-button" type="button" aria-label="Close member details">×</button>
       </header>
       <div id="detail-body" class="detail-body"><p>Loading…</p></div>
     </div>
   </dialog>
-  <link rel="stylesheet" href="/map-controller.css?v=1">
   <script src="/map-controller.js?v=1" defer></script>
   <script src="/operator.js?v=9" defer></script>
 </body>

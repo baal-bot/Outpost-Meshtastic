@@ -52,7 +52,7 @@ async function loadSessions() {
       <div class="session-icon">${item.current ? "●" : "○"}</div>
       <div><strong>${item.current ? "This session" : safe(item.source)}</strong><p>${safe(item.user_agent)}</p><small>Last active ${safe(timeLabel(item.last_activity_at))} · expires ${safe(timeLabel(item.expires_at))}</small></div>
       <button type="button" data-revoke-session>${item.current ? "Sign out" : "Revoke"}</button>
-    </article>`).join("") || `<p class="empty">No active sessions.</p>`;
+    </article>`).join("") || `<p class="ui-empty empty">No active sessions.</p>`;
 }
 
 function accountCard(account) {

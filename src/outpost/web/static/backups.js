@@ -188,7 +188,7 @@ async function loadBackups() {
         <button class="restore" data-restore="${safe(item.name)}">Restore</button>
       </div>
     </div>
-  `).join("") || `<p class="empty">No backups yet.</p>`;
+  `).join("") || `<p class="ui-empty empty">No backups yet.</p>`;
   document.querySelectorAll("[data-validate]").forEach((button) => {
     button.addEventListener("click", () => validate(button));
   });
