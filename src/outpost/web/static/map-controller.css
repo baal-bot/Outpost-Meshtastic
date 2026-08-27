@@ -1,0 +1,268 @@
+.outpost-map {
+  position: relative;
+  height: 440px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: grab;
+  touch-action: none;
+  isolation: isolate;
+}
+
+.outpost-map.dragging { cursor: grabbing; }
+.outpost-map:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
+.outpost-map-tiles,
+.outpost-map-markers { position: absolute; inset: 0; }
+.outpost-map-tiles { z-index: 0; overflow: hidden; }
+.outpost-map-markers { z-index: 2; pointer-events: none; }
+
+.outpost-map-tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 256px;
+  height: 256px;
+  object-fit: cover;
+  user-select: none;
+  will-change: transform;
+}
+
+.outpost-map-controls {
+  position: absolute;
+  z-index: 6;
+  top: 12px;
+  left: 12px;
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--raised) 94%, transparent);
+  box-shadow: 0 6px 20px color-mix(in srgb, #000 35%, transparent);
+}
+
+.outpost-map-controls button,
+.outpost-map-controls button:not(:disabled):active {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.outpost-map-controls button:last-child { border-bottom: 0; }
+.outpost-map-controls button:hover { background: var(--soft); }
+
+.outpost-map-marker {
+  --marker-color: var(--green);
+  --marker-border: var(--surface);
+  position: absolute;
+  z-index: 3;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: translate(-50%, -50%) !important;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.outpost-map-marker-symbol,
+.outpost-map-footprint-symbol {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  box-sizing: border-box;
+  width: var(--marker-size, 18px);
+  height: var(--marker-size, 18px);
+  border: 3px solid var(--marker-border);
+  border-radius: 50%;
+  background: var(--marker-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--marker-color) 24%, transparent);
+  transform: translate(-50%, -50%);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.outpost-map-marker:hover .outpost-map-marker-symbol,
+.outpost-map-marker:focus-visible .outpost-map-marker-symbol,
+.outpost-map-marker.selected .outpost-map-marker-symbol {
+  transform: translate(-50%, -50%) scale(1.18);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--marker-color) 30%, transparent);
+}
+
+.outpost-map-marker:focus-visible { outline: none; }
+.outpost-map-marker:focus-visible .outpost-map-marker-symbol {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.outpost-map-marker.shape-square .outpost-map-marker-symbol { border-radius: 4px; }
+.outpost-map-marker.shape-diamond .outpost-map-marker-symbol {
+  border-radius: 4px;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.outpost-map-marker.shape-diamond:hover .outpost-map-marker-symbol,
+.outpost-map-marker.shape-diamond:focus-visible .outpost-map-marker-symbol,
+.outpost-map-marker.shape-diamond.selected .outpost-map-marker-symbol {
+  transform: translate(-50%, -50%) rotate(45deg) scale(1.18);
+}
+.outpost-map-marker.shape-pin .outpost-map-marker-symbol {
+  border-radius: 50% 50% 50% 4px;
+  transform: translate(-50%, -68%) rotate(-45deg);
+}
+.outpost-map-marker.shape-pin:hover .outpost-map-marker-symbol,
+.outpost-map-marker.shape-pin:focus-visible .outpost-map-marker-symbol,
+.outpost-map-marker.shape-pin.selected .outpost-map-marker-symbol {
+  transform: translate(-50%, -68%) rotate(-45deg) scale(1.18);
+}
+
+.outpost-map-marker.tone-info { --marker-color: #63a8a0; }
+.outpost-map-marker.tone-caution { --marker-color: #d2a85b; }
+.outpost-map-marker.tone-urgent { --marker-color: #e36f4f; }
+.outpost-map-marker.tone-critical { --marker-color: #ff3c4f; }
+.outpost-map-marker.tone-node { --marker-color: #80d6c5; }
+.outpost-map-marker.tone-ok { --marker-color: #8bd66f; }
+.outpost-map-marker.tone-help { --marker-color: #ff3c4f; }
+.outpost-map-marker.tone-evacuated { --marker-color: #7da9df; }
+.outpost-map-marker.tone-unaccounted { --marker-color: #d2a85b; }
+.outpost-map-marker.tone-member { --marker-color: #397d66; --marker-border: #b9e3d1; }
+.outpost-map-marker.tone-trusted { --marker-color: #a47c35; --marker-border: #efd08b; }
+.outpost-map-marker.tone-waypoint { --marker-color: #286c55; --marker-border: #9ad4ba; }
+.outpost-map-marker.tone-quake { --marker-color: #8c672b; --marker-border: #f0ca77; }
+.outpost-map-marker.status-monitoring .outpost-map-marker-symbol {
+  outline: 2px solid #8fcbd7;
+  outline-offset: 3px;
+}
+
+.outpost-map-marker.variant-footprint { z-index: 1; }
+.outpost-map-footprint-symbol {
+  border-width: 2px;
+  background: color-mix(in srgb, var(--marker-color) 18%, transparent);
+}
+.outpost-map-marker.variant-footprint:hover .outpost-map-footprint-symbol,
+.outpost-map-marker.variant-footprint:focus-visible .outpost-map-footprint-symbol,
+.outpost-map-marker.variant-footprint.selected .outpost-map-footprint-symbol {
+  background: color-mix(in srgb, var(--marker-color) 28%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--marker-color) 20%, transparent);
+}
+
+.outpost-map-coordinates {
+  position: absolute;
+  z-index: 5;
+  bottom: 9px;
+  left: 10px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  color: var(--muted);
+  font: .62rem ui-monospace, monospace;
+}
+
+.outpost-map-attribution {
+  position: absolute;
+  z-index: 5;
+  right: 4px;
+  bottom: 3px;
+  padding: 2px 5px;
+  background: #fff;
+  color: #222;
+  font-size: .56rem;
+}
+.outpost-map-attribution a { color: #245b9c; text-decoration: underline; }
+
+.outpost-map-empty,
+.outpost-map-basemap-state {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+}
+.outpost-map-empty {
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 50px;
+  color: var(--muted);
+  text-align: center;
+}
+.outpost-map-empty[hidden] { display: none; }
+.outpost-map-basemap-state {
+  top: 12px;
+  left: 58px;
+  margin: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  color: var(--muted);
+  font-size: .6rem;
+}
+
+.outpost-map-detail {
+  position: absolute;
+  z-index: 8;
+  top: 12px;
+  right: 12px;
+  width: min(320px, calc(100% - 70px));
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--green) 38%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 12px 38px color-mix(in srgb, #000 60%, transparent);
+  color: var(--ink);
+  cursor: default;
+}
+.outpost-map-detail h3 { margin: 2px 30px 8px 0; color: var(--ink); }
+.outpost-map-detail p { margin: 6px 0; color: var(--muted); font-size: .72rem; line-height: 1.45; }
+.outpost-map-detail .eyebrow { color: var(--green); font-size: .56rem; }
+.outpost-map-detail .outpost-map-detail-close,
+.outpost-map-detail .close-map,
+.outpost-map-detail .close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0;
+}
+.outpost-map-detail .detail-actions,
+.outpost-map-detail .waypoint-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 13px;
+}
+.outpost-map-detail .detail-actions button,
+.outpost-map-detail .waypoint-card-actions button { padding: 7px 10px; font-size: .66rem; }
+.outpost-map-detail [data-alert] { border-color: var(--green); background: var(--green); color: var(--surface); }
+.outpost-map-detail [data-resolve] {
+  border-color: color-mix(in srgb, var(--red) 50%, var(--line));
+  background: color-mix(in srgb, var(--red) 12%, var(--raised));
+  color: var(--red);
+}
+
+html[data-theme="night"] .outpost-map-tile {
+  filter: sepia(.3) hue-rotate(320deg) saturate(.55) brightness(.82);
+}
+
+@media (max-width: 620px) {
+  .outpost-map { height: 360px; }
+  .outpost-map-detail { top: 8px; right: 8px; }
+  .outpost-map-attribution { max-width: 62%; text-align: right; }
+}

@@ -24,6 +24,22 @@ minutes while visible. Every page has the same hidden-tab zero-request budget. A
 may contact the configured weather-provider chain to populate current conditions and forecast;
 subsequent warm refreshes must use the environment cache until its configured expiry.
 
+### Interactive map budget
+
+The shared map controller has a separate operator-device budget:
+
+| Interaction | Budget |
+| --- | ---: |
+| Pointer events handled in one event-loop burst | one rendered animation frame; at most two |
+| Small pan with unchanged tile coverage | zero tile or marker DOM replacements |
+| Pan/zoom render frame on Raspberry Pi 5 | under 16.7 ms target; 50 ms hard test ceiling |
+| Marker hit-area change on hover, focus, or selection | 0 px |
+
+`Controller.getDiagnostics()` reports frames, pointer moves, tile/marker creates and removals, live
+DOM counts, total/average/max render time, and current view. Browser regression tests drive the
+real Watch, Members, and Environment maps with mouse, synthetic touch, and keyboard input in every
+theme.
+
 ## Implementation
 
 `refresh-scheduler.js` owns repeating browser refresh work. It runs each task single-flight, pauses
@@ -76,3 +92,8 @@ The cold-load warm-up issued five NWS HTTP requests to populate conditions and f
 one reader connection. Visible concurrent refreshes lazily opened the pool's second and final
 reader; no additional connection opened during the hidden phase. Record updated measurements here
 when refresh behavior or target hardware changes.
+
+The shared map baseline was captured on the same Pi on 2026-08-26 in headless Chromium. A burst of
+200 touch-pointer moves produced one render frame in 1.2 ms, preserved all eight live tile elements,
+and created or removed no tiles or markers. Cold controller initialization, including eight tile
+elements, peaked at 29.8 ms. The automated test keeps the wider 50 ms ceiling for loaded CI hosts.

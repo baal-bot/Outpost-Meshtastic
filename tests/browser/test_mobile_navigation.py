@@ -342,21 +342,292 @@ def test_map_targets_and_list_alternatives_are_keyboard_ready(
         wait_for_navigation(page)
         size = page.evaluate(
             """() => {
-              const marker = document.createElement('button');
-              marker.className = 'environment-marker quake';
-              document.querySelector('#environment-markers').appendChild(marker);
+              const map = document.querySelector('#environment-map').outpostMapController;
+              map.setMarkers([{id: 'test-quake', lat: 40.44, lon: -79.99,
+                className: 'shape-diamond tone-quake', label: 'Test earthquake'}]);
+              map.renderNow();
+              const marker = document.querySelector('[data-marker-id="test-quake"]');
               const box = marker.getBoundingClientRect();
-              return {width: box.width, height: box.height};
+              map.fit([{lat: 0, lon: 179.8}, {lat: 0, lon: -179.8}], {maxZoom: 12});
+              return {width: box.width, height: box.height, dateline: map.getView()};
             }"""
         )
-        assert size["width"] >= 24 and size["height"] >= 24
-        scripts = " ".join(
-            page.request.get(f"{dashboard_url}/{name}").text()
+        assert size["width"] == size["height"] == 36
+        assert abs(abs(size["dateline"]["lon"]) - 180) < 1
+        assert size["dateline"]["zoom"] >= 8
+        page_scripts = {
+            name: page.request.get(f"{dashboard_url}/{name}").text()
             for name in ("environment.js", "member-map.js", "watch.js")
+        }
+        controller = page.request.get(f"{dashboard_url}/map-controller.js").text()
+        assert "data-waypoint-focus" in page_scripts["environment.js"]
+        assert "member-map-row-open" in page_scripts["member-map.js"]
+        assert "data-incident-open" in page_scripts["watch.js"]
+        assert all("OutpostMap.Controller" in script for script in page_scripts.values())
+        assert all("tile.openstreetmap.org" not in script for script in page_scripts.values())
+        assert "tile.openstreetmap.org" in controller
+        assert page.locator("#environment-map").get_attribute("aria-keyshortcuts")
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("theme", THEMES)
+@pytest.mark.parametrize(
+    ("path", "root"),
+    (
+        ("/watch.html", "#incident-map"),
+        ("/environment.html", "#environment-map"),
+        ("/operator.html", "#member-map"),
+    ),
+)
+def test_shared_map_geometry_and_controls_are_stable_in_every_theme(
+    browser: object,
+    dashboard_url: str,
+    theme: str,
+    path: str,
+    root: str,
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme=theme)
+    route_shared_operator_api(page)
+    try:
+        page.goto(f"{dashboard_url}{path}", wait_until="networkidle")
+        wait_for_navigation(page)
+        page.wait_for_function(
+            "selector => Boolean(document.querySelector(selector)?.outpostMapController)",
+            arg=root,
         )
-        assert "data-waypoint-focus" in scripts
-        assert "member-map-row-open" in scripts
-        assert "data-incident-open" in scripts
+        page.evaluate(
+            """selector => {
+              const map = document.querySelector(selector).outpostMapController;
+              const view = map.getView();
+              map.setMarkers([{id: 'geometry-test', lat: view.lat, lon: view.lon,
+                className: 'shape-pin tone-waypoint', label: 'Geometry test marker'}]);
+              map.renderNow();
+            }""",
+            root,
+        )
+        marker = page.locator(f'{root} [data-marker-id="geometry-test"]')
+        before = marker.bounding_box()
+        assert before is not None
+        marker.hover()
+        marker.click()
+        after = marker.bounding_box()
+        assert after is not None
+        assert before["width"] == after["width"] == 36
+        assert before["height"] == after["height"] == 36
+        assert marker.get_attribute("aria-pressed") == "true"
+        controls = page.locator(f"{root} .outpost-map-controls button")
+        assert controls.count() == 3
+        assert controls.evaluate_all(
+            "buttons => buttons.every(button => button.getBoundingClientRect().width === 36)"
+        )
+        screenshot = page.locator(root).screenshot(animations="disabled")
+        assert screenshot.startswith(b"\x89PNG") and len(screenshot) > 1_000
+    finally:
+        page.close()
+
+
+def test_shared_map_coalesces_touch_pan_and_preserves_dom_on_target_pi(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        page.wait_for_function(
+            "() => Boolean(document.querySelector('#environment-map').outpostMapController)"
+        )
+        result = page.evaluate(
+            """async () => {
+              const root = document.querySelector('#environment-map');
+              const map = root.outpostMapController;
+              const view = map.getView();
+              map.setMarkers([
+                {id: 'perf-a', lat: view.lat, lon: view.lon,
+                  className: 'shape-circle tone-info', label: 'Performance marker A'},
+                {id: 'perf-b', lat: view.lat + .01, lon: view.lon + .01,
+                  className: 'shape-diamond tone-quake', label: 'Performance marker B'},
+              ]);
+              map.renderNow();
+              const before = map.getDiagnostics();
+              const tileRefs = new Map([...root.querySelectorAll('.outpost-map-tile')]
+                .map(tile => [tile.dataset.tileKey, tile]));
+              const start = {x: 420, y: 260};
+              root.dispatchEvent(new PointerEvent('pointerdown', {
+                bubbles: true, pointerId: 41, pointerType: 'touch', isPrimary: true,
+                button: 0, clientX: start.x, clientY: start.y,
+              }));
+              for (let index = 0; index < 200; index += 1) {
+                root.dispatchEvent(new PointerEvent('pointermove', {
+                  bubbles: true, pointerId: 41, pointerType: 'touch', isPrimary: true,
+                  button: 0, clientX: start.x + 8 + index / 200,
+                  clientY: start.y + 4,
+                }));
+              }
+              root.dispatchEvent(new PointerEvent('pointerup', {
+                bubbles: true, pointerId: 41, pointerType: 'touch', isPrimary: true,
+                button: 0, clientX: start.x + 9, clientY: start.y + 4,
+              }));
+              await new Promise(resolve => requestAnimationFrame(
+                () => requestAnimationFrame(resolve),
+              ));
+              const after = map.getDiagnostics();
+              const persistentTiles = [...root.querySelectorAll('.outpost-map-tile')]
+                .filter(tile => tileRefs.get(tile.dataset.tileKey) === tile).length;
+              for (let index = 0; index < 3; index += 1) {
+                root.dispatchEvent(new WheelEvent('wheel', {
+                  bubbles: true, cancelable: true, deltaY: -100,
+                }));
+              }
+              await new Promise(resolve => requestAnimationFrame(
+                () => requestAnimationFrame(resolve),
+              ));
+              return {before, after, zoomAfter: map.getDiagnostics(), persistentTiles};
+            }"""
+        )
+        before, after = result["before"], result["after"]
+        assert after["pointerMoves"] - before["pointerMoves"] == 200
+        assert after["frames"] - before["frames"] <= 2
+        assert after["markerCreates"] == before["markerCreates"]
+        assert after["markerRemoves"] == before["markerRemoves"]
+        assert after["tileCreates"] == before["tileCreates"]
+        assert after["tileRemoves"] == before["tileRemoves"]
+        assert result["persistentTiles"] > 0
+        assert after["view"] != before["view"]
+        assert after["maxFrameMilliseconds"] < 50
+        zoom_after = result["zoomAfter"]
+        assert zoom_after["frames"] - after["frames"] <= 2
+        assert zoom_after["view"]["zoom"] == after["view"]["zoom"] + 3
+        assert zoom_after["maxFrameMilliseconds"] < 50
+
+        root = page.locator("#environment-map")
+        root.focus()
+        longitude = after["view"]["lon"]
+        page.keyboard.press("ArrowRight")
+        page.wait_for_function(
+            "longitude => document.querySelector('#environment-map')"
+            ".outpostMapController.getView().lon !== longitude",
+            arg=longitude,
+        )
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("local_available", (True, False))
+def test_shared_map_online_failure_uses_one_offline_fallback_state(
+    browser: object, dashboard_url: str, local_available: bool
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    page.route(
+        "https://tile.openstreetmap.org/**",
+        lambda route: route.fulfill(status=503, content_type="text/plain", body="offline"),
+    )
+    if not local_available:
+        page.route(
+            "**/tiles/manifest.json",
+            lambda route: route.fulfill(status=404, content_type="application/json", body="{}"),
+        )
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        attribution = page.locator("#environment-map .outpost-map-attribution")
+        assert attribution.locator("a").get_attribute("href") == (
+            "https://www.openstreetmap.org/copyright"
+        )
+        if local_available:
+            page.locator('#environment-map .outpost-map-tile[data-source="local"]').first.wait_for()
+            assert "offline fallback: browser-test" in attribution.text_content()
+            assert not page.locator("#environment-map .outpost-map-basemap-state").is_visible()
+        else:
+            page.locator("#environment-map .outpost-map-basemap-state").wait_for()
+            assert (
+                "coordinates and markers remain active"
+                in page.locator("#environment-map .outpost-map-basemap-state").text_content()
+            )
+    finally:
+        page.close()
+
+
+def test_member_map_marker_filter_and_detail_use_shared_controller(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="daylight")
+    route_shared_operator_api(page)
+    member = {
+        "id": 9,
+        "mesh_id": "!00000009",
+        "handle": "alice",
+        "trust": "trusted",
+        "lat": 40.4406,
+        "lon": -79.9959,
+        "received_at": "2099-08-26T20:00:00Z",
+        "expires_at": "2099-08-27T20:00:00Z",
+        "last_seen": "2099-08-26T20:00:00Z",
+        "age_seconds": 30,
+        "deletes_in_seconds": 86_400,
+        "source": "position_app",
+        "visibility": "members",
+        "last_heard_snr": 8.5,
+        "hops_away": 1,
+    }
+
+    def members(route: object) -> None:
+        if urlparse(route.request.url).path == "/api/v1/members/map":
+            body = {"items": [member]}
+        else:
+            body = {
+                "items": [],
+                "approved_count": 1,
+                "discovered_count": 0,
+                "review_count": 0,
+                "archived_count": 0,
+                "ignored_count": 0,
+                "trusted_count": 1,
+                "total": 0,
+                "next_cursor": None,
+                "saved_filters": [],
+            }
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/api/v1/members*", members)
+    page.route("**/api/v1/members/map", members)
+    page.route(
+        "**/api/v1/security/safety-floor",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"summary":{"attempts":0,"coalesced":0},"items":[]}',
+        ),
+    )
+    page.route(
+        "**/api/v1/audit*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"items":[],"total":0,"next_cursor":null}',
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/operator.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        marker = page.locator('[data-marker-id="member-9"]')
+        marker.wait_for()
+        marker.click()
+        detail = page.locator("#member-map-detail")
+        detail.get_by_role("heading", name="@alice").wait_for()
+        assert "Meshtastic position share" in detail.text_content()
+        assert marker.get_attribute("aria-pressed") == "true"
+
+        page.locator("#member-map-trust").select_option("operator")
+        assert page.locator('[data-marker-id="member-9"]').count() == 0
+        assert page.locator("#member-map-empty").is_visible()
+        assert not detail.is_visible()
+        page.locator("#member-map-trust").select_option("all")
+        page.locator('[data-marker-id="member-9"]').wait_for()
+        health.assert_clean()
     finally:
         page.close()
 
@@ -1733,6 +2004,13 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
             {"text": "tree down blocking Cedar Lane 40.4406 -79.9959", "force": False}
         ]
         assert page.locator(".lifecycle-badge.open").is_visible()
+        marker = page.locator('[data-marker-id="incident-7"]')
+        marker.click()
+        detail = page.locator("#map-detail")
+        detail.get_by_role("heading", name="Tree down blocking Cedar Lane").wait_for()
+        assert marker.get_attribute("aria-pressed") == "true"
+        detail.get_by_role("button", name="Close").click()
+        assert marker.get_attribute("aria-pressed") == "false"
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
     finally:
@@ -1791,7 +2069,22 @@ def test_environment_waypoint_create_and_map_card_are_functional_and_browser_cle
         elif path == "/api/v1/environment/alerts":
             body = {"items": []}
         elif path == "/api/v1/environment/earthquakes":
-            body = {"items": []}
+            body = {
+                "items": [
+                    {
+                        "id": "us7000test",
+                        "magnitude": 3.2,
+                        "place": "12 km north of Pittsburgh",
+                        "latitude": 40.55,
+                        "longitude": -79.99,
+                        "distance_km": 12,
+                        "depth_km": 6.5,
+                        "bearing_deg": 3,
+                        "occurred_at": 2_000_000_000,
+                        "significance": False,
+                    }
+                ]
+            }
         else:
             body = {}
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
@@ -1823,6 +2116,9 @@ def test_environment_waypoint_create_and_map_card_are_functional_and_browser_cle
             }
         ]
         assert "40.44600, -80.01000" in card.text_content()
+        card.get_by_role("button", name="Close").click()
+        page.locator('[data-marker-id="quake-us7000test"]').click()
+        card.get_by_role("heading", name="M3.2 · 12 km north of Pittsburgh").wait_for()
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
     finally:

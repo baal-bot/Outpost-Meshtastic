@@ -1,5 +1,5 @@
 import("/nav.js");
-import("/member-map.js?v=5");
+import("/member-map.js?v=6");
 
 const $ = id => document.getElementById(id);
 const safe = value => String(value ?? "").replace(

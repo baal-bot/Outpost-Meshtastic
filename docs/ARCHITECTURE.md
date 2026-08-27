@@ -11,7 +11,7 @@ durable state, and an asynchronous supervisor owns the radio.
 - **Domain services:** BBS, mail, environment, incidents, alerts, welfare, federation.
 - **Airtime governor:** durable traffic classes, safety priority, channel limits, pacing.
 - **Database:** ordered migrations and transactional reads/writes.
-- **Web app:** authenticated APIs, static dashboards, tiles, metrics.
+- **Web app:** authenticated APIs, static dashboards, shared map controller, tiles, metrics.
 - **Providers:** weather, CAP, seismic, and map data with caching.
 - **Federation:** peer trust, framing, replay protection, filtering, import.
 
@@ -52,6 +52,12 @@ atomic database replacement, durable sidecar progress, and a supervisor-driven p
 Core commands and stored data work without WAN. Provider views may serve bounded cached data with
 age/provenance or show unavailable. Maps use online tiles and an optional regional fallback. Radio
 federation is internet-independent; MQTT is not.
+
+All incident, member, and environment maps use `map-controller.js`. It owns Web Mercator
+projection, persistent tile and marker layers, online-to-local tile fallback, attribution, fit,
+pan/zoom, selection, empty state, and mouse/touch/keyboard input. Page adapters supply only domain
+marker definitions and detail-card actions. Pointer movement is animation-frame coalesced; a pan
+repositions existing DOM and creates or removes tiles only when the viewport crosses a tile edge.
 
 ## Trust boundaries
 

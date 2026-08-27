@@ -15,9 +15,10 @@ screen, while the system remains complete for someone who has only a handheld.
 exposed to the internet by the shipped configuration. The install script **MUST NOT** open a
 firewall port to WAN.
 
-**REQ-API-002** — The web interface **MUST** be fully functional with no internet: no CDN
-assets, no external fonts, no external map tiles, no analytics. Every asset is served from
-the node.
+**REQ-API-002** — The web interface **MUST** remain operational with no internet: no CDN
+application assets, external fonts, or analytics. Online map tiles **MAY** be used when available,
+but coordinates, markers, controls, detail cards, and an installed regional fallback **MUST**
+continue working without them.
 
 **REQ-API-003** — The SPA **MUST** be pre-built and vendored into
 `src/outpost/web/static/`. The Pi **MUST NOT** need Node.js at runtime or install time.
@@ -261,10 +262,15 @@ single most important operational signal in the product.
 
 ### 5.2 Map
 
-**REQ-UI-002** — Leaflet with **locally-cached raster tiles**. The install script **MUST**
-support downloading a bounded tile pack for the operator's region at zoom 8–14, and the map
-**MUST** degrade to a plain coordinate grid rather than showing broken tiles when none are
-cached.
+**REQ-UI-002** — One shared map controller **MUST** serve incident, member, and environment
+views. OpenStreetMap raster tiles are the online default; the install script **MUST** support a
+bounded regional tile pack at zoom 8–14 as the automatic fallback. When neither source is
+available, coordinates, markers, controls, and detail cards **MUST** remain functional and the
+missing basemap **MUST** be stated rather than rendered as broken or blank tiles.
+
+**REQ-UI-002a** — Tile and marker DOM **MUST** persist through ordinary pans. Pointer work
+**MUST** be animation-frame bounded, and mouse, touch, keyboard, selection, popup, attribution,
+and offline behavior **MUST** be consistent across map pages unless a domain action is documented.
 
 **REQ-UI-003** — Layers, individually toggleable: incidents (icon by type, colour by
 severity), node positions (opacity by last-heard age), CAP alert polygons, waypoints,

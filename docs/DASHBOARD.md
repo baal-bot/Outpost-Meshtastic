@@ -83,6 +83,20 @@ Follow System option. The preference is stored in the current browser rather tha
 database so a wall display, phone, and operator workstation can each use the appropriate mode.
 Night Ops reduces map brightness; it does not change incident severity or provider data.
 
+## Map controls
+
+Watch, Members, and Environment share the same map controls and interaction model. Drag with a
+mouse or one finger to pan, use the wheel or **+ / −** controls to zoom, and activate a marker to
+open its domain detail card. With the map focused, arrow keys pan, **+ / −** zoom, **0** fits visible
+markers where the page offers fit, **Home** returns an Environment map to the Outpost, and
+**Escape** closes the active selection. Marker hit areas remain 36 px square while their visual
+symbol changes state, preventing the shape and click-target shifts seen in the earlier maps.
+
+OpenStreetMap is the online default. If a regional tile bundle is installed, failed online tiles
+fall back to it automatically. When neither source can provide a tile, the map explicitly reports
+that the basemap is unavailable while coordinates, markers, controls, and detail cards continue to
+work. Attribution and fallback state are rendered consistently on every map.
+
 Section headings share one responsive action-bar treatment. Filters come first, status follows,
 and action buttons remain in their authored primary/secondary order. The action bar wraps on
 intermediate widths and stacks below its heading on narrow or enlarged-text displays rather than
