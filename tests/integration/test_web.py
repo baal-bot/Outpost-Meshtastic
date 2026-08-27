@@ -56,7 +56,7 @@ async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp
     assert "System capabilities" in dashboard.text
     assert client.get("/Figtree-Variable.ttf").status_code == 200
     operator = client.get("/operator.html")
-    assert operator.status_code == 200 and "Members & moderation" in operator.text
+    assert operator.status_code == 200 and "Members & radio triage" in operator.text
     bbs = client.get("/bbs.html")
     assert bbs.status_code == 200 and "Boards & discussions" in bbs.text
     radio = client.get("/radio.html")

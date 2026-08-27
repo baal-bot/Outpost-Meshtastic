@@ -50,6 +50,7 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | System/security | `kv` | Expire only keys whose stored deadline elapsed. |
 | System/security | `audit_log` | Preserve forever and protect. |
 | Members/directory | `member` | Preserve identity/trust history until explicit operator lifecycle action. |
+| Members/directory | `member_trust_history` | Preserve reviewed trust-change evidence forever and protect. |
 | Members/directory | `member_position` | Expire at its per-share deadline. |
 | Members/directory | `channel_dir` | Preserve operator-managed directory. |
 | BBS/mail | `board` | Preserve operator configuration. |

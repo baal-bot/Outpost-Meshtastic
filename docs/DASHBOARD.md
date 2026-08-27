@@ -22,6 +22,34 @@ phones and desktops and uses bundled assets so its interface remains available w
 Discovered radios are not members. Member counts, welfare recipients, and member-map markers should
 use admitted members only.
 
+### Member and radio triage
+
+The Members workspace separates enrolled identities from radios merely heard on the mesh. Saved
+queues cover new discoveries, recently heard identities, stale discoveries, members, responders,
+and radios requiring operator review. Search covers mesh ID, radio names, handle, notes, and
+hardware metadata.
+
+Open **Review** to see why the identity is in its current category, first/last heard time, latest
+signal and hops, position consent and retention state, recent activity, operator notes, and the
+permanent trust-change history. A trust change requires a reason and shows what the target level
+enables before it is saved. Granting member-level trust admits the identity to member-only
+workflows; claiming a handle through the mesh also restores a previously archived discovery as an
+active enrolled identity.
+
+Archive and Ignore apply only to unenrolled discovered radios:
+
+- **Archive** removes stale discovery noise from active queues while retaining the identity,
+  activity, and audit evidence for later restoration.
+- **Ignore** additionally keeps future heard traffic from reopening operator review. Traffic is
+  still logged, and the identity remains restorable.
+- Neither action blocks radio commands or deletes evidence. Use the reviewed `blocked` trust level
+  when command suppression is intended.
+
+Bulk archive/ignore safely skips enrolled identities even if a stale selection is submitted. CSV
+export is limited to 200 selected identities, is audit logged, neutralizes spreadsheet formulas,
+and deliberately omits exact coordinates. Exact retained coordinates remain operator-only in the
+review and member map.
+
 ## Weather provenance
 
 Weather cards label station observations, near-term forecasts, and model estimates separately.
@@ -82,7 +110,8 @@ The JSON API is rooted at `/api/v1`. Important read surfaces include:
 - `/api/v1/health` and `/api/v1/status`
 - `/api/v1/config`
 - `/api/v1/dashboard/overview` and the ETag-enabled `/api/v1/dashboard/poll`
-- `/api/v1/members`, `/api/v1/members/map`, and `/api/v1/mesh/messages`
+- `/api/v1/members`, `/api/v1/members/{id}`, `/api/v1/members/map`,
+  `/api/v1/members/export`, `/api/v1/members/bulk`, and `/api/v1/mesh/messages`
 - `/api/v1/mesh/queue` and `/api/v1/mesh/airtime`
 - `/api/v1/boards`, `/api/v1/mail`, `/api/v1/mail/conversations`, `/api/v1/incidents`,
   `/api/v1/events`

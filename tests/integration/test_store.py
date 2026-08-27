@@ -11,9 +11,18 @@ from outpost.store.members import MemberRepo
 async def test_database_migrates_and_resolves_member(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()
-    member = await MemberRepo(database, VirtualClock()).resolve("!a1b2c3d4")
+    repository = MemberRepo(database, VirtualClock())
+    member = await repository.resolve("!a1b2c3d4", last_heard_snr=8.5, hops_away=2)
     assert member.trust == "guest"
     assert member.mesh_num == 0xA1B2C3D4
+    heard = await database.read(
+        "SELECT last_heard_snr,hops_away FROM member WHERE id=?", (member.id,)
+    )
+    assert dict(heard[0]) == {"last_heard_snr": 8.5, "hops_away": 2}
+    await database.write("UPDATE member SET directory_state='ignored' WHERE id=?", (member.id,))
+    await repository.claim_handle(member.mesh_id, "relay")
+    state = await database.read("SELECT directory_state FROM member WHERE id=?", (member.id,))
+    assert state[0]["directory_state"] == "active"
     await database.close()
 
 

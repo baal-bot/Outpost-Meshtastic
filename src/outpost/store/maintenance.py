@@ -56,6 +56,13 @@ TABLE_POLICIES = (
         True,
     ),
     TablePolicy(
+        "member_trust_history",
+        "directory",
+        "preserve",
+        "Reviewed trust-change evidence is never aged out.",
+        True,
+    ),
+    TablePolicy(
         "member_position",
         "directory",
         "expire",

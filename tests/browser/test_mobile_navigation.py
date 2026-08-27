@@ -655,7 +655,13 @@ def route_operator_workspace(page: object, seen_audit_urls: list[str]) -> None:
                     "items": [],
                     "approved_count": 0,
                     "discovered_count": 0,
+                    "review_count": 0,
+                    "archived_count": 0,
+                    "ignored_count": 0,
                     "trusted_count": 0,
+                    "total": 0,
+                    "next_cursor": None,
+                    "saved_filters": [],
                 }
             ),
         ),

@@ -70,14 +70,30 @@ async def test_password_session_csrf_and_forced_change(tmp_path) -> None:
     assert approved["items"] == [] and approved["discovered_count"] == 1
     members = client.get("/api/v1/members?view=all")
     assert members.status_code == 200 and members.json()["items"][0]["mesh_id"] == "!00000001"
+    unreviewed_update = client.patch(
+        f"/api/v1/members/{member_id}",
+        headers={"x-csrf-token": csrf},
+        json={"trust": "trusted"},
+    )
+    assert unreviewed_update.status_code == 422
     update = client.patch(
         f"/api/v1/members/{member_id}",
         headers={"x-csrf-token": csrf},
-        json={"trust": "trusted", "notes": "known neighbor"},
+        json={
+            "trust": "trusted",
+            "notes": "known neighbor",
+            "reason": "Known neighbor verified",
+        },
     )
     assert update.status_code == 200
+    detail = client.get(f"/api/v1/members/{member_id}")
+    assert detail.status_code == 200
+    assert detail.json()["trust_history"][0]["reason"] == "Known neighbor verified"
+    exported = client.get(f"/api/v1/members/export?ids={member_id}")
+    assert exported.status_code == 200
+    assert "position_lat" not in exported.text
     audit = client.get("/api/v1/audit").json()["items"]
-    assert audit[0]["action"] == "member.update"
+    assert {item["action"] for item in audit} >= {"member.update", "member.export"}
     mail_id = await database.write(
         """
         INSERT INTO mail(

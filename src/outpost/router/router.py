@@ -70,7 +70,11 @@ class Router:
         invoked = self._invoked(inbound)
         if invoked is None or inbound.no_reply:
             return Response(ResponseKind.NONE)
-        member = await self.members.resolve(inbound.from_id)
+        member = await self.members.resolve(
+            inbound.from_id,
+            last_heard_snr=inbound.rx_snr,
+            hops_away=inbound.hops_away,
+        )
         if member.trust == "blocked":
             return Response(ResponseKind.NONE)
         channel = -1 if inbound.is_direct else inbound.channel

@@ -1835,7 +1835,11 @@ class OutpostApp:
             and message.latitude is not None
             and message.longitude is not None
         ):
-            member = await self.router.members.resolve(message.from_id)
+            member = await self.router.members.resolve(
+                message.from_id,
+                last_heard_snr=message.rx_snr,
+                hops_away=message.hops_away,
+            )
             await self.incidents.record_position(
                 member, message.latitude, message.longitude, prompt=message.is_direct
             )
@@ -1856,7 +1860,11 @@ class OutpostApp:
             and message.text
             and self.incidents.emergency_keyword(message.text, self.config.watch.emergency_keywords)
         ):
-            member = await self.router.members.resolve(message.from_id)
+            member = await self.router.members.resolve(
+                message.from_id,
+                last_heard_snr=message.rx_snr,
+                hops_away=message.hops_away,
+            )
             incident, created = await self.incidents.emergency_trigger(
                 member, message.text, self.config.watch.emergency_cooldown_minutes
             )
@@ -1867,7 +1875,11 @@ class OutpostApp:
                 [Line(f"⚠ INC {incident.local_ref} filed. Contact 911. Not emergency service.")],
             )
         elif self.config.modules.watch.enabled and message.is_direct and message.text:
-            member = await self.router.members.resolve(message.from_id)
+            member = await self.router.members.resolve(
+                message.from_id,
+                last_heard_snr=message.rx_snr,
+                hops_away=message.hops_away,
+            )
             if self.incidents.is_position_share_notice(message.text):
                 response = Response(ResponseKind.NONE)
             else:

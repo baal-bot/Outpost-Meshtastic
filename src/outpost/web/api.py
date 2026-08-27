@@ -30,6 +30,7 @@ from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.store.maintenance import MaintenanceService
 from outpost.watch import AlertService, CheckinService, IncidentService
 from outpost.web.auth import WebAuthService
+from outpost.web.member_triage import MemberTriageError, MemberTriageService
 from outpost.web.operator_inbox import OperatorInboxService
 from outpost.web.settings import RuntimeSettings
 
@@ -64,7 +65,19 @@ class WatchSettingsBody(BaseModel):
 
 class MemberPatchBody(BaseModel):
     trust: Literal["blocked", "guest", "member", "trusted", "responder", "operator"] | None = None
-    notes: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+    reason: str | None = Field(default=None, max_length=240)
+
+
+class MemberStateBody(BaseModel):
+    action: Literal["archive", "ignore", "restore"]
+    reason: str = Field(default="", max_length=240)
+
+
+class MemberBulkBody(BaseModel):
+    member_ids: list[int] = Field(min_length=1, max_length=200)
+    action: Literal["archive", "ignore", "restore"]
+    reason: str = Field(default="", max_length=240)
 
 
 class PositionPurgeBody(BaseModel):
@@ -1130,6 +1143,8 @@ def create_web_app(
         return Response(encoded, media_type="application/json", headers=headers)
 
     if database is not None:
+        member_triage = MemberTriageService(database)
+
         if settings is not None:
 
             @app.get("/api/v1/config")
@@ -2201,8 +2216,9 @@ def create_web_app(
             counts = await database.read(
                 """
                 SELECT
-                  SUM(CASE WHEN handle IS NOT NULL
-                             OR trust IN ('member','trusted','responder','operator')
+                  SUM(CASE WHEN directory_state='active' AND
+                             (handle IS NOT NULL OR
+                              trust IN ('member','trusted','responder','operator'))
                            THEN 1 ELSE 0 END) AS members_total,
                   SUM(CASE WHEN last_seen >= unixepoch()-86400 THEN 1 ELSE 0 END) AS heard_24h,
                   SUM(CASE WHEN last_seen >= unixepoch()-604800 THEN 1 ELSE 0 END) AS heard_7d
@@ -2249,7 +2265,8 @@ def create_web_app(
                           m.hops_away,json_extract(m.prefs,'$.position') AS privacy,
                           p.lat,p.lon,p.received_at,p.source,p.expires_at
                    FROM member m JOIN member_position p ON p.member_id=m.id
-                   WHERE (m.handle IS NOT NULL
+                   WHERE m.directory_state='active'
+                     AND (m.handle IS NOT NULL
                       OR m.trust IN ('member','trusted','responder','operator'))
                      AND p.expires_at>?
                    ORDER BY p.received_at DESC""",
@@ -2344,46 +2361,97 @@ def create_web_app(
                 )
             return {"deleted": count, "pending_deleted": pending_count}
 
-        @app.get("/api/v1/members")
+        @app.get("/api/v1/members", response_model=None)
         async def members(
             cursor: int = Query(0, ge=0),
             limit: int = Query(50, ge=1, le=200),
-            view: Literal["approved", "discovered", "all"] = "approved",
-        ) -> dict[str, Any]:
-            conditions = {
-                "approved": (
-                    "handle IS NOT NULL OR trust IN ('member','trusted','responder','operator')"
-                ),
-                "discovered": "handle IS NULL AND trust IN ('guest','blocked')",
-                "all": "1=1",
-            }
-            rows = await database.read(
-                f"""
-                SELECT id,mesh_id,handle,trust,first_seen,last_seen,last_heard_snr,hops_away,notes
-                FROM member WHERE {conditions[view]}
-                ORDER BY last_seen DESC,id LIMIT ? OFFSET ?
-                """,  # noqa: S608 - condition is selected from fixed literals.
-                (limit + 1, cursor),
+            view: Literal["approved", "discovered", "archived", "all"] = "approved",
+            saved: Literal["new", "recent", "stale", "member", "responder", "review"] | None = None,
+            query: str = Query(default="", max_length=100),
+        ) -> dict[str, Any] | Response:
+            try:
+                result = await member_triage.list(
+                    view=view, saved=saved, query=query, cursor=cursor, limit=limit
+                )
+            except MemberTriageError as error:
+                return JSONResponse(
+                    {"error": {"code": error.code, "message": str(error)}}, status_code=422
+                )
+            for item in result["items"]:
+                for key in (
+                    "first_seen",
+                    "last_seen",
+                    "directory_state_at",
+                    "reviewed_at",
+                    "position_received_at",
+                    "position_expires_at",
+                ):
+                    if item.get(key) is not None:
+                        item[key] = _timestamp(int(item[key]))
+            return result
+
+        @app.get("/api/v1/members/export", response_model=None)
+        async def member_export(ids: str = Query(min_length=1, max_length=1400)) -> Response:
+            try:
+                member_ids = [int(value) for value in ids.split(",")]
+                content, count = await member_triage.export(member_ids)
+            except (ValueError, MemberTriageError) as error:
+                code = error.code if isinstance(error, MemberTriageError) else "invalid_selection"
+                return JSONResponse(
+                    {"error": {"code": code, "message": str(error)}}, status_code=422
+                )
+            return Response(
+                content,
+                media_type="text/csv",
+                headers={
+                    "Content-Disposition": 'attachment; filename="outpost-member-triage.csv"',
+                    "X-Outpost-Export-Count": str(count),
+                },
             )
-            counts = await database.read(
-                """SELECT
-                   SUM(handle IS NOT NULL OR trust IN ('member','trusted','responder','operator'))
-                     AS approved_count,
-                   SUM(handle IS NULL AND trust IN ('guest','blocked')) AS discovered_count
-                   ,SUM(trust IN ('trusted','responder','operator')) AS trusted_count
-                   FROM member"""
-            )
-            items = [dict(row) for row in rows[:limit]]
-            for item in items:
-                item["first_seen"] = _timestamp(item["first_seen"])
-                item["last_seen"] = _timestamp(item["last_seen"])
-            return {
-                "items": items,
-                "approved_count": int(counts[0]["approved_count"] or 0),
-                "discovered_count": int(counts[0]["discovered_count"] or 0),
-                "trusted_count": int(counts[0]["trusted_count"] or 0),
-                "next_cursor": cursor + limit if len(rows) > limit else None,
-            }
+
+        @app.post("/api/v1/members/bulk", response_model=None)
+        async def member_bulk(body: MemberBulkBody) -> dict[str, Any] | Response:
+            try:
+                return await member_triage.bulk(body.member_ids, body.action, body.reason)
+            except MemberTriageError as error:
+                return JSONResponse(
+                    {"error": {"code": error.code, "message": str(error)}}, status_code=422
+                )
+
+        @app.get("/api/v1/members/{member_id}", response_model=None)
+        async def member_detail(member_id: int) -> dict[str, Any] | Response:
+            result = await member_triage.detail(member_id)
+            if result is None:
+                return JSONResponse(
+                    {"error": {"code": "not_found", "message": "Member not found."}},
+                    status_code=404,
+                )
+            member = result["member"]
+            for key in (
+                "first_seen",
+                "last_seen",
+                "directory_state_at",
+                "reviewed_at",
+                "position_received_at",
+                "position_expires_at",
+            ):
+                if member.get(key) is not None:
+                    member[key] = _timestamp(int(member[key]))
+            for item in result["recent_activity"]:
+                item["created_at"] = _timestamp(int(item["created_at"]))
+            for item in result["trust_history"]:
+                item["created_at"] = _timestamp(int(item["created_at"]))
+            return result
+
+        @app.post("/api/v1/members/{member_id}/state", response_model=None)
+        async def member_state(member_id: int, body: MemberStateBody) -> dict[str, Any] | Response:
+            try:
+                return await member_triage.set_state(member_id, body.action, body.reason)
+            except MemberTriageError as error:
+                status = 404 if error.code == "not_found" else 422
+                return JSONResponse(
+                    {"error": {"code": error.code, "message": str(error)}}, status_code=status
+                )
 
         @app.get("/api/v1/mesh/messages")
         async def mesh_messages(
@@ -2611,35 +2679,26 @@ def create_web_app(
 
         @app.patch("/api/v1/members/{member_id}")
         async def member_patch(member_id: int, body: MemberPatchBody) -> Response:
-            values = body.model_dump(exclude_none=True)
-            if not values:
+            notes_supplied = "notes" in body.model_fields_set
+            if body.trust is None and not notes_supplied:
                 return JSONResponse(
                     {"error": {"code": "empty_update", "message": "No changes supplied."}},
                     status_code=400,
                 )
-            assignments, params = [], []
-            for key, value in values.items():
-                assignments.append(f"{key}=?")
-                params.append(value)
-            params.append(member_id)
-            rows = await database.read("SELECT mesh_id FROM member WHERE id=?", (member_id,))
-            if not rows:
-                return JSONResponse(
-                    {"error": {"code": "not_found", "message": "Member not found."}},
-                    status_code=404,
+            try:
+                result = await member_triage.update(
+                    member_id,
+                    trust=body.trust,
+                    notes=body.notes,
+                    notes_supplied=notes_supplied,
+                    reason=body.reason,
                 )
-            await database.write(
-                f"UPDATE member SET {','.join(assignments)} WHERE id=?",  # noqa: S608
-                tuple(params),
-            )
-            await database.write(
-                """
-                INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web','operator','member.update',?,?,unixepoch())
-                """,
-                (rows[0]["mesh_id"], ",".join(sorted(values))),
-            )
-            return JSONResponse({"ok": True})
+            except MemberTriageError as error:
+                status = 404 if error.code == "not_found" else 422
+                return JSONResponse(
+                    {"error": {"code": error.code, "message": str(error)}}, status_code=status
+                )
+            return JSONResponse(result)
 
         @app.patch("/api/v1/posts/{post_id}")
         async def post_patch(post_id: int, body: PostPatchBody) -> Response:
