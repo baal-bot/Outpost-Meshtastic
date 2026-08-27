@@ -9,8 +9,9 @@ detailed intended product design.
 2. [Installation](INSTALLATION.md)
 3. [Configuration](CONFIGURATION.md)
 4. [Operations](OPERATIONS.md)
-5. [Troubleshooting](TROUBLESHOOTING.md)
-6. [Dashboard and API](DASHBOARD.md)
+5. [Data retention and storage](RETENTION.md)
+6. [Troubleshooting](TROUBLESHOOTING.md)
+7. [Dashboard and API](DASHBOARD.md)
 
 ## Members and responders
 

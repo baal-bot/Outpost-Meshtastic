@@ -27,6 +27,7 @@ from outpost.fed import FederationPeerService
 from outpost.radio_operations import RadioOperations
 from outpost.store import Database
 from outpost.store.backups import BackupService, RestoreCoordinator
+from outpost.store.maintenance import MaintenanceService
 from outpost.watch import AlertService, CheckinService, IncidentService
 from outpost.web.auth import WebAuthService
 from outpost.web.operator_inbox import OperatorInboxService
@@ -67,6 +68,10 @@ class MemberPatchBody(BaseModel):
 
 
 class PositionPurgeBody(BaseModel):
+    confirmation: str
+
+
+class MaintenanceRunBody(BaseModel):
     confirmation: str
 
 
@@ -319,6 +324,7 @@ def create_web_app(
         Callable[[str, str, str, str], Awaitable[dict[str, object]]] | None
     ) = None,
     restore_coordinator: RestoreCoordinator | None = None,
+    maintenance: MaintenanceService | None = None,
     module_provider: Callable[[], dict[str, bool]] | None = None,
     federation_mail_reply: (
         Callable[[str, str, str, str, str, str, str], Awaitable[dict[str, object]]] | None
@@ -1428,6 +1434,39 @@ def create_web_app(
                         status_code=422,
                     )
                 return JSONResponse(job, status_code=202)
+
+        if maintenance is not None:
+
+            @app.get("/api/v1/maintenance/storage")
+            async def maintenance_storage() -> dict[str, Any]:
+                return await maintenance.storage_report()
+
+            @app.get("/api/v1/maintenance/preview")
+            async def maintenance_preview() -> dict[str, Any]:
+                return (await maintenance.preview()).as_dict()
+
+            @app.post("/api/v1/maintenance/run", response_model=None)
+            async def maintenance_run(
+                body: MaintenanceRunBody,
+            ) -> dict[str, Any] | Response:
+                if body.confirmation != "CLEANUP":
+                    return JSONResponse(
+                        {
+                            "error": {
+                                "code": "confirmation_required",
+                                "message": "Enter CLEANUP to run retention maintenance.",
+                            }
+                        },
+                        status_code=422,
+                    )
+                try:
+                    result = await maintenance.run(actor_kind="web", actor_ref="operator")
+                except RuntimeError as error:
+                    return JSONResponse(
+                        {"error": {"code": "maintenance_busy", "message": str(error)}},
+                        status_code=409,
+                    )
+                return {"result": result.as_dict()}
 
         if incidents is not None:
 

@@ -79,7 +79,13 @@ escalation stages, and acknowledgement threshold before approval.
 
 ## Privacy and retention
 
-Retention reduces old posts, mail, and message logs; it does not create an organizational policy.
+Retention covers completed operational, provider, federation, authentication, BBS, mail, and watch
+history. It does not replace an organizational policy. Review the dry-run and per-domain growth in
+Backups → Live data & retention; the complete rules and storage estimates are in
+[Data retention and storage](RETENTION.md). Scheduled cleanup takes a verified pre-cleanup snapshot
+and releases the SQLite writer between small batches. Audit evidence, active workflows, pairing
+state, federation approval queues, and unsent deliveries are protected.
+
 Document who can approve members, view locations, export rosters, access backups, and pair peers.
 Exact member POS shares expire after `store.retention.member_positions_hours` (168 hours by
 default). The Members map shows the source, share time, visibility, and scheduled deletion, with

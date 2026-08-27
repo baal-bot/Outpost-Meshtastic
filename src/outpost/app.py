@@ -232,6 +232,7 @@ class OutpostApp:
             self.import_federation_inbox,
             self.send_federation_mail,
             self.restore_coordinator,
+            self.maintenance,
             module_provider=self.config.modules.enabled_map,
             federation_mail_reply=self.reply_federation_mail,
         )

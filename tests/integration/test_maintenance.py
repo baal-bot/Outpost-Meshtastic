@@ -1,10 +1,12 @@
 import pytest
+from fastapi.testclient import TestClient
 
 from outpost.clock import VirtualClock
 from outpost.config import Config
 from outpost.store import Database
 from outpost.store.backups import BackupService
 from outpost.store.maintenance import MaintenanceService
+from outpost.web.api import create_web_app
 
 
 @pytest.mark.asyncio
@@ -112,4 +114,76 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
     assert backups.list()
     assert await service.due() is False
     assert await database.read("SELECT 1 FROM audit_log WHERE action='maintenance.run'")
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_maintenance_preview_storage_health_and_bounded_cleanup(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    now = int(clock.now().timestamp())
+    old = now - 400 * 86_400
+    async with database.transaction() as transaction:
+        for index in range(300):
+            await transaction.write(
+                "INSERT INTO web_login_attempt(source,successful,created_at) VALUES(?,?,?)",
+                (f"source-{index}", 0, old),
+            )
+        await transaction.write(
+            "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+            "VALUES('system','test','security.test','database',NULL,?)",
+            (old,),
+        )
+    config = Config.model_validate(
+        {
+            "store": {
+                "path": str(tmp_path / "outpost.db"),
+                "maintenance_batch_rows": 25,
+                "maintenance_max_rows": 250,
+                "backup": {"enabled": False, "keep": 2},
+            }
+        }
+    )
+    service = MaintenanceService(database, BackupService(database), clock, config)
+
+    preview = await service.preview()
+    assert preview.total_rows == 300
+    assert next(item for item in preview.rules if item.key == "web_login_attempts").rows == 300
+    assert len(await database.read("SELECT 1 FROM web_login_attempt")) == 300
+
+    health = await service.storage_report()
+    assert health["database_bytes"] > 0
+    assert health["wal_bytes"] >= 0 and health["backup_bytes"] == 0
+    assert {item["key"] for item in health["domains"]} == {
+        "system",
+        "directory",
+        "community",
+        "watch",
+        "environment",
+        "federation",
+    }
+    audit_policy = next(item for item in health["policies"] if item["table"] == "audit_log")
+    assert audit_policy["policy"] == "preserve" and audit_policy["protected"] is True
+
+    result = await service.run(actor_kind="web", actor_ref="operator")
+    assert result.removed["web_login_attempts"] == 250
+    assert result.limited is True and result.batch_rows == 25
+    assert len(await database.read("SELECT 1 FROM web_login_attempt")) == 50
+    audits = await database.read("SELECT actor_kind,actor_ref FROM audit_log ORDER BY id")
+    assert len(audits) == 2
+    assert dict(audits[-1]) == {"actor_kind": "web", "actor_ref": "operator"}
+    after = await service.storage_report()
+    assert after["growth_since"] == now
+
+    client = TestClient(
+        create_web_app(
+            lambda: {"radio": "up"},
+            database=database,
+            maintenance=service,
+        )
+    )
+    assert client.get("/api/v1/maintenance/preview").status_code == 200
+    denied = client.post("/api/v1/maintenance/run", json={"confirmation": "wrong"})
+    assert denied.status_code == 422
     await database.close()

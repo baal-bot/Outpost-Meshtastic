@@ -176,6 +176,7 @@ field acceptance.
 - [Mesh commands](docs/COMMANDS.md)
 - [Dashboard and API](docs/DASHBOARD.md)
 - [Operations](docs/OPERATIONS.md)
+- [Data retention and storage](docs/RETENTION.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Federation](docs/FEDERATION.md)
 - [Security](docs/SECURITY.md)

@@ -1713,12 +1713,63 @@ def test_backup_create_validate_and_restore_confirmation_are_functional_and_clea
             body = {}
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
 
+    def maintenance_route(route: object) -> None:
+        body = {
+            "database_bytes": 1048576,
+            "wal_bytes": 4096,
+            "backup_bytes": 4096,
+            "backup_count": 1,
+            "disk_free_bytes": 10737418240,
+            "growth_since": 1787760000,
+            "last_maintenance": "2026-08-26",
+            "domains": [
+                {
+                    "key": "system",
+                    "label": "System & security",
+                    "rows": 300,
+                    "size_bytes": 524288,
+                    "growth_rows": 4,
+                    "growth_bytes": 4096,
+                },
+                {
+                    "key": "community",
+                    "label": "BBS & mail",
+                    "rows": 40,
+                    "size_bytes": 262144,
+                    "growth_rows": 2,
+                    "growth_bytes": 4096,
+                },
+            ],
+            "cleanup": {
+                "total_rows": 2,
+                "estimated_bytes": 2048,
+                "rules": [
+                    {
+                        "label": "Expired web sessions",
+                        "rows": 2,
+                    }
+                ],
+            },
+            "policies": [
+                {
+                    "table": "audit_log",
+                    "policy": "preserve",
+                    "detail": "Security evidence is never aged out.",
+                    "protected": True,
+                }
+            ],
+        }
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
     page.route("**/api/v1/backups**", backup_route)
     page.route("**/api/v1/recovery/restores/**", backup_route)
+    page.route("**/api/v1/maintenance/**", maintenance_route)
     health = BrowserHealth(page)
     try:
         page.goto(f"{dashboard_url}/backups.html", wait_until="domcontentloaded")
         wait_for_navigation(page)
+        page.get_by_text("2 records").wait_for()
+        page.get_by_text("System & security").wait_for()
         page.get_by_role("button", name="Create verified backup").click()
         page.get_by_text(backup["name"]).wait_for()
         page.get_by_role("button", name="Validate").click()

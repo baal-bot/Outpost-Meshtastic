@@ -88,6 +88,13 @@ The JSON API is rooted at `/api/v1`. Important read surfaces include:
   `/api/v1/events`
 - `/api/v1/environment/weather`, `/forecast`, `/alerts`, `/earthquakes`, `/waypoints`
 - `/api/v1/backups`, `/api/v1/audit`, and federation endpoints under `/api/v1/federation`
+- `/api/v1/maintenance/storage`, `/api/v1/maintenance/preview`, and
+  `/api/v1/maintenance/run`
+
+Backups → Live data & retention reports the live database, WAL, verified backups, available disk,
+per-domain rows/allocation, and growth since the last maintenance baseline. Its cleanup preview is
+read-only. Applying the preview requires the displayed confirmation, takes a verified snapshot
+first, and runs bounded deletion batches. See [Data retention and storage](RETENTION.md).
 
 `/api/v1/audit` accepts `from_time`, `until`, `actor`, `action`, `target`, `outcome`, `cursor`, and
 `limit`. Outcomes are `success`, `denied`, or `failure`; existing privileged-action writers record

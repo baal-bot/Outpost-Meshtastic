@@ -127,5 +127,20 @@ web:
 store:
   path: "/var/lib/outpost/outpost.db"
   maintenance_hour: 3
-  retention: {posts_days: 90, mail_days: 180, member_positions_hours: 168, message_log_days: 30, message_log_max_rows: 500000}
+  maintenance_batch_rows: 250
+  maintenance_max_rows: 10000
+  retention:
+    posts_days: 90
+    mail_days: 180
+    member_positions_hours: 168
+    message_log_days: 30
+    message_log_max_rows: 500000
+    authentication_days: 30
+    digest_days: 90
+    watch_history_days: 365
+    environment_history_days: 30
+    provider_cache_days: 2
+    federation_service_days: 7
+    federation_history_days: 30
+    outbound_history_days: 30
   backup: {enabled: true, keep: 14}

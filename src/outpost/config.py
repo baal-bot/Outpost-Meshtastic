@@ -237,6 +237,14 @@ class RetentionConfig(StrictModel):
     member_positions_hours: int = Field(default=168, ge=1, le=720)
     message_log_days: int = Field(default=30, ge=1)
     message_log_max_rows: int = Field(default=500_000, ge=1_000)
+    authentication_days: int = Field(default=30, ge=1, le=365)
+    digest_days: int = Field(default=90, ge=1, le=730)
+    watch_history_days: int = Field(default=365, ge=30, le=3_650)
+    environment_history_days: int = Field(default=30, ge=1, le=365)
+    provider_cache_days: int = Field(default=2, ge=1, le=30)
+    federation_service_days: int = Field(default=7, ge=1, le=90)
+    federation_history_days: int = Field(default=30, ge=1, le=365)
+    outbound_history_days: int = Field(default=30, ge=1, le=365)
 
 
 class BackupConfig(StrictModel):
@@ -247,6 +255,8 @@ class BackupConfig(StrictModel):
 class StoreConfig(StrictModel):
     path: str = "/var/lib/outpost/outpost.db"
     maintenance_hour: int = Field(default=3, ge=0, le=23)
+    maintenance_batch_rows: int = Field(default=250, ge=25, le=2_000)
+    maintenance_max_rows: int = Field(default=10_000, ge=250, le=100_000)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
 

@@ -94,11 +94,21 @@ proxy for remote administration.
 ### `store`
 
 Controls SQLite path, maintenance hour, retention, and backup count. The service account needs
-write access to the database parent directory. `retention.member_positions_hours` controls how
+write access to the database parent directory. `maintenance_batch_rows` (250) is the maximum rows
+deleted in one writer transaction; `maintenance_max_rows` (10,000) bounds a complete daily run.
+The engine rotates fairly across eligible domains when the run limit is reached.
+
+`retention.member_positions_hours` controls how
 long the latest exact POS share is retained (default 168 hours, range 1–720). Each new share stores
 its own deletion time. Past-due positions are excluded immediately from maps, commands, welfare,
 and safety processing; daily maintenance physically deletes them. Existing positions from before
 the expiry migration are expired on upgrade and require a fresh member share to reappear.
+
+The remaining retention keys govern BBS/mail, authentication, digests, terminal watch history,
+provider history/cache, completed federation service/delivery history, and terminal durable
+outbound work. Active incidents/events, pending federation approvals, live deliveries, identity,
+configuration, and audit evidence are not age-deleted. See
+[Data retention and storage](RETENTION.md) for the table-by-table contract and capacity estimates.
 
 ## Environment overrides
 
