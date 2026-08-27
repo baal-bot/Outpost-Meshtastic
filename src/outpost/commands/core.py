@@ -38,6 +38,7 @@ async def help_command(ctx: CommandContext) -> Response:
         "OPERATOR": {"operator"},
         "WATCH": {"watch"},
         "ENV": {"env"},
+        "AI": {"ai"},
     }
 
     def group_commands(modules: set[str]) -> list[str]:

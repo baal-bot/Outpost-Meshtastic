@@ -3,6 +3,10 @@ const $ = id => document.getElementById(id);
 const safe = value => String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[char]);
 let csrf = "";
 let policyWizardOpen = false;
+let topologyMap = null;
+let topologyItems = [];
+let topologyIncidents = [];
+let topologyFitted = false;
 const api = (url, options = {}) => fetch(url, {...options, headers: {...(options.body ? {"content-type":"application/json"} : {}), ...(options.method && options.method !== "GET" ? {"x-csrf-token":csrf} : {}), ...options.headers}});
 function age(epoch) { if (!epoch) return "Never"; const seconds = Math.max(0, Date.now()/1000-epoch); if (seconds < 90) return "Just now"; if (seconds < 3600) return `${Math.floor(seconds/60)}m ago`; if (seconds < 86400) return `${Math.floor(seconds/3600)}h ago`; return `${Math.floor(seconds/86400)}d ago`; }
 function serviceProvenance(item) {
@@ -126,6 +130,92 @@ async function loadRelayMail() {
   await refreshRelayMail();
 }
 async function refreshRelayMail() { const target = $("relay-mail-history"); if (!target) return; const response = await api("/api/v1/federation/mail"); if (!response.ok) return; const items = (await response.json()).items; target.innerHTML = items.map(item => `<article><strong>${safe(item.direction)} · ${safe(item.state)}</strong><span>${safe(item.node_name || item.mesh_id)} → ${safe(item.recipient_handle)}</span><code>${safe(item.relay_id)}</code><time>${new Date(item.created_at*1000).toLocaleString()}</time></article>`).join("") || `<p class="ui-empty empty">No federated mail deliveries yet.</p>`; }
+async function loadTopology() {
+  const directory = $("peer-list").closest(".panel");
+  const panel = document.createElement("section");
+  panel.className = "ui-card panel content-panel topology-panel";
+  panel.innerHTML = `<div class="heading"><div><p class="eyebrow">REGIONAL TOPOLOGY</p><h2>Trusted Outpost health</h2></div><div class="topology-tools"><label><input id="topology-incidents" type="checkbox"> Show incidents</label><button id="refresh-topology" class="small-button">Refresh</button></div></div><p class="mqtt-note">Only active peers that explicitly shared a coarse location appear on the map. The identity and health list remains available without map tiles.</p><div class="topology-workspace"><div id="topology-map" class="outpost-map" tabindex="0" aria-label="Interactive federation topology map. Use arrow keys to pan and plus or minus to zoom."><div class="outpost-map-tiles"></div><div class="outpost-map-markers"></div><div class="ui-map-controls outpost-map-controls"><button data-map-action="zoom-in" title="Zoom in" aria-label="Zoom in">+</button><button data-map-action="zoom-out" title="Zoom out" aria-label="Zoom out">−</button><button data-map-action="fit" title="Fit shared Outposts" aria-label="Fit shared Outposts">⌂</button></div><span class="outpost-map-coordinates">—</span><div class="outpost-map-attribution"></div><p class="outpost-map-empty">No trusted peers have shared a map location.</p><aside id="topology-map-detail" class="outpost-map-detail" hidden></aside></div><div id="topology-list" class="topology-list"><p class="ui-empty empty">Loading federation identities…</p></div></div>`;
+  directory.insertAdjacentElement("afterend", panel);
+  topologyMap = new window.OutpostMap.Controller({root:$("topology-map"),detail:$("topology-map-detail"),onFit:fitTopology,onBackground:closeTopologyDetail});
+  $("refresh-topology").addEventListener("click", refreshTopology);
+  $("topology-incidents").addEventListener("change", refreshTopologyIncidents);
+  await refreshTopology();
+}
+function topologyDefinitions() {
+  const peers = topologyItems.filter(item => item.location && item.raw_state === "active").map(item => ({id:`topology-${item.mesh_id}`,lat:item.location.lat,lon:item.location.lon,className:`shape-diamond ${item.degraded ? "tone-caution" : "tone-ok"}`,title:`${item.node_name || item.mesh_id} · ${item.state}`,label:`Show topology health for ${item.node_name || item.mesh_id}`,data:{...item,markerKind:"peer"},onActivate:showTopologyDetail}));
+  const incidents = topologyIncidents.filter(item => item.lat != null && item.lon != null).map(item => ({id:`topology-incident-${item.id}`,lat:item.lat,lon:item.lon,className:`shape-circle tone-${item.severity || "info"}`,title:`INC ${item.local_ref}: ${item.title}`,label:`Show incident ${item.local_ref}: ${item.title}`,data:{...item,markerKind:"incident"},onActivate:showTopologyDetail}));
+  return [...peers,...incidents];
+}
+function renderTopologyMap() { if (!topologyMap) return; const definitions=topologyDefinitions();topologyMap.setMarkers(definitions);topologyMap.setEmpty(definitions.length===0);if(!topologyFitted&&definitions.length){topologyFitted=true;topologyMap.fit(definitions,{maxZoom:10});} }
+function fitTopology() { const definitions=topologyDefinitions();if(definitions.length)topologyMap.fit(definitions,{maxZoom:10}); }
+function closeTopologyDetail() { topologyMap?.clearSelection();const detail=$("topology-map-detail");if(detail)detail.hidden=true; }
+function showTopologyDetail(item) {
+  const detail=$("topology-map-detail");if(!detail)return;
+  detail.hidden=false;
+  if(item.markerKind==="incident"){detail.innerHTML=`<button class="close-map" aria-label="Close">×</button><p class="eyebrow">OPTIONAL INCIDENT LAYER</p><h3>INC ${safe(item.local_ref)} · ${safe(item.title)}</h3><p>${safe(item.severity || "info")} · ${safe(item.type || "incident")}</p><p><a href="/watch.html">Open Community Watch →</a></p>`;detail.querySelector(".close-map").onclick=closeTopologyDetail;return;}
+  const paths=["radio","mqtt"].map(name=>{const path=item.paths?.[name]||{};return `<span class="transport-chip ${name}">${name==="radio"?"⌁ LoRa":"◫ MQTT"} · ${path.last_at?age(path.last_at):"not observed"}</span>`;}).join("");
+  const reasons=(item.degraded_reasons||[]).map(reason=>`<li>${safe(reason)}</li>`).join("");
+  const audits=(item.audit||[]).map(event=>`<li>${safe(event.action)} · ${age(event.created_at)}</li>`).join("")||"<li>No matching audit events.</li>";
+  const policy=item.location_policy;
+  const shareForm=policy?`<form id="topology-location-form" class="topology-location-form"><label class="topology-share-check"><input id="topology-share" type="checkbox" ${policy.share_location?"checked":""}> Share this Outpost's coarse location with this peer</label><label>Latitude<input id="topology-share-lat" type="number" min="-90" max="90" step="0.00001" value="${safe(policy.lat ?? "")}"></label><label>Longitude<input id="topology-share-lon" type="number" min="-180" max="180" step="0.00001" value="${safe(policy.lon ?? "")}"></label><label>Precision<select id="topology-share-precision"><option value="10">10 km</option><option value="25">25 km</option><option value="50">50 km</option><option value="100">100 km</option></select></label><button>Save location policy</button><small>Coordinates are rounded to the selected precision before authenticated delivery.</small><span id="topology-policy-result"></span></form>`:"";
+  detail.innerHTML=`<button class="close-map" aria-label="Close">×</button><p class="eyebrow">${safe(item.identity_kind || "current")} IDENTITY · ${safe(item.state)}</p><h3>${safe(item.node_name || item.mesh_id)}</h3><code>${safe(item.mesh_id)}</code><div class="topology-paths">${paths}</div><p>Preferred: <b>${safe(item.preferred_path || "unavailable")}</b> · Last successful: <b>${safe(item.last_successful_path || "none")}</b><br>Last seen ${age(item.last_seen_at)} · Last sync ${age(item.last_sync_at)} · Backlog ${safe(item.backlog || 0)}</p>${item.location?`<p>Approximate location · ${safe(item.location.precision_km)} km precision · received ${age(item.location.received_at)}</p>`:"<p>Remote location not shared. This identity remains list-only.</p>"}${reasons?`<ul class="topology-warnings">${reasons}</ul>`:""}<details><summary>Delivery, service, and policy context</summary><p>Delivery errors ${safe(item.delivery?.errors||0)} · rejected frames ${safe(item.delivery?.rejected_24h||0)}<br>Services: ${item.services?.length?item.services.map(safe).join(", "):"none"}<br>Boards: ${item.policy?.boards?.length?item.policy.boards.map(safe).join(", "):"none"}<br>Incident sync ${item.policy?.sync_incidents?"enabled":"disabled"} · relay ${item.policy?.relay_enabled?(item.policy.relay_paused?"paused":"enabled"):"disabled"}</p></details><details><summary>Recent audit context</summary><ul>${audits}</ul></details>${shareForm}`;
+  detail.querySelector(".close-map").onclick=closeTopologyDetail;
+  const form=$("topology-location-form");
+  if(form){
+    $("topology-share-precision").value=String(policy.precision_km);
+    form.addEventListener("submit",async event=>{
+      event.preventDefault();
+      const sharing=$("topology-share").checked,lat=$("topology-share-lat").value,lon=$("topology-share-lon").value;
+      if(sharing&&(!lat||!lon)){$("topology-policy-result").textContent="Latitude and longitude are required to share a location.";return;}
+      if(sharing&&!policy.share_location&&!await window.OutpostUI.confirm({title:"Share a coarse Outpost location?",message:`${item.node_name||item.mesh_id} will receive this location rounded to the selected precision. This is separate from incident-sharing policy.`,confirmLabel:"Enable sharing"}))return;
+      const body={share_location:sharing,location_lat:sharing?Number(lat):null,location_lon:sharing?Number(lon):null,precision_km:Number($("topology-share-precision").value)};
+      const response=await api(`/api/v1/federation/topology/peers/${encodeURIComponent(item.mesh_id)}`,{method:"PUT",body:JSON.stringify(body)}),result=await response.json();
+      $("topology-policy-result").textContent=response.ok?"Location-sharing policy saved; authenticated update queued.":result.error.message;
+      if(response.ok)await refreshTopology();
+    });
+  }
+}
+async function refreshTopologyIncidents(){topologyIncidents=[];if($("topology-incidents").checked){const response=await api("/api/v1/watch/map?hours_ago=24");if(response.ok)topologyIncidents=(await response.json()).incidents||[];}renderTopologyMap();}
+async function refreshTopology() {
+  const target=$("topology-list");if(!target)return;
+  const response=await api("/api/v1/federation/topology");if(!response.ok)return;
+  const result=await response.json();topologyItems=result.items||[];
+  target.innerHTML=topologyItems.map(item=>`<button class="topology-peer ${item.degraded?"degraded":""}" data-topology-peer="${safe(item.mesh_id)}"><span><strong>${safe(item.node_name||item.mesh_id)}</strong><code>${safe(item.mesh_id)}</code></span><span class="chip ${safe(item.state)}">${safe(item.state)}</span><small>${safe(item.identity_kind||"current")} identity · ${item.location?`shared · ${safe(item.location.precision_km)} km precision`:"list only"} · ${safe(item.backlog||0)} queued<br>${item.transports?.length?item.transports.map(safe).join(" + "):"No active transport"}</small></button>`).join("")||`<p class="ui-empty empty">No discovered, paired, adopted, or forgotten Outpost identities.</p>`;
+  document.querySelectorAll("[data-topology-peer]").forEach(button=>button.addEventListener("click",()=>{const item=topologyItems.find(value=>value.mesh_id===button.dataset.topologyPeer);if(!item)return;if(item.location)topologyMap.setView({lat:item.location.lat,lon:item.location.lon,zoom:9});showTopologyDetail({...item,markerKind:"peer"});}));
+  renderTopologyMap();
+}
+async function loadStoreForward() {
+  const directory = $("peer-list").closest(".panel");
+  const panel = document.createElement("section");
+  panel.className = "ui-card panel content-panel store-forward-panel";
+  panel.innerHTML = `<div class="heading"><div><p class="eyebrow">SIGNED STORE-AND-FORWARD</p><h2>Disconnected delivery</h2></div><button id="refresh-relay" class="small-button">Refresh</button></div><p class="mqtt-note">Every hop requires an explicit peer policy. Origin signatures and idempotency survive relays; routing metadata is visible to relay operators.</p><div id="relay-summary" class="relay-summary"></div><form id="relay-create" class="relay-create"><input id="relay-destination" aria-label="Relay destination node ID" pattern="^![0-9a-fA-F]{8}$" placeholder="Destination !1234abcd" required><select id="relay-scope" aria-label="Relay content scope"><option value="request">Request</option><option value="incident">Incident</option><option value="receipt">Receipt</option></select><textarea id="relay-payload" aria-label="Relay payload JSON" maxlength="700" placeholder='Payload JSON, for example {"kind":"status"}' required></textarea><label>Hop limit <input id="relay-hops" type="number" min="1" max="4" value="3"></label><button>Queue signed envelope</button><span id="relay-result"></span></form><div class="relay-columns"><section><h3>Peer relay policies</h3><div id="relay-policies"></div></section><section><h3>Observed origin keys</h3><div id="relay-origins"></div></section></div><h3>Custody queue</h3><div id="relay-queue"></div>`;
+  directory.insertAdjacentElement("afterend", panel);
+  $("refresh-relay").addEventListener("click", refreshStoreForward);
+  $("relay-create").addEventListener("submit", async event => {
+    event.preventDefault();
+    let payload;
+    try { payload = JSON.parse($("relay-payload").value); } catch { $("relay-result").textContent = "Payload must be valid JSON."; return; }
+    const response = await api("/api/v1/federation/relay", {method:"POST", body:JSON.stringify({destination:$("relay-destination").value,scope:$("relay-scope").value,payload,hop_limit:Number($("relay-hops").value)})});
+    const body = await response.json();
+    $("relay-result").textContent = response.ok ? `Envelope ${body.envelope_id} queued.` : body.error.message;
+    if (response.ok) $("relay-payload").value = "";
+    await refreshStoreForward();
+  });
+  await refreshStoreForward();
+}
+async function refreshStoreForward() {
+  const queue = $("relay-queue"); if (!queue) return;
+  const response = await api("/api/v1/federation/relay"); if (!response.ok) return;
+  const result = await response.json();
+  const active = ["queued","quarantined","paused","forwarding","forwarded"].reduce((total,state)=>total+(result.summary.counts[state]||0),0);
+  $("relay-summary").innerHTML = `<span><b>${active}</b> active custody items</span><span><b>${result.summary.stored_bytes}</b> stored bytes</span><span>Direct paired destinations are preferred automatically.</span>`;
+  $("relay-policies").innerHTML = result.policies.map(policy => `<article><div><strong>${safe(policy.mesh_id)}</strong><small>${policy.enabled ? safe(policy.scopes.join(", ")) : "Relay disabled"}</small></div><button data-relay-enable="${safe(policy.mesh_id)}">${policy.enabled ? "Disable" : "Enable"}</button>${policy.enabled ? `<button data-relay-pause="${safe(policy.mesh_id)}">${policy.paused ? "Resume" : "Pause"}</button>` : ""}</article>`).join("") || `<p class="ui-empty empty">Pair an Outpost before granting relay custody.</p>`;
+  $("relay-origins").innerHTML = result.origins.map(origin => `<article><div><strong>${safe(origin.origin_node)}</strong><small>${safe(origin.fingerprint.slice(0,16))}… · ${safe(origin.state)}</small></div>${origin.state === "observed" ? `<button data-origin-trust="${safe(origin.origin_node)}">Trust</button><button class="danger" data-origin-reject="${safe(origin.origin_node)}">Reject</button>` : ""}</article>`).join("") || `<p class="ui-empty empty">No relayed origin keys observed.</p>`;
+  queue.innerHTML = result.queue.map(item => `<article class="relay-item"><div><strong>${safe(item.scope)} · ${safe(item.state)}</strong><code>${safe(item.envelope_id)}</code></div><p>${safe(item.origin_node)} → ${safe(item.destination_node)}<br>Route: ${item.route.map(safe).join(" → ")}${item.last_path ? `<br>Selected ${safe(item.last_path)} path → ${safe(item.next_hop_mesh_id)}` : ""}${item.received_transport ? `<br>Received by ${safe(item.received_transport.toUpperCase())}` : ""}</p><small>Expires ${new Date(item.expires_at*1000).toLocaleString()}${item.last_error ? ` · ${safe(item.last_error)}` : ""}</small><div>${["queued","forwarding"].includes(item.state)?`<button data-relay-action="pause" data-envelope="${safe(item.envelope_id)}">Pause</button>`:""}${item.state==="paused"?`<button data-relay-action="resume" data-envelope="${safe(item.envelope_id)}">Resume</button>`:""}${item.state!=="purged"?`<button class="danger" data-relay-action="purge" data-envelope="${safe(item.envelope_id)}">Purge payload</button>`:""}</div></article>`).join("") || `<p class="ui-empty empty">No relay custody history.</p>`;
+  document.querySelectorAll("[data-relay-enable],[data-relay-pause]").forEach(button => button.addEventListener("click", async () => { const meshId=button.dataset.relayEnable||button.dataset.relayPause;const current=result.policies.find(value=>value.mesh_id===meshId);const body={enabled:button.dataset.relayEnable!==undefined?!current.enabled:current.enabled,paused:button.dataset.relayPause!==undefined?!current.paused:false,scopes:current.scopes.length?current.scopes:["incident","request"],max_stored_items:current.max_stored_items,max_stored_bytes:current.max_stored_bytes,rate_per_hour:current.rate_per_hour,airtime_seconds_per_hour:current.airtime_seconds_per_hour};await api(`/api/v1/federation/relay/peers/${encodeURIComponent(meshId)}`,{method:"PUT",body:JSON.stringify(body)});await refreshStoreForward(); }));
+  document.querySelectorAll("[data-origin-trust],[data-origin-reject]").forEach(button => button.addEventListener("click", async () => { const origin=button.dataset.originTrust||button.dataset.originReject;const state=button.dataset.originTrust?"trusted":"rejected";await api(`/api/v1/federation/relay/origins/${encodeURIComponent(origin)}`,{method:"PATCH",body:JSON.stringify({state})});await refreshStoreForward(); }));
+  document.querySelectorAll("[data-relay-action]").forEach(button => button.addEventListener("click", async () => { await api(`/api/v1/federation/relay/${encodeURIComponent(button.dataset.envelope)}`,{method:"PATCH",body:JSON.stringify({action:button.dataset.relayAction})});await refreshStoreForward(); }));
+}
 async function loadOriginHistory() {
   const policy = document.querySelector(".path-grid").closest(".panel");
   const panel = document.createElement("section"); panel.className = "ui-card panel content-panel origin-panel";
@@ -181,5 +271,5 @@ async function refresh() {
   const unconfigured = all.find(peer => peer.state === "active" && !peer.policy_configured);
   if (unconfigured && !policyWizardOpen) await showPolicyWizard(unconfigured);
 }
-async function initialize() { const response = await fetch("/api/v1/auth/session"); if (!response.ok) { location.href = "/"; return; } csrf = (await response.json()).csrf_token; await refresh(); await loadMqtt(); await loadServices(); await loadInbox(); await loadSyncStatus(); await loadOriginHistory(); await loadRelayMail(); const {scheduler}=await import("/refresh-scheduler.js"); scheduler.schedule("federation-main",()=>Promise.all([refresh(),refreshServices(),refreshSyncStatus()]),{interval:15000}); }
+async function initialize() { const response = await fetch("/api/v1/auth/session"); if (!response.ok) { location.href = "/"; return; } csrf = (await response.json()).csrf_token; await refresh(); await loadMqtt(); await loadServices(); await loadInbox(); await loadSyncStatus(); await loadOriginHistory(); await loadRelayMail(); await loadStoreForward(); await loadTopology(); const {scheduler}=await import("/refresh-scheduler.js"); scheduler.schedule("federation-main",()=>Promise.all([refresh(),refreshServices(),refreshSyncStatus(),refreshStoreForward(),refreshTopology()]),{interval:15000}); }
 $("refresh-fed").addEventListener("click", refresh); $("peer-filter").addEventListener("change", refresh); initialize();

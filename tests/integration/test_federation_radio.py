@@ -183,6 +183,58 @@ async def test_trusted_federation_uses_authenticated_broadcast_carrier(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_authenticated_topology_frame_updates_only_its_target_peer(tmp_path) -> None:
+    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    secret = bytes(range(32))
+    await app.federation.discover("!remote", "Remote", 1, {}, "mqtt")
+    await app.database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,local_approved=1,remote_approved=1 "
+        "WHERE mesh_id='!remote'",
+        (secret,),
+    )
+    frame = app.federation_codec.encode(
+        MessageType.TOPOLOGY_UPDATE,
+        {
+            "mesh_id": "!remote",
+            "target_mesh_id": "!local",
+            "topology": {
+                "generated_at": int(app.clock.now().timestamp()),
+                "location": {"lat": 40.4, "lon": -80.0, "precision_km": 25},
+            },
+        },
+        1,
+        secret,
+    )[0]
+
+    await app._handle_federation_discovery(
+        InboundMessage(
+            90,
+            "!remote",
+            "^all",
+            0,
+            config.radio.federation_portnum,
+            False,
+            None,
+            frame,
+            datetime.now(UTC),
+            via_mqtt=True,
+        )
+    )
+
+    peer = (await app.federation_topology.overview())["items"][0]
+    assert peer["location"] == {
+        "lat": 40.4,
+        "lon": -80.0,
+        "precision_km": 25.0,
+        "received_at": int(app.clock.now().timestamp()),
+    }
+    await app.database.close()
+
+
+@pytest.mark.asyncio
 async def test_allowed_remote_thread_root_imports_without_manual_inbox_approval(tmp_path) -> None:
     config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
     app = OutpostApp(config)

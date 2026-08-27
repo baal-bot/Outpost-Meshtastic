@@ -49,8 +49,8 @@ modules:
   env: {enabled: true}
   fed: {enabled: true}
 ai:
-  provider: hailo
-  model: "qwen2.5-instruct:1.5b"
+  provider: hailo_vlm
+  model: "Qwen3-VL-2B-Instruct"
   timeout_s: 45
   max_concurrency: 1
   queue_depth: 3
@@ -70,6 +70,7 @@ ai:
   persona_addendum: ""
   cold_placeholder_threshold_s: 15
   cold_placeholder_enabled: false
+  hailo_vlm: {model_path: "/var/lib/outpost/models/Qwen3-VL-2B-Instruct.hef", context_tokens: 2048, optimize_memory_on_device: true}
   hailo: {base_url: "http://127.0.0.1:8000", context_tokens: 2048, supports_tools: false}
   llamacpp: {base_url: "http://127.0.0.1:8080", context_tokens: 4096, supports_tools: true}
   ollama: {base_url: "http://127.0.0.1:11434", context_tokens: 4096, supports_tools: true}

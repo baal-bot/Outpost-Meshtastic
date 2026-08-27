@@ -20,6 +20,7 @@ run; this document does not treat simulation as proof of real-mesh timing.
 | 12 | Emergency keywords default off; responder-only | `test_watch_incidents.py`, configuration tests | Pass |
 | 13 | Valid roster CSV | `test_watch_checkin.py` | Pass |
 | 14 | AI cannot author or raise alerts | `test_phase3_acceptance.py` | Pass |
+| 15 | Cross-Outpost identity, conflict, merge, unmerge, and local-monitoring lock | `test_incident_reconciliation.py` | Pass |
 
 The remaining phase gate is the six-person real-radio tabletop in
 `tests/hardware/PHASE3_TABLETOP.md`.

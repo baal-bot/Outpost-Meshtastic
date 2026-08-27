@@ -53,10 +53,16 @@ tokens and login failures are limited by source and username. `auth.mode: none` 
 loopback and must not be placed behind an unauthenticated public proxy.
 
 `sudo outpost-diagnostics --output /path/to/outpost-diagnostics.zip` creates a mode-0600 support
-bundle containing a bounded journal excerpt and non-secret configuration summary. The exporter
+bundle containing recent warning/error lines, live health, versions/storage, and a non-secret
+configuration summary. The broader journal requires `--include-journal`. The exporter
 redacts legacy bootstrap passwords, current setup values, account password hashes, TOTP secrets,
-recovery-code hashes, session cookies, bearer tokens, and CSRF values. Review any bundle before
-sharing because ordinary operational messages can still contain community-sensitive information.
+recovery-code hashes, session cookies, bearer tokens, CSRF values, and content-shaped fields. It
+does not query message tables. Review any bundle before sharing because ordinary operational errors
+can still contain community-sensitive information.
+
+The optional setup hotspot is an expiring bootstrap boundary, not trusted infrastructure. It uses a
+generated WPA2 password, AP client isolation, no forwarding, and a host-input allowlist. Stop it as
+soon as LAN access works, and use a dedicated read-only account for unattended wall displays.
 
 The audit API and dashboard redact credential-shaped keys and assignments before displaying or
 copying structured detail. This is a defense in depth, not permission to write secrets into audit

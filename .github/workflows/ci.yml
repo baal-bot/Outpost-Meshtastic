@@ -4,6 +4,7 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   test:
@@ -14,20 +15,27 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -e '.[dev,radio]'
       - run: python -m playwright install --with-deps chromium
-      - run: ruff format --check src tests
-      - run: ruff check src tests
+      - run: >-
+          ruff format --check src tests tools/build_release_metadata.py
+          tools/check_capabilities.py tools/verify_release.py deploy/configure.py
+          deploy/render_avahi.py
+      - run: >-
+          ruff check src tests tools/build_release_metadata.py
+          tools/check_capabilities.py tools/verify_release.py deploy/configure.py
+          deploy/render_avahi.py
       - run: mypy
+      - run: python tools/check_capabilities.py --check
       - run: pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json
       - run: python tools/check_critical_coverage.py coverage.json
       - run: sh -n deploy/install.sh deploy/install-test-host.sh deploy/rollback.sh deploy/update.sh deploy/smoke-package.sh
-      - run: python -m py_compile deploy/configure.py
+      - run: python -m py_compile deploy/configure.py deploy/render_avahi.py
       - run: sh deploy/smoke-package.sh
       - if: matrix.python-version == '3.13'
         run: pip-audit

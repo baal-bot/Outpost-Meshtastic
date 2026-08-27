@@ -23,6 +23,11 @@ some optional radio integrations remain in the [acceptance backlog](docs/FEDERAT
 The database schema, API, command grammar, and federation protocol are not stable until the project
 publishes a compatibility policy and a 1.0 release.
 
+<!-- capability-summary:start -->
+Capability evidence snapshot (2026-08-27): 16 tracked — Automated-tested 9, Simulated 2, Single-node field-tested 1, Two-node field-tested 2, Hardware-gated 2. No capability is marked production-ready. See [Features and maturity](docs/FEATURES.md) for test, field,
+hardware, revision, limitation, and roadmap evidence.
+<!-- capability-summary:end -->
+
 ## What it provides
 
 - Meshtastic command router with direct-message and configured-channel support
@@ -37,7 +42,7 @@ publishes a compatibility policy and a 1.0 release.
 - Airtime budgets, priority queues, deduplication, quiet hours, and emergency reserve
 - SQLite migrations, integrity checks, rotating backups, and audited restore
 - Optional authenticated federation, bounded synchronization, peer services, and mail relay
-- Local AI provider adapters and target-hardware benchmark/evaluation tooling (assistant runtime in progress)
+- Local AI assistant with guarded retrieval, review tooling, and target-hardware provider evaluation
 - Prometheus metrics and systemd watchdog integration
 
 See [Features and maturity](docs/FEATURES.md) for implementation and validation details.
@@ -180,6 +185,7 @@ field acceptance.
 - [Documentation index](docs/README.md)
 - [Features and maturity](docs/FEATURES.md)
 - [Installation](docs/INSTALLATION.md)
+- [Field-appliance onboarding](docs/ONBOARDING.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Mesh commands](docs/COMMANDS.md)
 - [Dashboard and API](docs/DASHBOARD.md)
@@ -191,6 +197,8 @@ field acceptance.
 - [Security](docs/SECURITY.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Development](docs/DEVELOPMENT.md)
+- [Releases and artifact verification](docs/RELEASES.md)
+- [Release evidence checklist](docs/RELEASE-CHECKLIST.md)
 - [Detailed specification](docs/outpost-spec/README.md)
 
 ## Contributing

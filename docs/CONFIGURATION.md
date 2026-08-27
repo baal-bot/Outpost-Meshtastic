@@ -70,9 +70,11 @@ gap, multipart pacing, queue capacity, and traffic-class shares. Budget plus res
 
 ### `ai`
 
-The provider is one of `hailo`, `llamacpp`, `ollama`, `openai_compat`, or `null`. Each endpoint has
-a base URL, configured context fallback, tool-capability flag, and optional API-key environment
-variable name. A selected provider context below 1,600 tokens is invalid.
+The provider is one of `hailo_vlm`, `hailo`, `llamacpp`, `ollama`, `openai_compat`, or `null`.
+`hailo_vlm` loads its compiled HEF from `ai.hailo_vlm.model_path`; production models belong under
+`/var/lib/outpost/models`. HTTP providers have a base URL, configured context fallback,
+tool-capability flag, and optional API-key environment-variable name. A selected provider context
+below 1,600 tokens is invalid.
 
 Runtime bounds include a 45-second timeout, concurrency of one, queue depth of three, at most two
 tool rounds, a 220-token output ceiling, keep-warm policy, embedding queue, and circuit breaker.

@@ -175,6 +175,12 @@ class AIProviderEndpoint(StrictModel):
     api_key_env: str = Field(default="", pattern=r"^[A-Z][A-Z0-9_]*$|^$")
 
 
+class AIHailoVLMConfig(StrictModel):
+    model_path: Path = Path("/var/lib/outpost/models/Qwen3-VL-2B-Instruct.hef")
+    context_tokens: int = Field(default=2048, ge=256)
+    optimize_memory_on_device: bool = True
+
+
 class AIBudgetConfig(StrictModel):
     system_tokens: int = Field(default=240, ge=64, le=260)
     tool_tokens: int = Field(default=160, ge=0, le=512)
@@ -203,8 +209,10 @@ class AICircuitBreakerConfig(StrictModel):
 
 
 class AIConfig(StrictModel):
-    provider: Literal["hailo", "llamacpp", "ollama", "openai_compat", "null"] = "hailo"
-    model: str = "qwen2.5-instruct:1.5b"
+    provider: Literal["hailo_vlm", "hailo", "llamacpp", "ollama", "openai_compat", "null"] = (
+        "hailo_vlm"
+    )
+    model: str = "Qwen3-VL-2B-Instruct"
     timeout_s: float = Field(default=45, gt=0, le=180)
     max_concurrency: int = Field(default=1, ge=1, le=4)
     queue_depth: int = Field(default=3, ge=0, le=20)
@@ -217,6 +225,7 @@ class AIConfig(StrictModel):
     persona_addendum: str = Field(default="", max_length=200)
     cold_placeholder_threshold_s: int = Field(default=15, ge=5, le=120)
     cold_placeholder_enabled: bool = False
+    hailo_vlm: AIHailoVLMConfig = Field(default_factory=AIHailoVLMConfig)
     hailo: AIProviderEndpoint = Field(
         default_factory=lambda: AIProviderEndpoint(base_url="http://127.0.0.1:8000")
     )
@@ -450,7 +459,9 @@ class Config(StrictModel):
             raise ValueError("env.user_agent must be configured when the env module is enabled")
         if self.modules.ai.enabled:
             provider = getattr(self.ai, self.ai.provider, None)
-            if self.ai.provider != "null" and (provider is None or not provider.base_url):
+            if self.ai.provider not in {"null", "hailo_vlm"} and (
+                provider is None or not provider.base_url
+            ):
                 raise ValueError(f"ai.{self.ai.provider}.base_url is required when AI is enabled")
         return self
 

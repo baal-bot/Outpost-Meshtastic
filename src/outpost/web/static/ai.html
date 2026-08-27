@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="theme-color" content="#071411">
+    <script src="/theme-boot.js"></script>
+    <title>Local AI · Outpost</title>
+    <link rel="stylesheet" href="/base.css?v=1">
+    <link rel="stylesheet" href="/layout.css?v=1">
+    <link rel="stylesheet" href="/ai.css?v=1">
+    <link rel="stylesheet" href="/components.css?v=1">
+  </head>
+  <body>
+    <aside class="rail">
+      <a class="brand" href="/"><b>O</b><span>OUTPOST</span></a>
+      <nav></nav>
+      <div class="rail-foot"><i></i>Guarded local inference<br><small>Evidence before generation</small></div>
+    </aside>
+    <div class="shell">
+      <header>
+        <div><p class="eyebrow">LOCAL INFERENCE</p><h1>AI control room</h1></div>
+        <div id="ai-health" class="ui-pill status waiting"><i></i> Checking provider</div>
+      </header>
+      <main>
+        <section class="ui-notice ai-safety-note">
+          <strong>Model output is untrusted</strong>
+          <p>Outpost blocks high-risk requests before inference, retrieves only permitted local
+            evidence, and rejects malformed, uncited, or oversized output before radio delivery.</p>
+        </section>
+
+        <section class="ai-stats" aria-label="AI runtime status">
+          <article><small>PROVIDER</small><strong id="provider-name">—</strong><p id="provider-scope">Local</p></article>
+          <article><small>MODEL</small><strong id="model-name">—</strong><p id="model-context">— context</p></article>
+          <article><small>QUEUE</small><strong id="queue-depth">—</strong><p id="queue-capacity">— capacity</p></article>
+          <article><small>CIRCUIT</small><strong id="circuit-state">—</strong><p id="circuit-detail">No failures reported</p></article>
+        </section>
+
+        <div class="ai-primary-grid">
+          <section class="ui-card panel content-panel ai-test-panel">
+            <div class="heading">
+              <div><p class="eyebrow">DRY RUN</p><h2>Test the guarded path</h2></div>
+            </div>
+            <form id="ai-test-form">
+              <label for="ai-question">Question</label>
+              <textarea id="ai-question" rows="4" maxlength="1000" required
+                placeholder="What are the verified shelter hours?"></textarea>
+              <button type="submit" class="ui-button ui-button--primary">Run without transmitting</button>
+            </form>
+            <output id="ai-test-result" class="ai-test-result" aria-live="polite">No test run yet.</output>
+          </section>
+
+          <section class="ui-card panel content-panel refusal-panel">
+            <div class="heading">
+              <div><p class="eyebrow">OPERATOR POLICY</p><h2>Local refusal rules</h2></div>
+            </div>
+            <form id="refusal-form" class="refusal-form">
+              <label for="refusal-phrase">Phrase to match</label>
+              <input id="refusal-phrase" maxlength="120" required placeholder="unverified evacuation route">
+              <label for="refusal-reason">Internal reason</label>
+              <input id="refusal-reason" maxlength="120" required placeholder="operator policy">
+              <button type="submit">Add refusal rule</button>
+            </form>
+            <div id="refusal-list" class="refusal-list"><p class="ui-empty empty">Loading rules…</p></div>
+          </section>
+        </div>
+
+        <section class="ui-card panel content-panel knowledge-panel">
+          <div class="heading">
+            <div><p class="eyebrow">VERIFIED EVIDENCE</p><h2>Local knowledge base</h2></div>
+            <span id="knowledge-count" class="chip">— documents</span>
+          </div>
+          <div class="knowledge-layout">
+            <form id="knowledge-form" class="knowledge-form">
+              <input id="knowledge-id" type="hidden">
+              <label for="knowledge-title">Title</label>
+              <input id="knowledge-title" maxlength="120" required>
+              <label for="knowledge-slug">Stable source label <small>optional</small></label>
+              <input id="knowledge-slug" maxlength="64" placeholder="shelter-hours">
+              <label for="knowledge-body">Verified local information</label>
+              <textarea id="knowledge-body" rows="8" maxlength="12000" required></textarea>
+              <div class="form-actions">
+                <button type="submit" class="ui-button ui-button--primary">Save document</button>
+                <button id="knowledge-cancel" type="button" hidden>Cancel edit</button>
+              </div>
+              <p id="knowledge-message" class="form-message" aria-live="polite"></p>
+            </form>
+            <div id="knowledge-list" class="knowledge-list"><p class="ui-empty empty">Loading knowledge…</p></div>
+          </div>
+        </section>
+
+        <section class="ui-card panel content-panel review-panel">
+          <div class="heading">
+            <div><p class="eyebrow">AUDIT & CORRECTION</p><h2>Recent interactions</h2></div>
+            <button id="refresh-ai" type="button">Refresh</button>
+          </div>
+          <div id="interaction-list" class="interaction-list"><p class="ui-empty empty">Loading interactions…</p></div>
+        </section>
+      </main>
+      <footer>
+        <span>ASK answers are logged for operator review.</span>
+        <span>Test runs never transmit to the mesh.</span>
+      </footer>
+    </div>
+    <script src="/ai.js?v=1" defer></script>
+  </body>
+</html>

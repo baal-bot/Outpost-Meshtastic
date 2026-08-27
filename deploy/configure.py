@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from outpost.config import Config
+from outpost.onboarding import record_step
 
 
 def ask(label: str, default: str) -> str:
@@ -45,6 +46,7 @@ def detect_hailo10h() -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Configure a new Outpost installation")
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--state", type=Path)
     args = parser.parse_args()
     data: dict[str, Any] = yaml.safe_load(args.config.read_text()) or {}
     node, radio = data["node"], data["radio"]
@@ -90,11 +92,14 @@ def main() -> None:
         enabled = ask("Enable detected Hailo-10H local AI provider (yes/no)", "no")
         if enabled.lower() in {"y", "yes"}:
             data["modules"]["ai"]["enabled"] = True
-            data["ai"]["provider"] = "hailo"
+            data["ai"]["provider"] = "hailo_vlm"
+            data["ai"]["model"] = "Qwen3-VL-2B-Instruct"
     Config.model_validate(data)
     temporary = args.config.with_suffix(".yaml.new")
     temporary.write_text(yaml.safe_dump(data, sort_keys=False))
     temporary.replace(args.config)
+    if args.state is not None:
+        record_step(args.state, "identity_location", "completed")
     print(f"\nValidated configuration written to {args.config}")
 
 

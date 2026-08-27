@@ -324,11 +324,20 @@ class FederationPeerService:
         )
         return await self.by_mesh_id(mesh_id)
 
-    async def forget(self, mesh_id: str) -> None:
+    async def forget(self, mesh_id: str, actor: str = "system") -> None:
         peer = await self.by_mesh_id(mesh_id)
         if peer.state != "rejected":
             raise ValueError("only rejected peers can be forgotten")
-        await self.database.write("DELETE FROM fed_peer WHERE id=?", (peer.id,))
+        now = int(self.clock.now().timestamp())
+        async with self.database.transaction() as transaction:
+            await transaction.write(
+                "INSERT INTO fed_peer_tombstone(mesh_id,node_name,forgotten_at,forgotten_by) "
+                "VALUES(?,?,?,?) ON CONFLICT(mesh_id) DO UPDATE SET "
+                "node_name=excluded.node_name,forgotten_at=excluded.forgotten_at,"
+                "forgotten_by=excluded.forgotten_by",
+                (peer.mesh_id, peer.node_name, now, actor[:160]),
+            )
+            await transaction.write("DELETE FROM fed_peer WHERE id=?", (peer.id,))
 
     async def update_sync_policy(
         self,

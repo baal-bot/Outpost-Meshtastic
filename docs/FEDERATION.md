@@ -10,8 +10,10 @@ the feature remains experimental until the complete acceptance backlog is run.
 - Discovery creates a pending directory entry only.
 - Pairing uses X25519 and a six-digit out-of-band confirmation code.
 - Paired frames use canonical CBOR, bounded fragments, HMAC, and persistent replay counters.
-- Federation frames use an RF/MQTT-compatible channel broadcast carrier; pair-specific encryption,
-  authentication, replay protection, and application receipts provide confidentiality and delivery.
+- Federation frames use an RF/MQTT-compatible channel broadcast carrier; pair-specific HMAC,
+  replay protection, and application receipts provide authentication and delivery. Confidentiality
+  on the carrier depends on the configured Meshtastic channel; encrypted relay mail adds its own
+  end-to-end protection.
 - The Federation transfer panel reports the path actually observed on inbound frames (LoRa or
   MQTT), authenticated counters, durable queue state, retries, recovered deliveries, and last
   successful activity. Outbound frames are labelled as mesh broadcasts because radio firmware may
@@ -43,6 +45,19 @@ the feature remains experimental until the complete acceptance backlog is run.
   incidents are eligible. Member positions, pending location reports, and waypoints are never
   federation streams.
 - Imported items can be quarantined for operator review.
+- Incident imports preserve every contributing origin UID and append each accepted, stale,
+  conflicting, or advisory update to an immutable provenance timeline. Bounded duplicate
+  suggestions always require a human decision. A remote resolution cannot silently close an
+  incident that this Outpost is monitoring. See [incident reconciliation](INCIDENT-RECONCILIATION.md).
+- Signed store-and-forward can move bounded envelopes through explicitly authorized paired peers.
+  Direct destinations are preferred, each peer has separate scope/storage/rate/airtime policy, and
+  relay-origin keys learned indirectly require operator review. Ordinary relay payloads and routing
+  metadata are visible to custodians; only the `opaque` scope is suitable for ciphertext. See the
+  [relay protocol and threat model](FEDERATION-RELAY-PROTOCOL.md).
+- The topology health view maps only active peers that explicitly sent an authenticated coarse
+  location. Unsigned discovery, incident-sharing coordinates, and names never imply map consent.
+  List-only identity states, transport health, backlog, policy/audit context, optional incident
+  layering, and tile-free fallback are documented in [federation topology](FEDERATION-TOPOLOGY.md).
 
 ## Before pairing
 

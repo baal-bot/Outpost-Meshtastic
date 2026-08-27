@@ -10,12 +10,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from outpost.ai import AIService, create_provider
+from outpost.ai.retrieval import RetrievalEngine
+from outpost.ai.store import AIStore
 from outpost.bbs.admin import BBSAdmin
 from outpost.bbs.channels import ChannelDirectory
 from outpost.bbs.digests import DigestService
 from outpost.bbs.mail import MailService
 from outpost.bbs.service import BBSService
 from outpost.clock import SystemClock
+from outpost.commands.ai import specs as ai_specs
 from outpost.commands.alerts import specs as alert_specs
 from outpost.commands.bbs import specs as bbs_specs
 from outpost.commands.checkin import specs as checkin_specs
@@ -41,7 +45,9 @@ from outpost.env import (
 from outpost.fed import (
     FederationMailService,
     FederationPeerService,
+    FederationRelayService,
     FederationSyncService,
+    FederationTopologyService,
     FrameCodec,
     FrameError,
     MessageType,
@@ -58,7 +64,7 @@ from outpost.security.rate_limit import RateLimiter
 from outpost.store import Database
 from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.store.maintenance import MaintenanceService
-from outpost.store.members import MemberRepo
+from outpost.store.members import Member, MemberRepo
 from outpost.store.message_log import MessageLogRepo
 from outpost.store.outbox import OutboxStore
 from outpost.transport.chunker import chunk_text
@@ -108,7 +114,7 @@ class OutpostApp:
             self.config.radio.reconnect,
             self.clock,
             self.config.radio.liveness_timeout_s,
-            lambda: self._task_progress("radio-supervisor"),
+            self._radio_progress,
         )
         self.inbound_pipeline = InboundPipeline("", set(self.config.radio.bridge_node_ids))
         self.governor = AirtimeGovernor(
@@ -128,6 +134,23 @@ class OutpostApp:
             safety_repeat_window_seconds=self.config.security.safety_repeat_window_seconds,
         )
         self.router = Router(self.config, members, sessions, limiter)
+        self.ai_store = AIStore(self.database)
+        provider_config = (
+            self.config.ai
+            if self.config.modules.ai.enabled
+            else self.config.ai.model_copy(update={"provider": "null"})
+        )
+        self.ai_service = AIService(
+            self.config,
+            create_provider(provider_config),
+            RetrievalEngine(
+                self.database,
+                now=lambda: int(self.clock.now().timestamp()),
+                node_status=self.status,
+            ),
+            self.ai_store,
+            now=lambda: int(self.clock.now().timestamp()),
+        )
         bbs = BBSService(self.database, self.clock, "local")
         directory = ChannelDirectory(self.database)
         mail = MailService(
@@ -171,6 +194,10 @@ class OutpostApp:
             self.database, module_enabled=self.config.modules.is_enabled
         )
         self.federation_mail = FederationMailService(self.database, self.federation, self.clock)
+        self.federation_relay = FederationRelayService(self.database, self.federation, self.clock)
+        self.federation_topology = FederationTopologyService(
+            self.database, self.federation, self.clock
+        )
         self.federation_codec = FrameCodec(self.config.fed.max_fragments)
         self.federation_reassembler = Reassembler(self.config.fed.reassembly_timeout_s)
         for spec in (
@@ -182,6 +209,7 @@ class OutpostApp:
             ),
             *mail_specs(mail),
             *directory_specs(directory),
+            *(ai_specs(self.ai_service, self.config) if self.config.modules.ai.enabled else ()),
             *(operator_specs(bbs) if self.config.modules.bbs.enabled else ()),
             *(watch_specs(self.incidents) if self.config.modules.watch.enabled else ()),
             *(alert_specs(self.alerts) if self.config.modules.watch.enabled else ()),
@@ -247,6 +275,11 @@ class OutpostApp:
             federation_mail_reply=self.reply_federation_mail,
             same_events=self.same_events,
             same_receiver_health=self.same_receiver.health,
+            ai_service=self.ai_service,
+            ai_store=self.ai_store,
+            ai_test=self.test_ai,
+            federation_relay=self.federation_relay,
+            federation_topology=self.federation_topology,
         )
 
     def _start_background_task(
@@ -264,10 +297,39 @@ class OutpostApp:
         task.add_done_callback(self._background_task_done)
         return task
 
+    async def test_ai(self, question: str) -> dict[str, object]:
+        member = MemberRepo(self.database, self.clock)
+        rows = await self.database.read(
+            "SELECT mesh_id FROM member WHERE trust='operator' ORDER BY last_seen DESC LIMIT 1"
+        )
+        if rows:
+            actor = await member.resolve(str(rows[0]["mesh_id"]))
+        else:
+            actor = Member(0, "!00000000", 0, "operator", "operator", 0, 0)
+        result = await self.ai_service.answer(question, actor, -1, self.router.registry)
+        return {
+            "text": result.text,
+            "outcome": result.outcome,
+            "question_class": result.question_class,
+            "grounded": result.grounded,
+            "refused": result.refused,
+            "refusal_reason": result.refusal_reason,
+            "transmitted": False,
+        }
+
     def _task_progress(self, name: str) -> None:
         health = self._task_health.get(name)
         if health is not None and health["state"] == "running":
             health["last_ok_at"] = int(self.clock.now().timestamp())
+
+    def _radio_progress(self) -> None:
+        self._task_progress("radio-supervisor")
+        local_id = self.radio.local_node_id
+        if local_id:
+            self.inbound_pipeline.local_node_id = local_id
+            self.incidents.origin_node = local_id
+            self.federation.local_mesh_id = local_id
+            self.federation_sync.local_mesh_id = local_id
 
     def _background_task_done(self, task: asyncio.Task[None]) -> None:
         name = task.get_name()
@@ -447,6 +509,15 @@ class OutpostApp:
 
     async def startup(self) -> None:
         await self.database.open()
+        await self.federation_relay.initialize()
+        if self.config.modules.ai.enabled:
+            if self.config.ai.provider == "openai_compat":
+                print(
+                    "WARNING: AI uses an external provider; questions and retrieved data "
+                    "leave this node.",
+                    flush=True,
+                )
+            await self.ai_service.initialize()
         await self.governor.recover()
         await self.runtime_settings.load()
         self.federation_sync.local_mesh_id = self.radio.local_node_id
@@ -487,6 +558,11 @@ class OutpostApp:
                 else []
             ),
             *(
+                [self._start_background_task("ai-keep-warm", self._ai_keep_warm_loop())]
+                if self.config.modules.ai.enabled and self.config.ai.keep_warm.enabled
+                else []
+            ),
+            *(
                 [
                     self._start_background_task(
                         "federation-discovery", self._federation_hello_loop()
@@ -497,6 +573,10 @@ class OutpostApp:
                     self._start_background_task("federation-sync", self._federation_sync_loop()),
                     self._start_background_task(
                         "federation-delivery", self._federation_delivery_loop()
+                    ),
+                    self._start_background_task("federation-relay", self._federation_relay_loop()),
+                    self._start_background_task(
+                        "federation-topology", self._federation_topology_loop()
                     ),
                 ]
                 if self.config.modules.fed.enabled
@@ -1081,6 +1161,90 @@ class OutpostApp:
             self._task_progress("federation-delivery")
             await self.clock.sleep(30)
 
+    async def _send_relay_receipt(self, peer_id: str, envelope_id: str, state: str) -> None:
+        await self._send_federation_value(
+            peer_id,
+            MessageType.RELAY_ACK,
+            {
+                "target_mesh_id": peer_id,
+                "envelope_id": envelope_id,
+                "state": state,
+            },
+        )
+
+    async def _federation_relay_loop(self) -> None:
+        while True:
+            local_id = self.radio.local_node_id
+            if self.config.modules.fed.enabled and local_id:
+                self.federation.local_mesh_id = local_id
+                now = int(self.clock.now().timestamp())
+                await self.federation_relay.expire(now=now)
+                await self.federation_relay.recover_stalled(now=now)
+                for receipt in await self.federation_relay.pending_receipts():
+                    try:
+                        await self._send_relay_receipt(
+                            receipt["previous_hop"], receipt["envelope_id"], "delivered"
+                        )
+                    except (FrameError, ValueError):
+                        continue
+                    await self.federation_relay.mark_receipt_sent(receipt["envelope_id"])
+                for item in await self.federation_relay.queue(50):
+                    if item["state"] != "queued":
+                        continue
+                    envelope_id = str(item["envelope_id"])
+                    try:
+                        selected = await self.federation_relay.next_hop(envelope_id, now=now)
+                        if selected is None:
+                            continue
+                        peer_id = selected["mesh_id"]
+                        secret = await self.federation.secret(peer_id)
+                        counter = await self.federation.next_counter(peer_id)
+                        frames = self.federation_codec.encode(
+                            MessageType.RELAY_PUT,
+                            {
+                                "mesh_id": local_id,
+                                "target_mesh_id": peer_id,
+                                "envelope": await self.federation_relay.wire(envelope_id),
+                            },
+                            counter,
+                            secret,
+                        )
+                        airtime = sum(toa(len(frame), self.governor.preset) for frame in frames)
+                        await self.federation_relay.reserve_forward(
+                            envelope_id,
+                            peer_id,
+                            airtime,
+                            now=now,
+                            path=selected["path"],
+                        )
+                        await self._queue_trusted_federation_frames(frames)
+                    except (FrameError, ValueError) as error:
+                        await self.federation_relay.mark_failed(envelope_id, str(error))
+            self._task_progress("federation-relay")
+            await self.clock.sleep(30)
+
+    async def _federation_topology_loop(self) -> None:
+        while True:
+            local_id = self.radio.local_node_id
+            if self.config.modules.fed.enabled and local_id:
+                self.federation.local_mesh_id = local_id
+                now = int(self.clock.now().timestamp())
+                for peer_id in await self.federation_topology.due(now=now):
+                    try:
+                        await self._send_federation_value(
+                            peer_id,
+                            MessageType.TOPOLOGY_UPDATE,
+                            {
+                                "target_mesh_id": peer_id,
+                                "topology": await self.federation_topology.advertisement(peer_id),
+                            },
+                        )
+                    except (FrameError, ValueError):
+                        continue
+                    await self.federation_topology.mark_sent(peer_id, now=now)
+            self._task_progress("federation-topology")
+            await self.clock.sleep(60)
+
     async def _handle_federation_discovery(self, message: object) -> None:
         payload = getattr(message, "payload", None)
         sender = getattr(message, "from_id", "")
@@ -1115,6 +1279,9 @@ class OutpostApp:
                 MessageType.ITEM_RECEIPT,
                 MessageType.MAIL_RELAY,
                 MessageType.MAIL_RECEIPT,
+                MessageType.RELAY_PUT,
+                MessageType.RELAY_ACK,
+                MessageType.TOPOLOGY_UPDATE,
             }:
                 secret = await self.federation.secret(sender)
             fragment = self.federation_codec.decode_fragment(payload, secret)
@@ -1418,6 +1585,38 @@ class OutpostApp:
                             "FROM fed_mail_delivery WHERE relay_id=? AND direction='out')",
                             (state, state, relay_id),
                         )
+            elif msg_type is MessageType.RELAY_PUT:
+                envelope = value.get("envelope")
+                if not isinstance(envelope, dict):
+                    raise ValueError("invalid relay envelope")
+                envelope_id, state = await self.federation_relay.accept(
+                    sender,
+                    envelope,
+                    transport="mqtt" if getattr(message, "via_mqtt", False) else "radio",
+                )
+                try:
+                    await self._send_relay_receipt(sender, envelope_id, state)
+                except (FrameError, ValueError):
+                    pass
+                else:
+                    if state == "delivered":
+                        await self.federation_relay.mark_receipt_sent(envelope_id)
+            elif msg_type is MessageType.RELAY_ACK:
+                envelope_id = str(value.get("envelope_id", ""))
+                state = str(value.get("state", ""))
+                previous = await self.federation_relay.acknowledge(sender, envelope_id, state)
+                if previous is not None:
+                    try:
+                        await self._send_relay_receipt(previous, envelope_id, "delivered")
+                    except (FrameError, ValueError):
+                        pass
+                    else:
+                        await self.federation_relay.mark_receipt_sent(envelope_id)
+            elif msg_type is MessageType.TOPOLOGY_UPDATE:
+                topology = value.get("topology")
+                if not isinstance(topology, dict):
+                    raise ValueError("invalid federation topology update")
+                await self.federation_topology.accept(sender, topology)
         except (FrameError, KeyError, TypeError, ValueError) as error:
             packet_id = getattr(message, "packet_id", None)
             if packet_id is not None:
@@ -1735,12 +1934,19 @@ class OutpostApp:
             self._task_progress("store-maintenance")
             await self.clock.sleep(60)
 
+    async def _ai_keep_warm_loop(self) -> None:
+        while True:
+            await self.ai_service.warm()
+            self._task_progress("ai-keep-warm")
+            await self.clock.sleep(self.config.ai.keep_warm.interval_s)
+
     async def shutdown(self) -> None:
         self._shutting_down = True
         await self.supervisor.stop()
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        await self.ai_service.close()
         await self.database.close()
 
     async def _governor_loop(self) -> None:
@@ -1983,6 +2189,7 @@ class OutpostApp:
             "queues": self.governor.queue_depths(),
             "alert_delivery": self.governor.alert_delivery_status(),
             "same_receiver": self.same_receiver.health(),
+            "ai": self.ai_service.snapshot(),
             "tasks_healthy": self.background_tasks_healthy(),
             "task_failure": self._fatal_task_error,
             "recovery": self.restore_coordinator.maintenance_status(),

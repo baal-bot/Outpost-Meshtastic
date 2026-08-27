@@ -12,6 +12,7 @@ BENCHMARK = runpy.run_path(
 percentile = cast(Callable[[list[float], float], float | None], BENCHMARK["percentile"])
 grade = cast(Callable[[str, dict[str, Any]], tuple[bool, list[str]]], BENCHMARK["grade"])
 eval_question = cast(Callable[[dict[str, Any]], str], BENCHMARK["eval_question"])
+deterministic_howto = cast(Callable[[str], str | None], BENCHMARK["deterministic_howto"])
 
 
 def test_benchmark_percentiles_use_observed_nearest_rank() -> None:
@@ -52,3 +53,19 @@ def test_eval_question_wraps_fixture_as_evidence() -> None:
         }
     )
     assert question == "EVIDENCE\n[kb:hours] Open Saturday.\n\nWhen is it open?"
+
+
+def test_grader_enforces_runtime_path_metadata() -> None:
+    passed, failures = grade(
+        "[AI] I can't give medical dosing. Call 911.",
+        {
+            "refused": True,
+            "refusal_reason": "medical_dosing",
+            "max_bytes": 200,
+        },
+        {"refusal_reason": "legal", "model_called": False},
+    )
+
+    assert not passed
+    assert failures == ["wrong_refusal_reason"]
+    assert deterministic_howto("How do I make a board post?") == "[AI] Use POST."

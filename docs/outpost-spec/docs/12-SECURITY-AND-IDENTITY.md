@@ -278,6 +278,7 @@ MemoryDenyWriteExecute=no      # required by some ML runtimes
 SystemCallFilter=@system-service
 DeviceAllow=/dev/ttyUSB0 rw
 DeviceAllow=/dev/hailo0 rw
+DeviceAllow=/dev/h1x-0 rw
 Restart=always
 RestartSec=10
 WatchdogSec=120

@@ -1,0 +1,422 @@
+schema_version = 1
+as_of = "2026-08-27"
+
+[states.designed]
+label = "Designed"
+definition = "Behavior and safety boundaries are specified, but an operator-usable implementation is not present."
+
+[states.implemented]
+label = "Implemented"
+definition = "The capability is present in code; complete automated behavior coverage is not yet recorded."
+
+[states.automated_tested]
+label = "Automated-tested"
+definition = "Unit, integration, acceptance, or browser tests exercise the capability and its important failure boundaries."
+
+[states.simulated]
+label = "Simulated"
+definition = "The complete workflow passed with simulated clocks, radios, providers, peers, or failures; a relevant field gate remains open."
+
+[states.single_node_field_tested]
+label = "Single-node field-tested"
+definition = "A recorded run passed on one physical Outpost or its attached field hardware."
+
+[states.two_node_field_tested]
+label = "Two-node field-tested"
+definition = "A recorded workflow passed between two physical Outposts, including the stated transport and recovery conditions."
+
+[states.hardware_gated]
+label = "Hardware-gated"
+definition = "A capability-specific hardware acceptance gate passed on the recorded target; broader soak or deployment gates may remain."
+
+[states.production_ready]
+label = "Production-ready"
+definition = "A release decision explicitly accepted all required safety, compatibility, recovery, field, and operational evidence."
+
+[[capabilities]]
+id = "meshtastic_transport"
+area = "Meshtastic transport"
+present = "Serial, TCP, and BLE links; reconnect, liveness supervision, inbound backpressure, and radio status."
+maturity = "single_node_field_tested"
+introduced_commit = "04e74ca"
+limitations = [
+  "Serial and live LoRa paths have field evidence; TCP and BLE remain primarily automated-test paths.",
+  "Extended unplug, range, busy-channel, and unattended-soak gates remain open.",
+]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/unit/test_radio_link.py"
+description = "Link lifecycle, packet handling, and failure normalization."
+[[capabilities.evidence]]
+kind = "field"
+path = "docs/FEDERATION-ACCEPTANCE-BACKLOG.md"
+description = "Live radio traffic and recovery were exercised between physical Outposts."
+
+[[capabilities]]
+id = "command_routing"
+area = "Command routing"
+present = "DM/channel parsing, sessions, paging, trust checks, module gates, and bounded inbound workers."
+maturity = "automated_tested"
+introduced_commit = "04e74ca"
+limitations = ["The full handheld/firmware/preset matrix is not field-qualified."]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/acceptance/test_phase1_acceptance.py"
+description = "Phase 1 command and radio-response behavior."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_inbound_workers.py"
+description = "Bounded concurrency, backpressure, and drop telemetry."
+
+[[capabilities]]
+id = "airtime_delivery"
+area = "Airtime and outbound delivery"
+present = "Durable priority queue, airtime shares, emergency reserve, quiet hours, dedupe, pacing, receipts, and restart recovery."
+maturity = "automated_tested"
+introduced_commit = "3d65058"
+limitations = [
+  "A 24-hour comparison with the deployed radio preset and destructive power-loss campaign remain open.",
+]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_durable_outbox.py"
+description = "Admitted work survives restart and delivery state is idempotent."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/unit/test_governor.py"
+description = "Priority, budget, reserve, pacing, and failure-path policy."
+
+[[capabilities]]
+id = "identity_directory"
+area = "Identity and member directory"
+present = "Handles, trust, approvals, recently-heard radio discovery, exact-position controls, and operator triage."
+maturity = "automated_tested"
+introduced_commit = "8accdf3"
+limitations = ["Trust decisions still require local operator policy and identity verification."]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_directory_moderation.py"
+description = "Handle claims, approval, trust, and moderation boundaries."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_member_triage.py"
+description = "Discovered-radio triage and accountable operator actions."
+
+[[capabilities]]
+id = "bbs_mail"
+area = "BBS, mail, and operator inbox"
+present = "Boards, threads, posts, subscriptions, digests, private mail, moderation, and one replyable operations inbox."
+maturity = "automated_tested"
+introduced_commit = "41a6c85"
+limitations = ["Real-mesh multipart loss and high-volume community moderation need longer field exercises."]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_bbs_mail.py"
+description = "Stored messaging, routing, authorization, and paging behavior."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_operator_inbox.py"
+description = "Unified reply routing and audited operator workflow."
+
+[[capabilities]]
+id = "community_watch"
+area = "Community Watch"
+present = "Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, responder alerts, bounded repeats, escalation, all-clear, and maps."
+maturity = "simulated"
+introduced_commit = "8323143"
+limitations = ["The six-participant real-radio tabletop and receipt-latency gate remain open."]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "acceptance"
+path = "docs/PHASE3-ACCEPTANCE.md"
+description = "Automated phase gates and explicitly open tabletop criteria."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_watch_alerts.py"
+description = "Audience delivery, repeats, acknowledgements, escalation, and all-clear."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_reconciliation.py"
+description = "Partition, concurrent edit, immutable identity, human merge/unmerge, and resolution-lock behavior."
+
+[[capabilities]]
+id = "welfare"
+area = "Welfare events and check-ins"
+present = "Events, reviewed solicitation, roster states, HELP/OK handling, derived unaccounted members, and CSV export."
+maturity = "simulated"
+introduced_commit = "04e74ca"
+limitations = ["A real participant exercise and timing evidence remain part of the Phase 3 tabletop."]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "acceptance"
+path = "docs/PHASE3-ACCEPTANCE.md"
+description = "Simulated roster, solicitation, help, and export gates."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_watch_checkin.py"
+description = "Welfare state transitions and privacy boundaries."
+
+[[capabilities]]
+id = "environment"
+area = "Environmental information"
+present = "Weather observations/forecasts, CAP alerts, astronomy, earthquakes, caching, provenance, maps, and waypoints."
+maturity = "automated_tested"
+introduced_commit = "72763e5"
+limitations = [
+  "A 30-day real-alert observation and complete WAN-down field day remain open.",
+  "Internet-backed data expires and then fails closed; it is not an official warning receiver.",
+]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "acceptance"
+path = "docs/PHASE4-ACCEPTANCE.md"
+description = "Provider, cache, CAP lifecycle, geometry, and provenance gates."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_weather.py"
+description = "Weather caching, expiry, observation/forecast labels, and safe failure."
+
+[[capabilities]]
+id = "same_receiver"
+area = "NOAA SAME / RTL-SDR"
+present = "Supervised receive-only rtl_fm/samedec pipeline, county and review gates, CAP dedupe, health, and bounded restart."
+maturity = "hardware_gated"
+introduced_commit = "764516a"
+limitations = ["Extended antenna observation and receipt of a real local test/warning remain open."]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-26"
+[[capabilities.evidence]]
+kind = "hardware"
+path = "docs/PHASE4-ACCEPTANCE.md"
+description = "Pi carrier, forced USB loss, backoff, recovery, and audio-fixture results."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/unit/test_same_receiver.py"
+description = "Process supervision and parser failure boundaries."
+
+[[capabilities]]
+id = "dashboard_access"
+area = "Dashboard and operator access"
+present = "Responsive module-aware pages/API, named roles, TOTP/recovery, sessions, step-up protection, accessibility, shared map controls, and an offline-capable federation topology view."
+maturity = "automated_tested"
+introduced_commit = "5295868"
+limitations = ["Trusted-LAN or operator-provided TLS/VPN deployment is still assumed."]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_mobile_navigation.py"
+description = "Desktop/mobile, accessibility, role, navigation, and interaction matrix."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_web_auth.py"
+description = "Authentication, role authorization, recovery, session, and step-up boundaries."
+
+[[capabilities]]
+id = "backup_recovery"
+area = "Backup, restore, upgrade, and rollback"
+present = "Online verified backups, rotation, quiesced web restore, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback."
+maturity = "automated_tested"
+introduced_commit = "df0ee14"
+limitations = ["Destructive power-loss and full fresh-host recovery drills remain open."]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_backups.py"
+description = "Quiesce, integrity validation, restore failure, and recovery behavior."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/unit/test_deploy_install.py"
+description = "Artifact verification, atomic activation, snapshot, health rollback, and installer invariants."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/RELEASES.md"
+description = "Release evidence, verified update, rollback, compromise, and revocation procedures."
+
+[[capabilities]]
+id = "retention_privacy"
+area = "Retention and privacy controls"
+present = "Bounded retention, exact-position expiry/deletion, message limits, maintenance batches, and auditable policy changes."
+maturity = "automated_tested"
+introduced_commit = "4d8af9c"
+limitations = ["Thirty-day write-volume and SD-card wear evidence remains open."]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_maintenance.py"
+description = "Bounded deletion, batching, and maintenance observability."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_member_position_retention.py"
+description = "Exact-position expiry, deletion, and coarse-history behavior."
+
+[[capabilities]]
+id = "federation"
+area = "Outpost federation"
+present = "Pairing, authenticated framing, policy, board/incident sync, peer services, encrypted mail relay, signed multi-hop custody, privacy-gated topology health, receipts, pagination, and reconciliation."
+maturity = "two_node_field_tested"
+introduced_commit = "8f7219e"
+limitations = [
+  "MQTT-only traffic/fallback and destructive quota exhaustion remain open.",
+  "Signed multi-hop custody is simulation-tested; physical three-node and power-loss exercises remain open.",
+  "Topology location exchange is automated-tested; physical multi-node and long-duration stale/recovery exercises remain open.",
+  "Federation remains experimental until every acceptance-backlog item passes.",
+]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "field"
+path = "docs/FEDERATION-ACCEPTANCE-BACKLOG.md"
+description = "Recorded two-Outpost pairing, radio sync, recovery, mail, privacy, and rejection probes."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_federation_sync.py"
+description = "Bounded synchronization and reconciliation behavior."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_reconciliation.py"
+description = "Origin-aware partition/reconnect conflict reconciliation and human merge correction."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_federation_relay.py"
+description = "Signed three-node custody, direct-path selection, duplicate/reconnect safety, malicious-input rejection, quotas, receipts, and operator controls."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/FEDERATION-RELAY-PROTOCOL.md"
+description = "Relay threat model, protocol bounds, confidentiality limits, resource policy, and operator runbook."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_federation_topology.py"
+description = "Privacy-gated coarse location exchange, health paths/backlog, stale state, successors, tombstones, and safe API output."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/FEDERATION-TOPOLOGY.md"
+description = "Location privacy boundary, identity states, health derivation, offline behavior, and operator workflow."
+
+[[capabilities]]
+id = "meshtastic_mqtt"
+area = "Meshtastic MQTT federation path"
+present = "Optional radio-firmware MQTT discovery, targeted bootstrap, transport observation, and resilient pairing approvals."
+maturity = "two_node_field_tested"
+introduced_commit = "f75f8af"
+limitations = ["Full federation traffic over MQTT-only and automatic fallback remains open."]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-26"
+[[capabilities.evidence]]
+kind = "field"
+path = "docs/FEDERATION-ACCEPTANCE-BACKLOG.md"
+description = "Live MQTT discovery and mixed RF/MQTT pairing approval evidence."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_federation_radio.py"
+description = "Radio/MQTT path selection and transport failure behavior."
+
+[[capabilities]]
+id = "local_ai"
+area = "Local AI assistant"
+present = "ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, and native HailoRT Qwen3-VL provider."
+maturity = "hardware_gated"
+introduced_commit = "6b3d01a"
+limitations = [
+  "Raw model output is untrusted and failed standalone injection and medical-dosing probes.",
+  "Qwen3-VL image input, one-hour thermal load, cold-idle behavior, and CPU-provider comparison remain open.",
+]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "hardware"
+path = "docs/benchmarks/HAILO-H10-QWEN-2026-08-27.md"
+description = "Target Hailo-10H load, latency, image smoke, and 60/60 guarded evaluation evidence."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_ai_runtime.py"
+description = "Retrieval, refusal, output filtering, fallback, queue, and circuit-breaker behavior."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/eval/test_live_provider.py"
+description = "Opt-in hardware release-gate assertion for the full guarded corpus."
+
+[[capabilities]]
+id = "installation_operations"
+area = "Installation and diagnostics"
+present = "Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, authenticated releases, and hardened service tooling."
+maturity = "automated_tested"
+introduced_commit = "d614d85"
+limitations = ["A recorded fresh-Pi mDNS/hotspot onboarding drill and extended unattended wallboard soak remain field gates."]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-27"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/unit/test_deploy_install.py"
+description = "Installer, discovery/hotspot boundaries, service sandbox, recovery, and acceptance-host invariants."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/unit/test_onboarding.py"
+description = "Resumable checklist, secret-free credential detection, requirement metadata, and mDNS declaration."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/ONBOARDING.md"
+description = "Field checklist, local access, wallboard isolation, and redacted diagnostic procedure."

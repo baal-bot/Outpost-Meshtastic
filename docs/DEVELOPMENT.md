@@ -43,6 +43,7 @@ config, database, API/channel key, member export, precise location, or tile cach
 .venv/bin/ruff format src tests
 .venv/bin/ruff check src tests
 .venv/bin/mypy
+.venv/bin/python tools/check_capabilities.py --check
 .venv/bin/pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json
 .venv/bin/python tools/check_critical_coverage.py coverage.json
 sh -n deploy/install.sh deploy/install-test-host.sh deploy/smoke-package.sh
@@ -54,8 +55,8 @@ Provider adapter tests use recorded/mock HTTP responses and never contact a live
 quality runs are explicit and excluded from normal CI:
 
 ```sh
-.venv/bin/python tools/bench_inference.py --provider hailo --runs 3
-.venv/bin/python tools/bench_inference.py --provider hailo --runs 5 --eval
+.venv/bin/python tools/bench_inference.py --provider hailo_vlm --runs 3
+.venv/bin/python tools/bench_inference.py --provider hailo_vlm --runs 5 --eval
 ```
 
 The global coverage floor is supplemented by weighted line-coverage floors in

@@ -109,7 +109,7 @@ All 15 criteria in [07-BBS-AND-MAIL.md](07-BBS-AND-MAIL.md) §10, criteria 1–7
 
 ### Work items
 
-1. `ai/providers/` — `hailo`, `llamacpp`, `ollama`, `openai_compat`, `null`.
+1. `ai/providers/` — `hailo_vlm`, `hailo`, `llamacpp`, `ollama`, `openai_compat`, `null`.
 2. `tools/bench_inference.py` and the 60-item eval set (**do this before choosing a default**).
 3. `ai/budget.py` — token budgeter with provider-reported context size.
 4. `ai/retrieval.py` — classification, FTS+recency ranking, optional embedding re-rank,

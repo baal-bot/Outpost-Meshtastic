@@ -357,8 +357,9 @@ security:
   handle_reserve_days: 30
 
 ai:
-  provider: hailo              # hailo | llamacpp | ollama | openai_compat | null
-  model: "qwen2.5-instruct:1.5b"
+  provider: hailo_vlm          # hailo_vlm | hailo | llamacpp | ollama | openai_compat | null
+  model: "Qwen3-VL-2B-Instruct"
+  hailo_vlm:  { model_path: "/var/lib/outpost/models/Qwen3-VL-2B-Instruct.hef" }
   hailo:      { base_url: "http://127.0.0.1:8000" }
   llamacpp:   { base_url: "http://127.0.0.1:8080" }
   ollama:     { base_url: "http://127.0.0.1:11434" }

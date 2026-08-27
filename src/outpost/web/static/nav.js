@@ -140,7 +140,7 @@ const links = [
   ["/backups.html", "▣", "Backups"],
   ["/#activity", "◫", "Activity"],
   ["/#system", "⚙", "System"],
-  ["/#system", "✦", "AI"],
+  ["/ai.html", "✦", "AI"],
   ["/api/docs", "◇", "API"],
 ];
 const navigation = document.querySelector(".rail nav");
@@ -191,6 +191,7 @@ const moduleLinks = {
   AI: "ai",
 };
 const modulePages = {
+  "/ai.html": "ai",
   "/bbs.html": "bbs",
   "/watch.html": "watch",
   "/environment.html": "env",

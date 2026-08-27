@@ -1,7 +1,8 @@
 [Unit]
 Description=Outpost local Hailo inference provider
 After=network.target
-ConditionPathExists=/dev/hailo0
+ConditionPathExists=|/dev/hailo0
+ConditionPathExists=|/dev/h1x-0
 
 [Service]
 Type=simple
@@ -9,6 +10,7 @@ User=outpost
 Group=outpost
 WorkingDirectory=/var/lib/outpost
 Environment=OLLAMA_HOST=127.0.0.1:8000
+Environment=XDG_CONFIG_HOME=/etc/outpost
 ExecStart=/usr/bin/hailo-ollama
 Restart=on-failure
 RestartSec=10
@@ -22,6 +24,7 @@ ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 DeviceAllow=/dev/hailo0 rw
+DeviceAllow=/dev/h1x-0 rw
 
 [Install]
 WantedBy=multi-user.target

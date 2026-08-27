@@ -1,0 +1,214 @@
+from __future__ import annotations
+
+import asyncio
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, Protocol
+
+from outpost.config import AIHailoVLMConfig
+
+from .models import (
+    Capabilities,
+    ChatMessage,
+    ChatRequest,
+    ChatResponse,
+    ProviderError,
+    ProviderHealth,
+    ProviderState,
+    ProviderUnavailable,
+)
+
+
+class VLMRuntime(Protocol):
+    def generate(
+        self,
+        messages: tuple[ChatMessage, ...],
+        *,
+        max_output_tokens: int,
+        temperature: float,
+        timeout_ms: int,
+    ) -> tuple[str, int, int]: ...
+
+    def close(self) -> None: ...
+
+
+RuntimeFactory = Callable[[Path, bool], VLMRuntime]
+
+
+class _HailoRuntime:
+    def __init__(self, model_path: Path, optimize_memory_on_device: bool) -> None:
+        try:
+            from hailo_platform import VDevice
+            from hailo_platform.genai import VLM
+        except ImportError as exc:
+            raise ProviderUnavailable(
+                "hailo_vlm: HailoRT Python bindings are not installed"
+            ) from exc
+
+        self._vdevice = VDevice()
+        try:
+            self._vlm = VLM(
+                self._vdevice,
+                str(model_path),
+                optimize_memory_on_device=optimize_memory_on_device,
+            )
+        except Exception:
+            self._vdevice.release()
+            raise
+
+    def generate(
+        self,
+        messages: tuple[ChatMessage, ...],
+        *,
+        max_output_tokens: int,
+        temperature: float,
+        timeout_ms: int,
+    ) -> tuple[str, int, int]:
+        prompt: list[dict[str, Any]] = [
+            {
+                "role": message.role,
+                "content": [{"type": "text", "text": message.content}],
+            }
+            for message in messages
+        ]
+        # Hailo's VLM maintains conversation state internally. Outpost requests
+        # are independent and may belong to different mesh users, so retaining
+        # that state would be a cross-user data leak.
+        self._vlm.clear_context()
+        prompt_tokens = sum(len(self._vlm.tokenize(message.content)) for message in messages)
+        do_sample = temperature > 0
+        response = self._vlm.generate_all(
+            prompt=prompt,
+            frames=[],
+            temperature=temperature if do_sample else None,
+            do_sample=do_sample,
+            max_generated_tokens=max_output_tokens,
+            timeout_ms=timeout_ms,
+        )
+        content = _strip_generation_markers(str(response))
+        return content, prompt_tokens, len(self._vlm.tokenize(content))
+
+    def close(self) -> None:
+        try:
+            self._vlm.release()
+        finally:
+            self._vdevice.release()
+
+
+def _default_runtime_factory(model_path: Path, optimize_memory_on_device: bool) -> VLMRuntime:
+    return _HailoRuntime(model_path, optimize_memory_on_device)
+
+
+class HailoVLMProvider:
+    """Direct HailoRT adapter for a compiled vision-language HEF."""
+
+    name = "hailo_vlm"
+    external = False
+
+    def __init__(
+        self,
+        endpoint: AIHailoVLMConfig,
+        model: str,
+        timeout_s: float,
+        max_output_tokens: int,
+        *,
+        runtime_factory: RuntimeFactory = _default_runtime_factory,
+    ) -> None:
+        self.endpoint = endpoint
+        self.model = model
+        self.timeout_s = timeout_s
+        self.max_output_tokens = max_output_tokens
+        self._runtime_factory = runtime_factory
+        self._runtime: VLMRuntime | None = None
+        self._load_lock = asyncio.Lock()
+        self._request_lock = asyncio.Lock()
+
+    async def _ensure_runtime(self) -> VLMRuntime:
+        async with self._load_lock:
+            if self._runtime is not None:
+                return self._runtime
+            if not self.endpoint.model_path.is_file():
+                raise ProviderUnavailable("hailo_vlm: configured HEF model file was not found")
+            try:
+                self._runtime = await asyncio.to_thread(
+                    self._runtime_factory,
+                    self.endpoint.model_path,
+                    self.endpoint.optimize_memory_on_device,
+                )
+            except ProviderUnavailable:
+                raise
+            except Exception as exc:
+                raise ProviderUnavailable(f"hailo_vlm: {type(exc).__name__}") from exc
+            return self._runtime
+
+    async def health(self) -> ProviderHealth:
+        started = time.perf_counter()
+        try:
+            await self._ensure_runtime()
+        except ProviderUnavailable as exc:
+            return ProviderHealth(state=ProviderState.UNAVAILABLE, detail=str(exc))
+        return ProviderHealth(
+            state=ProviderState.HEALTHY,
+            detail="ready",
+            latency_ms=max(0, round((time.perf_counter() - started) * 1000)),
+            models=(self.model,),
+        )
+
+    async def capabilities(self) -> Capabilities:
+        return Capabilities(
+            context_tokens=self.endpoint.context_tokens,
+            supports_tools=False,
+            supports_streaming=False,
+            max_output_tokens=self.max_output_tokens,
+            idle_unloads=False,
+            source="configured",
+        )
+
+    async def chat(self, req: ChatRequest) -> ChatResponse:
+        if req.tools:
+            raise ProviderError("hailo_vlm does not support tool calls")
+        started = time.perf_counter()
+        async with self._request_lock:
+            runtime = await self._ensure_runtime()
+            try:
+                content, prompt_tokens, output_tokens = await asyncio.to_thread(
+                    runtime.generate,
+                    req.messages,
+                    max_output_tokens=min(req.max_output_tokens, self.max_output_tokens),
+                    temperature=req.temperature,
+                    timeout_ms=max(1, round(self.timeout_s * 1000)),
+                )
+            except Exception as exc:
+                raise ProviderUnavailable(f"hailo_vlm: {type(exc).__name__}") from exc
+        return ChatResponse(
+            content=content,
+            prompt_tokens=prompt_tokens,
+            output_tokens=output_tokens,
+            ttft_ms=None,
+            total_ms=max(0, round((time.perf_counter() - started) * 1000)),
+            finish_reason="stop",
+        )
+
+    async def warm(self) -> None:
+        await self._ensure_runtime()
+
+    async def close(self) -> None:
+        async with self._request_lock:
+            async with self._load_lock:
+                runtime, self._runtime = self._runtime, None
+                if runtime is not None:
+                    await asyncio.to_thread(runtime.close)
+
+
+def _strip_generation_markers(content: str) -> str:
+    value = content.strip()
+    markers = ("<|im_end|>", "<|endoftext|>")
+    changed = True
+    while changed:
+        changed = False
+        for marker in markers:
+            if value.endswith(marker):
+                value = value[: -len(marker)].rstrip()
+                changed = True
+    return value

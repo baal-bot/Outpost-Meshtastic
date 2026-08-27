@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 
 import httpx
 import pytest
 
 from outpost.ai import ChatMessage, ChatRequest, create_provider
+from outpost.ai.providers.hailo_vlm import HailoVLMProvider, _HailoRuntime
 from outpost.ai.providers.models import ProviderState, ProviderUnavailable
-from outpost.config import AIConfig
+from outpost.config import AIConfig, AIHailoVLMConfig
 
 
 def client_for(handler: object) -> httpx.AsyncClient:
@@ -65,8 +68,10 @@ async def test_hailo_keeps_its_non_openai_wire_format_isolated() -> None:
         if request.url.path == "/api/tags":
             return httpx.Response(200, json={"models": []})
         if request.url.path == "/hailo/v1/list":
-            return httpx.Response(200, json={"models": [{"name": "qwen:1.5b"}]})
+            return httpx.Response(200, json={"models": ["qwen:1.5b"]})
         if request.url.path == "/api/chat":
+            body = json.loads(request.content)
+            assert body["messages"] == [{"role": "user", "content": "line one line two"}]
             return httpx.Response(
                 200,
                 text=('{"content":"Hailo "}\n{"content":"answer"}\n{"done":true,"eval_count":2}\n'),
@@ -86,10 +91,134 @@ async def test_hailo_keeps_its_non_openai_wire_format_isolated() -> None:
     assert capabilities.context_tokens == 2048
     assert not capabilities.supports_tools
     response = await provider.chat(
-        ChatRequest(messages=(ChatMessage(role="user", content="question"),))
+        ChatRequest(messages=(ChatMessage(role="user", content="line one\nline two"),))
     )
     assert response.content == "Hailo answer"
     await client.aclose()
+
+
+class FakeVLMRuntime:
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple[ChatMessage, ...], int, float, int]] = []
+        self.closed = False
+        self.active = 0
+        self.peak_active = 0
+
+    def generate(
+        self,
+        messages: tuple[ChatMessage, ...],
+        *,
+        max_output_tokens: int,
+        temperature: float,
+        timeout_ms: int,
+    ) -> tuple[str, int, int]:
+        self.active += 1
+        self.peak_active = max(self.peak_active, self.active)
+        time.sleep(0.01)
+        self.calls.append((messages, max_output_tokens, temperature, timeout_ms))
+        self.active -= 1
+        return "Native Hailo answer", 12, 3
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_hailo_vlm_loads_compiled_model_and_serialises_native_chat(tmp_path) -> None:
+    model = tmp_path / "Qwen3-VL-2B-Instruct.hef"
+    model.write_bytes(b"test HEF")
+    runtime = FakeVLMRuntime()
+    provider = HailoVLMProvider(
+        AIHailoVLMConfig(model_path=model),
+        "Qwen3-VL-2B-Instruct",
+        45,
+        64,
+        runtime_factory=lambda _path, _optimize: runtime,
+    )
+
+    health = await provider.health()
+    capabilities = await provider.capabilities()
+    response = await provider.chat(
+        ChatRequest(
+            messages=(ChatMessage(role="user", content="Is the road open?"),),
+            max_output_tokens=80,
+            temperature=0,
+        )
+    )
+
+    assert health.state is ProviderState.HEALTHY
+    assert health.models == ("Qwen3-VL-2B-Instruct",)
+    assert not capabilities.supports_tools
+    assert not capabilities.supports_streaming
+    assert response.content == "Native Hailo answer"
+    assert response.prompt_tokens == 12
+    assert response.output_tokens == 3
+    assert runtime.calls[0][1:] == (64, 0, 45_000)
+    await asyncio.gather(
+        provider.chat(ChatRequest(messages=(ChatMessage(role="user", content="one"),))),
+        provider.chat(ChatRequest(messages=(ChatMessage(role="user", content="two"),))),
+    )
+    assert runtime.peak_active == 1
+    await provider.close()
+    assert runtime.closed
+
+
+@pytest.mark.asyncio
+async def test_hailo_vlm_reports_missing_hef_without_importing_runtime(tmp_path) -> None:
+    provider = HailoVLMProvider(
+        AIHailoVLMConfig(model_path=tmp_path / "missing.hef"),
+        "Qwen3-VL-2B-Instruct",
+        45,
+        64,
+    )
+
+    health = await provider.health()
+
+    assert health.state is ProviderState.UNAVAILABLE
+    assert "HEF model file was not found" in health.detail
+
+
+def test_native_hailo_vlm_clears_context_and_builds_structured_prompt() -> None:
+    class FakeNativeVLM:
+        def __init__(self) -> None:
+            self.cleared = 0
+            self.prompt: object = None
+
+        def clear_context(self) -> None:
+            self.cleared += 1
+
+        def tokenize(self, text: str) -> list[str]:
+            return text.split()
+
+        def generate_all(self, **kwargs: object) -> str:
+            self.prompt = kwargs["prompt"]
+            return "answer<|im_end|>"
+
+    native = FakeNativeVLM()
+    runtime = object.__new__(_HailoRuntime)
+    runtime._vlm = native
+    content, prompt_tokens, output_tokens = runtime.generate(
+        (
+            ChatMessage(role="system", content="Stay grounded."),
+            ChatMessage(role="user", content="Road status?"),
+        ),
+        max_output_tokens=32,
+        temperature=0,
+        timeout_ms=1000,
+    )
+
+    assert native.cleared == 1
+    assert native.prompt == [
+        {
+            "role": "system",
+            "content": [{"type": "text", "text": "Stay grounded."}],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Road status?"}],
+        },
+    ]
+    assert (content, prompt_tokens, output_tokens) == ("answer", 4, 1)
 
 
 @pytest.mark.asyncio

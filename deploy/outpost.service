@@ -26,6 +26,7 @@ DeviceAllow=/dev/ttyUSB0 rw
 DeviceAllow=/dev/ttyACM0 rw
 DeviceAllow=/dev/ttyACM1 rw
 DeviceAllow=/dev/hailo0 rw
+DeviceAllow=/dev/h1x-0 rw
 DeviceAllow=char-usb_device rw
 Restart=always
 RestartSec=10

@@ -9,13 +9,17 @@ phones and desktops and uses bundled assets so its interface remains available w
 - **Members:** actual members, discovered radios, trust/approval controls, and member map.
 - **BBS and Mail:** boards, threads, moderation, and a conversation-based operations inbox with
   member/system identity, route previews, delivery state, search, unread state, and archiving.
-- **Watch:** incident map/list, monitoring state, alerts, acknowledgements, and welfare events.
+- **Watch:** incident map/list, monitoring state, alerts, acknowledgements, welfare events, and
+  human-reviewed cross-Outpost incident reconciliation with origin/provenance inspection.
 - **Environment:** separate environmental map, weather/forecast, official alerts, earthquakes,
   astronomy, editable waypoints, and the reviewed RTL-SDR/SAME inbox and receiver health.
 - **Radio:** connection state, firmware/node details, telemetry, durable outbound state and
   cancellation, airtime, reconnect, and MQTT.
 - **Federation:** peer directory, pairing, transport policy, per-path transfer telemetry, durable
-  retry/recovery health, sync policy/inbox, services, and relay mail.
+  retry/recovery health, sync policy/inbox, services, relay mail, and signed multi-hop custody queues
+  with per-peer limits and operator origin-key review. Its topology workspace maps only active peers
+  with explicit coarse-location consent, keeps every other identity in a health list, and adds
+  incidents only after the operator selects that layer.
 - **Access:** named web accounts, roles, authenticator enrollment, one-use recovery codes, and
   active-session inventory.
 - **Backups/System/Settings:** health, retention, backup/restore, identity, emergency policy, AI, and
@@ -143,7 +147,7 @@ The JSON API is rooted at `/api/v1`. Important read surfaces include:
   `/api/v1/members/export`, `/api/v1/members/bulk`, and `/api/v1/mesh/messages`
 - `/api/v1/mesh/queue` and `/api/v1/mesh/airtime`
 - `/api/v1/boards`, `/api/v1/mail`, `/api/v1/mail/conversations`, `/api/v1/incidents`,
-  `/api/v1/events`
+  `/api/v1/incidents/{id}/merge`, `/unmerge`, `/reject-match`, and `/api/v1/events`
 - `/api/v1/environment/weather`, `/forecast`, `/alerts`, `/same`, `/earthquakes`, `/waypoints`
 - `/api/v1/backups`, `/api/v1/audit`, and federation endpoints under `/api/v1/federation`
 - `/api/v1/maintenance/storage`, `/api/v1/maintenance/preview`, and

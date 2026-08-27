@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import builtins
+import json
 import math
 import re
 import uuid
@@ -7,11 +9,14 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from outpost.clock import Clock
-from outpost.store import Database
+from outpost.store import Database, Transaction
 from outpost.store.members import Member
 
 ACTIVE = ("open", "monitoring")
+TERMINAL = ("resolved", "false_alarm", "expired")
 SEVERITY_RANK = {"critical": 4, "urgent": 3, "caution": 2, "info": 1}
+MATCH_WINDOW_SECONDS = 2 * 60 * 60
+MATCH_RADIUS_M = 1_000
 TAXONOMY: dict[str, tuple[tuple[str, ...], str, int]] = {
     "hazard": (("haz", "tree", "flood", "ice", "obstruction"), "caution", 48),
     "road": (("rd", "road", "closure", "washout", "bridge"), "caution", 72),
@@ -58,6 +63,8 @@ class Incident:
     position_suppressed: int
     unverified: int
     flagged_for_review: int
+    merged_into_id: int | None
+    reconciliation_review: int
 
     def json(self) -> dict[str, Any]:
         return asdict(self)
@@ -76,7 +83,7 @@ class IncidentService:
 
     @staticmethod
     def infer(text: str) -> str:
-        words = re.findall(r"[a-z0-9]+", text.lower())
+        words = [str(value) for value in re.findall(r"[a-z0-9]+", text.lower())]
         if words and words[0] in TAXONOMY:
             return words[0]
         for word in words:
@@ -122,6 +129,51 @@ class IncidentService:
         fields = Incident.__dataclass_fields__
         return Incident(**{key: row[key] for key in fields})
 
+    @staticmethod
+    def _snapshot(incident: Incident) -> dict[str, object]:
+        return {
+            key: getattr(incident, key)
+            for key in (
+                "type",
+                "severity",
+                "status",
+                "title",
+                "body",
+                "lat",
+                "lon",
+                "location_text",
+                "expires_at",
+            )
+        }
+
+    async def _append_provenance(
+        self,
+        store: Database | Transaction,
+        incident_id: int,
+        origin_uid: str,
+        source_node: str,
+        event_kind: str,
+        payload: dict[str, object],
+        *,
+        actor: str,
+        recorded_at: int,
+        source_updated_at: int | None = None,
+    ) -> None:
+        await store.write(
+            "INSERT INTO incident_provenance(incident_id,origin_uid,source_node,event_kind,"
+            "payload_json,source_updated_at,recorded_at,actor) VALUES(?,?,?,?,?,?,?,?)",
+            (
+                incident_id,
+                origin_uid,
+                source_node,
+                event_kind,
+                json.dumps(payload, separators=(",", ":"), sort_keys=True),
+                source_updated_at,
+                recorded_at,
+                actor[:160],
+            ),
+        )
+
     async def duplicate(
         self,
         kind: str,
@@ -136,7 +188,7 @@ class IncidentService:
         cutoff = int(self.clock.now().timestamp()) - window_minutes * 60
         rows = await self.database.read(
             "SELECT * FROM incident WHERE status IN ('open','monitoring') AND type=? "
-            "AND created_at>=? AND lat IS NOT NULL AND lon IS NOT NULL",
+            "AND merged_into_id IS NULL AND created_at>=? AND lat IS NOT NULL AND lon IS NOT NULL",
             (kind, cutoff),
         )
         tokens = set(re.findall(r"[a-z0-9]+", title.lower()))
@@ -227,7 +279,35 @@ class IncidentService:
                 int(member is not None and member.trust == "guest"),
             ),
         )
-        return await self.by_id(incident_id), None
+        created = await self.by_id(incident_id)
+        assert created is not None
+        await self.database.write(
+            "INSERT INTO incident_origin(origin_uid,incident_id,original_incident_id,origin_node,"
+            "source_kind,first_seen_at,last_seen_at,source_updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (
+                created.uid,
+                created.id,
+                created.id,
+                self.origin_node,
+                "local",
+                now,
+                now,
+                now,
+            ),
+        )
+        await self._append_provenance(
+            self.database,
+            created.id,
+            created.uid,
+            self.origin_node,
+            "created",
+            self._snapshot(created),
+            actor=self._member_label(member) if member else operator_label,
+            recorded_at=now,
+            source_updated_at=now,
+        )
+        return created, None
 
     async def record_position(
         self, member: Member, lat: float, lon: float, *, prompt: bool
@@ -315,7 +395,19 @@ class IncidentService:
             "SELECT * FROM incident WHERE local_ref=? ORDER BY updated_at DESC LIMIT 1",
             (local_ref,),
         )
-        return self._row(rows[0]) if rows else None
+        if not rows:
+            return None
+        value = self._row(rows[0])
+        seen = {value.id}
+        while value.merged_into_id is not None:
+            if value.merged_into_id in seen:
+                raise RuntimeError("incident merge cycle detected")
+            seen.add(value.merged_into_id)
+            target = await self.by_id(value.merged_into_id)
+            if target is None:
+                raise RuntimeError("incident merge target is missing")
+            value = target
+        return value
 
     async def list(
         self, *, status: str | None = None, kind: str | None = None, limit: int = 50
@@ -326,6 +418,7 @@ class IncidentService:
             params.append(status)
         else:
             clauses.append("status IN ('open','monitoring')")
+        clauses.append("merged_into_id IS NULL")
         if kind:
             clauses.append("type=?")
             params.append(kind)
@@ -336,6 +429,337 @@ class IncidentService:
             (*params, limit),
         )
         return [self._row(row) for row in rows]
+
+    async def origins(self, incident_id: int) -> builtins.list[dict[str, Any]]:
+        rows = await self.database.read(
+            "SELECT origin_uid,origin_node,source_kind,first_seen_at,last_seen_at,"
+            "source_updated_at,original_incident_id FROM incident_origin "
+            "WHERE incident_id=? ORDER BY first_seen_at,origin_uid",
+            (incident_id,),
+        )
+        return [dict(row) for row in rows]
+
+    async def provenance(self, incident_id: int, limit: int = 200) -> builtins.list[dict[str, Any]]:
+        rows = await self.database.read(
+            "SELECT DISTINCT p.id,p.incident_id,p.origin_uid,p.source_node,p.event_kind,"
+            "p.payload_json,p.source_updated_at,p.recorded_at,p.actor "
+            "FROM incident_provenance p WHERE p.incident_id=? OR p.origin_uid IN "
+            "(SELECT origin_uid FROM incident_origin WHERE incident_id=?) "
+            "ORDER BY p.recorded_at DESC,p.id DESC LIMIT ?",
+            (incident_id, incident_id, max(1, min(limit, 500))),
+        )
+        values: builtins.list[dict[str, Any]] = []
+        for row in reversed(rows):
+            value = dict(row)
+            try:
+                value["payload"] = json.loads(str(value.pop("payload_json")))
+            except json.JSONDecodeError:
+                value["payload"] = {"error": "invalid historical payload"}
+            values.append(value)
+        return values
+
+    async def match_candidates(self, incident_id: int) -> builtins.list[dict[str, Any]]:
+        source = await self.by_id(incident_id)
+        if (
+            source is None
+            or source.merged_into_id is not None
+            or source.lat is None
+            or source.lon is None
+        ):
+            return []
+        rows = await self.database.read(
+            "SELECT * FROM incident candidate WHERE candidate.id<>? "
+            "AND candidate.merged_into_id IS NULL AND candidate.type=? "
+            "AND ABS(candidate.created_at-?)<=? "
+            "AND candidate.lat IS NOT NULL AND candidate.lon IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM incident_match_decision decision "
+            "WHERE ((decision.source_incident_id=? "
+            "AND decision.target_incident_id=candidate.id) OR "
+            "(decision.source_incident_id=candidate.id AND decision.target_incident_id=?)) "
+            "AND decision.state='rejected')",
+            (
+                source.id,
+                source.type,
+                source.created_at,
+                MATCH_WINDOW_SECONDS,
+                source.id,
+                source.id,
+            ),
+        )
+        source_tokens = set(re.findall(r"[a-z0-9]+", source.title.lower()))
+        candidates: builtins.list[dict[str, Any]] = []
+        for row in rows:
+            distance = self.distance_m(source.lat, source.lon, row["lat"], row["lon"])
+            if distance > MATCH_RADIUS_M:
+                continue
+            candidate_tokens = set(re.findall(r"[a-z0-9]+", str(row["title"]).lower()))
+            overlap = len(source_tokens & candidate_tokens) / max(
+                1, len(source_tokens | candidate_tokens)
+            )
+            if overlap < 0.15:
+                continue
+            time_delta = abs(source.created_at - int(row["created_at"]))
+            score = round(
+                0.4
+                + 0.3 * (1 - distance / MATCH_RADIUS_M)
+                + 0.2 * (1 - time_delta / MATCH_WINDOW_SECONDS)
+                + 0.1 * overlap,
+                4,
+            )
+            candidates.append(
+                {
+                    "id": int(row["id"]),
+                    "uid": str(row["uid"]),
+                    "local_ref": int(row["local_ref"]),
+                    "title": str(row["title"]),
+                    "severity": str(row["severity"]),
+                    "status": str(row["status"]),
+                    "distance_m": round(distance),
+                    "time_delta_minutes": round(time_delta / 60),
+                    "title_overlap": round(overlap, 3),
+                    "score": score,
+                    "reasons": [
+                        f"same type: {source.type}",
+                        f"{round(distance)} m apart (limit {MATCH_RADIUS_M} m)",
+                        f"{round(time_delta / 60)} min apart (limit 120 min)",
+                        f"title overlap {overlap:.0%}",
+                    ],
+                }
+            )
+        candidates.sort(key=lambda value: (-float(value["score"]), int(value["id"])))
+        return candidates[:10]
+
+    async def merge(self, source_id: int, target_id: int, actor: str) -> Incident:
+        candidates = {int(value["id"]): value for value in await self.match_candidates(source_id)}
+        if target_id not in candidates:
+            raise ValueError("incidents are outside the bounded match rules")
+        now = int(self.clock.now().timestamp())
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT * FROM incident WHERE id IN (?,?) ORDER BY id", (source_id, target_id)
+            )
+            values = {int(row["id"]): self._row(row) for row in rows}
+            source, target = values.get(source_id), values.get(target_id)
+            if source is None or target is None:
+                raise ValueError("incident not found")
+            if source.merged_into_id is not None or target.merged_into_id is not None:
+                raise ValueError("only canonical incidents can be merged")
+            severity = max((target.severity, source.severity), key=SEVERITY_RANK.__getitem__)
+            expires = max(
+                (value for value in (target.expires_at, source.expires_at) if value is not None),
+                default=None,
+            )
+            use_source_location = target.lat is None and source.lat is not None
+            await transaction.write(
+                "UPDATE incident SET severity=?,expires_at=?,lat=?,lon=?,location_text=?,"
+                "location_unconfirmed=?,updated_at=?,reconciliation_review=0 WHERE id=?",
+                (
+                    severity,
+                    expires,
+                    source.lat if use_source_location else target.lat,
+                    source.lon if use_source_location else target.lon,
+                    source.location_text if use_source_location else target.location_text,
+                    int(not (use_source_location or target.lat is not None)),
+                    now,
+                    target.id,
+                ),
+            )
+            await transaction.write(
+                "UPDATE incident SET merged_into_id=?,reconciliation_review=0 WHERE id=?",
+                (target.id, source.id),
+            )
+            await transaction.write(
+                "UPDATE incident_origin SET incident_id=?,last_seen_at=? WHERE incident_id=?",
+                (target.id, now, source.id),
+            )
+            candidate = candidates[target_id]
+            await transaction.write(
+                "INSERT INTO incident_match_decision(source_incident_id,target_incident_id,state,"
+                "score,reasons_json,reviewed_at,reviewed_by) VALUES(?,?,'merged',?,?,?,?) "
+                "ON CONFLICT(source_incident_id,target_incident_id) DO UPDATE SET state='merged',"
+                "score=excluded.score,reasons_json=excluded.reasons_json,"
+                "reviewed_at=excluded.reviewed_at,reviewed_by=excluded.reviewed_by",
+                (
+                    source.id,
+                    target.id,
+                    candidate["score"],
+                    json.dumps(candidate["reasons"], separators=(",", ":")),
+                    now,
+                    actor[:160],
+                ),
+            )
+            policy: dict[str, object] = {
+                "source_incident_id": source.id,
+                "target_incident_id": target.id,
+                "status": "target retained",
+                "description": "target retained",
+                "location": "source used only when target missing",
+                "severity": "highest retained",
+                "expiration": "latest retained",
+                "resolution": "source advisory only",
+            }
+            await self._append_provenance(
+                transaction,
+                target.id,
+                target.uid,
+                self.origin_node,
+                "merge",
+                policy,
+                actor=actor,
+                recorded_at=now,
+            )
+            await self._append_provenance(
+                transaction,
+                source.id,
+                source.uid,
+                source.uid.split(":", 1)[0] if source.uid.startswith("!") else self.origin_node,
+                "merged_into",
+                policy,
+                actor=actor,
+                recorded_at=now,
+            )
+        merged = await self.by_id(target_id)
+        assert merged is not None
+        return merged
+
+    async def unmerge(self, source_id: int, actor: str) -> Incident:
+        source = await self.by_id(source_id)
+        if source is None or source.merged_into_id is None:
+            raise ValueError("incident is not merged")
+        target_id = source.merged_into_id
+        target = await self.by_id(target_id)
+        assert target is not None
+        now = int(self.clock.now().timestamp())
+        payload: dict[str, object] = {
+            "source_incident_id": source.id,
+            "target_incident_id": target.id,
+            "note": "canonical field corrections remain explicit operator actions",
+        }
+        async with self.database.transaction() as transaction:
+            await transaction.write(
+                "UPDATE incident SET merged_into_id=NULL,reconciliation_review=1 WHERE id=?",
+                (source.id,),
+            )
+            await transaction.write(
+                "UPDATE incident_origin SET incident_id=?,last_seen_at=? WHERE incident_id=? "
+                "AND original_incident_id IN (SELECT id FROM incident "
+                "WHERE id=? OR merged_into_id=?)",
+                (source.id, now, target.id, source.id, source.id),
+            )
+            await transaction.write(
+                "UPDATE incident_match_decision SET state='unmerged',reviewed_at=?,reviewed_by=? "
+                "WHERE source_incident_id=? AND target_incident_id=?",
+                (now, actor[:160], source.id, target.id),
+            )
+            for incident, event in ((target, "unmerge"), (source, "unmerged")):
+                await self._append_provenance(
+                    transaction,
+                    incident.id,
+                    incident.uid,
+                    self.origin_node,
+                    event,
+                    payload,
+                    actor=actor,
+                    recorded_at=now,
+                )
+        restored = await self.by_id(source_id)
+        assert restored is not None
+        return restored
+
+    async def reject_match(self, source_id: int, target_id: int, actor: str) -> None:
+        candidates = {int(value["id"]): value for value in await self.match_candidates(source_id)}
+        candidate = candidates.get(target_id)
+        if candidate is None:
+            raise ValueError("match candidate not found")
+        source = await self.by_id(source_id)
+        assert source is not None
+        now = int(self.clock.now().timestamp())
+        await self.database.write(
+            "INSERT INTO incident_match_decision(source_incident_id,target_incident_id,state,"
+            "score,reasons_json,reviewed_at,reviewed_by) VALUES(?,?,'rejected',?,?,?,?) "
+            "ON CONFLICT(source_incident_id,target_incident_id) DO UPDATE SET state='rejected',"
+            "score=excluded.score,reasons_json=excluded.reasons_json,"
+            "reviewed_at=excluded.reviewed_at,reviewed_by=excluded.reviewed_by",
+            (
+                source_id,
+                target_id,
+                candidate["score"],
+                json.dumps(candidate["reasons"], separators=(",", ":")),
+                now,
+                actor[:160],
+            ),
+        )
+        await self._append_provenance(
+            self.database,
+            source.id,
+            source.uid,
+            self.origin_node,
+            "match_rejected",
+            {"target_incident_id": target_id},
+            actor=actor,
+            recorded_at=now,
+        )
+
+    async def operator_patch(
+        self,
+        incident_id: int,
+        *,
+        status: str | None,
+        severity: str | None,
+        resolution: str | None,
+        actor: str,
+    ) -> Incident:
+        incident = await self.by_id(incident_id)
+        if incident is None:
+            raise ValueError("incident not found")
+        if incident.merged_into_id is not None:
+            raise ValueError("update the canonical incident instead")
+        if status in TERMINAL and not (resolution or "").strip():
+            raise ValueError("terminal incident status requires a resolution note")
+        changes: dict[str, object] = {}
+        assignments: builtins.list[str] = []
+        params: builtins.list[object] = []
+        if status is not None:
+            assignments.append("status=?")
+            params.append(status)
+            changes["status"] = status
+            if status in TERMINAL:
+                assignments.extend(("resolved_at=?", "resolved_by=?"))
+                params.extend((int(self.clock.now().timestamp()), actor[:160]))
+            else:
+                assignments.extend(("resolved_at=NULL", "resolved_by=NULL"))
+        if severity is not None:
+            assignments.append("severity=?")
+            params.append(severity)
+            changes["severity"] = severity
+        if resolution is not None:
+            note = resolution.strip()[:500]
+            assignments.append("resolution_note=?")
+            params.append(note or None)
+            changes["resolution_note"] = note or None
+        if not assignments:
+            raise ValueError("no incident changes supplied")
+        now = int(self.clock.now().timestamp())
+        assignments.extend(("updated_at=?", "reconciliation_review=0"))
+        params.extend((now, incident.id))
+        await self.database.write(
+            f"UPDATE incident SET {','.join(assignments)} WHERE id=?",  # noqa: S608
+            tuple(params),
+        )
+        await self._append_provenance(
+            self.database,
+            incident.id,
+            incident.uid,
+            self.origin_node,
+            "operator_correction",
+            changes,
+            actor=actor,
+            recorded_at=now,
+            source_updated_at=now,
+        )
+        updated = await self.by_id(incident.id)
+        assert updated is not None
+        return updated
 
     async def react(self, local_ref: int, member: Member, kind: str, note: str = "") -> Incident:
         if kind not in {"confirm", "dispute"}:
@@ -375,9 +799,20 @@ class IncidentService:
         )
         updated = await self.by_id(incident.id)
         assert updated is not None
+        await self._append_provenance(
+            self.database,
+            incident.id,
+            incident.uid,
+            self.origin_node,
+            kind,
+            {"note": note or None, "member": self._member_label(member)},
+            actor=self._member_label(member),
+            recorded_at=now,
+            source_updated_at=now,
+        )
         return updated
 
-    async def updates(self, incident_id: int, limit: int = 2) -> list[dict[str, Any]]:
+    async def updates(self, incident_id: int, limit: int = 2) -> builtins.list[dict[str, Any]]:
         rows = await self.database.read(
             "SELECT seq,author_label,kind,body,created_at FROM incident_update "
             "WHERE incident_id=? ORDER BY seq DESC LIMIT ?",
@@ -412,16 +847,27 @@ class IncidentService:
         )
         updated = await self.by_id(incident.id)
         assert updated is not None
+        await self._append_provenance(
+            self.database,
+            incident.id,
+            incident.uid,
+            self.origin_node,
+            "acknowledged" if kind == "ack" else "operator_update",
+            {"body": note or None, "status": status},
+            actor=actor,
+            recorded_at=now,
+            source_updated_at=now,
+        )
         return updated
 
-    async def expire_due(self) -> list[Incident]:
+    async def expire_due(self) -> builtins.list[Incident]:
         now = int(self.clock.now().timestamp())
         rows = await self.database.read(
             "SELECT id FROM incident WHERE status IN ('open','monitoring') "
-            "AND expires_at IS NOT NULL AND expires_at<=? ORDER BY id",
+            "AND merged_into_id IS NULL AND expires_at IS NOT NULL AND expires_at<=? ORDER BY id",
             (now,),
         )
-        expired: list[Incident] = []
+        expired: builtins.list[Incident] = []
         for row in rows:
             incident_id = int(row["id"])
             seq_rows = await self.database.read(
@@ -448,5 +894,16 @@ class IncidentService:
             )
             value = await self.by_id(incident_id)
             if value is not None and value.status == "expired":
+                await self._append_provenance(
+                    self.database,
+                    value.id,
+                    value.uid,
+                    self.origin_node,
+                    "expired",
+                    {"status": "expired"},
+                    actor="system",
+                    recorded_at=now,
+                    source_updated_at=now,
+                )
                 expired.append(value)
         return expired

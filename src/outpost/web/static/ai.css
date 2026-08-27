@@ -1,0 +1,55 @@
+.ai-safety-note {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 17px 19px;
+  border: 1px solid var(--ui-warning-border);
+  border-radius: 10px;
+}
+.ai-safety-note strong { flex: 0 0 auto; font-size: .78rem; }
+.ai-safety-note p { color: var(--ui-warning-text); font-size: .7rem; line-height: 1.5; }
+.ai-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
+.ai-stats article { padding: 19px; background: linear-gradient(145deg, var(--ui-surface-raised), var(--ui-surface)); border: 1px solid var(--ui-border); border-radius: 11px; }
+.ai-stats small { color: var(--ui-text-muted); font: 650 .6rem ui-monospace, monospace; letter-spacing: .06em; }
+.ai-stats strong { display: block; margin: 6px 0 3px; overflow: hidden; font-size: 1.15rem; text-overflow: ellipsis; white-space: nowrap; }
+.ai-stats p { color: var(--ui-text-muted); font-size: .68rem; }
+.ai-primary-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 16px; margin-top: 16px; }
+.ai-test-panel form, .refusal-form, .knowledge-form { display: grid; gap: 8px; }
+.ai-test-panel label, .refusal-form label, .knowledge-form label { color: var(--ui-text-muted); font-size: .68rem; }
+.ai-test-panel textarea, .knowledge-form textarea { resize: vertical; }
+.ai-test-panel button, .refusal-form button { justify-self: start; margin-top: 4px; }
+.ai-test-result { display: block; min-height: 70px; margin-top: 16px; padding: 14px; color: var(--ui-text-muted); background: var(--ui-surface-inset); border: 1px solid var(--ui-border); border-radius: 8px; font: .72rem/1.55 ui-monospace, monospace; white-space: pre-wrap; }
+.ai-test-result.ready { color: var(--ui-text); }
+.refusal-list { display: grid; gap: 7px; margin-top: 17px; }
+.refusal-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 11px; background: var(--ui-surface-subtle); border: 1px solid var(--ui-border); border-radius: 7px; }
+.refusal-row strong { overflow-wrap: anywhere; font-size: .69rem; }
+.refusal-row span { color: var(--ui-text-muted); font-size: .6rem; }
+.knowledge-panel, .review-panel { margin-top: 16px; }
+.knowledge-layout { display: grid; grid-template-columns: minmax(280px, .75fr) minmax(0, 1.25fr); gap: 24px; }
+.knowledge-form { align-content: start; padding: 16px; background: var(--ui-surface-inset); border: 1px solid var(--ui-border); border-radius: 9px; }
+.knowledge-form label small { float: right; }
+.form-actions { display: flex; gap: 8px; margin-top: 5px; }
+.form-message { min-height: 1em; color: var(--ui-warning-text); font-size: .65rem; }
+.knowledge-list, .interaction-list { display: grid; gap: 9px; align-content: start; }
+.knowledge-row, .interaction-row { padding: 14px; background: var(--ui-surface-subtle); border: 1px solid var(--ui-border); border-radius: 9px; }
+.knowledge-row header, .interaction-row header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.knowledge-row h3, .interaction-row h3 { margin: 0; font-size: .8rem; }
+.knowledge-row code, .interaction-meta { color: var(--ui-text-muted); font-size: .59rem; }
+.knowledge-row p, .interaction-row p { margin: 9px 0 0; color: var(--ui-text-muted); font-size: .69rem; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.knowledge-actions, .interaction-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.knowledge-actions button, .interaction-actions button { min-height: 30px; padding: 5px 8px; font-size: .59rem; }
+.interaction-row .answer { color: var(--ui-text); }
+.interaction-row[data-refused="true"] { border-color: var(--ui-warning-border); }
+.interaction-rating[aria-pressed="true"] { color: var(--ui-success-text); border-color: var(--ui-success-border); }
+@media (max-width: 980px) {
+  .ai-stats { grid-template-columns: 1fr 1fr; }
+  .ai-primary-grid, .knowledge-layout { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .ai-safety-note { display: block; }
+  .ai-safety-note p { margin-top: 7px; }
+  .ai-stats { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ai-stats article { padding: 14px; }
+  .knowledge-actions, .interaction-actions { margin-top: 8px; }
+  .knowledge-row header, .interaction-row header { display: block; }
+}

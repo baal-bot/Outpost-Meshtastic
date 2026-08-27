@@ -8,13 +8,57 @@ from outpost.web.api import create_web_app
 
 
 def test_health_is_minimal_and_status_has_detail() -> None:
-    app = create_web_app(lambda: {"radio": "down", "queues": {"reply": 0}})
+    app = create_web_app(
+        lambda: {
+            "radio": "down",
+            "queues": {"reply": 0},
+            "tasks_healthy": False,
+            "tasks": {
+                "radio-supervisor": {
+                    "state": "running",
+                    "started_at": 1,
+                    "last_ok_at": 2,
+                    "error": "must not leave loopback",
+                }
+            },
+            "radio_config": {
+                "region": "US",
+                "preset": "LONG_FAST",
+                "channels": [0, 2],
+                "gps": {"lat": 40.0, "lon": -80.0},
+            },
+            "ai": {"provider": "hailo_vlm", "model": "Qwen3-VL-2B-Instruct"},
+        }
+    )
     client = TestClient(app)
     health = client.get("/api/v1/health")
     assert health.json() == {"status": "degraded", "version": "0.1.0"}
     assert "queues" not in health.json()
     assert client.get("/api/v1/status").json()["radio"] == "down"
     assert health.headers["x-frame-options"] == "DENY"
+    for captive_path in ("/generate_204", "/hotspot-detect.html", "/ncsi.txt", "/connecttest.txt"):
+        captive = client.get(captive_path, follow_redirects=False)
+        assert captive.status_code == 307
+        assert captive.headers["location"] == "/"
+    assert client.get("/api/v1/diagnostics/status").status_code == 403
+
+    local = TestClient(app, client=("127.0.0.1", 50000))
+    diagnostics = local.get("/api/v1/diagnostics/status")
+    assert diagnostics.status_code == 200
+    assert diagnostics.json()["tasks"] == {
+        "radio-supervisor": {
+            "state": "running",
+            "started_at": 1,
+            "last_ok_at": 2,
+        }
+    }
+    assert diagnostics.json()["radio_config"] == {
+        "region": "US",
+        "preset": "LONG_FAST",
+        "channels": [0, 2],
+    }
+    assert "gps" not in str(diagnostics.json())
+    assert "queues" not in diagnostics.json()
 
     failed_tasks = TestClient(create_web_app(lambda: {"radio": "up", "tasks_healthy": False})).get(
         "/api/v1/health"
@@ -65,6 +109,8 @@ async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp
     assert mail.status_code == 200 and "Operator-readable plaintext" in mail.text
     backups = client.get("/backups.html")
     assert backups.status_code == 200 and "Backups contain sensitive location data" in backups.text
+    ai = client.get("/ai.html")
+    assert ai.status_code == 200 and "Test the guarded path" in ai.text
     navigation = client.get("/nav.js").text
     scheduler = client.get("/refresh-scheduler.js")
     assert scheduler.status_code == 200 and "visibilitychange" in scheduler.text
@@ -73,6 +119,9 @@ async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp
     assert "Radio + MQTT" in federation_script
     assert "Peer-provided" in federation_script and "station observation" in federation_script
     assert 'directory.insertAdjacentElement("afterend", panel)' in federation_script
+    watch_script = client.get("/watch.js").text
+    assert "IDENTITY & RECONCILIATION" in watch_script
+    assert "data-merge-target" in watch_script and "data-unmerge-source" in watch_script
     for label in (
         "Overview",
         "Members",

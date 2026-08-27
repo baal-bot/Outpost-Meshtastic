@@ -103,17 +103,33 @@ in which case, drop the stack and keep the verbs, which is the safe direction.
 with a mandatory benchmark harness that selects the default on the operator's actual
 hardware.
 
-**Forces.** The brief assumed a 4B Qwen on the Hailo-10H. That model does not exist: the
-GenAI Model Zoo ceiling is Qwen3-1.7B, the context is hard-capped at 2048 tokens, and in
+**Forces.** The brief assumed a 4B Qwen on the Hailo-10H. No such text model is shipped: the
+GenAI Model Zoo text ceiling is Qwen3-1.7B, the context is hard-capped at 2048 tokens, and in
 independent benchmarks the Pi 5 CPU **outperformed** the NPU on every shipped model. The
 accelerator's real advantages are power draw and CPU offload. Committing the architecture to
-a specific accelerator on vendor claims would be a mistake.
+a specific accelerator on vendor claims would be a mistake. The 2B Qwen3-VL model is multimodal,
+requires suite 5.3.0 or newer, and is exposed through C++/Python rather than Hailo-Ollama. The
+provider abstraction now includes a direct adapter for that API.
 
 **Rejected.** Hailo-only; cloud-only; a single hardcoded model.
 
 **Revisit if.** Hailo ships larger models with longer context — their R&D has said publicly
 that new model support is in progress. The abstraction is what lets us adopt it without a
 rewrite.
+
+**Target-node result (2026-08-27).** Hailo-10H with `qwen2.5:1.5b` (published as
+`qwen2.5-instruct:1.5b` by suite 5.1.1) was the initial Phase 2 default. It measured 9.0 s warm p50
+and 16.7 s p95, versus 22.4 s p50 and 72.3 s p95 for
+Llama 3.2 3B. The guarded corpus passed 60/60 with zero safety failures, but no raw Qwen
+factual output passed the marker/citation post-filter; production therefore relies on the cited
+extractive fallback whenever synthesis is not provably well-formed. See
+`docs/benchmarks/HAILO-H10-QWEN-2026-08-27.md`.
+
+After the reversible HailoRT 5.3.0 upgrade, `Qwen3-VL-2B-Instruct` loaded successfully through the
+new direct `hailo_vlm` adapter. It is the current configured model for text inference; image input
+remains future work. Its guarded corpus passed 60/60 with zero safety failures and a 21.31-second
+six-prompt p95 at the 96-token production cap. Qwen 2.5 through Hailo-Ollama remains the rollback
+path.
 
 ---
 
@@ -263,12 +279,12 @@ deliverable.
 | # | Unknown | Resolve in | How |
 |---|---|---|---|
 | **U1** | Actual time-on-air per packet at the deployed preset | Phase 0 | Compare the `toa()` model against the radio's `airUtilTx` telemetry over 24 h; recalibrate (REQ-TEST-014) |
-| **U2** | Whether Hailo or CPU llama.cpp is the better provider on this hardware | Phase 2 | `tools/bench_inference.py` (REQ-AI-015). Independent benchmarks favour CPU on speed; Hailo on power |
-| **U3** | Whether `hailo-ollama` serves Qwen3-1.7B (it is in the zoo but absent from the only published `/hailo/v1/list` dump) | Phase 2 | Query `/hailo/v1/list` on the actual unit |
+| **U2** | Whether Hailo or CPU llama.cpp is the better provider on this hardware | Phase 2 | **Partially resolved 2026-08-27:** Hailo Qwen passed the gate; CPU comparison remains optional |
+| **U3** | Whether `hailo-ollama` serves Qwen3-1.7B (it is in the zoo but absent from the only published `/hailo/v1/list` dump) | Phase 2 | **Resolved 2026-08-27:** not in the unit's served list; use Qwen 2.5 Instruct 1.5B |
 | **U4** | Whether `hailo-ollama` handles concurrent requests or serialises them | Phase 2 | Measure; assume serial until proven otherwise (REQ-AI-011) |
 | **U5** | Real cold-start latency and whether keep-warm reliably prevents unload | Phase 2 | Measure; a hands-on review reports 25–40 s cold starts with no documented `keep_alive` control |
 | **U6** | Embedding throughput on the Pi 5 CPU — no credible public benchmark exists | Phase 2 | Measure MiniLM-L6 via ONNX on the target |
-| **U7** | Whether a 2048-token budget leaves enough room for useful retrieval | Phase 2 | The eval set is the answer. If not, CPU llama.cpp removes the ceiling |
+| **U7** | Whether a 2048-token budget leaves enough room for useful retrieval | Phase 2 | **Resolved 2026-08-27:** guarded 60-item corpus passed 60/60 within the fixed budget |
 | **U8** | Practical mesh reliability for multi-part responses at the deployed hop count | Phase 1 | Measure ordering and loss; tune the inter-part delay from 12 s |
 | **U9** | Pi CPU load of the `rtl_fm \| samedec` chain | Phase 4 | Measure; no published figure exists |
 | **U10** | Whether federation is affordable at all on a busy mesh | Phase 5 | Measure a real sync cycle's airtime; ADR-009's sneakernet mode exists because the answer may be "no" |

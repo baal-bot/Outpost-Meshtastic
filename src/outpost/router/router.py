@@ -85,6 +85,9 @@ class Router:
         if not await self.rate_limiter.allow(member.mesh_id, member.trust, token):
             return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
         spec = self.registry.resolve(token)
+        if spec is None and inbound.is_direct and self.config.modules.ai.enabled:
+            spec = self.registry.resolve("ASK")
+            args = invoked
         if spec is None:
             return Response(ResponseKind.ERROR, [Line(message("unknown"))])
         if TrustLevel.parse(member.trust) < spec.min_trust:
@@ -106,7 +109,12 @@ class Router:
             version=__version__,
             disclaimer=self.config.node.disclaimer,
             attribution=(
-                " · Weather fallback data: Open-Meteo" if self.config.modules.env.enabled else ""
+                (" · Weather fallback data: Open-Meteo" if self.config.modules.env.enabled else "")
+                + (
+                    " · AI external provider: data leaves this node"
+                    if self.config.modules.ai.enabled and self.config.ai.provider == "openai_compat"
+                    else ""
+                )
             ),
         )
         try:

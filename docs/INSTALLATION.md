@@ -37,6 +37,7 @@ sudo ./deploy/install.sh
 | Versioned releases | `/opt/outpost/releases/` |
 | Previous release | `/opt/outpost/previous` |
 | Database/runtime files | `/var/lib/outpost` |
+| Native Hailo models | `/var/lib/outpost/models` |
 | Service unit | `/etc/systemd/system/outpost.service` |
 
 The first interactive install opens a guided identity, units, radio, and optional location wizard.
@@ -46,6 +47,12 @@ and stage a new, isolated release under `/opt/outpost/releases`. The installer v
 package and configuration, creates an integrity-checked pre-upgrade database backup, switches the
 `current` symlink atomically, and waits for health. Failed health verification restores both the
 previous code and pre-upgrade database. `git pull` alone never updates the running installation.
+
+After service startup, resume the complete field checklist with `sudo outpost-onboarding status`.
+It covers credentials, identity/location, live radio and region/channel verification, maps and
+providers, off-device backup, optional federation, and a separate wallboard account. The installer
+also advertises the configured HTTP service through Avahi when available. See
+[Field-appliance onboarding](ONBOARDING.md) for mDNS and the optional expiring setup hotspot.
 
 ## Federation acceptance host
 
@@ -151,9 +158,11 @@ Periodic Test audio fixture; the second uses a temporary database and requires s
 ## Optional Hailo AI HAT+ 2
 
 The first-run wizard detects a Hailo-10H and can enable its local provider, but the operating-system
-runtime must already be installed and the Pi rebooted. Follow [Local AI](AI.md) for the pinned
-Hailo-10H runtime, GenAI package, loopback-only service, model pull, and hardware benchmark. Do not
-install the Hailo-8 `hailo-all` package on an AI HAT+ 2.
+runtime must already be installed and the Pi rebooted. The default provider is native HailoRT 5.3
+with `Qwen3-VL-2B-Instruct`. Pass `OUTPOST_HAILORT_WHEEL` and `OUTPOST_HAILO_VLM_MODEL` to the
+installer; it copies the HEF into `/var/lib/outpost/models` and validates the known-good checksum.
+Follow [Local AI](AI.md) for exact commands, rollback provider details, and the hardware benchmark.
+Do not install the Hailo-8 `hailo-all` package on an AI HAT+ 2.
 
 Leave AI disabled until the model passes the safety evaluation. The radio, BBS, mail, Watch,
 Environment, and federation features do not require the accelerator or any inference provider.
@@ -175,9 +184,11 @@ used interactively; the local USGS pack is the fallback.
 
 1. Create and download a validated off-device backup in addition to the installer's local snapshot.
 2. Review release and configuration changes.
-3. From a clean checkout, run `./deploy/update.sh origin/main`, or pass a release tag such as
-   `./deploy/update.sh v0.2.0`. It fetches the target, installs it, and returns the source checkout
-   to its prior revision if installation fails. A pull by itself does not update the running process.
+3. From a clean checkout, pass a signed release tag such as `./deploy/update.sh v0.2.0`. The updater
+   requires the GitHub CLI and verifies checksums, metadata, provenance attestations, and the exact
+   tagged commit before activation. `./deploy/update.sh origin/main` remains available for explicit
+   development installs but is not a verified release. A pull by itself does not update the running
+   process. See [Releases and artifact verification](RELEASES.md).
 4. Compare active config with `/etc/outpost/config.yaml.dist`.
 5. Verify health, login, radio connectivity, and a mesh `PING`.
 
@@ -203,9 +214,10 @@ state. Keep the generated safety snapshots until the result has been independent
 ## Releases and dependency lock
 
 Production installation constrains runtime packages with `requirements.lock`. Tagged `v*`
-revisions run the package smoke test, build a wheel and checksum, and publish both to the matching
-GitHub release. Update the project version and lock intentionally in the same reviewed release PR;
-do not regenerate the lock as an incidental upgrade step.
+revisions must pass the exact-commit CI matrix before the release workflow publishes a wheel,
+checksums, release metadata, SPDX SBOM, and GitHub provenance attestations. Update the project
+version and lock intentionally in the same reviewed release PR; do not regenerate the lock as an
+incidental upgrade step.
 
 ## A second Outpost
 

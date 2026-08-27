@@ -40,11 +40,13 @@ class OllamaProvider(HTTPProvider):
         models = value.get("models", [])
         if not isinstance(models, list):
             return ()
-        return tuple(
-            str(item.get("name") or item.get("model"))
-            for item in models
-            if isinstance(item, dict) and (item.get("name") or item.get("model"))
-        )
+        names: list[str] = []
+        for item in models:
+            if isinstance(item, str) and item:
+                names.append(item)
+            elif isinstance(item, dict) and (item.get("name") or item.get("model")):
+                names.append(str(item.get("name") or item.get("model")))
+        return tuple(names)
 
     async def health(self) -> ProviderHealth:
         started = time.perf_counter()
@@ -88,7 +90,7 @@ class OllamaProvider(HTTPProvider):
     async def chat(self, req: ChatRequest) -> ChatResponse:
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [message.model_dump(exclude_none=True) for message in req.messages],
+            "messages": self._message_payload(req.messages),
             "stream": True,
             "options": {
                 "num_predict": min(req.max_output_tokens, self.max_output_tokens),
@@ -150,6 +152,9 @@ class OllamaProvider(HTTPProvider):
             finish_reason=str(final.get("done_reason") or "stop"),
             tool_calls=tuple(calls),
         )
+
+    def _message_payload(self, messages: tuple[ChatMessage, ...]) -> list[dict[str, Any]]:
+        return [message.model_dump(exclude_none=True) for message in messages]
 
     async def warm(self) -> None:
         await self.chat(

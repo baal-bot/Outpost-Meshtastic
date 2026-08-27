@@ -23,6 +23,25 @@ class ManifestItem:
 
 
 class FederationSyncService:
+    INCIDENT_TERMINAL = {"resolved", "false_alarm", "expired"}
+    INCIDENT_FIELDS = (
+        "type",
+        "severity",
+        "status",
+        "title",
+        "body",
+        "lat",
+        "lon",
+        "location_text",
+        "radius_m",
+        "reporter_label",
+        "created_at",
+        "updated_at",
+        "expires_at",
+        "resolved_at",
+        "resolution_note",
+    )
+
     def __init__(
         self,
         database: Database,
@@ -59,9 +78,9 @@ class FederationSyncService:
             return True
         if peer.incident_lat is None or peer.incident_lon is None:
             return False
-        lat1, lat2 = math.radians(float(lat)), math.radians(peer.incident_lat)
+        lat1, lat2 = math.radians(float(str(lat))), math.radians(peer.incident_lat)
         delta_lat = lat2 - lat1
-        delta_lon = math.radians(peer.incident_lon - float(lon))
+        delta_lon = math.radians(peer.incident_lon - float(str(lon)))
         value = math.sin(delta_lat / 2) ** 2 + (
             math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2
         )
@@ -74,6 +93,13 @@ class FederationSyncService:
             return uid
         prefix = f"{self.local_mesh_id}:"
         return uid[len(prefix) :] if uid.startswith(prefix) else None
+
+    def _stored_origin_uid(self, uid: str) -> str:
+        return self._local_uid(uid) or uid
+
+    @staticmethod
+    def _origin_node_for_uid(uid: str, fallback: str) -> str:
+        return uid.split(":", 1)[0] if uid.startswith("!") and ":" in uid else fallback
 
     def local_thread_uid(self, uid: str) -> str:
         return self._local_uid(uid) or uid
@@ -120,6 +146,38 @@ class FederationSyncService:
         joined = "\x1f".join("" if value is None else str(value) for value in values)
         return hashlib.sha256(joined.encode()).hexdigest()[:16]
 
+    @staticmethod
+    def _payload_digest(encoded: str) -> str:
+        return hashlib.sha256(encoded.encode()).hexdigest()[:16]
+
+    @staticmethod
+    async def _incident_provenance(
+        transaction: Transaction,
+        *,
+        incident_id: int,
+        origin_uid: str,
+        source_node: str,
+        event_kind: str,
+        payload: dict[str, Any],
+        source_updated_at: int,
+        recorded_at: int,
+        actor: str,
+    ) -> None:
+        await transaction.write(
+            "INSERT INTO incident_provenance(incident_id,origin_uid,source_node,event_kind,"
+            "payload_json,source_updated_at,recorded_at,actor) VALUES(?,?,?,?,?,?,?,?)",
+            (
+                incident_id,
+                origin_uid,
+                source_node,
+                event_kind,
+                json.dumps(payload, separators=(",", ":"), sort_keys=True),
+                source_updated_at,
+                recorded_at,
+                actor[:160],
+            ),
+        )
+
     async def manifest(
         self,
         peer: Peer,
@@ -158,7 +216,7 @@ class FederationSyncService:
         if peer.sync_incidents and self.module_enabled("watch"):
             rows = await self.database.read(
                 "SELECT uid,updated_at,status,severity,title,body,lat,lon FROM incident "
-                "ORDER BY updated_at DESC",
+                "WHERE merged_into_id IS NULL ORDER BY updated_at DESC",
             )
             items.extend(
                 ManifestItem(
@@ -208,11 +266,24 @@ class FederationSyncService:
                 continue
             table, version_column = table_version
             canonical_uid = await self.canonical_remote_uid(uid)
-            rows = await self.database.read(
-                f"SELECT {version_column} version FROM {table} "  # noqa: S608
-                "WHERE uid IN (?,?)",
-                (uid, canonical_uid),
-            )
+            if stream == "incidents":
+                stored_uid = self._stored_origin_uid(uid)
+                rows = await self.database.read(
+                    "SELECT source_updated_at version FROM incident_origin "
+                    "WHERE origin_uid IN (?,?,?)",
+                    (uid, canonical_uid, stored_uid),
+                )
+                if not rows:
+                    rows = await self.database.read(
+                        "SELECT updated_at version FROM incident WHERE uid IN (?,?,?)",
+                        (uid, canonical_uid, stored_uid),
+                    )
+            else:
+                rows = await self.database.read(
+                    f"SELECT {version_column} version FROM {table} "  # noqa: S608
+                    "WHERE uid IN (?,?)",
+                    (uid, canonical_uid),
+                )
             remote_version = int(item.get("version", item.get("v", 0)) or 0)
             if not rows or remote_version > max(int(row["version"] or 0) for row in rows):
                 requested.append({"stream": stream, "uid": uid})
@@ -242,9 +313,9 @@ class FederationSyncService:
                 )
             elif stream == "incidents" and peer.sync_incidents:
                 rows = await self.database.read(
-                    "SELECT uid,type,severity,status,title,body,lat,lon,location_text,radius_m,"
+                    "SELECT id,uid,type,severity,status,title,body,lat,lon,location_text,radius_m,"
                     "reporter_label,origin_node,created_at,updated_at,expires_at,resolved_at,"
-                    "resolution_note FROM incident WHERE uid=?",
+                    "resolution_note FROM incident WHERE uid=? AND merged_into_id IS NULL",
                     (local_uid,),
                 )
                 if rows and not self.incident_allowed(peer, rows[0]["lat"], rows[0]["lon"]):
@@ -257,10 +328,20 @@ class FederationSyncService:
                 )
             if rows:
                 payload = dict(rows[0])
+                incident_id = payload.pop("id", None)
                 payload["uid"] = uid
                 if stream.startswith("board:"):
                     payload["thread_uid"] = self._wire_uid(str(payload["thread_uid"]))
                     payload["origin_node"] = uid.split(":", 1)[0]
+                elif stream == "incidents" and incident_id is not None:
+                    origins = await self.database.read(
+                        "SELECT origin_uid FROM incident_origin WHERE incident_id=? "
+                        "ORDER BY origin_uid",
+                        (incident_id,),
+                    )
+                    payload["origin_uids"] = [
+                        self._wire_uid(str(value["origin_uid"])) for value in origins
+                    ] or [uid]
                 exported.append(
                     {
                         "stream": stream,
@@ -297,7 +378,7 @@ class FederationSyncService:
                 "SELECT id,digest FROM fed_inbox_item WHERE peer_id=? AND stream=? AND uid=?",
                 (peer.id, stream, uid),
             )
-            digest = str(item.get("digest", ""))[:64]
+            digest = self._payload_digest(encoded)
             if existing and str(existing[0]["digest"]) == digest:
                 changed = False
             elif existing:
@@ -322,6 +403,355 @@ class FederationSyncService:
                 (peer.id, stream, uid, now),
             )
         return changed
+
+    @staticmethod
+    def _incident_values(payload: dict[str, Any]) -> dict[str, Any]:
+        values: dict[str, Any] = {
+            "type": str(payload["type"]),
+            "severity": str(payload["severity"]),
+            "status": str(payload["status"]),
+            "title": str(payload["title"])[:64],
+            "body": str(payload["body"])[:4000] if payload.get("body") is not None else None,
+            "lat": payload.get("lat"),
+            "lon": payload.get("lon"),
+            "location_text": (
+                str(payload["location_text"])[:500]
+                if payload.get("location_text") is not None
+                else None
+            ),
+            "radius_m": payload.get("radius_m"),
+            "reporter_label": str(payload.get("reporter_label") or "Federated peer")[:80],
+            "created_at": int(payload["created_at"]),
+            "updated_at": int(payload["updated_at"]),
+            "expires_at": payload.get("expires_at"),
+            "resolved_at": payload.get("resolved_at"),
+            "resolution_note": (
+                str(payload["resolution_note"])[:500]
+                if payload.get("resolution_note") is not None
+                else None
+            ),
+        }
+        if values["type"] not in {
+            "hazard",
+            "road",
+            "fire",
+            "medical",
+            "police",
+            "utility",
+            "missing",
+            "animal",
+            "weather",
+            "resource",
+            "other",
+        }:
+            raise ValueError("invalid federated incident type")
+        if values["severity"] not in {"info", "caution", "urgent", "critical"}:
+            raise ValueError("invalid federated incident severity")
+        if values["status"] not in {"open", "monitoring", "resolved", "false_alarm", "expired"}:
+            raise ValueError("invalid federated incident status")
+        if not values["title"]:
+            raise ValueError("federated incident title is required")
+        lat, lon = values["lat"], values["lon"]
+        if (lat is None) != (lon is None):
+            raise ValueError("federated incident coordinates must be a pair")
+        if lat is not None and not (
+            -90 <= float(str(lat)) <= 90 and -180 <= float(str(lon)) <= 180
+        ):
+            raise ValueError("invalid federated incident coordinates")
+        if int(values["created_at"]) < 0 or int(values["updated_at"]) < int(values["created_at"]):
+            raise ValueError("invalid federated incident timestamps")
+        return values
+
+    async def _adopt_incident_origins(
+        self,
+        transaction: Transaction,
+        *,
+        payload: dict[str, Any],
+        primary_uid: str,
+        incident_id: int,
+        original_incident_id: int,
+        peer_id: int,
+        source_node: str,
+        source_updated_at: int,
+        digest: str,
+        now: int,
+    ) -> None:
+        candidates = payload.get("origin_uids", [])
+        origin_uids = [primary_uid]
+        if isinstance(candidates, list):
+            origin_uids.extend(
+                value
+                for value in candidates[:100]
+                if isinstance(value, str) and value and len(value) <= 160
+            )
+        for wire_origin_uid in dict.fromkeys(origin_uids):
+            origin_uid = self._stored_origin_uid(wire_origin_uid)
+            existing = await transaction.read(
+                "SELECT incident_id FROM incident_origin WHERE origin_uid=?", (origin_uid,)
+            )
+            if existing:
+                if int(existing[0]["incident_id"]) != incident_id:
+                    await transaction.write(
+                        "UPDATE incident SET reconciliation_review=1 WHERE id IN (?,?)",
+                        (incident_id, existing[0]["incident_id"]),
+                    )
+                continue
+            await transaction.write(
+                "INSERT INTO incident_origin(origin_uid,incident_id,original_incident_id,"
+                "origin_node,source_kind,source_peer_id,first_seen_at,last_seen_at,"
+                "source_updated_at,source_digest) VALUES(?,?,?,?,'federation',?,?,?,?,?)",
+                (
+                    origin_uid,
+                    incident_id,
+                    original_incident_id,
+                    self._origin_node_for_uid(wire_origin_uid, source_node),
+                    peer_id,
+                    now,
+                    now,
+                    source_updated_at,
+                    digest if origin_uid == primary_uid else "",
+                ),
+            )
+
+    async def _import_incident(
+        self,
+        transaction: Transaction,
+        inbox: Any,
+        uid: str,
+        payload: dict[str, Any],
+        operator: str,
+        now: int,
+    ) -> None:
+        values = self._incident_values(payload)
+        source_updated_at = int(values["updated_at"])
+        source_node = str(inbox["mesh_id"])
+        digest = str(inbox["digest"] or "")[:64]
+        peer_id = int(inbox["peer_id"])
+        origin_uid = self._stored_origin_uid(uid)
+        origins = await transaction.read(
+            "SELECT incident_id,original_incident_id,origin_node,source_kind,source_updated_at,"
+            "source_digest "
+            "FROM incident_origin WHERE origin_uid=?",
+            (origin_uid,),
+        )
+        if not origins:
+            legacy = await transaction.read(
+                "SELECT id,updated_at FROM incident WHERE uid=?", (origin_uid,)
+            )
+            if legacy:
+                await transaction.write(
+                    "INSERT INTO incident_origin(origin_uid,incident_id,original_incident_id,"
+                    "origin_node,source_kind,source_peer_id,first_seen_at,last_seen_at,"
+                    "source_updated_at,source_digest) VALUES(?,?,?,?,'federation',?,?,?,?,?)",
+                    (
+                        origin_uid,
+                        legacy[0]["id"],
+                        legacy[0]["id"],
+                        source_node,
+                        peer_id,
+                        now,
+                        now,
+                        legacy[0]["updated_at"],
+                        "",
+                    ),
+                )
+                origins = await transaction.read(
+                    "SELECT incident_id,original_incident_id,origin_node,source_kind,"
+                    "source_updated_at,source_digest "
+                    "FROM incident_origin WHERE origin_uid=?",
+                    (origin_uid,),
+                )
+        if not origins:
+            refs = await transaction.read("SELECT COALESCE(MAX(local_ref),0)+1 value FROM incident")
+            incident_id = await transaction.write(
+                """INSERT INTO incident(uid,local_ref,type,severity,status,title,body,
+                   lat,lon,location_text,radius_m,reporter_label,origin_node,created_at,
+                   updated_at,expires_at,resolved_at,resolution_note,source,unverified,
+                   flagged_for_review)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'member',1,1)""",
+                (
+                    origin_uid,
+                    refs[0]["value"],
+                    values["type"],
+                    values["severity"],
+                    values["status"],
+                    values["title"],
+                    values["body"],
+                    values["lat"],
+                    values["lon"],
+                    values["location_text"],
+                    values["radius_m"],
+                    values["reporter_label"],
+                    self._origin_node_for_uid(uid, source_node),
+                    values["created_at"],
+                    values["updated_at"],
+                    values["expires_at"],
+                    values["resolved_at"],
+                    values["resolution_note"],
+                ),
+            )
+            await self._adopt_incident_origins(
+                transaction,
+                payload=payload,
+                primary_uid=origin_uid,
+                incident_id=incident_id,
+                original_incident_id=incident_id,
+                peer_id=peer_id,
+                source_node=source_node,
+                source_updated_at=source_updated_at,
+                digest=digest,
+                now=now,
+            )
+            await self._incident_provenance(
+                transaction,
+                incident_id=incident_id,
+                origin_uid=origin_uid,
+                source_node=source_node,
+                event_kind="federation_imported",
+                payload=values,
+                source_updated_at=source_updated_at,
+                recorded_at=now,
+                actor=operator,
+            )
+            return
+
+        origin = origins[0]
+        incident_id = int(origin["incident_id"])
+        original_id = int(origin["original_incident_id"])
+        source_version = int(origin["source_updated_at"])
+        source_digest = str(origin["source_digest"] or "")
+        original_rows = await transaction.read("SELECT * FROM incident WHERE id=?", (original_id,))
+        if not original_rows:
+            raise ValueError("incident origin points to missing original")
+        original = original_rows[0]
+        if source_updated_at < source_version:
+            await transaction.write(
+                "UPDATE incident_origin SET last_seen_at=? WHERE origin_uid=?", (now, origin_uid)
+            )
+            await self._incident_provenance(
+                transaction,
+                incident_id=incident_id,
+                origin_uid=origin_uid,
+                source_node=source_node,
+                event_kind="stale_update_ignored",
+                payload=values,
+                source_updated_at=source_updated_at,
+                recorded_at=now,
+                actor=operator,
+            )
+            return
+        same_snapshot = all(original[field] == values[field] for field in self.INCIDENT_FIELDS)
+        if source_updated_at == source_version and (
+            (source_digest and digest != source_digest) or (not source_digest and not same_snapshot)
+        ):
+            await transaction.write(
+                "UPDATE incident SET reconciliation_review=1 WHERE id=?", (incident_id,)
+            )
+            await self._incident_provenance(
+                transaction,
+                incident_id=incident_id,
+                origin_uid=origin_uid,
+                source_node=source_node,
+                event_kind="concurrent_update_conflict",
+                payload=values,
+                source_updated_at=source_updated_at,
+                recorded_at=now,
+                actor=operator,
+            )
+            return
+        if source_updated_at == source_version and (source_digest == digest or same_snapshot):
+            await transaction.write(
+                "UPDATE incident_origin SET last_seen_at=?,source_digest=? WHERE origin_uid=?",
+                (now, digest, origin_uid),
+            )
+            return
+
+        adopted_identity_only = str(original["uid"]) != origin_uid
+        merged = original["merged_into_id"] is not None
+        foreign_relay = (
+            str(origin["source_kind"]) == "local" or str(origin["origin_node"]) != source_node
+        )
+        if foreign_relay:
+            await transaction.write(
+                "UPDATE incident SET reconciliation_review=1 WHERE id=?", (incident_id,)
+            )
+            await self._incident_provenance(
+                transaction,
+                incident_id=incident_id,
+                origin_uid=origin_uid,
+                source_node=source_node,
+                event_kind="relayed_origin_update",
+                payload=values,
+                source_updated_at=source_updated_at,
+                recorded_at=now,
+                actor=operator,
+            )
+            return
+        update_fields = tuple(field for field in self.INCIDENT_FIELDS if field != "created_at")
+        if adopted_identity_only or merged:
+            await transaction.write(
+                "UPDATE incident SET reconciliation_review=1 WHERE id=?", (incident_id,)
+            )
+            if merged:
+                assignments = ",".join(f"{field}=?" for field in update_fields)
+                await transaction.write(
+                    f"UPDATE incident SET {assignments},unverified=1,flagged_for_review=1 "  # noqa: S608
+                    "WHERE id=?",
+                    (
+                        *(values[field] for field in update_fields),
+                        original_id,
+                    ),
+                )
+            event_kind = "merged_origin_update" if merged else "adopted_identity_update"
+        else:
+            resolution_withheld = (
+                str(original["status"]) == "monitoring"
+                and str(values["status"]) in self.INCIDENT_TERMINAL
+            )
+            update_values = dict(values)
+            if resolution_withheld:
+                for field in ("status", "resolved_at", "resolution_note"):
+                    update_values[field] = original[field]
+            assignments = ",".join(f"{field}=?" for field in update_fields)
+            await transaction.write(
+                f"UPDATE incident SET {assignments},origin_node=?,unverified=1,"  # noqa: S608
+                "flagged_for_review=1,reconciliation_review=? WHERE id=?",
+                (
+                    *(update_values[field] for field in update_fields),
+                    source_node,
+                    int(resolution_withheld),
+                    original_id,
+                ),
+            )
+            event_kind = "resolution_withheld" if resolution_withheld else "federation_updated"
+        await transaction.write(
+            "UPDATE incident_origin SET last_seen_at=?,source_updated_at=?,source_digest=?,"
+            "source_peer_id=? WHERE origin_uid=?",
+            (now, source_updated_at, digest, peer_id, origin_uid),
+        )
+        await self._adopt_incident_origins(
+            transaction,
+            payload=payload,
+            primary_uid=origin_uid,
+            incident_id=incident_id,
+            original_incident_id=original_id,
+            peer_id=peer_id,
+            source_node=source_node,
+            source_updated_at=source_updated_at,
+            digest=digest,
+            now=now,
+        )
+        await self._incident_provenance(
+            transaction,
+            incident_id=incident_id,
+            origin_uid=origin_uid,
+            source_node=source_node,
+            event_kind=event_kind,
+            payload=values,
+            source_updated_at=source_updated_at,
+            recorded_at=now,
+            actor=operator,
+        )
 
     async def import_inbox(self, item_id: int, operator: str, now: int) -> str:
         async with self.database.transaction() as transaction:
@@ -395,44 +825,7 @@ class FederationSyncService:
             elif stream == "incidents":
                 if not row["sync_incidents"]:
                     raise ValueError("incident sync is no longer allowed")
-                refs = await transaction.read(
-                    "SELECT COALESCE(MAX(local_ref),0)+1 value FROM incident"
-                )
-                await transaction.write(
-                    """INSERT INTO incident(uid,local_ref,type,severity,status,title,body,
-                       lat,lon,location_text,radius_m,reporter_label,origin_node,created_at,
-                       updated_at,expires_at,resolved_at,resolution_note,source,unverified,
-                       flagged_for_review)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'member',1,1)
-                       ON CONFLICT(uid) DO UPDATE SET type=excluded.type,
-                       severity=excluded.severity,status=excluded.status,title=excluded.title,
-                       body=excluded.body,lat=excluded.lat,lon=excluded.lon,
-                       location_text=excluded.location_text,radius_m=excluded.radius_m,
-                       reporter_label=excluded.reporter_label,origin_node=excluded.origin_node,
-                       updated_at=excluded.updated_at,expires_at=excluded.expires_at,
-                       resolved_at=excluded.resolved_at,resolution_note=excluded.resolution_note,
-                       unverified=1,flagged_for_review=1""",
-                    (
-                        uid,
-                        refs[0]["value"],
-                        payload["type"],
-                        payload["severity"],
-                        payload["status"],
-                        str(payload["title"])[:64],
-                        payload.get("body"),
-                        payload.get("lat"),
-                        payload.get("lon"),
-                        payload.get("location_text"),
-                        payload.get("radius_m"),
-                        str(payload.get("reporter_label") or "Federated peer")[:80],
-                        str(row["mesh_id"]),
-                        int(payload["created_at"]),
-                        int(payload["updated_at"]),
-                        payload.get("expires_at"),
-                        payload.get("resolved_at"),
-                        payload.get("resolution_note"),
-                    ),
-                )
+                await self._import_incident(transaction, row, uid, payload, operator, now)
             elif stream == "alerts":
                 if not row["relay_alerts"]:
                     raise ValueError("alert relay is no longer allowed")

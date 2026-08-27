@@ -85,12 +85,16 @@ def test_ai_runtime_policy_defaults_are_bounded() -> None:
     assert config.ai.max_concurrency == 1
     assert config.ai.queue_depth == 3
     assert config.ai.max_tool_rounds == 2
+    assert config.ai.provider == "hailo_vlm"
+    assert config.ai.model == "Qwen3-VL-2B-Instruct"
+    assert config.ai.hailo_vlm.context_tokens == 2048
     assert config.ai.hailo.context_tokens == 2048
 
 
 @pytest.mark.parametrize(
     "ai",
     [
+        {"provider": "hailo_vlm", "hailo_vlm": {"context_tokens": 1599}},
         {"provider": "hailo", "hailo": {"context_tokens": 1599}},
         {"max_concurrency": 0},
         {"max_tool_rounds": 3},

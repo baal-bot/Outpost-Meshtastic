@@ -42,6 +42,9 @@ class MessageType(IntEnum):
     PONG = 0x41
     SERVICE_QUERY = 0x50
     SERVICE_RESPONSE = 0x51
+    RELAY_PUT = 0x60
+    RELAY_ACK = 0x61
+    TOPOLOGY_UPDATE = 0x70
 
 
 class FrameError(ValueError):

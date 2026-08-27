@@ -43,7 +43,7 @@ DESTINATIONS = (
     ("Backups", "/backups.html"),
     ("Activity", "/#activity"),
     ("System", "/#system"),
-    ("AI", "/#system"),
+    ("AI", "/ai.html"),
     ("API", "/api/docs"),
 )
 OPERATOR_PAGES = tuple(
@@ -78,6 +78,7 @@ ACTION_SECTIONS = (
     ("/watch.html", "Open incidents"),
 )
 MODULE_PAGES = (
+    ("ai", "AI", "/ai.html", "Local AI is offline"),
     ("bbs", "BBS", "/bbs.html", "Community boards is offline"),
     ("watch", "Watch", "/watch.html", "Community Watch is offline"),
     ("env", "Environment", "/environment.html", "Environment is offline"),
@@ -441,6 +442,19 @@ def route_visual_content_api(page: object) -> None:
     )
     fulfill("**/api/v1/federation/origins", {"items": []})
     fulfill("**/api/v1/federation/mail", {"items": []})
+    fulfill(
+        "**/api/v1/federation/topology",
+        {"items": [], "counts": {}, "generated_at": 2_000_000_000},
+    )
+    fulfill(
+        "**/api/v1/federation/relay",
+        {
+            "summary": {"counts": {}, "stored_bytes": 0, "events": []},
+            "queue": [],
+            "policies": [],
+            "origins": [],
+        },
+    )
 
     fulfill("**/api/v1/auth/accounts", {"items": []})
     fulfill("**/api/v1/auth/sessions", {"items": [], "count": 0})
@@ -700,6 +714,132 @@ def test_shared_dialogs_manage_focus_escape_validation_and_live_regions(
         page.close()
 
 
+def test_federation_topology_requires_shared_location_and_incident_opt_in(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    active = {
+        "mesh_id": "!bbbbbbbb",
+        "node_name": "Relay B",
+        "state": "active",
+        "raw_state": "active",
+        "identity_kind": "current",
+        "protocol_version": 1,
+        "capabilities": {"bbs": True},
+        "transports": ["radio", "mqtt"],
+        "paths": {
+            "radio": {"last_at": 1_999_999_900, "count_24h": 2},
+            "mqtt": {"last_at": 1_999_999_950, "count_24h": 3},
+        },
+        "preferred_path": "mqtt",
+        "last_successful_path": "mqtt",
+        "last_seen_at": 1_999_999_950,
+        "last_sync_at": 1_999_999_900,
+        "backlog": 2,
+        "degraded": False,
+        "degraded_reasons": [],
+        "location": {
+            "lat": 40.44,
+            "lon": -79.99,
+            "precision_km": 10,
+            "received_at": 1_999_999_950,
+        },
+        "location_policy": {
+            "share_location": False,
+            "lat": None,
+            "lon": None,
+            "precision_km": 10,
+            "updated_at": None,
+        },
+        "delivery": {"backlog": 2, "errors": 0, "rejected_24h": 0},
+        "services": ["weather"],
+        "policy": {"boards": ["general"], "sync_incidents": True},
+        "audit": [],
+    }
+    list_only = {
+        "mesh_id": "!cccccccc",
+        "node_name": "Discovered C",
+        "state": "discovered",
+        "raw_state": "pending",
+        "identity_kind": "current",
+        "transports": ["radio"],
+        "location": None,
+        "backlog": 0,
+        "degraded": False,
+        "degraded_reasons": [],
+    }
+    forgotten = {
+        "mesh_id": "!dddddddd",
+        "node_name": "Former D",
+        "state": "forgotten",
+        "raw_state": "forgotten",
+        "identity_kind": "forgotten",
+        "transports": [],
+        "location": None,
+        "backlog": 0,
+        "degraded": False,
+        "degraded_reasons": [],
+    }
+    page.route(
+        "**/api/v1/federation/topology",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {"items": [active, list_only, forgotten], "counts": {}, "generated_at": 0}
+            ),
+        ),
+    )
+    page.route(
+        "**/api/v1/watch/map*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "incidents": [
+                        {
+                            "id": 7,
+                            "local_ref": 7,
+                            "title": "Bridge damage",
+                            "type": "infrastructure",
+                            "severity": "urgent",
+                            "lat": 40.45,
+                            "lon": -80.01,
+                        }
+                    ],
+                    "nodes": [],
+                    "alerts": [],
+                }
+            ),
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/federation.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        assert page.locator("[data-topology-peer]").count() == 3
+        assert page.locator('[data-marker-id="topology-!bbbbbbbb"]').count() == 1
+        assert page.locator('[data-marker-id="topology-!cccccccc"]').count() == 0
+        assert page.locator('[data-marker-id^="topology-incident-"]').count() == 0
+
+        page.locator("#topology-incidents").check()
+        page.locator('[data-marker-id="topology-incident-7"]').wait_for()
+        page.locator('[data-topology-peer="!bbbbbbbb"]').click()
+        detail = page.locator("#topology-map-detail")
+        detail.get_by_role("heading", name="Relay B").wait_for()
+        assert "Preferred: mqtt" in detail.text_content()
+        assert "secret" not in detail.text_content().lower()
+        detail.locator("#topology-share").check()
+        detail.get_by_role("button", name="Save location policy").click()
+        assert "Latitude and longitude are required" in detail.text_content()
+        health.assert_clean()
+    finally:
+        page.close()
+
+
 def test_map_targets_and_list_alternatives_are_keyboard_ready(
     browser: object, dashboard_url: str
 ) -> None:
@@ -724,12 +864,13 @@ def test_map_targets_and_list_alternatives_are_keyboard_ready(
         assert size["dateline"]["zoom"] >= 8
         page_scripts = {
             name: page.request.get(f"{dashboard_url}/{name}").text()
-            for name in ("environment.js", "member-map.js", "watch.js")
+            for name in ("environment.js", "member-map.js", "watch.js", "federation.js")
         }
         controller = page.request.get(f"{dashboard_url}/map-controller.js").text()
         assert "data-waypoint-focus" in page_scripts["environment.js"]
         assert "member-map-row-open" in page_scripts["member-map.js"]
         assert "data-incident-open" in page_scripts["watch.js"]
+        assert "topology-incidents" in page_scripts["federation.js"]
         assert all("OutpostMap.Controller" in script for script in page_scripts.values())
         assert all("tile.openstreetmap.org" not in script for script in page_scripts.values())
         assert "tile.openstreetmap.org" in controller

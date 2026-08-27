@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import zipfile
 from contextlib import closing
@@ -26,6 +27,7 @@ def test_diagnostic_bundle_redacts_bootstrap_password_session_and_csrf(
             f"Cookie: outpost_session={session}",
             f"Authorization: Bearer {bearer}",
             f"database password_hash={password_hash}",
+            'provider error body="private member message with spaces"',
             "radio supervisor connected",
         )
     )
@@ -33,18 +35,51 @@ def test_diagnostic_bundle_redacts_bootstrap_password_session_and_csrf(
         tmp_path / "diagnostics.zip",
         config,
         journal,
+        runtime={
+            "platform": {"python": "3.13.7", "outpost": "0.1.0"},
+            "database": {"schema": 147, "quick_check": "ok"},
+            "storage": {"filesystem_free_bytes": 1024},
+            "service": {"ActiveState": "active"},
+            "live": {
+                "reachable": True,
+                "radio": "up",
+                "tasks_healthy": True,
+                "providers": {"nws": {"status": "up", "failures": 0}},
+            },
+        },
         exact_values=(setup_token, password_hash),
     )
 
     assert output.stat().st_mode & 0o777 == 0o600
     with zipfile.ZipFile(output) as archive:
-        assert set(archive.namelist()) == {"manifest.json", "journal.log"}
+        assert set(archive.namelist()) == {"manifest.json", "recent-errors.log"}
+        manifest = json.loads(archive.read("manifest.json"))
         contents = b"\n".join(archive.read(name) for name in archive.namelist()).decode()
     for value in (setup_token, password, session, csrf, bearer, password_hash):
         assert value not in contents
     assert config.node.operator_contact not in contents
+    assert "private member message with spaces" not in contents
     assert "[REDACTED]" in contents
     assert "radio supervisor connected" in contents
+    assert manifest["runtime"]["database"] == {"schema": 147, "quick_check": "ok"}
+    assert manifest["runtime"]["live"]["radio"] == "up"
+
+
+def test_full_journal_is_opt_in(tmp_path: Path) -> None:
+    config = load_config(Path(__file__).parents[2] / "config" / "config.example.yaml")
+    output = build_bundle(
+        tmp_path / "diagnostics.zip",
+        config,
+        "recent warning\n",
+        full_journal="ordinary service activity\n",
+    )
+
+    with zipfile.ZipFile(output) as archive:
+        assert set(archive.namelist()) == {
+            "manifest.json",
+            "recent-errors.log",
+            "journal.log",
+        }
 
 
 def test_database_secrets_returns_only_auth_redaction_values(tmp_path: Path) -> None:

@@ -5,6 +5,7 @@ import httpx
 from outpost.config import AIConfig
 
 from .hailo import HailoProvider
+from .hailo_vlm import HailoVLMProvider
 from .models import InferenceProvider
 from .null import NullProvider
 from .ollama import OllamaProvider
@@ -19,6 +20,8 @@ def create_provider(
         config.timeout_s,
         config.max_output_tokens,
     )
+    if config.provider == "hailo_vlm":
+        return HailoVLMProvider(config.hailo_vlm, *common)
     if config.provider == "hailo":
         return HailoProvider(config.hailo, *common, client=client)
     if config.provider == "llamacpp":

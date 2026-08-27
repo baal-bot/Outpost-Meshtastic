@@ -23,6 +23,7 @@ wheel = sys.argv[1]
 required = {
     "outpost/__main__.py",
     "outpost/diagnostics.py",
+    "outpost/onboarding.py",
     "outpost/setup_token.py",
     "outpost/store/migrations/0000_core.sql",
     "outpost/store/migrations/0104_digests.sql",
@@ -47,7 +48,7 @@ with zipfile.ZipFile(wheel) as archive:
 missing = sorted(required - names)
 if missing:
     raise SystemExit(f"wheel is missing runtime files: {', '.join(missing)}")
-for command in ("outpost-diagnostics", "outpost-setup-token"):
+for command in ("outpost-diagnostics", "outpost-onboarding", "outpost-setup-token"):
     if command not in entry_points:
         raise SystemExit(f"wheel is missing console command: {command}")
 PY

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import time
@@ -10,12 +11,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import make_asgi_app
 from pydantic import BaseModel, Field
 
 from outpost import __version__
+from outpost.ai import AIService
+from outpost.ai.store import AIStore
 from outpost.bbs.admin import BBSAdmin
 from outpost.env import (
     AstronomyService,
@@ -25,7 +28,11 @@ from outpost.env import (
     WaypointService,
     WeatherService,
 )
-from outpost.fed import FederationPeerService
+from outpost.fed import (
+    FederationPeerService,
+    FederationRelayService,
+    FederationTopologyService,
+)
 from outpost.operator_context import (
     current_actor,
     current_actor_ref,
@@ -97,6 +104,29 @@ class WatchSettingsBody(BaseModel):
     emergency_keywords: list[str] | None = None
     emergency_cooldown_minutes: int | None = None
     escalation: dict[str, Any] | None = None
+
+
+class AITestBody(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+
+
+class KBDocumentBody(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1, max_length=12_000)
+    slug: str | None = Field(default=None, max_length=64)
+
+
+class AIRatingBody(BaseModel):
+    rating: Literal[-1, 0, 1]
+
+
+class AIPromoteBody(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+
+
+class AIRefusalBody(BaseModel):
+    phrase: str = Field(min_length=3, max_length=120)
+    reason: str = Field(min_length=1, max_length=120)
 
 
 class MemberPatchBody(BaseModel):
@@ -191,6 +221,10 @@ class IncidentPatchBody(BaseModel):
 class IncidentUpdateBody(BaseModel):
     kind: Literal["ack", "update"]
     note: str = ""
+
+
+class IncidentMergeBody(BaseModel):
+    target_id: int = Field(gt=0)
 
 
 class AlertCreateBody(BaseModel):
@@ -296,6 +330,46 @@ class FederationMailBody(BaseModel):
     body: str = Field(min_length=1, max_length=800)
 
 
+def _default_relay_scopes() -> list[Literal["incident", "request", "receipt", "opaque"]]:
+    return ["incident", "request"]
+
+
+class FederationRelayPolicyBody(BaseModel):
+    enabled: bool = False
+    paused: bool = False
+    scopes: list[Literal["incident", "request", "receipt", "opaque"]] = Field(
+        default_factory=_default_relay_scopes, max_length=4
+    )
+    max_stored_items: int = Field(default=50, ge=1, le=500)
+    max_stored_bytes: int = Field(default=65_536, ge=1_024, le=1_048_576)
+    rate_per_hour: int = Field(default=20, ge=1, le=200)
+    airtime_seconds_per_hour: float = Field(default=30, ge=1, le=300)
+
+
+class FederationRelayCreateBody(BaseModel):
+    destination: str = Field(pattern=r"^![0-9a-fA-F]{8}$")
+    scope: Literal["incident", "request", "receipt"]
+    payload: dict[str, Any]
+    expires_in: int = Field(default=86_400, ge=60, le=604_800)
+    hop_limit: int = Field(default=3, ge=1, le=4)
+    idempotency_key: str | None = Field(default=None, max_length=64)
+
+
+class FederationRelayActionBody(BaseModel):
+    action: Literal["pause", "resume", "purge"]
+
+
+class FederationRelayOriginBody(BaseModel):
+    state: Literal["trusted", "rejected"]
+
+
+class FederationTopologyPolicyBody(BaseModel):
+    share_location: bool = False
+    location_lat: float | None = Field(default=None, ge=-90, le=90)
+    location_lon: float | None = Field(default=None, ge=-180, le=180)
+    precision_km: float = Field(default=10, ge=1, le=100)
+
+
 class MailConversationStateBody(BaseModel):
     state: Literal["read", "unread", "archive", "active"]
 
@@ -380,6 +454,11 @@ def create_web_app(
     ) = None,
     same_events: SameService | None = None,
     same_receiver_health: Callable[[], dict[str, Any]] | None = None,
+    ai_service: AIService | None = None,
+    ai_store: AIStore | None = None,
+    ai_test: Callable[[str], Awaitable[dict[str, object]]] | None = None,
+    federation_relay: FederationRelayService | None = None,
+    federation_topology: FederationTopologyService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Outpost API", version=__version__, docs_url="/api/docs")
 
@@ -423,6 +502,7 @@ def create_web_app(
             or path.startswith("/api/v1/federation/mqtt")
             or path.startswith("/api/v1/federation/origins")
             or path.startswith("/api/v1/config/watch")
+            or path.startswith("/api/v1/ai")
             or path.startswith("/api/v1/alerts")
             or path.startswith("/api/v1/environment/cap")
             or path.startswith("/api/v1/environment/earthquakes")
@@ -436,6 +516,7 @@ def create_web_app(
             path.startswith("/api/v1/auth/accounts")
             or path.startswith("/api/v1/auth/sessions")
             or path.startswith("/api/v1/audit")
+            or path.startswith("/api/v1/ai")
             or path.startswith("/api/v1/backups")
             or path.startswith("/api/v1/mail/")
             or path.startswith("/api/v1/members/export")
@@ -464,6 +545,7 @@ def create_web_app(
         path = request.url.path
         public = path in {
             "/api/v1/health",
+            "/api/v1/diagnostics/status",
             "/api/v1/auth/login",
             "/api/v1/auth/setup",
         } or path.startswith("/api/v1/recovery/restores/")
@@ -636,6 +718,13 @@ def create_web_app(
     async def favicon() -> Response:
         icon = Path(static_dir or "") / "favicon.svg"
         return FileResponse(icon, media_type="image/svg+xml")
+
+    @app.get("/generate_204", include_in_schema=False, response_model=None)
+    @app.get("/hotspot-detect.html", include_in_schema=False, response_model=None)
+    @app.get("/ncsi.txt", include_in_schema=False, response_model=None)
+    @app.get("/connecttest.txt", include_in_schema=False, response_model=None)
+    async def captive_setup_entry() -> RedirectResponse:
+        return RedirectResponse("/", status_code=307)
 
     @app.get("/tiles/{zoom}/{x}/{y}.png", response_model=None)
     async def tile_image(zoom: int, x: int, y: int) -> Response:
@@ -872,6 +961,95 @@ def create_web_app(
             "version": __version__,
         }
 
+    @app.get("/api/v1/diagnostics/status", response_class=JSONResponse, response_model=None)
+    async def diagnostic_status(request: Request) -> dict[str, Any] | Response:
+        host = request.client.host if request.client is not None else ""
+        try:
+            local_request = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            local_request = False
+        if not local_request:
+            return JSONResponse(
+                {"error": {"code": "loopback_required", "message": "Local access required."}},
+                status_code=403,
+            )
+        status = status_provider()
+        tasks = status.get("tasks", {})
+        if not isinstance(tasks, dict):
+            tasks = {}
+        safe_tasks = {
+            str(name): {
+                key: value
+                for key, value in task.items()
+                if key in {"state", "started_at", "last_ok_at", "stopped_at"}
+            }
+            for name, task in tasks.items()
+            if isinstance(task, dict)
+        }
+        radio_config = status.get("radio_config", {})
+        safe_radio_config = (
+            {
+                key: value
+                for key, value in radio_config.items()
+                if key in {"region", "preset", "channels", "missing_policy_channels"}
+            }
+            if isinstance(radio_config, dict)
+            else {}
+        )
+        ai = status.get("ai", {})
+        safe_ai = (
+            {
+                key: value
+                for key, value in ai.items()
+                if key
+                in {
+                    "provider",
+                    "model",
+                    "external",
+                    "pending",
+                    "circuit_open",
+                    "circuit_open_until",
+                }
+            }
+            if isinstance(ai, dict)
+            else {}
+        )
+        receiver = status.get("same_receiver", {})
+        safe_receiver = (
+            {
+                key: value
+                for key, value in receiver.items()
+                if key
+                in {
+                    "state",
+                    "restart_count",
+                    "last_audio_at",
+                    "last_signal_at",
+                    "last_decode_at",
+                    "next_restart_at",
+                }
+            }
+            if isinstance(receiver, dict)
+            else {}
+        )
+        providers = weather.provider_health() if weather is not None else {}
+        safe_providers = {
+            str(name): {
+                key: value for key, value in provider.items() if key in {"status", "failures"}
+            }
+            for name, provider in providers.items()
+            if isinstance(provider, dict)
+        }
+        return {
+            "radio": status.get("radio", "unknown"),
+            "radio_config": safe_radio_config,
+            "tasks_healthy": status.get("tasks_healthy"),
+            "tasks": safe_tasks,
+            "ai": safe_ai,
+            "same_receiver": safe_receiver,
+            "providers": safe_providers,
+        }
+
     if restore_coordinator is not None:
 
         @app.get("/api/v1/recovery/restores/{job_id}", response_model=None)
@@ -885,6 +1063,109 @@ def create_web_app(
             return job
 
     if federation is not None:
+        if federation_topology is not None:
+
+            @app.get("/api/v1/federation/topology")
+            async def federation_topology_view() -> dict[str, Any]:
+                return await federation_topology.overview()
+
+            @app.put("/api/v1/federation/topology/peers/{mesh_id}", response_model=None)
+            async def federation_topology_policy(
+                mesh_id: str, body: FederationTopologyPolicyBody
+            ) -> dict[str, Any] | Response:
+                try:
+                    policy = await federation_topology.set_policy(
+                        mesh_id, **body.model_dump(), actor=current_actor()
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {
+                            "error": {
+                                "code": "topology_policy_failed",
+                                "message": str(error),
+                            }
+                        },
+                        status_code=409,
+                    )
+                return policy.json()
+
+        if federation_relay is not None:
+
+            @app.get("/api/v1/federation/relay")
+            async def federation_relay_view() -> dict[str, Any]:
+                return {
+                    "summary": await federation_relay.summary(),
+                    "queue": await federation_relay.queue(),
+                    "policies": [policy.json() for policy in await federation_relay.policies()],
+                    "origins": await federation_relay.origins(),
+                }
+
+            @app.post("/api/v1/federation/relay", response_model=None)
+            async def federation_relay_create(
+                body: FederationRelayCreateBody,
+            ) -> dict[str, str] | Response:
+                try:
+                    envelope_id = await federation_relay.create(
+                        body.destination,
+                        body.scope,
+                        body.payload,
+                        expires_in=body.expires_in,
+                        hop_limit=body.hop_limit,
+                        idempotency_key=body.idempotency_key,
+                        actor=current_actor(),
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "relay_create_failed", "message": str(error)}},
+                        status_code=409,
+                    )
+                return {"envelope_id": envelope_id, "state": "queued"}
+
+            @app.put("/api/v1/federation/relay/peers/{mesh_id}", response_model=None)
+            async def federation_relay_policy(
+                mesh_id: str, body: FederationRelayPolicyBody
+            ) -> dict[str, Any] | Response:
+                try:
+                    policy = await federation_relay.set_policy(
+                        mesh_id,
+                        **body.model_dump(),
+                        actor=current_actor(),
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "relay_policy_failed", "message": str(error)}},
+                        status_code=409,
+                    )
+                return policy.json()
+
+            @app.patch("/api/v1/federation/relay/origins/{origin_node}", response_model=None)
+            async def federation_relay_origin(
+                origin_node: str, body: FederationRelayOriginBody
+            ) -> dict[str, str] | Response:
+                try:
+                    await federation_relay.review_origin(
+                        origin_node.lower(), body.state, current_actor()
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "relay_origin_failed", "message": str(error)}},
+                        status_code=409,
+                    )
+                return {"origin_node": origin_node.lower(), "state": body.state}
+
+            @app.patch("/api/v1/federation/relay/{envelope_id}", response_model=None)
+            async def federation_relay_action(
+                envelope_id: str, body: FederationRelayActionBody
+            ) -> dict[str, str] | Response:
+                try:
+                    await federation_relay.item_action(envelope_id, body.action, current_actor())
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "relay_action_failed", "message": str(error)}},
+                        status_code=409,
+                    )
+                return {"envelope_id": envelope_id, "state": body.action}
+
         if federation_mail_send is not None and database is not None:
 
             @app.get("/api/v1/federation/mail")
@@ -946,7 +1227,7 @@ def create_web_app(
         async def federation_peer_forget(mesh_id: str) -> dict[str, bool] | Response:
             try:
                 peer = await federation.by_mesh_id(mesh_id)
-                await federation.forget(mesh_id)
+                await federation.forget(mesh_id, current_actor())
             except ValueError as error:
                 return JSONResponse(
                     {"error": {"code": "peer_forget_failed", "message": str(error)}},
@@ -1437,6 +1718,100 @@ def create_web_app(
     if database is not None:
         member_triage = MemberTriageService(database)
 
+        if ai_service is not None and ai_store is not None:
+
+            @app.get("/api/v1/ai/status")
+            async def ai_status() -> dict[str, Any]:
+                return await ai_service.status()
+
+            @app.get("/api/v1/ai/interactions")
+            async def ai_interactions(limit: int = Query(100, ge=1, le=250)) -> dict[str, Any]:
+                return {"items": await ai_store.interactions(limit)}
+
+            @app.get("/api/v1/ai/kb")
+            async def ai_kb() -> dict[str, Any]:
+                return {"items": await ai_store.documents()}
+
+            @app.post("/api/v1/ai/kb", response_model=None)
+            async def ai_kb_create(body: KBDocumentBody) -> dict[str, Any] | Response:
+                try:
+                    document_id = await ai_store.save_document(**body.model_dump())
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_kb", "message": str(error)}},
+                        status_code=422,
+                    )
+                return {"id": document_id}
+
+            @app.patch("/api/v1/ai/kb/{document_id}", response_model=None)
+            async def ai_kb_update(
+                document_id: int, body: KBDocumentBody
+            ) -> dict[str, Any] | Response:
+                try:
+                    updated = await ai_store.save_document(
+                        **body.model_dump(), document_id=document_id
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_kb", "message": str(error)}},
+                        status_code=422,
+                    )
+                return {"id": updated}
+
+            @app.delete("/api/v1/ai/kb/{document_id}", response_model=None)
+            async def ai_kb_delete(document_id: int) -> dict[str, Any] | Response:
+                if not await ai_store.delete_document(document_id):
+                    return JSONResponse(
+                        {"error": {"code": "not_found", "message": "Document not found."}},
+                        status_code=404,
+                    )
+                return {"deleted": True}
+
+            @app.patch("/api/v1/ai/interactions/{interaction_id}/rating", response_model=None)
+            async def ai_rate(interaction_id: int, body: AIRatingBody) -> dict[str, Any] | Response:
+                if not await ai_store.rate(interaction_id, body.rating):
+                    return JSONResponse(
+                        {"error": {"code": "not_found", "message": "Interaction not found."}},
+                        status_code=404,
+                    )
+                return {"rated": body.rating}
+
+            @app.post("/api/v1/ai/interactions/{interaction_id}/promote", response_model=None)
+            async def ai_promote(
+                interaction_id: int, body: AIPromoteBody
+            ) -> dict[str, Any] | Response:
+                try:
+                    document_id = await ai_store.promote_interaction(interaction_id, body.title)
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_promotion", "message": str(error)}},
+                        status_code=422,
+                    )
+                return {"document_id": document_id}
+
+            @app.get("/api/v1/ai/refusal-rules")
+            async def ai_refusal_rules() -> dict[str, Any]:
+                return {"items": await ai_store.refusal_rules()}
+
+            @app.post("/api/v1/ai/refusal-rules", response_model=None)
+            async def ai_add_refusal(body: AIRefusalBody) -> dict[str, Any] | Response:
+                try:
+                    rule_id = await ai_store.add_refusal_rule(
+                        body.phrase, body.reason, current_actor()
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_rule", "message": str(error)}},
+                        status_code=422,
+                    )
+                return {"id": rule_id}
+
+            if ai_test is not None:
+
+                @app.post("/api/v1/ai/test")
+                async def ai_test_console(body: AITestBody) -> dict[str, object]:
+                    return await ai_test(body.question)
+
         if settings is not None:
 
             @app.get("/api/v1/config")
@@ -1785,11 +2160,15 @@ def create_web_app(
                     for row in await database.read("SELECT mesh_id,node_name FROM fed_peer")
                 }
                 for value in values:
-                    uid = str(value.get("uid", ""))
-                    mesh_id = uid.split(":", 1)[0] if uid.startswith("!") and ":" in uid else None
-                    value["remote"] = mesh_id is not None
+                    origins = await incidents.origins(int(value["id"]))
+                    remote_origins = [
+                        origin for origin in origins if origin["source_kind"] == "federation"
+                    ]
+                    mesh_id = str(remote_origins[0]["origin_node"]) if remote_origins else None
+                    value["remote"] = bool(remote_origins)
                     value["origin_mesh_id"] = mesh_id
                     value["origin_name"] = peers.get(mesh_id, mesh_id) if mesh_id else None
+                    value["origins"] = origins
                 return values
 
             @app.get("/api/v1/incidents")
@@ -1809,6 +2188,7 @@ def create_web_app(
                     """
                     SELECT * FROM incident
                     WHERE lat IS NOT NULL AND lon IS NOT NULL AND created_at<=?
+                      AND merged_into_id IS NULL
                       AND (
                         status IN ('open','monitoring')
                         OR (status='resolved' AND resolved_at>=?)
@@ -1920,51 +2300,108 @@ def create_web_app(
                         {"error": {"code": "not_found", "message": "Incident not found."}},
                         status_code=404,
                     )
-                return {**value.json(), "updates": await incidents.updates(value.id, 100)}
+                canonical_id = value.merged_into_id or value.id
+                canonical = await incidents.by_id(canonical_id)
+                return {
+                    **value.json(),
+                    "canonical": (
+                        canonical.json() if canonical and canonical.id != value.id else None
+                    ),
+                    "updates": await incidents.updates(canonical_id, 100),
+                    "origins": await incidents.origins(canonical_id),
+                    "provenance": await incidents.provenance(canonical_id),
+                    "match_candidates": await incidents.match_candidates(value.id),
+                }
 
             @app.patch("/api/v1/incidents/{incident_id}", response_model=None)
             async def incident_patch(
                 incident_id: int, body: IncidentPatchBody
             ) -> dict[str, Any] | Response:
-                value = await incidents.by_id(incident_id)
-                if value is None:
-                    return JSONResponse(
-                        {"error": {"code": "not_found", "message": "Incident not found."}},
-                        status_code=404,
-                    )
                 changes = body.model_dump(exclude_none=True)
                 if not changes:
                     return JSONResponse(
                         {"error": {"code": "empty_update", "message": "No changes supplied."}},
                         status_code=400,
                     )
-                assignments, params = [], []
-                if body.status:
-                    assignments.append("status=?")
-                    params.append(body.status)
-                    if body.status in {"resolved", "false_alarm"}:
-                        assignments.extend(["resolved_at=unixepoch()", "resolved_by=?"])
-                        params.append(current_actor())
-                if body.severity:
-                    assignments.append("severity=?")
-                    params.append(body.severity)
-                if body.resolution is not None:
-                    assignments.append("resolution_note=?")
-                    params.append(body.resolution[:500])
-                assignments.append("updated_at=unixepoch()")
-                params.append(incident_id)
-                await database.write(
-                    f"UPDATE incident SET {','.join(assignments)} WHERE id=?",  # noqa: S608
-                    tuple(params),
-                )
+                try:
+                    updated = await incidents.operator_patch(
+                        incident_id,
+                        status=body.status,
+                        severity=body.severity,
+                        resolution=body.resolution,
+                        actor=current_actor(),
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_update", "message": str(error)}},
+                        status_code=422,
+                    )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
                     "VALUES('web',?,'incident.update',?,?,unixepoch())",
                     (current_actor_ref(), f"incident:{incident_id}", ",".join(changes)),
                 )
-                updated = await incidents.by_id(incident_id)
-                assert updated is not None
                 return updated.json()
+
+            @app.post("/api/v1/incidents/{source_id}/merge", response_model=None)
+            async def incident_merge(
+                source_id: int, body: IncidentMergeBody
+            ) -> dict[str, Any] | Response:
+                try:
+                    value = await incidents.merge(source_id, body.target_id, current_actor())
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_merge", "message": str(error)}},
+                        status_code=422,
+                    )
+                await database.write(
+                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                    "VALUES('web',?,'incident.merge',?,?,unixepoch())",
+                    (
+                        current_actor_ref(),
+                        f"incident:{source_id}",
+                        f"canonical incident:{body.target_id}",
+                    ),
+                )
+                return value.json()
+
+            @app.post("/api/v1/incidents/{source_id}/unmerge", response_model=None)
+            async def incident_unmerge(source_id: int) -> dict[str, Any] | Response:
+                try:
+                    value = await incidents.unmerge(source_id, current_actor())
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_unmerge", "message": str(error)}},
+                        status_code=422,
+                    )
+                await database.write(
+                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                    "VALUES('web',?,'incident.unmerge',?,?,unixepoch())",
+                    (current_actor_ref(), f"incident:{source_id}", "identity restored"),
+                )
+                return value.json()
+
+            @app.post("/api/v1/incidents/{source_id}/reject-match", response_model=None)
+            async def incident_reject_match(
+                source_id: int, body: IncidentMergeBody
+            ) -> dict[str, bool] | Response:
+                try:
+                    await incidents.reject_match(source_id, body.target_id, current_actor())
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_match", "message": str(error)}},
+                        status_code=422,
+                    )
+                await database.write(
+                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                    "VALUES('web',?,'incident.match_reject',?,?,unixepoch())",
+                    (
+                        current_actor_ref(),
+                        f"incident:{source_id}",
+                        f"candidate incident:{body.target_id}",
+                    ),
+                )
+                return {"ok": True}
 
             @app.post("/api/v1/incidents/{incident_id}/updates", response_model=None)
             async def incident_update(

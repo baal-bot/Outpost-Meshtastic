@@ -56,11 +56,12 @@ Every row above is **provisional** and is re-verified on the actual hardware dur
 them costs a config change, not a rewrite.
 
 **REQ-AI-002** — The system **MUST NOT** hard-depend on Hailo. Inference is behind a
-provider interface with **five** implementations — four real backends plus `null` — all
+provider interface with **six** implementations — five real backends plus `null` — all
 first-class:
 
 | Provider | Backend | Notes |
 |---|---|---|
+| `hailo_vlm` | Direct HailoRT 5.3 Python VLM API | Native Qwen3-VL HEF; local, serialised, 2048-token ceiling. |
 | `hailo` | `hailo-ollama` at `127.0.0.1:8000`, `/api/chat` | Low power, offloads CPU. 2048-token ceiling. |
 | `llamacpp` | `llama-server` (`llama.cpp`) on the Pi CPU | Arbitrary models, arbitrary context, ~10–20% faster than Ollama on the same model |
 | `ollama` | Standard Ollama, local or on a LAN host | For operators with a beefier box on the LAN |
@@ -122,7 +123,8 @@ the common path.
 
 | Provider | Suggested starting point | Rationale | Availability |
 |---|---|---|---|
-| `hailo` | `qwen2.5-instruct:1.5b` | Best instruction-following of the observed served set | Confirmed in a published `/hailo/v1/list` dump |
+| `hailo_vlm` | `Qwen3-VL-2B-Instruct` | Current native default; Outpost uses text input while retaining a future vision path | Loaded and exercised on target-node HailoRT 5.3.0 |
+| `hailo` | `qwen2.5:1.5b` | Rollback model; named `qwen2.5-instruct:1.5b` in suite 5.1.1 | Confirmed in target-node 5.1.1 and 5.3.0 catalog dumps |
 | `hailo` (tools) | `qwen2-1.5b-instruct-function-calling-v1` | Only tool-tuned model in the GenAI zoo | **In the zoo, not observed in `/hailo/v1/list`** — verify on the unit (doc 15 U3) |
 | `hailo` (newer) | `qwen3-1.7b-instruct` | Zoo ceiling | **Same caveat** (doc 15 U3) |
 | `llamacpp` | `Qwen2.5-1.5B-Instruct-Q4_K_M` | Fast on Pi 5 CPU, no 2048 ceiling | Always |

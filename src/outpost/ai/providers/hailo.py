@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import httpx
 
 from outpost.config import AIProviderEndpoint
 
-from .models import Capabilities, ProviderHealth, ProviderState, ProviderUnavailable
+from .models import Capabilities, ChatMessage, ProviderHealth, ProviderState, ProviderUnavailable
 from .ollama import OllamaProvider
 
 
@@ -55,3 +56,13 @@ class HailoProvider(OllamaProvider):
             idle_unloads=True,
             source="configured",
         )
+
+    def _message_payload(self, messages: tuple[ChatMessage, ...]) -> list[dict[str, Any]]:
+        payload = super()._message_payload(messages)
+        # Hailo-Ollama 5.3.0 passes literal control characters into the GenAI
+        # JSON renderer, which rejects otherwise valid multiline chat content.
+        for message in payload:
+            content = message.get("content")
+            if isinstance(content, str):
+                message["content"] = " ".join(content.split())
+        return payload

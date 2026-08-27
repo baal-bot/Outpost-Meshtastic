@@ -41,8 +41,10 @@ Create a credential-redacted diagnostic archive with:
 sudo outpost-diagnostics --output /var/lib/outpost/outpost-diagnostics.zip
 ```
 
-The archive is mode 0600. Review it before sharing; secret redaction does not make ordinary radio or
-community activity non-sensitive.
+The default mode-0600 archive contains platform/schema/storage evidence, systemd and loopback-only
+task/radio/provider health, and recent warning/error lines. It omits the broader journal and never
+queries message bodies. Use `--include-journal` only when necessary. Review every archive member
+before sharing; redaction does not make ordinary radio or community activity non-sensitive.
 
 ## Backups
 
@@ -58,13 +60,15 @@ operator's session. A failed restore automatically returns to the pre-restore sn
 
 ## Upgrades
 
-Prefer a tag or known commit over a moving branch. `deploy/update.sh` stages an isolated release;
-the installer takes a verified database snapshot and rolls back automatically if health fails.
+Use a verified `v*` tag for production. `deploy/update.sh` authenticates the release artifacts and
+exact source commit before staging an isolated release; the installer takes a verified database
+snapshot and rolls back automatically if health fails. Development refs are explicitly unsigned.
 Compare `/etc/outpost/config.yaml` with `.dist`, then perform dashboard and mesh round trips. Retain
 the prior release and backup until verification is complete. Use `sudo outpost-rollback` for a
 compatibility-checked rollback. The command verifies its release metadata before downtime and
 automatically restores the matching pre-upgrade database when the older code cannot read the live
 schema. It also keeps a pre-attempt safety snapshot and restores it if rollback health checks fail.
+The verification and compromise-response procedures are in [Releases](RELEASES.md).
 
 ## Radio maintenance
 

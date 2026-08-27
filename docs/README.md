@@ -7,12 +7,13 @@ detailed intended product design.
 
 1. [Features and maturity](FEATURES.md)
 2. [Installation](INSTALLATION.md)
-3. [Configuration](CONFIGURATION.md)
-4. [Operations](OPERATIONS.md)
-5. [Data retention and storage](RETENTION.md)
-6. [Troubleshooting](TROUBLESHOOTING.md)
-7. [Dashboard and API](DASHBOARD.md)
-8. [Local AI](AI.md)
+3. [Field-appliance onboarding](ONBOARDING.md)
+4. [Configuration](CONFIGURATION.md)
+5. [Operations](OPERATIONS.md)
+6. [Data retention and storage](RETENTION.md)
+7. [Troubleshooting](TROUBLESHOOTING.md)
+8. [Dashboard and API](DASHBOARD.md)
+9. [Local AI](AI.md)
 
 ## Members and responders
 
@@ -22,6 +23,9 @@ detailed intended product design.
 ## Federation operators
 
 - [Federation guide](FEDERATION.md)
+- [Incident identity and reconciliation](INCIDENT-RECONCILIATION.md)
+- [Signed relay protocol and operations](FEDERATION-RELAY-PROTOCOL.md)
+- [Federation topology, health, and location privacy](FEDERATION-TOPOLOGY.md)
 - [Federation acceptance backlog](FEDERATION-ACCEPTANCE-BACKLOG.md)
 - [Phase 5 architecture notes](PHASE5-ARCHITECTURE.md)
 
@@ -31,6 +35,9 @@ detailed intended product design.
 - [Development and contributing](DEVELOPMENT.md)
 - [Dashboard design system](UI-DESIGN-SYSTEM.md)
 - [Dashboard performance budget](PERFORMANCE.md)
+- [Releases and artifact verification](RELEASES.md)
+- [Release evidence checklist](RELEASE-CHECKLIST.md)
+- [August 2026 red-team remediation exit audit](RED-TEAM-REMEDIATION-2026-08.md)
 - [Detailed specification](outpost-spec/README.md)
 - [Phase 3 acceptance](PHASE3-ACCEPTANCE.md)
 - [Phase 4 acceptance](PHASE4-ACCEPTANCE.md)
