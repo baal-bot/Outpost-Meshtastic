@@ -160,7 +160,14 @@ async def test_guided_mail_and_incident_inputs_need_no_command_syntax(tmp_path) 
 
 @pytest.mark.asyncio
 async def test_typo_intent_channel_boundary_and_cold_number_recovery(tmp_path) -> None:
-    app = OutpostApp(Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}}))
+    app = OutpostApp(
+        Config.model_validate(
+            {
+                "store": {"path": str(tmp_path / "outpost.db")},
+                "channels": {0: {"name": "public", "bbs": "full"}},
+            }
+        )
+    )
     await app.database.open()
     try:
         fuzzy = await send(app, 1, "!00000001", "bords")

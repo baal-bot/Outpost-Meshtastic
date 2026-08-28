@@ -71,10 +71,10 @@ export async function initRadioConfigurator({api}) {
     value("radio-channel-psk", "");
     checked("radio-channel-generate", false);
     byId("radio-channel-key-state").textContent = `Current radio key: ${channel.psk}`;
-    const required = (state.outpost_policy_channels || []).includes(Number(index));
-    byId("radio-channel-policy").textContent = required
-      ? "Required by current Outpost policy. Change policy before disabling this slot."
-      : "This slot is not referenced by current Outpost policy.";
+    const policy = (state.outpost_channel_policies || []).find((entry) => entry.index === Number(index));
+    byId("radio-channel-policy").textContent = policy
+      ? `Outpost policy · ${policy.name} · BBS ${policy.bbs.replaceAll("_", " ")} · reports ${policy.accept_reports ? "accepted" : "off"} · alerts ${policy.alerts ? "on" : "off"} · AI ${policy.ai ? "on" : "off"}. This slot cannot be disabled until policy changes.`
+      : "No Outpost policy · commands received on this active slot are rejected.";
   }
 
   function renderMqttChannel(index) {

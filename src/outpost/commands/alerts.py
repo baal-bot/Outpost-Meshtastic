@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from outpost.router.models import (
+    ChannelUse,
     CommandContext,
     CommandSpec,
     Line,
@@ -55,6 +56,7 @@ def specs(service: AlertService) -> list[CommandSpec]:
             help_short="ALERT <severity> <inc> <headline> · responder broadcast",
             handler=alert,
             mutates=True,
+            channel_use=ChannelUse.ALERT,
         ),
         CommandSpec(
             "ACK",
@@ -67,5 +69,6 @@ def specs(service: AlertService) -> list[CommandSpec]:
             help_short="ACK <inc> [note] · acknowledge active alert",
             handler=ack,
             mutates=True,
+            channel_use=ChannelUse.REPORT,
         ),
     ]

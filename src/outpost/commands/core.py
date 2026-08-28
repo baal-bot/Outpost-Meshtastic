@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from outpost.render.catalogue import message
+from outpost.router.channel_policy import available as channel_available
+from outpost.router.channel_policy import decide as channel_decision
 from outpost.router.models import (
     CommandContext,
     CommandSpec,
@@ -24,7 +26,25 @@ def _available(ctx: CommandContext, command: str) -> bool:
     if not spec or TrustLevel.parse(ctx.member.trust) < spec.min_trust:
         return False
     member_only_actions = {"POST", "REPLY", "SEND", "SUB", "UNSUB", "RMPOST"}
-    return token not in member_only_actions or ctx.member.handle is not None
+    if token in member_only_actions and ctx.member.handle is None:
+        return False
+    return channel_available(
+        spec,
+        direct=ctx.message.is_direct,
+        policy=ctx.channel_policy,
+    )
+
+
+def _broadcast_shortcuts(ctx: CommandContext) -> str:
+    candidates = (
+        ("WX", "WX"),
+        ("WARN", "WARN"),
+        ("INCS", "INCIDENTS"),
+        ("OK", "OK"),
+        ("BOARDS", "BOARDS"),
+        ("ASK", "ASK"),
+    )
+    return " · ".join(f"!{label}" for label, command in candidates if _available(ctx, command))
 
 
 def _choices(
@@ -503,6 +523,7 @@ async def help_command(ctx: CommandContext) -> Response:
             if spec.module in modules
             and ctx.member.trust != "blocked"
             and TrustLevel.parse(ctx.member.trust) >= spec.min_trust
+            and _available(ctx, spec.name)
         ]
 
     topic = ctx.args.strip().upper()
@@ -515,6 +536,13 @@ async def help_command(ctx: CommandContext) -> Response:
             return _menu_screen(ctx, "SHORTCUTS")
         spec = ctx.registry.resolve(topic)
         if spec:
+            if not _available(ctx, spec.name):
+                decision = channel_decision(
+                    spec,
+                    direct=ctx.message.is_direct,
+                    policy=ctx.channel_policy,
+                )
+                return _detail(decision.message or f"{spec.name} is unavailable to this account.")
             return _detail(spec.help_short)
         if topic == "PRIVACY":
             return _detail(
@@ -536,12 +564,13 @@ async def help_command(ctx: CommandContext) -> Response:
         return _detail(f"Help topics: {' · '.join(topics)} · PRIVACY")
     if ctx.message.is_direct:
         return _home_screen(ctx)
-    return _detail("DM this node for the menu. Here: !WX · !WARN · !INCS · !OK · !?")
+    shortcuts = _broadcast_shortcuts(ctx)
+    return _detail(f"DM this node for the menu. Here: {shortcuts}")
 
 
 async def menu(ctx: CommandContext) -> Response:
     if not ctx.message.is_direct:
-        return _detail("Menu is DM only. Try !WX, !WARN, !INCS, or !OK here.")
+        return _detail(f"Menu is DM only. Here: {_broadcast_shortcuts(ctx)}")
     return _menu_screen(ctx, ctx.args)
 
 

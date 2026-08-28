@@ -3,11 +3,47 @@ from copy import deepcopy
 import pytest
 from fastapi.testclient import TestClient
 
+from outpost.app import OutpostApp
 from outpost.clock import VirtualClock
+from outpost.config import Config
 from outpost.fed import FederationPeerService
 from outpost.store import Database
 from outpost.web.api import create_web_app
 from outpost.web.auth import WebAuthService
+
+
+def test_radio_configuration_surfaces_policy_drift(tmp_path) -> None:
+    app = OutpostApp(
+        Config.model_validate(
+            {
+                "store": {"path": str(tmp_path / "outpost.db")},
+                "channels": {
+                    0: {"name": "public", "bbs": "read_only"},
+                    2: {"name": "outpost", "bbs": "full", "ai": True},
+                },
+            }
+        )
+    )
+
+    status = app._radio_configuration_context(
+        {
+            "available": True,
+            "channels": [
+                {"index": 0, "role": "PRIMARY"},
+                {"index": 1, "role": "SECONDARY"},
+                {"index": 2, "role": "DISABLED"},
+            ],
+            "warnings": ["Existing radio warning."],
+        }
+    )
+
+    assert status["outpost_channel_policies"][0]["bbs"] == "read_only"
+    assert status["outpost_channel_policies"][1]["ai"] is True
+    assert status["warnings"] == [
+        "Existing radio warning.",
+        "Outpost policy references inactive radio slot(s): 2.",
+        "Active radio slot(s) have no Outpost policy and reject commands: 1.",
+    ]
 
 
 @pytest.mark.asyncio

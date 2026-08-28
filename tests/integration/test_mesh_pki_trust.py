@@ -40,6 +40,7 @@ async def test_elevated_mesh_commands_require_reviewed_direct_pki_and_block_repl
             {
                 "store": {"path": str(tmp_path / "outpost.db")},
                 "modules": {"watch": {"enabled": True}},
+                "channels": {0: {"name": "public", "alerts": True}},
             }
         )
     )

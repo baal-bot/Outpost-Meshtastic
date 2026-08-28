@@ -9,6 +9,7 @@ from outpost.env import (
     WeatherService,
 )
 from outpost.router.models import (
+    ChannelUse,
     CommandContext,
     CommandSpec,
     Line,
@@ -283,6 +284,7 @@ def specs(
                 help_short="WARN [number] · active official alerts",
                 mutates=False,
                 handler=warn,
+                channel_use=ChannelUse.ALERT,
             )
         )
     if astronomy is not None:

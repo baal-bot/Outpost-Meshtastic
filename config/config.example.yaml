@@ -30,6 +30,9 @@ airtime:
   class_shares: {alert: 0.30, reply: 0.30, ai: 0.15, bulletin: 0.05, digest: 0.10, federation: 0.10}
   max_parts: {reply: 3, ai: 2, digest: 4, alert: 2, bulletin: 2}
 channels:
+  # Unlisted broadcast slots reject commands. DM use follows module and trust policy.
+  # alerts controls WARN/incident views and responder alert/event operations.
+  # accept_reports controls REPORT/CONFIRM/DISPUTE/ACK intake.
   0: {name: public, ai: false, bbs: read_only, alerts: true, accept_reports: true}
   2: {name: outpost, ai: true, bbs: full, alerts: true, accept_reports: true}
   3: {name: watch, ai: false, bbs: none, alerts: true, accept_reports: true}

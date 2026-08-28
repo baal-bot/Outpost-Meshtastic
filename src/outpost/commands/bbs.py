@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from outpost.bbs.service import BBSService
 from outpost.router.models import (
+    ChannelUse,
     CommandContext,
     CommandSpec,
     ContextFrame,
@@ -403,6 +404,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             help_short="BOARDS · list boards",
             handler=boards,
             mutates=False,
+            channel_use=ChannelUse.BBS_READ,
             **base,
         ),
         CommandSpec(
@@ -411,6 +413,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             help_short="BOARD <name> · recent threads",
             handler=board,
             mutates=False,
+            channel_use=ChannelUse.BBS_READ,
             **base,
         ),
         CommandSpec(
@@ -419,6 +422,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             help_short="POST <board> <text>",
             handler=post,
             mutates=True,
+            channel_use=ChannelUse.BBS_WRITE,
             **base,
         ),
         CommandSpec(
@@ -427,6 +431,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             help_short="READ <n> · open thread",
             handler=read,
             mutates=False,
+            channel_use=ChannelUse.BBS_READ,
             **base,
         ),
         CommandSpec(
@@ -435,6 +440,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             help_short="RE [thread] <text>",
             handler=reply,
             mutates=True,
+            channel_use=ChannelUse.BBS_WRITE,
             **base,
         ),
         CommandSpec(
@@ -443,6 +449,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             help_short="SEARCH <terms>",
             handler=search,
             mutates=False,
+            channel_use=ChannelUse.BBS_READ,
             **base,
         ),
         CommandSpec(
@@ -451,6 +458,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             help_short="NEW · unread digest",
             handler=new,
             mutates=True,
+            channel_use=ChannelUse.BBS_WRITE,
             **base,
         ),
         CommandSpec(
@@ -459,6 +467,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             help_short="MORE · next page",
             handler=more,
             mutates=False,
+            channel_use=ChannelUse.BBS_READ,
             **base,
         ),
         CommandSpec(
@@ -467,6 +476,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             help_short="SUB <board> [cadence]",
             handler=subscribe,
             mutates=True,
+            channel_use=ChannelUse.BBS_WRITE,
             **base,
         ),
         CommandSpec(
@@ -475,6 +485,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             help_short="UNSUB <board>",
             handler=unsubscribe,
             mutates=True,
+            channel_use=ChannelUse.BBS_WRITE,
             **base,
         ),
         CommandSpec(
@@ -483,6 +494,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             help_short="RMPOST <ref>",
             handler=remove_post,
             mutates=True,
+            channel_use=ChannelUse.BBS_WRITE,
             **base,
         ),
     ]

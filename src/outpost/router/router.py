@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import unicodedata
 from collections import defaultdict
@@ -13,6 +14,7 @@ from outpost.security.rate_limit import SAFETY_FLOOR, RateLimiter
 from outpost.store.members import MemberRepo
 from outpost.transport.models import InboundMessage
 
+from .channel_policy import CHANNEL_POLICY_REJECTIONS, decide
 from .intents import TOLERANT_REJECTIONS, IntentResolver
 from .models import CommandContext, Line, Response, ResponseKind, TrustLevel, TuiChoice, TuiScreen
 from .registry import CommandRegistry
@@ -189,6 +191,29 @@ class Router:
             return Response(ResponseKind.ERROR, [Line(message("unknown"))])
         if TrustLevel.parse(member.trust) < spec.min_trust:
             return Response(ResponseKind.ERROR, [Line(message("unknown"))])
+        policy = None if inbound.is_direct else self.config.channels.get(inbound.channel)
+        channel_decision = decide(spec, direct=inbound.is_direct, policy=policy)
+        if not channel_decision.allowed:
+            CHANNEL_POLICY_REJECTIONS.labels(
+                str(inbound.channel), spec.channel_use.value, channel_decision.reason
+            ).inc()
+            try:
+                await self.members.database.write(
+                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at,"
+                    "outcome) VALUES('mesh',?,'command.channel_policy_rejected',?,?,?,'denied')",
+                    (
+                        member.mesh_id,
+                        f"channel/{inbound.channel}/{spec.channel_use.value}",
+                        json.dumps({"reason": channel_decision.reason}, separators=(",", ":")),
+                        int(self.members.clock.now().timestamp()),
+                    ),
+                )
+            except Exception as error:
+                print(
+                    f"Channel policy audit failed: {type(error).__name__}",
+                    flush=True,
+                )
+            return Response(ResponseKind.ERROR, [Line(channel_decision.message)])
         if spec.min_trust >= TrustLevel.RESPONDER:
             authorized, _reason = await self.members.authorize_elevated(member, inbound, spec.name)
             if not authorized:
@@ -217,6 +242,7 @@ class Router:
             operator_contact=self.config.node.operator_contact,
             version=__version__,
             disclaimer=self.config.node.disclaimer,
+            channel_policy=policy,
             attribution=(
                 (" · Weather fallback data: Open-Meteo" if self.config.modules.env.enabled else "")
                 + (

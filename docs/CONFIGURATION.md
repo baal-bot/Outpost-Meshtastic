@@ -38,8 +38,21 @@ explicitly trusted bridge node IDs belong in `bridge_node_ids`.
 ### `channels`
 
 Keys are Meshtastic channel indices 0–7. Each controls display name, AI access, BBS policy (`none`,
-`read_only`, `full`), official alerts, and report acceptance. This does not replace the radio's
-region, modem preset, PSK, or channel setup.
+`read_only`, `full`), alerts, and report acceptance. Broadcast commands received on an index not
+listed here are rejected. Direct messages are governed by module and member-trust policy instead
+of the broadcast channel map.
+
+- `bbs`: `none` blocks board access, `read_only` permits browsing, and `full` permits authorized
+  writes. Actions such as `NEW` that change read state count as writes.
+- `accept_reports`: permits incident creation and member updates (`REPORT`, `CONFIRM`, `DISPUTE`,
+  and `ACK`) from the channel.
+- `alerts`: permits official-warning and incident views plus responder alert/event operations from
+  the channel. It does not independently enable report intake.
+- `ai`: permits AI commands from the channel; AI remains available by DM when its module is enabled.
+
+The radio configurator shows these effective rules per slot and warns when an active radio slot has
+no policy or a configured policy slot is inactive. This does not replace the radio's region, modem
+preset, PSK, or channel setup.
 
 ### `modules`
 

@@ -28,6 +28,17 @@ class ResponseKind(StrEnum):
     NONE = "none"
 
 
+class ChannelUse(StrEnum):
+    """The broadcast-channel capability a command requires."""
+
+    GENERAL = "general"
+    BBS_READ = "bbs_read"
+    BBS_WRITE = "bbs_write"
+    REPORT = "report"
+    ALERT = "alert"
+    AI = "ai"
+
+
 @dataclass(frozen=True)
 class TuiChoice:
     """One low-friction action displayed on a mesh TUI screen."""
@@ -90,6 +101,7 @@ class CommandSpec:
     help_short: str
     mutates: bool
     handler: CommandHandler
+    channel_use: ChannelUse = ChannelUse.GENERAL
 
 
 @dataclass
@@ -103,4 +115,5 @@ class CommandContext:
     operator_contact: str
     version: str
     disclaimer: str
+    channel_policy: Any | None = None
     attribution: str = ""

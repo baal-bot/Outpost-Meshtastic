@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from outpost.ai import AIService
-from outpost.config import Config
 from outpost.router.models import (
+    ChannelUse,
     CommandContext,
     CommandSpec,
     Line,
@@ -13,19 +13,8 @@ from outpost.router.models import (
 from outpost.transport.models import TrafficClass
 
 
-def specs(service: AIService, config: Config) -> list[CommandSpec]:
-    def allowed(ctx: CommandContext) -> bool:
-        if ctx.message.is_direct:
-            return True
-        policy = config.channels.get(ctx.message.channel)
-        return bool(policy and policy.ai)
-
+def specs(service: AIService) -> list[CommandSpec]:
     async def run(ctx: CommandContext, question: str) -> Response:
-        if not allowed(ctx):
-            return Response(
-                ResponseKind.ERROR,
-                [Line("AI is off on this channel. DM ASK <question> instead.")],
-            )
         result = await service.answer(
             question,
             ctx.member,
@@ -68,6 +57,7 @@ def specs(service: AIService, config: Config) -> list[CommandSpec]:
         max_parts=2,
         rate_key="commands",
         mutates=False,
+        channel_use=ChannelUse.AI,
     )
     return [
         CommandSpec(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from outpost.router.models import (
+    ChannelUse,
     CommandContext,
     CommandSpec,
     Line,
@@ -135,6 +136,7 @@ def specs(service: CheckinService) -> list[CommandSpec]:
             help_short="EVENT OPEN <policy> <name>|CLOSE",
             handler=event,
             mutates=True,
+            channel_use=ChannelUse.ALERT,
             **base,
         ),
     ]

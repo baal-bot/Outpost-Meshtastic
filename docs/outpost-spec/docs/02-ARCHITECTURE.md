@@ -315,8 +315,8 @@ airtime:
 channels:
   # index → policy. Index 0 is the primary/public channel.
   # bbs: none | read_only | full   — what BBS commands are permitted here
-  # alerts:      may the node BROADCAST alerts on this channel
-  # accept_reports: may members file incidents from this channel
+  # alerts: may members view warnings/incidents or invoke responder alert/event operations here
+  # accept_reports: may members create or update incident reports from this channel
   0: { name: "public",  ai: false, bbs: read_only, alerts: true, accept_reports: true  }
   2: { name: "outpost", ai: true,  bbs: full,      alerts: true, accept_reports: true  }
   3: { name: "watch",   ai: false, bbs: none,      alerts: true, accept_reports: true  }

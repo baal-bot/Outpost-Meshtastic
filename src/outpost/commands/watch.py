@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from outpost.router.models import (
+    ChannelUse,
     CommandContext,
     CommandSpec,
     ContextFrame,
@@ -164,6 +165,7 @@ def specs(service: IncidentService) -> list[CommandSpec]:
             ),
             handler=report,
             mutates=True,
+            channel_use=ChannelUse.REPORT,
             **base,
         ),
         CommandSpec(
@@ -172,6 +174,7 @@ def specs(service: IncidentService) -> list[CommandSpec]:
             help_short="REPORT! <details> · file despite duplicate suggestion",
             handler=report_force,
             mutates=True,
+            channel_use=ChannelUse.REPORT,
             **base,
         ),
         CommandSpec(
@@ -180,6 +183,7 @@ def specs(service: IncidentService) -> list[CommandSpec]:
             help_short="CONFIRM <inc> · independently confirm",
             handler=confirm,
             mutates=True,
+            channel_use=ChannelUse.REPORT,
             **base,
         ),
         CommandSpec(
@@ -188,6 +192,7 @@ def specs(service: IncidentService) -> list[CommandSpec]:
             help_short="DISPUTE <inc> [note] · flag concern",
             handler=dispute,
             mutates=True,
+            channel_use=ChannelUse.REPORT,
             **base,
         ),
         CommandSpec(
@@ -196,6 +201,7 @@ def specs(service: IncidentService) -> list[CommandSpec]:
             help_short="INCIDENTS · active incident list",
             handler=incidents,
             mutates=False,
+            channel_use=ChannelUse.ALERT,
             **base,
         ),
         CommandSpec(
@@ -204,6 +210,7 @@ def specs(service: IncidentService) -> list[CommandSpec]:
             help_short="INC <number> · incident detail",
             handler=detail,
             mutates=False,
+            channel_use=ChannelUse.ALERT,
             **base,
         ),
     ]

@@ -212,7 +212,7 @@ class OutpostApp:
             ),
             (mail_specs(mail), True),
             (directory_specs(directory), True),
-            (ai_specs(self.ai_service, self.config), self.config.modules.ai.enabled),
+            (ai_specs(self.ai_service), self.config.modules.ai.enabled),
             (operator_specs(bbs), self.config.modules.bbs.enabled),
             (watch_specs(self.incidents), self.config.modules.watch.enabled),
             (alert_specs(self.alerts), self.config.modules.watch.enabled),
@@ -1975,6 +1975,40 @@ class OutpostApp:
             {"latitude": location.lat, "longitude": location.lon} if location is not None else None
         )
         result["outpost_policy_channels"] = sorted(self.config.channels)
+        result["outpost_channel_policies"] = [
+            {
+                "index": index,
+                "name": policy.name,
+                "bbs": policy.bbs,
+                "ai": policy.ai,
+                "alerts": policy.alerts,
+                "accept_reports": policy.accept_reports,
+            }
+            for index, policy in sorted(self.config.channels.items())
+        ]
+        if result.get("available"):
+            live = {
+                int(channel["index"]): str(channel.get("role", "DISABLED"))
+                for channel in result.get("channels", [])
+            }
+            configured = set(self.config.channels)
+            active = {index for index, role in live.items() if role != "DISABLED"}
+            warnings = list(result.get("warnings", []))
+            missing = sorted(configured - active)
+            unmanaged = sorted(active - configured)
+            if missing:
+                warnings.append(
+                    "Outpost policy references inactive radio slot(s): "
+                    + ", ".join(str(index) for index in missing)
+                    + "."
+                )
+            if unmanaged:
+                warnings.append(
+                    "Active radio slot(s) have no Outpost policy and reject commands: "
+                    + ", ".join(str(index) for index in unmanaged)
+                    + "."
+                )
+            result["warnings"] = warnings
         return result
 
     async def radio_configuration_status(self) -> dict[str, Any]:
@@ -2088,6 +2122,12 @@ class OutpostApp:
             ).inc()
             await self._route_inbound(message, log_id)
 
+    def _channel_accepts_reports(self, message: InboundMessage) -> bool:
+        if message.is_direct:
+            return True
+        policy = self.config.channels.get(message.channel)
+        return bool(policy and policy.accept_reports)
+
     def _is_safety_inbound(self, message: InboundMessage) -> bool:
         if message.portnum == 5 and message.request_id is not None:
             return True
@@ -2098,6 +2138,7 @@ class OutpostApp:
         return bool(
             self.config.modules.watch.enabled
             and self.config.watch.emergency_keywords_enabled
+            and self._channel_accepts_reports(message)
             and message.text
             and self.incidents.emergency_keyword(message.text, self.config.watch.emergency_keywords)
         )
@@ -2186,6 +2227,7 @@ class OutpostApp:
         elif (
             self.config.modules.watch.enabled
             and self.config.watch.emergency_keywords_enabled
+            and self._channel_accepts_reports(message)
             and message.text
             and self.incidents.emergency_keyword(message.text, self.config.watch.emergency_keywords)
         ):
