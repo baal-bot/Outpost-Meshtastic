@@ -3924,8 +3924,14 @@ def create_web_app(
         if radio_operations is not None:
 
             @app.get("/api/v1/mesh/queue")
-            async def mesh_queue() -> dict[str, Any]:
-                return {"items": await radio_operations.queue()}
+            async def mesh_queue(
+                state: Literal[
+                    "current", "active", "failed", "expired", "terminal", "all"
+                ] = "current",
+                limit: int = Query(25, ge=1, le=100),
+                cursor: int | None = Query(None, gt=0),
+            ) -> dict[str, Any]:
+                return await radio_operations.history(state, limit=limit, cursor=cursor)
 
             @app.delete("/api/v1/mesh/queue/{item_id}")
             async def mesh_queue_cancel(item_id: int) -> Response:

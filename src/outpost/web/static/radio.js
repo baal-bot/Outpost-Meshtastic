@@ -12,6 +12,11 @@ let messageItems = [];
 let messageNextCursor = null;
 let messageFilterKey = "";
 let messageHistoryExpanded = false;
+let queueItems = [];
+let queueNextCursor = null;
+let queueFilterKey = "";
+let queueHistoryExpanded = false;
+let queueMeta = { counts: {}, total: 0, retention_days: 30 };
 
 $("send-channel").disabled = true;
 $("send-form").querySelector("button").disabled = true;
@@ -27,13 +32,149 @@ const api = async (url, options = {}) =>
   });
 
 const activeQueueStates = new Set(["pending", "held", "sending", "awaiting_ack"]);
+const terminalQueueStates = new Set([
+  "sent",
+  "acked",
+  "failed",
+  "expired",
+  "cancelled",
+  "superseded",
+  "retracted",
+]);
+
+function queueQuery(cursor = null) {
+  const query = new URLSearchParams({
+    state: $("filter-queue-state").value,
+    limit: "25",
+  });
+  if (cursor !== null) query.set("cursor", String(cursor));
+  return query;
+}
 
 function queueItemMatches(item, filter) {
   const state = item.state || "pending";
   if (filter === "active") return activeQueueStates.has(state);
   if (filter === "failed" || filter === "expired") return state === filter;
+  if (filter === "terminal") return terminalQueueStates.has(state);
   if (filter === "all") return true;
-  return state !== "expired";
+  return activeQueueStates.has(state) || state === "failed";
+}
+
+function updateNewestQueue(result) {
+  const fallbackCounts = {};
+  for (const item of result.items) {
+    const state = item.state || "pending";
+    fallbackCounts[state] = Number(fallbackCounts[state] || 0) + 1;
+  }
+  queueMeta = {
+    counts: result.counts || fallbackCounts,
+    total: Number(result.total ?? result.items.length),
+    retention_days: Number(result.retention_days ?? 30),
+  };
+  if (!queueHistoryExpanded) {
+    queueItems = result.items;
+    queueNextCursor = result.next_cursor ?? null;
+    return;
+  }
+  const newestIds = new Set(result.items.map((item) => item.id));
+  queueItems = [
+    ...result.items,
+    ...queueItems.filter((item) => !newestIds.has(item.id)),
+  ];
+}
+
+function queueOutcome(item) {
+  if (item.outcome_explanation) return item.outcome_explanation;
+  const state = item.state || "pending";
+  if (state === "acked") return "Acknowledged by the destination.";
+  if (state === "sent") return "Sent; no ACK was requested.";
+  if (state === "failed") return "Delivery failed after bounded retries.";
+  if (state === "expired") return "Expired before delivery completed.";
+  if (state === "cancelled" || state === "retracted") return "Cancelled before transmission.";
+  if (state === "superseded") return "Superseded by newer queued work.";
+  if (state === "awaiting_ack") return "Sent; waiting for an ACK.";
+  return "Waiting for airtime policy.";
+}
+
+function queueTimestamp(item) {
+  const timestamp = item.outcome_at || item.created_at;
+  return timestamp ? new Date(timestamp * 1000).toLocaleString() : "Current session";
+}
+
+function renderQueue() {
+  const stateLabel = {
+    pending: "Queued",
+    held: "Committing",
+    sending: "Transmitting",
+    awaiting_ack: "Awaiting acknowledgement",
+    sent: "Sent",
+    acked: "Acknowledged",
+    failed: "Failed",
+    expired: "Expired",
+    cancelled: "Cancelled",
+    superseded: "Superseded",
+    retracted: "Retracted",
+  };
+  const queueFilter = $("filter-queue-state").value;
+  const visibleQueue = queueItems.filter((item) => queueItemMatches(item, queueFilter));
+  const emptyQueueCopy = {
+    current: "No active or failed outbound work.",
+    active: "No active outbound work.",
+    failed: "No failed outbound work.",
+    expired: "No expired outbound history in the retention window.",
+    terminal: "No completed outbound history in the retention window.",
+    all: "No outbound work or retained history.",
+  };
+  $("queue-list").innerHTML =
+    visibleQueue
+      .map((item) => {
+        const stateName = item.state || "pending";
+        const payload = item.text || `${item.binary_len || item.byte_len} byte application frame`;
+        const detail = terminalQueueStates.has(stateName)
+          ? `<p class="${stateName === "failed" ? "queue-error" : "queue-meta"}">${safe(
+              queueOutcome(item),
+            )} <small>${safe(item.reason_code || stateName)} · ${safe(queueTimestamp(item))}</small></p>`
+          : `<p class="queue-meta">${safe(queueOutcome(item))} <small>${
+              item.attempts || 0
+            } attempt${Number(item.attempts || 0) === 1 ? "" : "s"} · ${safe(
+              queueTimestamp(item),
+            )}</small></p>`;
+        return (
+          `<article class="queue-card queue-${safe(stateName)}">` +
+          `<div class="queue-card-head"><strong>#${item.id} · ${safe(item.traffic_class)} → ` +
+          `${safe(item.destination)}</strong><span>${safe(stateLabel[stateName] || stateName)}${
+            item.stale ? " · stale" : ""
+          }</span></div><p title="${safe(payload)}">${safe(payload)}</p>${detail}` +
+          (item.cancellable
+            ? `<button data-cancel="${item.id}">Cancel item</button>`
+            : "") +
+          `</article>`
+        );
+      })
+      .join("") ||
+    `<p class="ui-empty empty">${
+      queueMeta.total > 0
+        ? "No matching records on this page. Choose another filter or refresh."
+        : emptyQueueCopy[queueFilter]
+    }</p>`;
+  const counts = queueMeta.counts || {};
+  const activeCount = [...activeQueueStates].reduce(
+    (total, state) => total + Number(counts[state] || 0),
+    0,
+  );
+  $("queue-history-summary").textContent =
+    `Showing ${visibleQueue.length} of ${queueMeta.total || 0} · ${activeCount} active · ` +
+    `${Number(counts.failed || 0)} failed · ${queueMeta.retention_days}-day history, not current backlog`;
+  $("load-more-queue").hidden = queueNextCursor === null;
+  document.querySelectorAll("[data-cancel]").forEach((button) =>
+    button.addEventListener("click", async () => {
+      const response = await api(`/api/v1/mesh/queue/${button.dataset.cancel}`, {
+        method: "DELETE",
+      });
+      if (response.ok) queueHistoryExpanded = false;
+      await refresh();
+    }),
+  );
 }
 
 function messageOutcomeLabel(outcome) {
@@ -179,6 +320,46 @@ async function loadMoreMessages() {
   }
 }
 
+async function loadMoreQueue() {
+  if (queueNextCursor === null) return;
+  const button = $("load-more-queue");
+  button.disabled = true;
+  button.textContent = "Loading…";
+  try {
+    const response = await api(`/api/v1/mesh/queue?${queueQuery(queueNextCursor)}`);
+    if (!response.ok) return;
+    const result = await response.json();
+    const existingIds = new Set(queueItems.map((item) => item.id));
+    queueItems.push(...result.items.filter((item) => !existingIds.has(item.id)));
+    queueNextCursor = result.next_cursor ?? null;
+    queueMeta = {
+      counts: result.counts || queueMeta.counts,
+      total: Number(result.total ?? queueMeta.total),
+      retention_days: Number(result.retention_days ?? queueMeta.retention_days),
+    };
+    queueHistoryExpanded = true;
+    renderQueue();
+  } finally {
+    button.disabled = false;
+    button.textContent = "Load more";
+  }
+}
+
+function installQueueHistoryControls() {
+  $("filter-queue-state").querySelector('option[value="current"]').textContent =
+    "Current · active + failed";
+  const allOption = $("filter-queue-state").querySelector('option[value="all"]');
+  const terminalOption = document.createElement("option");
+  terminalOption.value = "terminal";
+  terminalOption.textContent = "Terminal history";
+  allOption.before(terminalOption);
+  $("queue-list").insertAdjacentHTML(
+    "afterend",
+    '<div class="packet-history-actions queue-history-actions"><span id="queue-history-summary"></span>' +
+      '<button id="load-more-queue" class="ui-button small-button" type="button" hidden>Load more</button></div>',
+  );
+}
+
 function installInboundHealthCard() {
   const nodeCard = $("radio-node").closest("article");
   nodeCard.insertAdjacentHTML(
@@ -204,10 +385,17 @@ async function initialize() {
 }
 
 async function refresh() {
+  const selectedQueueFilter = $("filter-queue-state").value;
+  if (selectedQueueFilter !== queueFilterKey) {
+    queueItems = [];
+    queueNextCursor = null;
+    queueHistoryExpanded = false;
+    queueFilterKey = selectedQueueFilter;
+  }
   const [status, airtime, queue, channelMap] = await Promise.all([
     api("/api/v1/status").then((response) => response.json()),
     api("/api/v1/mesh/airtime").then((response) => response.json()),
-    api("/api/v1/mesh/queue").then((response) => response.json()),
+    api(`/api/v1/mesh/queue?${queueQuery()}`).then((response) => response.json()),
     api("/api/v1/radio/channels").then((response) => response.json()),
   ]);
   renderChannelMap(channelMap);
@@ -230,9 +418,13 @@ async function refresh() {
   $("radio-preset").textContent =
     `${status.radio_config.region} · ${status.radio_config.preset}`;
   $("airtime-total").textContent = airtime.used_seconds.toFixed(2);
-  $("queue-count").textContent = queue.items.filter((item) =>
-    ["pending", "held", "sending"].includes(item.state || "pending"),
-  ).length;
+  updateNewestQueue(queue);
+  const queueCounts = queueMeta.counts || {};
+  $("queue-count").textContent = [...activeQueueStates].reduce(
+    (total, queueState) => total + Number(queueCounts[queueState] || 0),
+    0,
+  );
+  renderQueue();
   updateNewestMessages(messages);
 
   const inbound = status.inbound || {};
@@ -276,57 +468,6 @@ async function refresh() {
         `<strong>${Number(value).toFixed(2)}s</strong></div>`,
     )
     .join("");
-  const stateLabel = {
-    pending: "Queued",
-    held: "Committing",
-    sending: "Transmitting",
-    awaiting_ack: "Awaiting acknowledgement",
-    failed: "Failed",
-    expired: "Expired",
-  };
-  const queueFilter = $("filter-queue-state").value;
-  const visibleQueue = queue.items.filter((item) => queueItemMatches(item, queueFilter));
-  const emptyQueueCopy = {
-    current: "No current or failed outbound work.",
-    active: "No active outbound work.",
-    failed: "No failed outbound work.",
-    expired: "No expired outbound history.",
-    all: "No outbound work records.",
-  };
-  $("queue-list").innerHTML =
-    visibleQueue
-      .map((item) => {
-        const stateName = item.state || "pending";
-        const created = item.created_at
-          ? new Date(item.created_at * 1000).toLocaleString()
-          : "Current session";
-        const payload = item.text || `${item.byte_len} byte application frame`;
-        const detail = item.last_error
-          ? `<p class="${stateName === "failed" ? "queue-error" : "queue-meta"}">${safe(
-              item.last_error,
-            )}</p>`
-          : `<p class="queue-meta">Queued ${safe(created)} · ${item.attempts || 0} attempt${
-              Number(item.attempts || 0) === 1 ? "" : "s"
-            }</p>`;
-        return (
-          `<article class="queue-card queue-${safe(stateName)}">` +
-          `<div class="queue-card-head"><strong>#${item.id} · ${safe(item.traffic_class)} → ` +
-          `${safe(item.destination)}</strong><span>${safe(stateLabel[stateName] || stateName)}${
-            item.stale ? " · stale" : ""
-          }</span></div><p title="${safe(payload)}">${safe(payload)}</p>${detail}` +
-          (item.cancellable
-            ? `<button data-cancel="${item.id}">Cancel item</button>`
-            : "") +
-          `</article>`
-        );
-      })
-      .join("") || `<p class="ui-empty empty">${emptyQueueCopy[queueFilter]}</p>`;
-  document.querySelectorAll("[data-cancel]").forEach((button) =>
-    button.addEventListener("click", async () => {
-      await api(`/api/v1/mesh/queue/${button.dataset.cancel}`, { method: "DELETE" });
-      await refresh();
-    }),
-  );
 }
 
 $("send-form").addEventListener("submit", async (event) => {
@@ -352,9 +493,11 @@ $("send-form").addEventListener("submit", async (event) => {
 });
 
 installInboundHealthCard();
+installQueueHistoryControls();
 $("refresh-radio").addEventListener("click", refresh);
 $("filter-queue-state").addEventListener("change", refresh);
 $("filter-direction").addEventListener("change", refresh);
 $("filter-channel").addEventListener("change", refresh);
 $("load-more-messages").addEventListener("click", loadMoreMessages);
+$("load-more-queue").addEventListener("click", loadMoreQueue);
 initialize();

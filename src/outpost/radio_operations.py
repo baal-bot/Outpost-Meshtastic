@@ -10,11 +10,38 @@ from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.models import TrafficClass
 
 MESH_ID = re.compile(r"^![0-9a-fA-F]{8}$")
+HISTORY_FILTERS = {
+    "current": ("pending", "held", "sending", "awaiting_ack", "failed"),
+    "active": ("pending", "held", "sending", "awaiting_ack"),
+    "failed": ("failed",),
+    "expired": ("expired",),
+    "terminal": ("sent", "acked", "failed", "expired", "cancelled", "superseded", "retracted"),
+    "all": (
+        "pending",
+        "held",
+        "sending",
+        "awaiting_ack",
+        "sent",
+        "acked",
+        "failed",
+        "expired",
+        "cancelled",
+        "superseded",
+        "retracted",
+    ),
+}
 
 
 class RadioOperations:
-    def __init__(self, database: Database, governor: AirtimeGovernor, clock: Clock) -> None:
+    def __init__(
+        self,
+        database: Database,
+        governor: AirtimeGovernor,
+        clock: Clock,
+        retention_days: int = 30,
+    ) -> None:
         self.database, self.governor, self.clock = database, governor, clock
+        self.retention_days = retention_days
 
     async def queue(self) -> list[dict[str, Any]]:
         if self.governor.outbox is not None:
@@ -47,6 +74,97 @@ class RadioOperations:
             }
             for item in self.governor.queued_items()
         ]
+
+    def _explain(self, item: dict[str, Any]) -> dict[str, Any]:
+        state = str(item["state"])
+        outcome = str(item.get("outcome") or "")
+        attempts = int(item.get("attempts") or 0)
+        if state == "acked" or outcome == "acked":
+            reason_code, explanation = "acked", "Acknowledged by the destination."
+        elif outcome in {"naked", "nak"}:
+            reason_code, explanation = "radio_nak", "The radio reported a NAK."
+        elif outcome == "rejected":
+            reason_code = "local_policy_rejection"
+            explanation = "Rejected locally by Outpost policy before transmission."
+        elif state == "sent" and (outcome == "not_requested" or not item.get("want_ack")):
+            reason_code, explanation = "no_ack_requested", "Sent; no ACK was requested."
+        elif state == "expired" and item.get("packet_id") is not None and item.get("want_ack"):
+            reason_code, explanation = "ack_timeout", "Timed out waiting for an ACK."
+        elif state == "expired":
+            reason_code, explanation = "expired_before_send", "Expired before it could be sent."
+        elif state == "superseded":
+            reason_code, explanation = "superseded", "Superseded by newer queued work."
+        elif state in {"cancelled", "retracted"}:
+            reason_code, explanation = "cancelled", "Cancelled before transmission."
+        elif state == "failed":
+            reason_code = "retry_exhausted" if attempts > 1 else "transport_failure"
+            explanation = (
+                "Transport failed after retry exhaustion."
+                if attempts > 1
+                else "Transport failed before delivery."
+            )
+        elif state == "awaiting_ack":
+            reason_code, explanation = "awaiting_ack", "Sent; waiting for an ACK."
+        elif state == "sending":
+            reason_code, explanation = "sending", "Transmission is in progress."
+        elif state == "held":
+            reason_code, explanation = "held", "Committing an admitted queue batch."
+        elif state == "pending" and attempts:
+            reason_code = "retry_scheduled"
+            explanation = "A transport attempt failed; waiting for a bounded retry."
+        else:
+            reason_code, explanation = "queued", "Waiting for airtime policy."
+        binary_len = int(item.get("binary_len") or 0)
+        text_len = len(str(item.get("text") or "").encode())
+        safe = {
+            key: value for key, value in item.items() if key not in {"binary_len", "last_error"}
+        }
+        safe.update(
+            {
+                "byte_len": binary_len or text_len,
+                "cancellable": state in {"pending", "held", "awaiting_ack", "failed"},
+                "stale": state == "awaiting_ack"
+                and self.clock.now().timestamp()
+                - float(item.get("last_attempt_at") or item.get("created_at") or 0)
+                >= 120,
+                "reason_code": reason_code,
+                "outcome_explanation": explanation,
+                "outcome_at": item.get("completed_at") or item.get("last_attempt_at"),
+            }
+        )
+        return safe
+
+    async def history(
+        self, state_filter: str = "current", *, limit: int = 25, cursor: int | None = None
+    ) -> dict[str, Any]:
+        states = HISTORY_FILTERS.get(state_filter)
+        if states is None:
+            raise ValueError("unknown outbound history filter")
+        if self.governor.outbox is None:
+            all_items = [self._explain(item) for item in await self.queue()]
+            counts = {state: 0 for state in HISTORY_FILTERS["all"]}
+            for item in all_items:
+                counts[str(item["state"])] += 1
+            items = [
+                item
+                for item in all_items
+                if str(item["state"]) in states and (cursor is None or int(item["id"]) < cursor)
+            ]
+            items.sort(key=lambda item: int(item["id"]), reverse=True)
+            return {
+                "items": items[:limit],
+                "next_cursor": int(items[limit - 1]["id"]) if len(items) > limit else None,
+                "total": sum(counts[state] for state in states),
+                "counts": counts,
+                "retention_days": self.retention_days,
+                "filter": state_filter,
+            }
+        result = await self.governor.outbox.operator_history(
+            states=states, limit=limit, before_id=cursor
+        )
+        result["items"] = [self._explain(item) for item in result["items"]]
+        result.update({"retention_days": self.retention_days, "filter": state_filter})
+        return result
 
     async def cancel(self, item_id: int) -> bool:
         cancelled = await self.governor.cancel_work(item_id)

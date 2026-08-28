@@ -10,7 +10,7 @@ import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import uvicorn
@@ -1868,6 +1868,142 @@ def test_radio_queue_filter_hides_expired_history_by_default(
         queue_filter.select_option("all")
         page.wait_for_function("() => document.querySelectorAll('.queue-card').length === 5")
         assert page.locator(".queue-card").count() == 5
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_radio_outbound_history_loads_more_without_cursor_drift(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    states = (
+        "pending",
+        "held",
+        "sending",
+        "awaiting_ack",
+        "sent",
+        "acked",
+        "failed",
+        "expired",
+        "cancelled",
+        "superseded",
+        "retracted",
+    )
+
+    def history_item(item_id: int) -> dict[str, object]:
+        state = states[(item_id - 1) % len(states)]
+        explanations = {
+            "sent": ("no_ack_requested", "Sent; no ACK was requested."),
+            "acked": ("acked", "Acknowledged by the destination."),
+            "failed": ("retry_exhausted", "Transport failed after retry exhaustion."),
+            "expired": ("expired_before_send", "Expired before it could be sent."),
+            "cancelled": ("cancelled", "Cancelled before transmission."),
+            "superseded": ("superseded", "Superseded by newer queued work."),
+            "retracted": ("cancelled", "Cancelled before transmission."),
+        }
+        reason, explanation = explanations.get(state, (state, "Waiting for airtime policy."))
+        return {
+            "id": item_id,
+            "state": state,
+            "text": f"History payload {item_id}",
+            "destination": "!00000001",
+            "channel": item_id % 4,
+            "traffic_class": "reply",
+            "created_at": 2_000_000_000 + item_id,
+            "outcome_at": 2_000_000_100 + item_id,
+            "attempts": 3 if state == "failed" else 1,
+            "cancellable": state in {"pending", "held", "awaiting_ack", "failed"},
+            "reason_code": reason,
+            "outcome_explanation": explanation,
+            "last_error": "ConnectionError: private radio path must never render",
+        }
+
+    history_items = [history_item(item_id) for item_id in range(1, 126)]
+
+    def queue_route(route: object) -> None:
+        query = parse_qs(urlparse(route.request.url).query)
+        state_filter = query.get("state", ["current"])[0]
+        cursor = int(query["cursor"][0]) if "cursor" in query else None
+        limit = int(query.get("limit", ["25"])[0])
+        filter_states = {
+            "current": {"pending", "held", "sending", "awaiting_ack", "failed"},
+            "active": {"pending", "held", "sending", "awaiting_ack"},
+            "failed": {"failed"},
+            "expired": {"expired"},
+            "terminal": {
+                "sent",
+                "acked",
+                "failed",
+                "expired",
+                "cancelled",
+                "superseded",
+                "retracted",
+            },
+            "all": set(states),
+        }[state_filter]
+        ordered = sorted(history_items, key=lambda item: int(item["id"]), reverse=True)
+        selected = [item for item in ordered if item["state"] in filter_states]
+        remaining = [item for item in selected if cursor is None or int(item["id"]) < cursor]
+        page_items = remaining[:limit]
+        counts = {state: sum(item["state"] == state for item in history_items) for state in states}
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": page_items,
+                    "next_cursor": (
+                        page_items[-1]["id"] if len(remaining) > len(page_items) else None
+                    ),
+                    "total": len(selected),
+                    "counts": counts,
+                    "retention_days": 30,
+                    "filter": state_filter,
+                }
+            ),
+        )
+
+    page.route("**/api/v1/mesh/queue*", queue_route)
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/radio.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        page.get_by_label("Queue state filter").select_option("all")
+        page.wait_for_function(
+            """() => document.querySelectorAll('.queue-card').length === 25 &&
+              document.querySelector('#queue-history-summary')?.textContent.includes('of 125')"""
+        )
+        assert "Showing 25 of 125" in page.locator("#queue-history-summary").text_content()
+        assert (
+            "30-day history, not current backlog"
+            in page.locator("#queue-history-summary").text_content()
+        )
+        assert "private radio path" not in page.locator("#queue-list").text_content()
+        assert (
+            "Transport failed after retry exhaustion." in page.locator("#queue-list").text_content()
+        )
+
+        page.locator("#load-more-queue").click()
+        page.wait_for_function("() => document.querySelectorAll('.queue-card').length === 50")
+        history_items.append(history_item(126))
+        page.locator("#refresh-radio").click()
+        page.wait_for_function("() => document.querySelectorAll('.queue-card').length === 51")
+        assert "Showing 51 of 126" in page.locator("#queue-history-summary").text_content()
+        assert page.evaluate(
+            """() => {
+              const ids = [...document.querySelectorAll('.queue-card strong')]
+                .map(node => node.textContent.split(' · ')[0]);
+              return ids.length === new Set(ids).size;
+            }"""
+        )
+
+        page.locator("#load-more-queue").click()
+        page.wait_for_function("() => document.querySelectorAll('.queue-card').length === 76")
+        assert "Showing 76 of 126" in page.locator("#queue-history-summary").text_content()
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
     finally:

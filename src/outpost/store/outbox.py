@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from .database import Database, Transaction
 
 ACTIVE_STATES = ("pending", "held", "sending")
 CANCELLABLE_STATES = ("pending", "held", "awaiting_ack", "failed")
+OPERATOR_STATES = (
+    "pending",
+    "held",
+    "sending",
+    "awaiting_ack",
+    "sent",
+    "acked",
+    "failed",
+    "expired",
+    "cancelled",
+    "superseded",
+    "retracted",
+)
 RECOVERY_NOTE = "recovered after an interrupted send"
 
 
@@ -344,19 +357,47 @@ class OutboxStore:
         return log_id
 
     async def list_operator_work(self, limit: int = 100) -> list[dict[str, Any]]:
+        result = await self.operator_history(
+            states=("pending", "held", "sending", "awaiting_ack", "failed", "expired"),
+            limit=limit,
+        )
+        return cast(list[dict[str, Any]], result["items"])
+
+    async def operator_history(
+        self,
+        *,
+        states: tuple[str, ...],
+        limit: int = 25,
+        before_id: int | None = None,
+    ) -> dict[str, Any]:
+        if not states or not set(states).issubset(OPERATOR_STATES):
+            raise ValueError("invalid outbound history state filter")
+        if not 1 <= limit <= 100:
+            raise ValueError("outbound history page size must be 1-100")
+        placeholders = ",".join("?" for _ in states)
+        cursor_clause = " AND id<?" if before_id is not None else ""
+        params: tuple[Any, ...] = (*states, *((before_id,) if before_id is not None else ()))
         rows = await self.database.read(
-            """
+            f"""
             SELECT id,state,text,destination,channel,traffic_class,severity,want_ack,
                    length(binary_payload) binary_len,created_at,expires_at,attempts,
-                   last_attempt_at,next_attempt_at,packet_id,outcome,last_error
+                   last_attempt_at,next_attempt_at,packet_id,outcome,last_error,completed_at
             FROM outbound_work
-            WHERE state IN ('pending','held','sending','awaiting_ack','failed','expired')
-            ORDER BY CASE state
-              WHEN 'failed' THEN 0 WHEN 'sending' THEN 1 WHEN 'pending' THEN 2
-              WHEN 'held' THEN 3 WHEN 'awaiting_ack' THEN 4 ELSE 5 END,
-              created_at,id
+            WHERE state IN ({placeholders}){cursor_clause}
+            ORDER BY id DESC
             LIMIT ?
-            """,
-            (limit,),
+            """,  # noqa: S608 -- SQL structure comes only from validated state names
+            (*params, limit + 1),
         )
-        return [dict(row) for row in rows]
+        count_rows = await self.database.read(
+            "SELECT state,COUNT(*) AS count FROM outbound_work GROUP BY state"
+        )
+        counts = {state: 0 for state in OPERATOR_STATES}
+        counts.update({str(row["state"]): int(row["count"]) for row in count_rows})
+        items = [dict(row) for row in rows[:limit]]
+        return {
+            "items": items,
+            "next_cursor": int(items[-1]["id"]) if len(rows) > limit and items else None,
+            "total": sum(counts[state] for state in states),
+            "counts": counts,
+        }

@@ -131,7 +131,12 @@ class OutpostApp:
             self.clock,
             outbox=OutboxStore(self.database),
         )
-        self.radio_operations = RadioOperations(self.database, self.governor, self.clock)
+        self.radio_operations = RadioOperations(
+            self.database,
+            self.governor,
+            self.clock,
+            self.config.store.retention.outbound_history_days,
+        )
         members = MemberRepo(self.database, self.clock)
         self.message_log = MessageLogRepo(self.database, self.clock)
         sessions = SessionStore(self.clock, self.config.router.session_idle_minutes)
