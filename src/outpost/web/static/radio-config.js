@@ -25,6 +25,7 @@ function configMarkup() {
     <div class="heading radio-config-heading"><div><p class="eyebrow">RADIO CONFIGURATION</p><h2>Meshtastic radio</h2></div><button id="radio-config-toggle" class="ui-button small-button" type="button">Configure radio</button></div>
     <p class="radio-config-intro">Purpose-built controls for an Outpost-connected node. Changes are written to the radio and may briefly restart its connection.</p>
     <div id="radio-config-summary" class="radio-config-summary" aria-live="polite"><span>Loading radio configuration…</span></div>
+    <div id="radio-config-operation" class="radio-config-operation" aria-live="polite" hidden></div>
     <div id="radio-config-workspace" class="radio-config-workspace" hidden>
       <div id="radio-config-warnings" class="radio-config-warnings" hidden></div>
       <nav class="radio-config-tabs" aria-label="Radio configuration sections">
@@ -104,6 +105,16 @@ export async function initRadioConfigurator({api}) {
       badge.textContent = text;
       summary.append(badge);
     }
+    const operation = byId("radio-config-operation");
+    operation.hidden = !state.operation;
+    if (state.operation) {
+      const detail = state.operation.error || state.operation.impact?.join(" ") || "";
+      operation.className = `radio-config-operation state-${state.operation.state}`;
+      operation.textContent = `${state.operation.state.replaceAll("_", " ")} · ${state.operation.section}. ${detail}`;
+      if (state.operation.state === "failed" && state.operation.recovery) {
+        operation.textContent += ` Recovery: ${state.operation.recovery}`;
+      }
+    }
     const warnings = byId("radio-config-warnings");
     warnings.replaceChildren();
     warnings.hidden = !(state.warnings || []).length;
@@ -164,10 +175,49 @@ export async function initRadioConfigurator({api}) {
   }
 
   async function apply(section, values, message, output) {
-    const confirmed = await window.OutpostUI.confirm({eyebrow: "RADIO CHANGE", title: `Apply ${section} settings?`, message: `${message} The radio connection may restart briefly.`, confirmLabel: "Write to radio"});
-    if (!confirmed) return;
-    output.textContent = "Writing radio configuration…";
-    const response = await api("/api/v1/radio/config", {method: "PUT", body: JSON.stringify({[section]: values})});
+    output.textContent = "Refreshing radio state and checking this change…";
+    const payload = {[section]: values};
+    const preflightResponse = await api("/api/v1/radio/config/preflight", {method: "POST", body: JSON.stringify(payload)});
+    const preflight = await preflightResponse.json().catch(() => ({}));
+    if (!preflightResponse.ok) {
+      output.textContent = preflight.error?.message || "Radio preflight failed; nothing was written.";
+      await window.OutpostUI.alert({title: "Radio not changed", message: output.textContent});
+      return;
+    }
+    const changes = (preflight.diff || []).map((entry) => `${entry.field}: ${String(entry.from)} → ${String(entry.to)}`).join("; ") || "No field changes detected";
+    const impact = (preflight.impact || []).join(" ");
+    const confirmed = await window.OutpostUI.confirm({eyebrow: "RADIO PREFLIGHT", title: `Review ${section} change`, message: `${message} Changes: ${changes}. Impact: ${impact || "No additional operational impact identified."} The radio will reconnect and fresh readback must match before Outpost calls this verified.`, confirmLabel: "Apply and verify"});
+    if (!confirmed) {
+      output.textContent = "Change reviewed but not applied.";
+      return;
+    }
+    output.textContent = "Applying radio configuration…";
+    let polling = false;
+    const lifecycle = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const statusResponse = await api("/api/v1/radio/config");
+        if (statusResponse.ok) {
+          const status = await statusResponse.json();
+          if (["applying", "reconnecting", "verifying"].includes(status.operation?.state)) {
+            output.textContent = `${status.operation.state.replaceAll("_", " ")} radio configuration…`;
+          }
+        }
+      } finally {
+        polling = false;
+      }
+    }, 500);
+    let response;
+    try {
+      response = await api("/api/v1/radio/config", {method: "PUT", body: JSON.stringify({preflight_id: preflight.id, ...payload})});
+    } catch {
+      output.textContent = "Connection lost while applying. Check the durable operation status before retrying.";
+      await window.OutpostUI.alert({title: "Verification interrupted", message: output.textContent});
+      return;
+    } finally {
+      clearInterval(lifecycle);
+    }
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
       output.textContent = body.error?.message || "Radio configuration was not changed.";
@@ -175,7 +225,7 @@ export async function initRadioConfigurator({api}) {
       return;
     }
     render(body);
-    output.textContent = "Saved to the radio.";
+    output.textContent = "Verified from fresh radio readback.";
     if (body.generated_psk) {
       const key = byId("radio-generated-key");
       key.hidden = false;

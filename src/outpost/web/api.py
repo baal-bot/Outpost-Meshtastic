@@ -361,6 +361,7 @@ class RadioMqttConfigBody(FederationMqttBody):
 
 
 class RadioConfigurationBody(BaseModel):
+    preflight_id: str | None = Field(default=None, min_length=8, max_length=64)
     identity: RadioIdentityConfigBody | None = None
     device: RadioDeviceConfigBody | None = None
     lora: RadioLoraConfigBody | None = None
@@ -370,13 +371,21 @@ class RadioConfigurationBody(BaseModel):
 
     @model_validator(mode="after")
     def exactly_one_section(self) -> RadioConfigurationBody:
-        populated = [name for name in type(self).model_fields if getattr(self, name) is not None]
+        populated = [
+            name
+            for name in ("identity", "device", "lora", "position", "channel", "mqtt")
+            if getattr(self, name) is not None
+        ]
         if len(populated) != 1:
             raise ValueError("provide exactly one radio configuration section")
         return self
 
     def change(self) -> tuple[str, dict[str, Any]]:
-        section = next(name for name in type(self).model_fields if getattr(self, name) is not None)
+        section = next(
+            name
+            for name in ("identity", "device", "lora", "position", "channel", "mqtt")
+            if getattr(self, name) is not None
+        )
         value = getattr(self, section)
         return section, value.model_dump()
 
@@ -554,6 +563,12 @@ def create_web_app(
     radio_configuration_status: Callable[[], Awaitable[dict[str, Any]]] | None = None,
     radio_configuration_configure: (
         Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
+    ) = None,
+    radio_configuration_preflight: (
+        Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
+    ) = None,
+    radio_configuration_apply: (
+        Callable[[str, str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
     ) = None,
 ) -> FastAPI:
     app = FastAPI(title="Outpost API", version=__version__, docs_url="/api/docs")
@@ -1814,7 +1829,33 @@ def create_web_app(
             response.headers["Cache-Control"] = "no-store"
             return await radio_configuration_status()
 
-    if radio_configuration_configure is not None:
+    if radio_configuration_preflight is not None:
+
+        @app.post("/api/v1/radio/config/preflight", response_model=None)
+        async def radio_configuration_preflight_view(
+            body: RadioConfigurationBody, response: Response
+        ) -> dict[str, Any] | Response:
+            response.headers["Cache-Control"] = "no-store"
+            section, values = body.change()
+            try:
+                return await radio_configuration_preflight(section, values)
+            except (
+                ConnectionError,
+                KeyError,
+                OSError,
+                TimeoutError,
+                TypeError,
+                ValueError,
+            ) as error:
+                payload: dict[str, Any] = {
+                    "error": {"code": "radio_preflight_failed", "message": str(error)}
+                }
+                operation = getattr(error, "operation", None)
+                if operation is not None:
+                    payload["operation"] = operation
+                return JSONResponse(payload, status_code=409, headers={"Cache-Control": "no-store"})
+
+    if radio_configuration_configure is not None or radio_configuration_apply is not None:
 
         @app.put("/api/v1/radio/config", response_model=None)
         async def radio_configuration_update(
@@ -1823,19 +1864,37 @@ def create_web_app(
             response.headers["Cache-Control"] = "no-store"
             section, values = body.change()
             try:
-                result = await radio_configuration_configure(section, values)
-            except (ConnectionError, KeyError, TypeError, ValueError) as error:
+                if radio_configuration_apply is not None:
+                    if body.preflight_id is None:
+                        raise ValueError("review a fresh radio preflight before applying changes")
+                    result = await radio_configuration_apply(body.preflight_id, section, values)
+                elif radio_configuration_configure is not None:
+                    result = await radio_configuration_configure(section, values)
+                else:  # pragma: no cover - route construction guarantees a callback
+                    raise RuntimeError("radio configuration callback is unavailable")
+            except (
+                ConnectionError,
+                KeyError,
+                OSError,
+                TimeoutError,
+                TypeError,
+                ValueError,
+            ) as error:
+                payload: dict[str, Any] = {
+                    "error": {
+                        "code": "radio_config_failed",
+                        "message": str(error),
+                    }
+                }
+                operation = getattr(error, "operation", None)
+                if operation is not None:
+                    payload["operation"] = operation
                 return JSONResponse(
-                    {
-                        "error": {
-                            "code": "radio_config_failed",
-                            "message": str(error),
-                        }
-                    },
+                    payload,
                     status_code=409,
                     headers={"Cache-Control": "no-store"},
                 )
-            if database is not None:
+            if database is not None and radio_configuration_apply is None:
                 secret_fields = {"password", "psk"}
                 changed_fields = sorted(
                     name

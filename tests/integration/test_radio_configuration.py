@@ -248,3 +248,54 @@ async def test_radio_writes_require_recent_operator_confirmation(tmp_path) -> No
     assert updated.status_code == 200
     assert writes == [("identity", {"long_name": "Outpost", "short_name": "OUT"})]
     await database.close()
+
+
+def test_radio_api_requires_matching_preflight_for_transactional_apply() -> None:
+    calls: list[tuple[object, ...]] = []
+
+    async def preflight(section, values):
+        calls.append(("preflight", section, values))
+        return {
+            "id": "reviewed-change-123",
+            "section": section,
+            "state": "preflight",
+            "diff": [{"field": "short_name", "from": "OLD", "to": "NEW"}],
+            "impact": ["Nearby nodes see the new identity."],
+        }
+
+    async def apply(operation_id, section, values):
+        calls.append(("apply", operation_id, section, values))
+        return {
+            "available": True,
+            "operation": {"id": operation_id, "state": "verified"},
+        }
+
+    client = TestClient(
+        create_web_app(
+            lambda: {"radio": "up"},
+            radio_configuration_preflight=preflight,
+            radio_configuration_apply=apply,
+        )
+    )
+    change = {"identity": {"long_name": "New Outpost", "short_name": "NEW"}}
+
+    missing = client.put("/api/v1/radio/config", json=change)
+    assert missing.status_code == 409
+    assert "preflight" in missing.json()["error"]["message"]
+    reviewed = client.post("/api/v1/radio/config/preflight", json=change)
+    assert reviewed.status_code == 200
+    applied = client.put(
+        "/api/v1/radio/config",
+        json={"preflight_id": reviewed.json()["id"], **change},
+    )
+    assert applied.status_code == 200
+    assert applied.json()["operation"]["state"] == "verified"
+    assert calls == [
+        ("preflight", "identity", {"long_name": "New Outpost", "short_name": "NEW"}),
+        (
+            "apply",
+            "reviewed-change-123",
+            "identity",
+            {"long_name": "New Outpost", "short_name": "NEW"},
+        ),
+    ]

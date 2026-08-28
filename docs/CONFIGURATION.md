@@ -51,8 +51,10 @@ of the broadcast channel map.
 - `ai`: permits AI commands from the channel; AI remains available by DM when its module is enabled.
 
 The radio configurator shows these effective rules per slot and warns when an active radio slot has
-no policy or a configured policy slot is inactive. This does not replace the radio's region, modem
-preset, PSK, or channel setup.
+no policy or a configured policy slot is inactive. Its guarded workflow can change the radio's
+region, modem preset, frequency slot, channel settings/PSK, identity, position, and MQTT state. It
+does not edit Outpost's YAML channel policy; change that policy first before disabling a referenced
+radio slot.
 
 ### `modules`
 

@@ -207,6 +207,19 @@ async def test_radio_configuration_is_guarded_and_never_reads_back_secrets() -> 
     assert channels[1].settings.name == "Rescue"
     assert writes == ["lora", 1]
     assert "generated_psk" not in await link.configuration_status()
+    assert (
+        await link.verify_configuration_secrets(
+            "channel", {"index": 1, "psk": None}, result["generated_psk"]
+        )
+        == []
+    )
+    channels[1].settings.psk = b"firmware-rejected-the-key"
+    assert await link.verify_configuration_secrets(
+        "channel", {"index": 1, "psk": None}, result["generated_psk"]
+    ) == ["psk"]
+    assert await link.verify_configuration_secrets(
+        "mqtt", {"username": "operator", "password": "wrong"}
+    ) == ["password"]
 
 
 @pytest.mark.asyncio

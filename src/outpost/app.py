@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import secrets
@@ -55,6 +56,7 @@ from outpost.fed import (
     Reassembler,
 )
 from outpost.operator_context import current_actor
+from outpost.radio_configuration import RadioConfigurationManager
 from outpost.radio_operations import RadioOperations
 from outpost.render.renderer import render_response
 from outpost.router.models import Line, Response, ResponseKind
@@ -79,6 +81,7 @@ from outpost.transport.metrics import (
     INBOUND_WORKERS_BUSY,
 )
 from outpost.transport.models import InboundMessage, Severity, TrafficClass
+from outpost.transport.radio_frequency import frequency_plan
 from outpost.transport.radio_link import MeshtasticRadioLink
 from outpost.transport.supervisor import RadioSupervisor
 from outpost.transport.toa import toa
@@ -111,6 +114,9 @@ class OutpostApp:
         self.clock = SystemClock()
         self.database = Database(self.config.store.path)
         self.radio = MeshtasticRadioLink(self.config.radio, self.clock)
+        self.radio_configuration = RadioConfigurationManager(
+            self.database, self.radio, self.clock, self.config
+        )
         self.supervisor = RadioSupervisor(
             self.radio,
             self.config.radio.reconnect,
@@ -286,7 +292,8 @@ class OutpostApp:
             federation_relay=self.federation_relay,
             federation_topology=self.federation_topology,
             radio_configuration_status=self.radio_configuration_status,
-            radio_configuration_configure=self.configure_radio,
+            radio_configuration_preflight=self.preflight_radio_configuration,
+            radio_configuration_apply=self.configure_radio,
         )
 
     def _start_background_task(
@@ -616,6 +623,7 @@ class OutpostApp:
 
     async def startup(self) -> None:
         await self.database.open()
+        await self.radio_configuration.initialize()
         if self.config.modules.fed.enabled:
             try:
                 await self.federation_relay.initialize()
@@ -2178,22 +2186,32 @@ class OutpostApp:
                     + "."
                 )
             result["warnings"] = warnings
+            with contextlib.suppress(KeyError, StopIteration, ValueError):
+                primary = next(
+                    channel for channel in result.get("channels", []) if channel["index"] == 0
+                )
+                result["lora"]["frequency"] = frequency_plan(
+                    result["lora"]["region"],
+                    result["lora"]["modem_preset"],
+                    result["lora"]["frequency_slot"],
+                    primary.get("name", ""),
+                )
+        result["operation"] = self.radio_configuration.operation()
         return result
 
     async def radio_configuration_status(self) -> dict[str, Any]:
         return self._radio_configuration_context(await self.radio.configuration_status())
 
-    async def configure_radio(self, section: str, values: dict[str, Any]) -> dict[str, Any]:
-        if (
-            section == "channel"
-            and str(values.get("role", "")).upper() == "DISABLED"
-            and int(values.get("index", -1)) in self.config.channels
-        ):
-            raise ValueError(
-                "This channel is required by Outpost policy; change Outpost policy "
-                "before disabling it"
-            )
-        return self._radio_configuration_context(await self.radio.configure(section, values))
+    async def preflight_radio_configuration(
+        self, section: str, values: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await self.radio_configuration.preflight(section, values)
+
+    async def configure_radio(
+        self, operation_id: str, section: str, values: dict[str, Any]
+    ) -> dict[str, Any]:
+        result = await self.radio_configuration.apply(operation_id, section, values)
+        return self._radio_configuration_context(result)
 
     async def _digest_loop(self) -> None:
         while True:

@@ -31,6 +31,7 @@ class MeshtasticRadioLink:
         self._inbound_dropped = 0
         self._last_inbound_drop_at: int | None = None
         self._config_lock = asyncio.Lock()
+        self._connection_generation = 0
 
     @property
     def state(self) -> LinkState:
@@ -47,6 +48,10 @@ class MeshtasticRadioLink:
     @property
     def snapshot(self) -> RadioSnapshot:
         return self._snapshot
+
+    @property
+    def connection_generation(self) -> int:
+        return self._connection_generation
 
     def _construct_interface(self) -> Any:
         if self.config.transport == "serial":
@@ -197,6 +202,123 @@ class MeshtasticRadioLink:
             },
             "warnings": warnings,
         }
+
+    @staticmethod
+    def _clone_message(message: Any) -> Any:
+        clone = type(message)()
+        clone.CopyFrom(message)
+        return clone
+
+    async def capture_configuration(self, section: str) -> dict[str, Any]:
+        """Capture an in-memory rollback image. Callers must never persist this value."""
+        local = self._local_node()
+        async with self._config_lock:
+            if section == "identity":
+                status = await self.configuration_status()
+                return {"identity": dict(status["identity"])}
+            if section in {"device", "lora", "position"}:
+                message = getattr(local.localConfig, section)
+                snapshot: dict[str, Any] = {section: self._clone_message(message)}
+                if section == "position":
+                    status = await self.configuration_status()
+                    snapshot["coordinates"] = dict(status["position"])
+                return snapshot
+            if section == "channel":
+                return {
+                    "index": None,
+                    "channels": [self._clone_message(channel) for channel in local.channels],
+                }
+            if section == "mqtt":
+                return {
+                    "mqtt": self._clone_message(local.moduleConfig.mqtt),
+                    "channels": [self._clone_message(channel) for channel in local.channels],
+                }
+        raise ValueError("unsupported radio configuration section")
+
+    async def restore_configuration(
+        self, section: str, snapshot: dict[str, Any], *, channel_index: int | None = None
+    ) -> None:
+        """Best-effort rollback using a secret-bearing snapshot held only in memory."""
+        local = self._local_node()
+        async with self._config_lock:
+            if section == "identity":
+                identity = snapshot["identity"]
+                await asyncio.to_thread(
+                    local.setOwner, identity["long_name"], identity["short_name"]
+                )
+                return
+            if section in {"device", "lora"}:
+                getattr(local.localConfig, section).CopyFrom(snapshot[section])
+                await asyncio.to_thread(local.writeConfig, section)
+                return
+            if section == "position":
+                local.localConfig.position.CopyFrom(snapshot["position"])
+                await asyncio.to_thread(local.writeConfig, "position")
+                coordinates = snapshot["coordinates"]
+                if coordinates["fixed_position"]:
+                    await asyncio.to_thread(
+                        local.setFixedPosition,
+                        float(coordinates["latitude"]),
+                        float(coordinates["longitude"]),
+                        int(coordinates["altitude"]),
+                    )
+                else:
+                    await asyncio.to_thread(local.removeFixedPosition)
+                return
+            if section == "channel":
+                if channel_index is None:
+                    raise ValueError("channel rollback requires a channel index")
+                local.channels[channel_index].CopyFrom(snapshot["channels"][channel_index])
+                await asyncio.to_thread(local.writeChannel, channel_index)
+                return
+            if section == "mqtt":
+                local.moduleConfig.mqtt.CopyFrom(snapshot["mqtt"])
+                for index, channel in enumerate(snapshot["channels"]):
+                    local.channels[index].CopyFrom(channel)
+                # Restore channel coupling first, then the module switch. If the second
+                # write fails the gateway is left without an unintended uplink.
+                if channel_index is not None:
+                    await asyncio.to_thread(local.writeChannel, channel_index)
+                await asyncio.to_thread(local.writeConfig, "mqtt")
+                return
+        raise ValueError("unsupported radio configuration section")
+
+    async def verify_configuration_secrets(
+        self, section: str, values: dict[str, Any], generated_psk: str | None = None
+    ) -> list[str]:
+        """Compare write-only values in memory and return field names only."""
+        local = self._local_node()
+        rejected: list[str] = []
+        if section == "channel":
+            supplied = generated_psk or values.get("psk")
+            if supplied:
+                try:
+                    expected = base64.b64decode(str(supplied), validate=True)
+                except (binascii.Error, ValueError):
+                    return ["psk"]
+                actual = bytes(local.channels[int(values["index"])].settings.psk)
+                if not secrets.compare_digest(expected, actual):
+                    rejected.append("psk")
+        elif section == "mqtt":
+            mqtt = local.moduleConfig.mqtt
+            for field in ("username", "password"):
+                expected_secret = values.get(field)
+                if expected_secret is not None and not secrets.compare_digest(
+                    str(expected_secret), str(getattr(mqtt, field, ""))
+                ):
+                    rejected.append(field)
+        return rejected
+
+    async def refresh_configuration(self, timeout_s: float = 30.0) -> dict[str, Any]:
+        """Reconnect and return state loaded by a newly constructed SDK interface."""
+        generation = self._connection_generation
+        await self.close()
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        while asyncio.get_running_loop().time() < deadline:
+            if self._state is LinkState.UP and self._connection_generation > generation:
+                return await self.configuration_status()
+            await asyncio.sleep(0.1)
+        raise TimeoutError("radio did not reconnect with fresh configuration before timeout")
 
     async def configure(self, section: str, values: dict[str, Any]) -> dict[str, Any]:
         if section == "mqtt":
@@ -362,6 +484,7 @@ class MeshtasticRadioLink:
             )
             self._last_rx = self.clock.monotonic()
             self._state = LinkState.UP
+            self._connection_generation += 1
         except Exception:
             self._state = LinkState.DOWN
             await self.close()

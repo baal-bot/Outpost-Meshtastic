@@ -91,14 +91,26 @@ sudo systemctl start outpost
 
 Then verify serial path, node ID, DM `PING`, channel handling, positions, and telemetry.
 
-For normal changes, use **Radio → Configure radio**. It reads live settings from the attached
-Meshtastic node and requires recent operator confirmation before every write. Outpost limits device
-roles to `CLIENT` and `CLIENT_BASE`, keeps serial enabled, removes unsafe frequency/duty-cycle
-overrides when saving a LoRa profile, and will not disable a channel referenced by Outpost policy.
-Generated channel keys are shown once and are never retained in the database or audit log.
+For normal changes, use **Radio → Configure radio**. Before confirmation, Outpost reconnects to read
+fresh device state and shows a redacted field diff plus operational impact. Apply is bound to that
+exact preflight for ten minutes and follows `preflight → applying → reconnecting → verifying →
+verified/failed`; a write is successful only after a new SDK connection reads the expected values
+back from the radio. Concurrent configurator writes are rejected. Outpost limits device roles to
+`CLIENT` and `CLIENT_BASE`, keeps serial enabled, removes unsafe frequency/duty-cycle overrides when
+saving a LoRa profile, and will not disable a channel referenced by Outpost policy. Generated
+channel keys are shown once and are never retained in the database or audit log.
 The LoRa Frequency Slot is separate from messaging channel slots 0–7: `0` uses Meshtastic's
 primary-channel-name calculation, while an explicit slot selects the shared RF frequency for every
-messaging channel.
+messaging channel. Preflight validates the region/preset slot count and shows the automatic or
+explicit effective slot and center frequency before any write.
+
+Outpost keeps a redacted pre-change snapshot and lifecycle record in SQLite. If firmware rejects a
+field, a multi-write operation fails partway, or fresh readback differs, it attempts to restore the
+in-memory pre-change radio configuration while the transport remains reachable. A failed or
+interrupted operation remains visible with recovery instructions. Connect directly over USB or
+Bluetooth with a Meshtastic client when the radio moved off-network; restore the displayed
+non-secret values and restore channel keys or MQTT credentials from the operator's separate secret
+store. Outpost deliberately cannot recover secrets that were never persisted.
 
 The compact MQTT controls under **Federation** and the full MQTT form under **Radio** operate on the
 same radio state. Compact edits preserve credentials and advanced flags. Outpost always enables

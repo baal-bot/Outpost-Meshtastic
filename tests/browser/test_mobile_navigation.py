@@ -1870,6 +1870,32 @@ def test_radio_configurator_guides_mqtt_and_uses_shared_live_settings(
     route_shared_operator_api(page)
     route_visual_content_api(page)
     writes: list[dict[str, object]] = []
+    preflights: list[dict[str, object]] = []
+    page.route(
+        "**/api/v1/radio/config/preflight",
+        lambda route: (
+            preflights.append(route.request.post_data_json),
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "id": f"review-{len(preflights)}",
+                        "state": "preflight",
+                        "section": next(iter(preflights[-1])),
+                        "diff": [
+                            {
+                                "field": "frequency_slot",
+                                "from": 20,
+                                "to": 33,
+                            }
+                        ],
+                        "impact": ["The radio will reconnect and verify fresh state."],
+                    }
+                ),
+            ),
+        )[-1],
+    )
     page.on(
         "request",
         lambda request: (
@@ -1887,11 +1913,12 @@ def test_radio_configurator_guides_mqtt_and_uses_shared_live_settings(
         assert page.locator("#radio-frequency-slot").input_value() == "20"
         page.locator("#radio-frequency-slot").fill("33")
         page.get_by_role("button", name="Save LoRa profile").click()
-        page.get_by_role("button", name="Write to radio").click()
+        page.get_by_role("button", name="Apply and verify").click()
         page.wait_for_function(
-            "() => document.querySelector('#radio-lora-result').textContent.includes('Saved')"
+            "() => document.querySelector('#radio-lora-result').textContent.includes('Verified')"
         )
         assert writes[-1]["lora"]["frequency_slot"] == 33  # type: ignore[index]
+        assert writes[-1]["preflight_id"] == "review-1"
         page.get_by_role("button", name="MQTT", exact=True).click()
         assert page.get_by_text(
             "These are the same live radio settings shown in Federation.", exact=False
@@ -1900,13 +1927,14 @@ def test_radio_configurator_guides_mqtt_and_uses_shared_live_settings(
         page.locator(".radio-advanced summary").click()
         page.locator("#radio-mqtt-json").check()
         page.get_by_role("button", name="Save MQTT settings").click()
-        page.get_by_role("button", name="Write to radio").click()
+        page.get_by_role("button", name="Apply and verify").click()
         page.wait_for_function(
-            "() => document.querySelector('#radio-mqtt-result').textContent.includes('Saved')"
+            "() => document.querySelector('#radio-mqtt-result').textContent.includes('Verified')"
         )
         assert writes[-1]["mqtt"]["address"] == "mqtt.changed.test"  # type: ignore[index]
         assert writes[-1]["mqtt"]["json_enabled"] is True  # type: ignore[index]
         assert "password" not in writes[-1]["mqtt"]  # type: ignore[operator]
+        assert len(preflights) == 2
         accessibility = Axe().run(
             page,
             options={
