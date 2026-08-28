@@ -368,6 +368,88 @@ async def test_named_roles_sessions_and_last_administrator_guard(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_mesh_operators_are_inventoried_and_linked_to_named_web_accounts(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    auth = WebAuthService(database, 12)
+    client = TestClient(create_web_app(lambda: {"radio": "up"}, database, auth))
+    csrf = await _permanent_operator(auth, client, "operator-password-42")
+
+    member = await MemberRepo(database, SystemClock()).resolve(
+        "!00000666", authenticated_pki_key=bytes(range(32))
+    )
+    await database.write("UPDATE member SET handle='666' WHERE id=?", (member.id,))
+    reviewed = client.post(
+        f"/api/v1/members/{member.id}/pki",
+        headers={"x-csrf-token": csrf},
+        json={"action": "approve", "reason": "Operator verified this handheld"},
+    )
+    assert reviewed.status_code == 200
+    promoted = client.patch(
+        f"/api/v1/members/{member.id}",
+        headers={"x-csrf-token": csrf},
+        json={"trust": "operator", "reason": "Assigned as an Outpost operator radio"},
+    )
+    assert promoted.status_code == 200
+
+    inventory = client.get("/api/v1/auth/accounts")
+    assert inventory.status_code == 200
+    radio = inventory.json()["operator_radios"][0]
+    assert radio["mesh_id"] == "!00000666"
+    assert radio["handle"] == "666"
+    assert radio["account_id"] is None
+
+    created = client.post(
+        "/api/v1/auth/accounts",
+        headers={"x-csrf-token": csrf},
+        json={
+            "username": "fieldlead",
+            "display_name": "Field Lead",
+            "role": "operator",
+            "initial_password": "field-lead-password-42",
+        },
+    )
+    assert created.status_code == 200
+    account_id = created.json()["id"]
+    linked = client.patch(
+        f"/api/v1/auth/accounts/{account_id}/radio",
+        headers={"x-csrf-token": csrf},
+        json={"member_id": member.id},
+    )
+    assert linked.status_code == 200
+    assert linked.json()["operator_radio"]["mesh_id"] == "!00000666"
+    assert linked.json()["operator_radio"]["pki_state"] == "verified"
+
+    already_owned = client.patch(
+        "/api/v1/auth/accounts/1/radio",
+        headers={"x-csrf-token": csrf},
+        json={"member_id": member.id},
+    )
+    assert already_owned.status_code == 422
+    assert "@fieldlead" in already_owned.json()["error"]["message"]
+
+    await database.write("UPDATE member SET trust='guest' WHERE id=?", (member.id,))
+    stale_link = client.get("/api/v1/auth/accounts").json()
+    assert stale_link["operator_radios"][0]["trust"] == "guest"
+    assert stale_link["operator_radios"][0]["account_id"] == account_id
+
+    downgraded = client.patch(
+        f"/api/v1/auth/accounts/{account_id}",
+        headers={"x-csrf-token": csrf},
+        json={"role": "viewer"},
+    )
+    assert downgraded.status_code == 200
+    assert downgraded.json()["operator_radio"] is None
+    after = client.get("/api/v1/auth/accounts").json()
+    assert after["operator_radios"] == []
+    actions = {row["action"] for row in await database.read("SELECT action FROM audit_log")}
+    assert {"auth.operator_radio_link", "auth.account_update"} <= actions
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_wallboard_summary_omits_sensitive_fields_and_does_not_mutate(tmp_path: Path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()

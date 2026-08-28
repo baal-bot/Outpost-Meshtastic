@@ -3336,6 +3336,24 @@ def test_access_workspace_enrolls_mfa_and_creates_named_account(
             "changed_at": None,
             "last_login_at": 2_000_000_000,
             "created_by": "local-setup",
+            "operator_radio": None,
+        }
+    ]
+    operator_radios = [
+        {
+            "id": 666,
+            "mesh_id": "!00000666",
+            "handle": "666",
+            "long_name": "Operator Handheld",
+            "short_name": "0666",
+            "trust": "operator",
+            "pki_state": "verified",
+            "last_seen": 2_000_000_000,
+            "account_id": None,
+            "account_username": None,
+            "account_display_name": None,
+            "account_role": None,
+            "account_enabled": None,
         }
     ]
     mutations: list[tuple[str, object]] = []
@@ -3405,11 +3423,43 @@ def test_access_workspace_enrolls_mfa_and_creates_named_account(
             )
             body = accounts[-1]
         else:
-            body = {"items": accounts, "count": len(accounts)}
+            body = {
+                "items": accounts,
+                "count": len(accounts),
+                "operator_radios": operator_radios,
+                "operator_radio_count": len(operator_radios),
+            }
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    def radio_link_route(route: object) -> None:
+        values = route.request.post_data_json
+        mutations.append(("radio", values))
+        radio = operator_radios[0]
+        if values["member_id"] is None:
+            accounts[0]["operator_radio"] = None
+            radio["account_id"] = None
+            radio["account_username"] = None
+            radio["account_display_name"] = None
+        else:
+            accounts[0]["operator_radio"] = {
+                "id": radio["id"],
+                "mesh_id": radio["mesh_id"],
+                "handle": radio["handle"],
+                "long_name": radio["long_name"],
+                "short_name": radio["short_name"],
+                "trust": radio["trust"],
+                "pki_state": radio["pki_state"],
+                "linked_at": 2_000_000_000,
+                "linked_by": "operator",
+            }
+            radio["account_id"] = 1
+            radio["account_username"] = "operator"
+            radio["account_display_name"] = "Pittsburgh Operator"
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(accounts[0]))
 
     page.route("**/api/v1/auth/sessions", sessions)
     page.route("**/api/v1/auth/accounts", account_route)
+    page.route("**/api/v1/auth/accounts/1/radio", radio_link_route)
     page.route(
         "**/api/v1/auth/mfa/begin",
         lambda route: route.fulfill(
@@ -3448,13 +3498,18 @@ def test_access_workspace_enrolls_mfa_and_creates_named_account(
         page.get_by_role("button", name="Confirm & enable").click()
         page.get_by_text("Save these recovery codes now", exact=True).wait_for()
 
-        page.get_by_role("button", name="Add account").click()
+        page.locator("#operator-radio-list").get_by_text("@666", exact=True).wait_for()
+        page.get_by_label("Operator radio for operator").select_option("666")
+        page.get_by_text("Operator radio linked to the named web account.", exact=True).wait_for()
+        assert ("radio", {"member_id": 666}) in mutations
+
+        page.get_by_role("button", name="Add web account").click()
         page.get_by_label("Username").fill("dispatch")
         page.get_by_label("Display name").fill("Dispatch Lead")
         page.get_by_label("Initial password").fill("dispatch-password-42")
         page.locator("#create-account-form").get_by_role("button", name="Create account").click()
         page.get_by_text("Dispatch Lead", exact=True).wait_for()
-        assert mutations[0][0] == "create"
+        assert any(action == "create" for action, _ in mutations)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
     finally:

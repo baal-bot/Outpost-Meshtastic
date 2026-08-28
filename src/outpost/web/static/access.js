@@ -7,6 +7,7 @@ const safe = (value) => String(value ?? "").replace(
 );
 let csrf = "";
 let session = null;
+let operatorRadios = [];
 
 const roleLabel = (role) => ({
   administrator: "Administrator",
@@ -16,6 +17,9 @@ const roleLabel = (role) => ({
 const timeLabel = (stamp) => stamp
   ? new Date(Number(stamp) * 1000).toLocaleString([], {dateStyle: "medium", timeStyle: "short"})
   : "Never";
+const radioName = (radio) => radio.handle
+  ? `@${radio.handle}`
+  : radio.long_name || radio.short_name || radio.mesh_id;
 
 async function api(path, options = {}) {
   const headers = {...(options.headers || {})};
@@ -57,6 +61,24 @@ async function loadSessions() {
 
 function accountCard(account) {
   const current = account.id === session.account_id;
+  const radio = account.operator_radio;
+  const eligibleRadio = ["administrator", "operator"].includes(account.role);
+  const availableRadios = operatorRadios.filter((item) => (
+    item.account_id === account.id || (item.trust === "operator" && !item.account_id)
+  ));
+  const radioOptions = availableRadios.map((item) => (
+    `<option value="${item.id}" ${radio?.id === item.id ? "selected" : ""}>${safe(radioName(item))} · ${safe(item.mesh_id)}</option>`
+  )).join("");
+  const radioControl = eligibleRadio
+    ? `<label class="operator-radio-link">Operator radio
+        <select data-operator-radio aria-label="Operator radio for ${safe(account.username)}">
+          <option value="">Not linked</option>${radioOptions}
+        </select>
+        <small>${radio
+    ? `${safe(radioName(radio))} · ${safe(radio.mesh_id)} · mesh ${safe(radio.trust)} · PKI ${safe(radio.pki_state)}`
+    : "Choose the handheld this person uses on the mesh."}</small>
+      </label>`
+    : '<small class="radio-ineligible">Read-only accounts cannot own an operator radio.</small>';
   const actions = current
     ? '<span class="current-account-note">Managed above</span>'
     : `<div class="account-actions">
@@ -70,15 +92,33 @@ function accountCard(account) {
     </div>`;
   return `<article class="account-row ${account.enabled ? "" : "disabled"}" data-account-id="${account.id}">
     <div class="account-avatar">${safe(account.display_name.slice(0, 1).toUpperCase())}</div>
-    <div class="account-copy"><div><strong>${safe(account.display_name)}</strong>${current ? "<span>CURRENT</span>" : ""}${account.mfa_enabled ? "<span>MFA</span>" : ""}</div><p>@${safe(account.username)} · ${safe(roleLabel(account.role))}</p><small>${account.enabled ? `Last sign-in ${safe(timeLabel(account.last_login_at))}` : "Account disabled"}${account.must_change ? " · password change required" : ""}</small></div>
+    <div class="account-copy"><div><strong>${safe(account.display_name)}</strong>${current ? "<span>CURRENT</span>" : ""}${account.mfa_enabled ? "<span>MFA</span>" : ""}</div><p>@${safe(account.username)} · ${safe(roleLabel(account.role))}</p><small>${account.enabled ? `Last sign-in ${safe(timeLabel(account.last_login_at))}` : "Account disabled"}${account.must_change ? " · password change required" : ""}</small>${radioControl}</div>
     ${actions}
+  </article>`;
+}
+
+function operatorRadioCard(radio) {
+  const isOperator = radio.trust === "operator";
+  const account = radio.account_id
+    ? `${safe(radio.account_display_name)} · @${safe(radio.account_username)}`
+    : "Mesh-only operator · no web account linked";
+  return `<article class="operator-radio-row ${isOperator ? "" : "trust-changed"}">
+    <div class="radio-avatar">⌁</div>
+    <div><div class="radio-title"><strong>${safe(radioName(radio))}</strong><span class="${isOperator ? "" : "warning"}">${isOperator ? "MESH OPERATOR" : `TRUST ${safe(String(radio.trust).toUpperCase())}`}</span></div>
+      <p><code>${safe(radio.mesh_id)}</code> · ${safe(radio.long_name || radio.short_name || "Unnamed radio")}</p>
+      <small>${account}</small>
+    </div>
+    <div class="radio-security ${radio.pki_state === "verified" ? "verified" : ""}"><b>PKI ${safe(String(radio.pki_state).toUpperCase())}</b><small>Last heard ${safe(timeLabel(radio.last_seen))}</small></div>
   </article>`;
 }
 
 async function loadAccounts() {
   if (session.role !== "administrator") return;
   const body = await api("/api/v1/auth/accounts");
+  operatorRadios = body.operator_radios || [];
   $("account-list").innerHTML = body.items.map(accountCard).join("");
+  $("operator-radio-list").innerHTML = operatorRadios.map(operatorRadioCard).join("")
+    || '<p class="ui-empty empty">No radios have mesh Operator trust yet. Promote a reviewed radio from Members and it will appear here automatically.</p>';
 }
 
 async function startMfa() {
@@ -205,6 +245,25 @@ $("create-account-form").addEventListener("submit", async (event) => {
 });
 
 $("account-list").addEventListener("change", async (event) => {
+  const radioSelect = event.target.closest("[data-operator-radio]");
+  if (radioSelect) {
+    const row = radioSelect.closest("[data-account-id]");
+    const memberId = radioSelect.value ? Number(radioSelect.value) : null;
+    try {
+      await api(`/api/v1/auth/accounts/${row.dataset.accountId}/radio`, {
+        method: "PATCH",
+        body: JSON.stringify({member_id: memberId}),
+      });
+      $("account-message").textContent = memberId
+        ? "Operator radio linked to the named web account."
+        : "Operator radio link removed.";
+      await loadAccounts();
+    } catch (error) {
+      $("account-message").textContent = error.message;
+      await loadAccounts();
+    }
+    return;
+  }
   const select = event.target.closest("[data-account-role]");
   if (!select) return;
   const row = select.closest("[data-account-id]");

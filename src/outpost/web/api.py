@@ -83,6 +83,10 @@ class AccountPasswordBody(BaseModel):
     temporary_password: str = Field(min_length=12, max_length=512)
 
 
+class AccountRadioBody(BaseModel):
+    member_id: int | None = Field(default=None, ge=1)
+
+
 class MfaConfirmBody(BaseModel):
     code: str = Field(min_length=6, max_length=32)
 
@@ -896,7 +900,13 @@ def create_web_app(
         @app.get("/api/v1/auth/accounts")
         async def auth_accounts() -> dict[str, Any]:
             items = await auth.accounts()
-            return {"items": items, "count": len(items)}
+            radios = await auth.operator_radios()
+            return {
+                "items": items,
+                "count": len(items),
+                "operator_radios": radios,
+                "operator_radio_count": len(radios),
+            }
 
         @app.post("/api/v1/auth/accounts", response_model=None)
         async def auth_account_create(
@@ -951,6 +961,22 @@ def create_web_app(
                     status_code=422,
                 )
             return {"ok": True}
+
+        @app.patch("/api/v1/auth/accounts/{account_id}/radio", response_model=None)
+        async def auth_account_radio(
+            account_id: int, body: AccountRadioBody, request: Request
+        ) -> dict[str, object] | Response:
+            try:
+                return await auth.link_operator_radio(
+                    account_id,
+                    body.member_id,
+                    request.state.web_session.username,
+                )
+            except ValueError as error:
+                return JSONResponse(
+                    {"error": {"code": "account_radio_invalid", "message": str(error)}},
+                    status_code=422,
+                )
 
         @app.get("/api/v1/auth/sessions")
         async def auth_sessions(request: Request) -> dict[str, Any]:

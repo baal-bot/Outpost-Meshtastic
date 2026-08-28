@@ -440,18 +440,123 @@ class WebAuthService:
 
     async def accounts(self) -> list[dict[str, object]]:
         rows = await self.database.read(
-            "SELECT id,username,display_name,role,must_change,enabled,totp_confirmed_at,"
-            "created_at,changed_at,last_login_at,created_by FROM web_account ORDER BY username"
+            "SELECT a.id,a.username,a.display_name,a.role,a.must_change,a.enabled,"
+            "a.totp_confirmed_at,a.created_at,a.changed_at,a.last_login_at,a.created_by,"
+            "a.radio_linked_at,a.radio_linked_by,m.id radio_id,m.mesh_id radio_mesh_id,"
+            "m.handle radio_handle,m.long_name radio_long_name,m.short_name radio_short_name,"
+            "m.trust radio_trust,m.pki_state radio_pki_state "
+            "FROM web_account a LEFT JOIN member m ON m.id=a.radio_member_id "
+            "ORDER BY a.username"
+        )
+        return [
+            {
+                "id": row["id"],
+                "username": row["username"],
+                "display_name": row["display_name"],
+                "role": row["role"],
+                "must_change": bool(row["must_change"]),
+                "enabled": bool(row["enabled"]),
+                "mfa_enabled": row["totp_confirmed_at"] is not None,
+                "created_at": row["created_at"],
+                "changed_at": row["changed_at"],
+                "last_login_at": row["last_login_at"],
+                "created_by": row["created_by"],
+                "operator_radio": (
+                    {
+                        "id": row["radio_id"],
+                        "mesh_id": row["radio_mesh_id"],
+                        "handle": row["radio_handle"],
+                        "long_name": row["radio_long_name"],
+                        "short_name": row["radio_short_name"],
+                        "trust": row["radio_trust"],
+                        "pki_state": row["radio_pki_state"],
+                        "linked_at": row["radio_linked_at"],
+                        "linked_by": row["radio_linked_by"],
+                    }
+                    if row["radio_id"] is not None
+                    else None
+                ),
+            }
+            for row in rows
+        ]
+
+    async def operator_radios(self) -> list[dict[str, object]]:
+        """Return mesh operators plus any linked radio whose trust later changed."""
+        rows = await self.database.read(
+            "SELECT m.id,m.mesh_id,m.handle,m.long_name,m.short_name,m.trust,m.pki_state,"
+            "m.last_seen,a.id account_id,a.username account_username,"
+            "a.display_name account_display_name,a.role account_role,a.enabled account_enabled "
+            "FROM member m LEFT JOIN web_account a ON a.radio_member_id=m.id "
+            "WHERE m.trust='operator' OR a.id IS NOT NULL "
+            "ORDER BY (m.trust='operator') DESC,m.last_seen DESC,m.mesh_id"
         )
         return [
             {
                 **dict(row),
-                "must_change": bool(row["must_change"]),
-                "enabled": bool(row["enabled"]),
-                "mfa_enabled": row["totp_confirmed_at"] is not None,
+                "account_enabled": (
+                    bool(row["account_enabled"]) if row["account_enabled"] is not None else None
+                ),
             }
             for row in rows
         ]
+
+    async def link_operator_radio(
+        self, account_id: int, member_id: int | None, actor: str
+    ) -> dict[str, object]:
+        async with self.database.transaction() as transaction:
+            accounts = await transaction.read(
+                "SELECT username,role,radio_member_id FROM web_account WHERE id=?",
+                (account_id,),
+            )
+            if not accounts:
+                raise ValueError("Account not found.")
+            account = accounts[0]
+            if account["role"] not in {"administrator", "operator"}:
+                raise ValueError("Only Administrator or Operator accounts can own a radio.")
+            old_member_id = account["radio_member_id"]
+            old_mesh_id = None
+            if old_member_id is not None:
+                old_rows = await transaction.read(
+                    "SELECT mesh_id FROM member WHERE id=?", (old_member_id,)
+                )
+                old_mesh_id = old_rows[0]["mesh_id"] if old_rows else None
+            mesh_id = None
+            if member_id is not None:
+                members = await transaction.read(
+                    "SELECT mesh_id,trust FROM member WHERE id=?", (member_id,)
+                )
+                if not members:
+                    raise ValueError("Radio identity not found.")
+                if members[0]["trust"] != "operator":
+                    raise ValueError("Promote this radio to mesh Operator before linking it.")
+                mesh_id = str(members[0]["mesh_id"])
+                linked = await transaction.read(
+                    "SELECT username FROM web_account WHERE radio_member_id=? AND id<>?",
+                    (member_id, account_id),
+                )
+                if linked:
+                    raise ValueError(f"That radio is already linked to @{linked[0]['username']}.")
+            await transaction.write(
+                "UPDATE web_account SET radio_member_id=?,radio_linked_at=?,radio_linked_by=? "
+                "WHERE id=?",
+                (
+                    member_id,
+                    int(time.time()) if member_id is not None else None,
+                    actor if member_id is not None else None,
+                    account_id,
+                ),
+            )
+        await self._audit(
+            actor,
+            "auth.operator_radio_link" if member_id is not None else "auth.operator_radio_unlink",
+            f"account:{account_id}",
+            {
+                "account": str(account["username"]),
+                "radio_before": old_mesh_id,
+                "radio_after": mesh_id,
+            },
+        )
+        return next(item for item in await self.accounts() if item["id"] == account_id)
 
     async def create_account(
         self, username: str, display_name: str, role: str, password: str, actor: str
@@ -507,9 +612,13 @@ class WebAuthService:
             )
             if int(count[0]["count"]) == 0:
                 raise ValueError("At least one enabled administrator is required.")
+        radio_unlinked = new_role == "viewer" and current["radio_member_id"] is not None
         await self.database.write(
-            "UPDATE web_account SET display_name=?,role=?,enabled=? WHERE id=?",
-            (label, new_role, int(new_enabled), account_id),
+            "UPDATE web_account SET display_name=?,role=?,enabled=?,"
+            "radio_member_id=CASE WHEN ?='viewer' THEN NULL ELSE radio_member_id END,"
+            "radio_linked_at=CASE WHEN ?='viewer' THEN NULL ELSE radio_linked_at END,"
+            "radio_linked_by=CASE WHEN ?='viewer' THEN NULL ELSE radio_linked_by END WHERE id=?",
+            (label, new_role, int(new_enabled), new_role, new_role, new_role, account_id),
         )
         if not new_enabled:
             await self.database.write("DELETE FROM web_session WHERE account_id=?", (account_id,))
@@ -517,7 +626,7 @@ class WebAuthService:
             actor,
             "auth.account_update",
             f"account:{account_id}",
-            {"role": new_role, "enabled": new_enabled},
+            {"role": new_role, "enabled": new_enabled, "radio_unlinked": radio_unlinked},
         )
         return next(item for item in await self.accounts() if item["id"] == account_id)
 

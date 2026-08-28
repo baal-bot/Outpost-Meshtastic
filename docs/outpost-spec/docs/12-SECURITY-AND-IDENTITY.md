@@ -181,7 +181,10 @@ build on a known high-severity vulnerability.
 **REQ-SEC-026a** — A web operator account and a mesh member identity are distinct security
 principals. Audit rows for dashboard actions **MUST** name the authenticated web account; granting
 mesh trust `operator` **MUST NOT** grant dashboard access, and creating a web Operator **MUST NOT**
-change mesh trust.
+change mesh trust. An Administrator **MAY** link one mesh Operator radio to one Administrator or
+Operator web account for identity attribution. That association **MUST NOT** merge the
+principals or copy authority in either direction, and a mesh Operator without a web account **MUST**
+still appear in the Operator Access inventory.
 
 **REQ-SEC-026b** — TOTP recovery values **MUST** be suitable for offline field transcription,
 displayed only at issuance, stored only as hashes, and consumed atomically on use. Diagnostic

@@ -50,7 +50,9 @@ account, and invalidated on password change.
 
 **REQ-API-007a** — Web accounts **MUST** support Administrator, Operator, and Read-only / wallboard
 roles. Web authority is separate from mesh member trust. The last enabled Administrator **MUST NOT**
-be demoted or disabled.
+be demoted or disabled. Operator Access **MUST** separately inventory every mesh identity with
+`operator` trust and **MAY** maintain a one-to-one attribution link from an Administrator or
+Operator web account to its actual handheld radio.
 
 **REQ-API-007b** — Accounts **MUST** support offline TOTP and one-use recovery codes. Sensitive
 trust, federation-policy, restore, and emergency actions **MUST** require a recent password and,

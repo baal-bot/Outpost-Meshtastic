@@ -82,6 +82,13 @@ Sessions expire according to `web.auth.session_hours`; state-changing requests r
 Protected actions additionally use a 10-minute password/TOTP step-up window. The browser asks only
 when that window has expired and safely retries the original request after successful confirmation.
 
+Operator Access inventories web sign-ins and mesh Operator radios separately. Promoting a reviewed
+member radio to mesh Operator makes it appear there automatically, even when it has no dashboard
+login. An Administrator can link one actual handheld radio to each Administrator or Operator web
+account; Outpost never assumes that its attached radio is the human operator's radio. Linking is
+for identity attribution only: it grants no web password or mesh trust. A demoted linked radio
+remains visible as a warning until it is unlinked or promoted again.
+
 The web console is intended for the local operator; mesh users do not need web accounts. A
 Read-only / wallboard account is optional and should be created only for a shared status display.
 It receives one aggregate contract and cannot browse operator pages or general read APIs. The

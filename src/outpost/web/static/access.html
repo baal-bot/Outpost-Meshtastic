@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="/base.css?v=1">
     <link rel="stylesheet" href="/layout.css?v=1">
     <link rel="stylesheet" href="/access.css">
+    <link rel="stylesheet" href="/access-operator-radio.css">
     <link rel="stylesheet" href="/components.css?v=1">
   </head>
   <body>
@@ -79,9 +80,12 @@
 
         <section id="accounts-panel" class="ui-card panel content-panel accounts-panel" aria-labelledby="accounts-title" hidden>
           <div class="heading">
-            <div><p class="eyebrow">ADMINISTRATOR CONTROL</p><h2 id="accounts-title">Operator accounts</h2></div>
-            <button id="show-create-account" class="ui-button ui-button--primary primary-button" type="button">Add account</button>
+            <div><p class="eyebrow">ADMINISTRATOR CONTROL</p><h2 id="accounts-title">Operator identities</h2></div>
+            <button id="show-create-account" class="ui-button ui-button--primary primary-button" type="button">Add web account</button>
           </div>
+          <p class="identity-boundary">Web sign-ins and mesh radios remain separate security
+            principals. Link them here to identify an operator's actual handheld radio; the
+            Outpost's attached radio is not assumed to be the operator.</p>
           <div class="role-guide">
             <article><b>Administrator</b><span>Accounts, restore, policy, and all operations</span></article>
             <article><b>Operator</b><span>Daily operations without account or restore authority</span></article>
@@ -94,8 +98,11 @@
             <div><label for="account-password">Initial password</label><input id="account-password" type="password" minlength="12" autocomplete="new-password" required></div>
             <footer><button id="cancel-create-account" type="button" class="ui-button secondary-button">Cancel</button><button type="submit" class="ui-button ui-button--primary primary-button">Create account</button></footer>
           </form>
+          <div class="identity-section-heading"><div><p class="eyebrow">LOCAL CONSOLE</p><h3>Web accounts</h3></div><small>Passwords and dashboard permissions</small></div>
           <div id="account-list" class="account-list"><p class="ui-empty empty">Loading accounts…</p></div>
           <p id="account-message" class="access-message" aria-live="polite"></p>
+          <div class="identity-section-heading mesh-heading"><div><p class="eyebrow">MESH AUTHORITY</p><h3>Operator radios</h3></div><small>Added automatically when mesh trust becomes Operator</small></div>
+          <div id="operator-radio-list" class="operator-radio-list"><p class="ui-empty empty">Loading operator radios…</p></div>
         </section>
       </main>
       <footer><span>Operator identities are local to this Outpost.</span><span>Recovery codes should be stored offline.</span></footer>

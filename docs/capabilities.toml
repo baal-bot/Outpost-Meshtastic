@@ -252,7 +252,7 @@ description = "Process supervision and parser failure boundaries."
 [[capabilities]]
 id = "dashboard_access"
 area = "Dashboard and operator access"
-present = "Responsive module-aware pages/API, named roles, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, accessibility, shared map controls, and an offline-capable federation topology view."
+present = "Responsive module-aware pages/API, named roles, explicit web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, accessibility, shared map controls, and an offline-capable federation topology view."
 maturity = "automated_tested"
 introduced_commit = "5295868"
 limitations = ["Most deployments assume operator-only trusted-LAN web access; Internet exposure and operator-supplied TLS/VPN remain opt-in deployment choices."]
