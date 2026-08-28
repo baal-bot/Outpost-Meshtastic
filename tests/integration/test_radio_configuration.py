@@ -7,7 +7,10 @@ from outpost.app import OutpostApp
 from outpost.clock import VirtualClock
 from outpost.config import Config
 from outpost.fed import FederationPeerService
+from outpost.radio_operations import RadioOperations
 from outpost.store import Database
+from outpost.transport.governor import AirtimeGovernor
+from outpost.watch import AlertService
 from outpost.web.api import create_web_app
 from outpost.web.auth import WebAuthService
 
@@ -44,6 +47,128 @@ def test_radio_configuration_surfaces_policy_drift(tmp_path) -> None:
         "Outpost policy references inactive radio slot(s): 2.",
         "Active radio slot(s) have no Outpost policy and reject commands: 1.",
     ]
+
+
+@pytest.mark.asyncio
+async def test_live_channel_map_includes_all_slots_history_and_revalidates_sends(
+    tmp_path,
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    await database.write(
+        """
+        INSERT INTO message_log(direction,channel,portnum,is_direct,byte_len,created_at)
+        VALUES('in',5,1,0,12,1234)
+        """
+    )
+    clock = VirtualClock()
+    config = Config.model_validate(
+        {
+            "channels": {
+                0: {"name": "Public", "alerts": True},
+                4: {"name": "Logistics", "alerts": True},
+                7: {"name": "Rescue", "alerts": True},
+            }
+        }
+    )
+    governor = AirtimeGovernor(object(), config.airtime, clock)  # type: ignore[arg-type]
+    operations = RadioOperations(database, governor, clock)
+    alerts = AlertService(database, governor, clock, config)
+    radio_state = {"radio": "up"}
+    channels = [
+        {
+            "index": index,
+            "role": ("PRIMARY" if index == 0 else "SECONDARY" if index in {4, 7} else "DISABLED"),
+            "name": {0: "Public", 4: "Field Logistics", 7: "Rescue"}.get(index, ""),
+        }
+        for index in range(8)
+    ]
+
+    async def radio_status() -> dict[str, object]:
+        return {
+            "available": radio_state["radio"] == "up",
+            "stale": radio_state["radio"] != "up",
+            "verified_at": 1234,
+            "channels": deepcopy(channels),
+            "outpost_channel_policies": [
+                {"index": index, "name": policy.name} for index, policy in config.channels.items()
+            ],
+        }
+
+    client = TestClient(
+        create_web_app(
+            lambda: radio_state,
+            database=database,
+            radio_operations=operations,
+            alerts=alerts,
+            radio_configuration_status=radio_status,
+        )
+    )
+
+    channel_map = client.get("/api/v1/radio/channels")
+    assert channel_map.status_code == 200
+    assert channel_map.headers["cache-control"] == "no-store"
+    assert [item["index"] for item in channel_map.json()["items"]] == list(range(8))
+    assert [item["index"] for item in channel_map.json()["items"] if item["active"]] == [
+        0,
+        4,
+        7,
+    ]
+    assert channel_map.json()["items"][4]["name"] == "Field Logistics"
+    assert channel_map.json()["items"][5]["historical"] is True
+
+    sent = client.post(
+        "/api/v1/mesh/send",
+        json={
+            "text": "Team move",
+            "destination": "^all",
+            "channel": 7,
+            "traffic_class": "bulletin",
+        },
+    )
+    assert sent.status_code == 200
+    raised = client.post(
+        "/api/v1/alerts",
+        json={"severity": "caution", "headline": "Bridge inspection", "channels": [7]},
+    )
+    assert raised.status_code == 200, raised.text
+
+    channels[7]["role"] = "DISABLED"
+    rejected_send = client.post(
+        "/api/v1/mesh/send",
+        json={
+            "text": "Do not queue",
+            "destination": "^all",
+            "channel": 7,
+            "traffic_class": "bulletin",
+        },
+    )
+    assert rejected_send.status_code == 422
+    assert "no longer active" in rejected_send.json()["error"]["message"]
+    rejected_alert = client.post(
+        "/api/v1/alerts",
+        json={"severity": "caution", "headline": "Do not raise", "channels": [7]},
+    )
+    assert rejected_alert.status_code == 422
+    assert "no longer active" in rejected_alert.json()["error"]["message"]
+
+    radio_state["radio"] = "down"
+    stale = client.get("/api/v1/radio/channels").json()
+    assert stale["available"] is False
+    assert stale["stale"] is True
+    assert stale["items"][4]["last_verified_active"] is True
+    disconnected = client.post(
+        "/api/v1/mesh/send",
+        json={
+            "text": "Still do not queue",
+            "destination": "^all",
+            "channel": 4,
+            "traffic_class": "bulletin",
+        },
+    )
+    assert disconnected.status_code == 422
+    assert "disconnected" in disconnected.json()["error"]["message"]
+    await database.close()
 
 
 @pytest.mark.asyncio

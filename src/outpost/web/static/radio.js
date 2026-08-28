@@ -13,6 +13,9 @@ let messageNextCursor = null;
 let messageFilterKey = "";
 let messageHistoryExpanded = false;
 
+$("send-channel").disabled = true;
+$("send-form").querySelector("button").disabled = true;
+
 const api = async (url, options = {}) =>
   fetch(url, {
     ...options,
@@ -36,6 +39,76 @@ function queueItemMatches(item, filter) {
 function messageOutcomeLabel(outcome) {
   if (outcome === "not_requested") return "no ACK requested";
   return outcome || "—";
+}
+
+function appendChannelOption(select, channel, suffix = "") {
+  const entry = document.createElement("option");
+  entry.value = String(channel.index);
+  entry.textContent = `${channel.name} · ch ${channel.index}${suffix}`;
+  select.append(entry);
+}
+
+function renderChannelMap(channelMap) {
+  const sendSelect = $("send-channel");
+  const priorSend = sendSelect.value;
+  const active = channelMap.items.filter((channel) => channel.active);
+  const lastVerified = channelMap.items.filter((channel) => channel.last_verified_active);
+  const sendChoices = channelMap.available ? active : channelMap.stale ? lastVerified : [];
+  sendSelect.replaceChildren();
+  if (sendChoices.length) {
+    for (const channel of sendChoices) {
+      appendChannelOption(sendSelect, channel, channelMap.available ? "" : " · last verified");
+    }
+    sendSelect.value = sendChoices.some((channel) => String(channel.index) === priorSend)
+      ? priorSend
+      : String(sendChoices[0].index);
+  } else {
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = channelMap.available
+      ? "No active radio channels"
+      : "No verified channel map";
+    sendSelect.append(empty);
+  }
+  const canSend = channelMap.available && active.length > 0;
+  sendSelect.disabled = !canSend;
+  $("send-form").querySelector("button").disabled = !canSend;
+  const mapState = $("send-channel-state");
+  if (channelMap.available) {
+    mapState.textContent = `${active.length} active radio channel${active.length === 1 ? "" : "s"}.`;
+  } else if (channelMap.stale) {
+    const verified = channelMap.verified_at
+      ? new Date(channelMap.verified_at * 1000).toLocaleString()
+      : "an earlier session";
+    mapState.textContent = `Last verified ${verified}; sending is disabled while the radio is disconnected.`;
+  } else {
+    mapState.textContent = "No verified radio channel map; sending is disabled.";
+  }
+  mapState.classList.toggle("history-warning", !channelMap.available);
+
+  const historySelect = $("filter-channel");
+  const priorHistory = historySelect.value;
+  historySelect.replaceChildren();
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "All channels";
+  historySelect.append(all);
+  const historyChoices = channelMap.items.filter(
+    (channel) => channel.active || channel.historical || (channelMap.stale && channel.last_verified_active),
+  );
+  for (const channel of historyChoices) {
+    const suffix = channel.active
+      ? ""
+      : channel.historical
+        ? " · retained"
+        : " · last verified";
+    appendChannelOption(historySelect, channel, suffix);
+  }
+  historySelect.value = historyChoices.some(
+    (channel) => String(channel.index) === priorHistory,
+  )
+    ? priorHistory
+    : "";
 }
 
 function messageQuery(cursor) {
@@ -131,6 +204,13 @@ async function initialize() {
 }
 
 async function refresh() {
+  const [status, airtime, queue, channelMap] = await Promise.all([
+    api("/api/v1/status").then((response) => response.json()),
+    api("/api/v1/mesh/airtime").then((response) => response.json()),
+    api("/api/v1/mesh/queue").then((response) => response.json()),
+    api("/api/v1/radio/channels").then((response) => response.json()),
+  ]);
+  renderChannelMap(channelMap);
   const direction = $("filter-direction").value;
   const channel = $("filter-channel").value;
   const selectedFilterKey = `${direction}:${channel}`;
@@ -140,12 +220,9 @@ async function refresh() {
     messageHistoryExpanded = false;
     messageFilterKey = selectedFilterKey;
   }
-  const [status, airtime, queue, messages] = await Promise.all([
-    api("/api/v1/status").then((response) => response.json()),
-    api("/api/v1/mesh/airtime").then((response) => response.json()),
-    api("/api/v1/mesh/queue").then((response) => response.json()),
-    api(`/api/v1/mesh/messages?${messageQuery(0)}`).then((response) => response.json()),
-  ]);
+  const messages = await api(`/api/v1/mesh/messages?${messageQuery(0)}`).then((response) =>
+    response.json(),
+  );
   const state = $("link-state");
   state.className = `ui-pill status ${status.radio}`;
   state.innerHTML = `<i></i>${safe(status.radio)}`;

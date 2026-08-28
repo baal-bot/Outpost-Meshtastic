@@ -7,6 +7,7 @@ from meshtastic.protobuf import channel_pb2, config_pb2, module_config_pb2
 
 from outpost.clock import VirtualClock
 from outpost.config import RadioConfig
+from outpost.transport.models import LinkState
 from outpost.transport.radio_link import MeshtasticRadioLink
 
 
@@ -155,6 +156,7 @@ async def test_radio_configuration_is_guarded_and_never_reads_back_secrets() -> 
             "position": {"latitude": 40.44, "longitude": -79.99, "altitude": 366},
         },
     )
+    link._state = LinkState.UP
 
     status = await link.configuration_status()
 
@@ -220,6 +222,15 @@ async def test_radio_configuration_is_guarded_and_never_reads_back_secrets() -> 
     assert await link.verify_configuration_secrets(
         "mqtt", {"username": "operator", "password": "wrong"}
     ) == ["password"]
+
+    link._on_lost()
+    stale = await link.configuration_status()
+    assert stale["available"] is False
+    assert stale["stale"] is True
+    assert stale["verified_at"] is not None
+    assert [channel["name"] for channel in stale["channels"]] == ["LongFast", "Rescue"]
+    assert "secret-key-material" not in str(stale)
+    assert "last verified configuration" in stale["warnings"][-1]
 
 
 @pytest.mark.asyncio

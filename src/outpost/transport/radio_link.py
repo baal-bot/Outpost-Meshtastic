@@ -6,6 +6,7 @@ import binascii
 import contextlib
 import secrets
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from typing import Any
 
 from outpost.clock import Clock
@@ -32,6 +33,7 @@ class MeshtasticRadioLink:
         self._last_inbound_drop_at: int | None = None
         self._config_lock = asyncio.Lock()
         self._connection_generation = 0
+        self._configuration_snapshot: dict[str, Any] | None = None
 
     @property
     def state(self) -> LinkState:
@@ -99,13 +101,33 @@ class MeshtasticRadioLink:
         return {0: "open", 1: "default", 16: "AES-128", 32: "AES-256"}.get(size, f"{size}-byte key")
 
     async def configuration_status(self) -> dict[str, Any]:
-        if self._interface is None:
-            return {"available": False, "connection": self.config.transport}
+        if self._interface is None or self._state is not LinkState.UP:
+            if self._configuration_snapshot is None:
+                return {
+                    "available": False,
+                    "stale": False,
+                    "verified_at": None,
+                    "connection": self.config.transport,
+                    "channels": [],
+                }
+            stale = deepcopy(self._configuration_snapshot)
+            stale.update({"available": False, "stale": True})
+            stale["warnings"] = [
+                *stale.get("warnings", []),
+                "Radio link is down; showing the last verified configuration.",
+            ]
+            return stale
         local = self._local_node()
         local_config = getattr(local, "localConfig", None)
         module_config = getattr(local, "moduleConfig", None)
         if local_config is None or module_config is None:
-            return {"available": False, "connection": self.config.transport}
+            return {
+                "available": False,
+                "stale": False,
+                "verified_at": None,
+                "connection": self.config.transport,
+                "channels": [],
+            }
         device = local_config.device
         lora = local_config.lora
         position = local_config.position
@@ -129,8 +151,10 @@ class MeshtasticRadioLink:
             warnings.append("The radio is overriding its regional duty-cycle limit.")
         if float(getattr(lora, "override_frequency", 0)) != 0:
             warnings.append("The radio is using an advanced frequency override.")
-        return {
+        result = {
             "available": True,
+            "stale": False,
+            "verified_at": int(self.clock.now().timestamp()),
             "connection": self.config.transport,
             "node_id": self._local_id,
             "identity": {
@@ -202,6 +226,8 @@ class MeshtasticRadioLink:
             },
             "warnings": warnings,
         }
+        self._configuration_snapshot = deepcopy(result)
+        return result
 
     @staticmethod
     def _clone_message(message: Any) -> Any:

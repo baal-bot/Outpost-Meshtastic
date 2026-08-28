@@ -525,6 +525,32 @@ def route_visual_content_api(page: object) -> None:
             "outpost_policy_channels": [0, 1],
         },
     )
+    fulfill(
+        "**/api/v1/radio/channels",
+        {
+            "available": True,
+            "stale": False,
+            "verified_at": 2_000_000_000,
+            "items": [
+                {
+                    "index": 0,
+                    "name": "LongFast",
+                    "role": "PRIMARY",
+                    "active": True,
+                    "last_verified_active": True,
+                    "historical": True,
+                },
+                {
+                    "index": 1,
+                    "name": "Outpost",
+                    "role": "SECONDARY",
+                    "active": True,
+                    "last_verified_active": True,
+                    "historical": False,
+                },
+            ],
+        },
+    )
     fulfill("**/api/v1/incidents*", {"items": []})
     fulfill("**/api/v1/alerts*", {"items": []})
     fulfill("**/api/v1/events*", {"current": None})
@@ -1828,19 +1854,19 @@ def test_radio_queue_filter_hides_expired_history_by_default(
         assert not page.get_by_text("Expired payload one").is_visible()
 
         queue_filter.select_option("active")
-        page.get_by_text("Awaiting payload").wait_for()
+        page.wait_for_function("() => document.querySelectorAll('.queue-card').length === 2")
         assert page.locator(".queue-card").count() == 2
 
         queue_filter.select_option("failed")
-        page.get_by_text("Failed payload").wait_for()
+        page.wait_for_function("() => document.querySelectorAll('.queue-card').length === 1")
         assert page.locator(".queue-card").count() == 1
 
         queue_filter.select_option("expired")
-        page.get_by_text("Expired payload one").wait_for()
+        page.wait_for_function("() => document.querySelectorAll('.queue-card').length === 2")
         assert page.locator(".queue-card").count() == 2
 
         queue_filter.select_option("all")
-        page.get_by_text("Current payload").wait_for()
+        page.wait_for_function("() => document.querySelectorAll('.queue-card').length === 5")
         assert page.locator(".queue-card").count() == 5
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
@@ -2051,6 +2077,119 @@ def test_radio_packet_history_loads_25_at_a_time(browser: object, dashboard_url:
         assert page.locator("#message-count").text_content() == "25"
         assert "direction=out" in message_requests[-1]
         assert "cursor=0" in message_requests[-1]
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_radio_and_watch_selectors_follow_live_sparse_channel_map(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    channel_map = {
+        "available": True,
+        "stale": False,
+        "verified_at": 2_000_000_000,
+        "items": [
+            {
+                "index": index,
+                "name": {0: "Public", 4: "Field Logistics", 7: "Rescue"}.get(
+                    index, f"Unused {index}"
+                ),
+                "role": (
+                    "PRIMARY" if index == 0 else "SECONDARY" if index in {4, 7} else "DISABLED"
+                ),
+                "active": index in {0, 4, 7},
+                "last_verified_active": index in {0, 4, 7},
+                "historical": index in {0, 5, 7},
+            }
+            for index in range(8)
+        ],
+    }
+    page.route(
+        "**/api/v1/radio/channels",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(channel_map),
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/radio.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        assert page.locator("#send-channel option").all_text_contents() == [
+            "Public · ch 0",
+            "Field Logistics · ch 4",
+            "Rescue · ch 7",
+        ]
+        assert page.locator("#filter-channel option").all_text_contents() == [
+            "All channels",
+            "Public · ch 0",
+            "Field Logistics · ch 4",
+            "Unused 5 · ch 5 · retained",
+            "Rescue · ch 7",
+        ]
+        page.locator("#send-channel").select_option("7")
+        page.locator("#filter-channel").select_option("5")
+        channel_map["items"][4]["name"] = "Field Ops"  # type: ignore[index]
+        page.locator("#refresh-radio").click()
+        page.locator("#send-channel option", has_text="Field Ops · ch 4").wait_for(state="attached")
+        assert page.locator("#send-channel").input_value() == "7"
+        assert page.locator("#filter-channel").input_value() == "5"
+
+        channel_map["items"][7]["active"] = False  # type: ignore[index]
+        channel_map["items"][7]["last_verified_active"] = False  # type: ignore[index]
+        channel_map["items"][7]["role"] = "DISABLED"  # type: ignore[index]
+        channel_map["items"][0]["name"] = "Public Net"  # type: ignore[index]
+        page.locator("#refresh-radio").click()
+        page.locator("#send-channel option", has_text="Public Net · ch 0").wait_for(
+            state="attached"
+        )
+        assert page.locator("#send-channel").input_value() == "0"
+        assert page.locator("#filter-channel").input_value() == "5"
+        assert page.get_by_role("option", name="Rescue · ch 7 · retained").count() == 1
+
+        channel_map["available"] = False
+        channel_map["stale"] = True
+        channel_map["items"][0]["active"] = False  # type: ignore[index]
+        channel_map["items"][4]["active"] = False  # type: ignore[index]
+        page.locator("#refresh-radio").click()
+        page.get_by_text(
+            "sending is disabled while the radio is disconnected", exact=False
+        ).wait_for()
+        assert page.locator("#send-channel").is_disabled()
+        assert page.locator("#send-form button").is_disabled()
+        assert page.locator("#filter-channel").input_value() == "5"
+
+        channel_map["available"] = True
+        channel_map["stale"] = False
+        channel_map["items"][0]["active"] = True  # type: ignore[index]
+        channel_map["items"][4]["active"] = True  # type: ignore[index]
+        page.goto(f"{dashboard_url}/watch.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        assert page.locator("#alert-channel option").all_text_contents() == [
+            "Public Net · ch 0",
+            "Field Ops · ch 4",
+        ]
+        page.locator("#alert-channel").select_option("4")
+        channel_map["items"][4]["name"] = "Field Command"  # type: ignore[index]
+        page.locator("#refresh-watch").click()
+        page.get_by_role("option", name="Field Command · ch 4").wait_for(state="attached")
+        assert page.locator("#alert-channel").input_value() == "4"
+
+        channel_map["available"] = False
+        channel_map["stale"] = True
+        channel_map["items"][0]["active"] = False  # type: ignore[index]
+        channel_map["items"][4]["active"] = False  # type: ignore[index]
+        page.locator("#refresh-watch").click()
+        page.get_by_text(
+            "broadcasting is disabled while the radio is disconnected", exact=False
+        ).wait_for()
+        assert page.locator("#alert-channel").is_disabled()
+        assert page.locator("#alert-form .alert-submit button").is_disabled()
         health.assert_clean()
     finally:
         page.close()

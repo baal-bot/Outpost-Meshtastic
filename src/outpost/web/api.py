@@ -584,6 +584,84 @@ def create_web_app(
             return settings.config.modules.enabled_map()
         return {name: True for name in ("bbs", "ai", "watch", "env", "fed")}
 
+    async def radio_channel_map() -> dict[str, Any]:
+        radio_status: dict[str, Any] = {
+            "available": False,
+            "stale": False,
+            "verified_at": None,
+            "channels": [],
+        }
+        if radio_configuration_status is not None:
+            try:
+                radio_status = await radio_configuration_status()
+            except (ConnectionError, OSError, TimeoutError):
+                radio_status["stale"] = True
+        radio_up = status_provider().get("radio") == "up"
+        available = bool(radio_status.get("available") and radio_up)
+        raw_channels = radio_status.get("channels", [])
+        current = {
+            int(channel["index"]): channel
+            for channel in raw_channels
+            if 0 <= int(channel.get("index", -1)) <= 7
+        }
+        policies = {
+            int(channel["index"]): channel
+            for channel in radio_status.get("outpost_channel_policies", [])
+            if 0 <= int(channel.get("index", -1)) <= 7
+        }
+        retained: dict[int, int | None] = {}
+        if database is not None:
+            rows = await database.read(
+                """
+                SELECT channel,MAX(created_at) AS last_seen_at
+                FROM message_log WHERE channel BETWEEN 0 AND 7
+                GROUP BY channel ORDER BY channel
+                """
+            )
+            retained = {int(row["channel"]): row["last_seen_at"] for row in rows}
+        items = []
+        for index in sorted(set(current) | set(retained)):
+            channel = current.get(index, {})
+            role = str(channel.get("role", "UNKNOWN"))
+            last_verified_active = role not in {"DISABLED", "UNKNOWN"}
+            name = str(channel.get("name", "")).strip()
+            if not name:
+                name = str(policies.get(index, {}).get("name", "")).strip()
+            items.append(
+                {
+                    "index": index,
+                    "name": name or f"Channel {index}",
+                    "role": role,
+                    "active": available and last_verified_active,
+                    "last_verified_active": last_verified_active,
+                    "historical": index in retained,
+                    "last_seen_at": retained.get(index),
+                }
+            )
+        return {
+            "available": available,
+            "stale": bool(radio_status.get("stale") or (items and not available)),
+            "verified_at": radio_status.get("verified_at"),
+            "items": items,
+        }
+
+    async def require_active_radio_channels(channels: list[int]) -> None:
+        if radio_configuration_status is None:
+            return
+        channel_map = await radio_channel_map()
+        if not channel_map["available"]:
+            raise ValueError(
+                "Radio is disconnected; reconnect it and verify the channel map before sending."
+            )
+        active = {item["index"] for item in channel_map["items"] if item["active"]}
+        inactive = sorted(set(channels) - active)
+        if inactive:
+            slots = ", ".join(str(index) for index in inactive)
+            raise ValueError(
+                f"Radio channel slot(s) {slots} are no longer active; refresh and choose "
+                "an active channel."
+            )
+
     def api_module(path: str) -> str | None:
         routes = (
             ("/api/v1/environment", "env"),
@@ -1830,6 +1908,11 @@ def create_web_app(
                         status_code=409,
                     )
 
+    @app.get("/api/v1/radio/channels")
+    async def radio_channels(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return await radio_channel_map()
+
     if radio_configuration_status is not None:
 
         @app.get("/api/v1/radio/config")
@@ -2717,6 +2800,7 @@ def create_web_app(
             @app.post("/api/v1/alerts", response_model=None)
             async def alert_create(body: AlertCreateBody) -> dict[str, Any] | Response:
                 try:
+                    await require_active_radio_channels(body.channels)
                     value = await alerts.raise_alert(
                         body.severity,
                         body.headline,
@@ -3859,6 +3943,7 @@ def create_web_app(
             @app.post("/api/v1/mesh/send", response_model=None)
             async def mesh_send(body: MeshSendBody) -> dict[str, int] | Response:
                 try:
+                    await require_active_radio_channels([body.channel])
                     item_id = await radio_operations.send(
                         body.text, body.destination, body.channel, body.traffic_class
                     )
