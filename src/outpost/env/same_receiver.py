@@ -189,16 +189,25 @@ class SameReceiver:
         watched = {rtl_wait, decoder_wait, *tasks}
         try:
             done, _pending = await asyncio.wait(watched, return_when=asyncio.FIRST_COMPLETED)
-            if rtl_wait in done:
-                self.last_exit_code = rtl_wait.result()
-                raise SameReceiverError(f"rtl_fm exited with status {self.last_exit_code}")
-            if decoder_wait in done:
-                self.last_exit_code = decoder_wait.result()
-                raise SameReceiverError(f"samedec exited with status {self.last_exit_code}")
+            process_error = self._process_exit_error(rtl_wait, decoder_wait)
+            if process_error is not None:
+                raise process_error
             completed = next(iter(done))
             error = completed.exception()
             if error is not None:
                 raise SameReceiverError(str(error)) from error
+            # A pipe reader can observe EOF just before asyncio publishes the
+            # child return code. Give the process watchers a bounded chance to
+            # report the concrete failure instead of losing it to a scheduling
+            # race and claiming only that a reader ended unexpectedly.
+            await asyncio.wait(
+                {rtl_wait, decoder_wait},
+                timeout=1,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            process_error = self._process_exit_error(rtl_wait, decoder_wait)
+            if process_error is not None:
+                raise process_error
             raise SameReceiverError(f"{completed.get_name()} ended unexpectedly")
         finally:
             for task in watched:
@@ -206,6 +215,15 @@ class SameReceiver:
                     task.cancel()
             await asyncio.gather(*watched, return_exceptions=True)
             await self._stop_processes()
+
+    def _process_exit_error(
+        self, rtl_wait: asyncio.Task[int], decoder_wait: asyncio.Task[int]
+    ) -> SameReceiverError | None:
+        for name, task in (("rtl_fm", rtl_wait), ("samedec", decoder_wait)):
+            if task.done():
+                self.last_exit_code = task.result()
+                return SameReceiverError(f"{name} exited with status {self.last_exit_code}")
+        return None
 
     async def _pump_audio(self) -> None:
         assert self._rtl is not None and self._rtl.stdout is not None
