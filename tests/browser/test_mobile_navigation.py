@@ -2052,6 +2052,68 @@ def test_inbound_queue_color_tracks_current_pressure_not_drop_history(
         page.close()
 
 
+def test_overview_reports_isolated_subsystem_failure(browser: object, dashboard_url: str) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    status = {
+        "node": "Relief Outpost",
+        "radio": "up",
+        "airtime_used_ratio": 0.01,
+        "radio_config": {
+            "node_id": "!699c2f30",
+            "region": "US",
+            "preset": "LongFast",
+            "channels": [],
+        },
+        "queues": {},
+        "tasks_healthy": True,
+        "subsystems_healthy": False,
+        "tasks": {
+            "inbound-router": {
+                "state": "running",
+                "failure_domain": "core",
+                "required": True,
+                "last_ok_at": 2_000_000_000,
+                "failure_count": 0,
+                "restart_count": 0,
+            },
+            "environment-poller": {
+                "state": "circuit_open",
+                "failure_domain": "optional_provider",
+                "required": False,
+                "degraded_reason": "ProgrammingError: CAP binding parameter was a list",
+                "failure_count": 4,
+                "restart_count": 3,
+                "last_error_at": 2_000_000_000,
+                "next_retry_at": 4_000_000_000,
+                "circuit_open": True,
+            },
+        },
+    }
+    page.route(
+        "**/api/v1/status",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(status),
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(dashboard_url, wait_until="networkidle")
+        wait_for_navigation(page)
+        assert page.locator("#subsystem-state").text_content() == "1 degraded"
+        card = page.locator(".subsystem-task.degraded")
+        assert "Environment Poller" in card.text_content()
+        assert "CAP binding parameter was a list" in card.text_content()
+        assert "circuit open" in card.text_content()
+        assert page.locator("#radio-state").text_content().strip() == "up"
+        health.assert_clean()
+    finally:
+        page.close()
+
+
 def test_capability_cards_reflect_disabled_modules(browser: object, dashboard_url: str) -> None:
     page = prepare_page(browser, 1280, dashboard_url, theme="dark")
     states = {

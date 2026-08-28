@@ -16,7 +16,7 @@ def main() -> None:
     async def serve() -> None:
         await application.startup()
         watchdog_task = asyncio.create_task(
-            watchdog(application.clock, application.background_tasks_healthy),
+            watchdog(application.clock, application.core_tasks_healthy),
             name="systemd-watchdog",
         )
         server = uvicorn.Server(

@@ -7,6 +7,9 @@
   shows queued, transmitting, acknowledgement-waiting, expired, and failed work. Failed work and a
   stale acknowledgement wait can be cancelled without editing SQLite.
 - Provider status shows recent success or a clear degraded state.
+- **Overview → Subsystem health** shows each task's failure domain, last progress or error, total
+  failures/restarts, open-circuit state, and next retry. A degraded optional task does not imply the
+  radio router is down.
 - Disk space accommodates database, backups, and tiles.
 - Journal shows no restart loop, migration/integrity error, or repeated radio flap.
 
@@ -15,7 +18,12 @@ systemctl is-active outpost
 systemctl status outpost --no-pager
 journalctl -u outpost --since today --no-pager
 curl -fsS http://127.0.0.1:8080/api/v1/health
+curl -fsS http://127.0.0.1:8080/api/v1/diagnostics/status
 ```
+
+The minimal health endpoint and systemd watchdog reflect core offline progress. Optional provider
+and restartable-local failures remain visible in the authenticated dashboard and loopback-only
+diagnostics while the core continues serving mesh traffic.
 
 Prometheus metrics are mounted at `/metrics`. Restrict them to trusted networks because labels and
 traffic characteristics can reveal operational patterns.

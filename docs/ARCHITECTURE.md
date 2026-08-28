@@ -53,6 +53,14 @@ Core commands and stored data work without WAN. Provider views may serve bounded
 age/provenance or show unavailable. Maps use online tiles and an optional regional fallback. Radio
 federation is internet-independent; MQTT is not.
 
+Long-running work is split into explicit failure domains. Radio supervision, the airtime governor,
+inbound routing, and inbound workers are core: an unexpected exit stops watchdog heartbeats and
+fails the process so admitted work can recover under systemd. Local subsystems such as SAME, AI,
+digests, watch scheduling, and maintenance restart independently. Environment and federation work
+are optional-provider domains. Isolated domains use bounded exponential backoff and expose an open
+circuit after repeated deterministic failures; they do not remove otherwise healthy offline mesh
+routing.
+
 All incident, member, and environment maps use `map-controller.js`. It owns Web Mercator
 projection, persistent tile and marker layers, online-to-local tile fallback, attribution, fit,
 pan/zoom, selection, empty state, and mouse/touch/keyboard input. Page adapters supply only domain

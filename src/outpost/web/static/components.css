@@ -463,3 +463,25 @@
   color: var(--ui-text-muted);
   font: .52rem ui-monospace, monospace;
 }
+.subsystem-panel { margin-top: 14px; }
+.subsystem-intro { margin: 8px 0 16px; color: var(--ui-text-muted); font-size: .72rem; }
+.subsystem-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.subsystem-task {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  background: var(--ui-surface-raised);
+}
+.subsystem-task.degraded { border-color: color-mix(in srgb, var(--amber) 55%, var(--ui-border)); }
+.subsystem-task.critical { border-color: color-mix(in srgb, var(--red) 65%, var(--ui-border)); }
+.subsystem-task header { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.subsystem-task strong { font-size: .76rem; }
+.subsystem-task header span,
+.subsystem-task small { color: var(--ui-text-muted); font: .54rem ui-monospace, monospace; }
+.subsystem-task header span { text-transform: uppercase; }
+.subsystem-task p { margin: 8px 0 5px; color: var(--ui-text-muted); font-size: .66rem; overflow-wrap: anywhere; }
+.subsystem-task.degraded p,
+.subsystem-task.critical p { color: var(--ui-text); }
+@media(max-width:1000px) { .subsystem-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media(max-width:620px) { .subsystem-list { grid-template-columns: 1fr; } }

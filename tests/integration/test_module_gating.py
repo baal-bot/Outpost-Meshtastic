@@ -152,5 +152,14 @@ async def test_enabled_module_combination_registers_matching_work(tmp_path) -> N
             "federation-sync",
             "federation-delivery",
         } <= task_names
+        health = app.status()["tasks"]
+        assert health["radio-supervisor"]["failure_domain"] == "core"
+        assert health["airtime-governor"]["failure_domain"] == "core"
+        assert health["inbound-router"]["failure_domain"] == "core"
+        assert health["bbs-digests"]["failure_domain"] == "restartable_local"
+        assert health["watch-scheduler"]["failure_domain"] == "restartable_local"
+        assert health["store-maintenance"]["failure_domain"] == "restartable_local"
+        assert health["environment-poller"]["failure_domain"] == "optional_provider"
+        assert health["federation-sync"]["failure_domain"] == "optional_provider"
     finally:
         await app.shutdown()

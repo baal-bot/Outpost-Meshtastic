@@ -65,6 +65,8 @@ def test_installer_stages_health_checked_release_with_rollback() -> None:
 
     unit = (Path(__file__).parents[2] / "deploy" / "outpost.service").read_text()
     assert "TimeoutStopSec=30" in unit
+    assert "StartLimitIntervalSec=300" in unit
+    assert "StartLimitBurst=5" in unit
 
     hotspot = (Path(__file__).parents[2] / "deploy" / "setup-hotspot.sh").read_text()
     assert "802-11-wireless.ap-isolation yes" in hotspot

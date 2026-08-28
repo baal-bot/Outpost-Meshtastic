@@ -7,6 +7,7 @@ if (sessionStorage.getItem(authHintKey) === "true") $("login-screen").classList.
 const safe = (value) => String(value).replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"})[char]);
 const ago = (stamp) => { const seconds = Math.max(0, (Date.now() - new Date(stamp)) / 1000); if (seconds < 60) return "now"; if (seconds < 3600) return `${Math.floor(seconds / 60)}m`; if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`; return `${Math.floor(seconds / 86400)}d`; };
 const item = (title, description, badge) => `<div class="item"><div><strong>${safe(title)}</strong><p>${safe(description || "")}</p></div><span class="badge">${safe(badge || "")}</span></div>`;
+document.querySelector("#system").insertAdjacentHTML("beforebegin", '<section id="subsystems" class="ui-card panel content-panel subsystem-panel"><div class="heading"><div><p class="eyebrow">FAILURE DOMAINS</p><h2>Subsystem health</h2></div><span id="subsystem-state" class="chip">Checking</span></div><p class="subsystem-intro">Core mesh routing fails safe. Local services and optional providers recover independently without taking the radio offline.</p><div id="subsystem-list" class="subsystem-list"><p class="ui-empty empty">Loading task health…</p></div></section>');
 document.querySelector(".kpis").insertAdjacentHTML("afterend", '<section class="panel weather-panel"><div><p id="weather-kind" class="eyebrow">LOCAL CONDITIONS</p><h2 id="weather-title">Weather</h2><p id="weather-summary">Set the Outpost location to enable weather.</p></div><div id="weather-reading" class="weather-reading"><strong>—</strong><span>Not configured</span></div><div id="weather-details" class="weather-details"></div></section>');
 document.querySelector(".weather-panel>div").insertAdjacentHTML("beforeend", '<div id="provider-health" class="provider-health"></div>');
 document.querySelector(".weather-panel").insertAdjacentHTML("afterend", '<section class="panel forecast-panel"><div class="forecast-heading"><div><p class="eyebrow">LOCAL FORECAST</p><h2>What’s ahead</h2></div><span id="forecast-meta">Loading forecast…</span></div><div id="forecast-days" class="forecast-days"></div><div id="forecast-hours" class="forecast-hours"></div></section>');
@@ -45,6 +46,31 @@ function activityRow(entry) {
   const identity = entry.handle ? `@${entry.handle}` : entry.peer_mesh_id || "mesh";
   const detail = [entry.command, entry.outcome, `channel ${entry.channel}`].filter(Boolean).join(" · ");
   return `<div class="activity-row"><span class="direction ${outbound ? "outbound" : ""}">${outbound ? "↗" : "↙"}</span><div><strong>${safe(identity)} · ${outbound ? "sent" : "received"}</strong><p>${safe(detail)}</p></div><time>${safe(ago(entry.created_at))}</time></div>`;
+}
+
+function renderSubsystems(status) {
+  const target = $("subsystem-list");
+  if (!target || viewerMode) return;
+  const tasks = Object.entries(status.tasks || {});
+  const degraded = tasks.filter(([, task]) => task.state !== "running");
+  const state = $("subsystem-state");
+  state.className = status.tasks_healthy === false ? "chip bad" : degraded.length ? "chip warn" : "chip";
+  state.textContent = status.tasks_healthy === false ? "Core fault" : degraded.length ? `${degraded.length} degraded` : "Healthy";
+  const friendly = (name) => name.split("-").map((part) => part === "ai" ? "AI" : part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+  const domain = (value) => ({core:"Core · fail fast",restartable_local:"Local · auto restart",optional_provider:"Optional · isolated"})[value] || value || "Task";
+  const when = (stamp) => stamp ? ago(new Date(stamp * 1000)) : "never";
+  const retry = (stamp) => { if (!stamp) return "retry pending"; const seconds = Math.max(0, stamp - Date.now() / 1000); return seconds < 2 ? "retrying now" : seconds < 60 ? `retry in ${Math.ceil(seconds)}s` : `retry in ${Math.ceil(seconds / 60)}m`; };
+  target.innerHTML = tasks.map(([name, task]) => {
+    const healthy = task.state === "running";
+    const level = healthy ? "" : task.required ? "critical" : "degraded";
+    const reason = healthy
+      ? task.failure_count ? `Recovered · last error ${when(task.last_error_at)} · ${task.last_error || "details unavailable"}` : `Last progress ${when(task.last_ok_at)}`
+      : task.degraded_reason || task.last_error || "Task stopped unexpectedly";
+    const detail = healthy
+      ? `${task.failure_count || 0} failures · ${task.restart_count || 0} restarts`
+      : `${task.failure_count || 0} failures · ${task.circuit_open ? "circuit open · " : ""}${retry(task.next_retry_at)}`;
+    return `<article class="subsystem-task ${level}"><header><strong>${safe(friendly(name))}</strong><span>${safe(task.state)}</span></header><p>${safe(reason)}</p><small>${safe(domain(task.failure_domain))} · ${safe(detail)}</small></article>`;
+  }).join("") || '<p class="ui-empty empty">Task health is not available.</p>';
 }
 
 async function refresh() {
@@ -95,6 +121,7 @@ async function refresh() {
       : overview.activity.map(activityRow).join("") || `<p class="ui-empty empty">No mesh activity recorded yet.</p>`;
     $("boards").innerHTML = boards.items.map((board) => item(board.title, board.description, `${board.thread_count} threads`)).join("") || `<p class="ui-empty empty">No boards.</p>`;
     $("channels").innerHTML = channels.items.map((channel) => item(channel.name, channel.description, `slot ${channel.slot}`)).join("") || `<p class="ui-empty empty">No channels.</p>`;
+    renderSubsystems(status);
     $("updated").textContent = `Updated ${new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`;
   } catch (_) {
     const radio = $("radio-state"); radio.className = "ui-pill status down"; radio.innerHTML = "<i></i>offline";
@@ -139,6 +166,7 @@ async function initialize() {
       document.body.dataset.operatorRole = "viewer";
       for (const selector of [
         "#system",
+        "#subsystems",
         ".weather-panel",
         ".forecast-panel",
         ".astronomy-panel",

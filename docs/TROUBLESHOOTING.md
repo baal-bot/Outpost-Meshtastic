@@ -15,6 +15,19 @@ sudo journalctl -u outpost -n 150 --no-pager
 Common causes: YAML errors, unknown strict keys, unchanged environment user agent, unsafe no-auth
 bind, unwritable database directory, or Python older than 3.12.
 
+Outpost limits a true process crash loop to five starts in five minutes. If systemd reports
+`start-limit-hit`, first fix the core error shown in the journal, then explicitly recover with:
+
+```sh
+sudo systemctl reset-failed outpost
+sudo systemctl start outpost
+sudo systemctl status outpost --no-pager
+```
+
+Do not use `reset-failed` repeatedly to mask a database, radio-routing, or configuration invariant.
+Failures shown under **Overview → Subsystem health** as `backoff` or `circuit_open` are already
+isolated and retry automatically; they do not require restarting the whole service.
+
 ## Dashboard unavailable
 
 ```sh

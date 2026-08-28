@@ -1109,7 +1109,24 @@ def create_web_app(
             str(name): {
                 key: value
                 for key, value in task.items()
-                if key in {"state", "started_at", "last_ok_at", "stopped_at"}
+                if key
+                in {
+                    "state",
+                    "failure_domain",
+                    "required",
+                    "started_at",
+                    "last_started_at",
+                    "last_ok_at",
+                    "stopped_at",
+                    "degraded_reason",
+                    "failure_count",
+                    "consecutive_failures",
+                    "restart_count",
+                    "last_error",
+                    "last_error_at",
+                    "next_retry_at",
+                    "circuit_open",
+                }
             }
             for name, task in tasks.items()
             if isinstance(task, dict)
@@ -1177,6 +1194,7 @@ def create_web_app(
             "radio": status.get("radio", "unknown"),
             "radio_config": safe_radio_config,
             "tasks_healthy": status.get("tasks_healthy"),
+            "subsystems_healthy": status.get("subsystems_healthy"),
             "tasks": safe_tasks,
             "ai": safe_ai,
             "same_receiver": safe_receiver,

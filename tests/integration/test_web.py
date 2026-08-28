@@ -15,9 +15,21 @@ def test_health_is_minimal_and_status_has_detail() -> None:
             "tasks_healthy": False,
             "tasks": {
                 "radio-supervisor": {
-                    "state": "running",
+                    "state": "backoff",
+                    "failure_domain": "optional_provider",
+                    "required": False,
                     "started_at": 1,
+                    "last_started_at": 1,
                     "last_ok_at": 2,
+                    "stopped_at": 3,
+                    "degraded_reason": "RuntimeError: provider failed",
+                    "failure_count": 2,
+                    "consecutive_failures": 2,
+                    "restart_count": 1,
+                    "last_error": "RuntimeError: provider failed",
+                    "last_error_at": 3,
+                    "next_retry_at": 33,
+                    "circuit_open": False,
                     "error": "must not leave loopback",
                 }
             },
@@ -48,9 +60,21 @@ def test_health_is_minimal_and_status_has_detail() -> None:
     assert diagnostics.status_code == 200
     assert diagnostics.json()["tasks"] == {
         "radio-supervisor": {
-            "state": "running",
+            "state": "backoff",
+            "failure_domain": "optional_provider",
+            "required": False,
             "started_at": 1,
+            "last_started_at": 1,
             "last_ok_at": 2,
+            "stopped_at": 3,
+            "degraded_reason": "RuntimeError: provider failed",
+            "failure_count": 2,
+            "consecutive_failures": 2,
+            "restart_count": 1,
+            "last_error": "RuntimeError: provider failed",
+            "last_error_at": 3,
+            "next_retry_at": 33,
+            "circuit_open": False,
         }
     }
     assert diagnostics.json()["radio_config"] == {
@@ -91,6 +115,18 @@ def test_health_is_minimal_and_status_has_detail() -> None:
     assert disabled_ai.status_code == 200
     assert disabled_ai.json() == {"status": "ok", "version": "0.1.0"}
 
+    isolated_optional_failure = TestClient(
+        create_web_app(
+            lambda: {
+                "radio": "up",
+                "tasks_healthy": True,
+                "subsystems_healthy": False,
+            }
+        )
+    ).get("/api/v1/health")
+    assert isolated_optional_failure.status_code == 200
+    assert isolated_optional_failure.json() == {"status": "ok", "version": "0.1.0"}
+
 
 @pytest.mark.asyncio
 async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp_path) -> None:
@@ -122,6 +158,7 @@ async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp
     assert "text" not in str(overview["activity"])
     dashboard = client.get("/")
     assert dashboard.status_code == 200 and "AIRTIME · ROLLING HOUR" in dashboard.text
+    assert "Subsystem health" in client.get("/app.js").text
     assert "outpost.operator.authenticated" in client.get("/app.js").text
     assert "System capabilities" in dashboard.text
     assert client.get("/Figtree-Variable.ttf").status_code == 200

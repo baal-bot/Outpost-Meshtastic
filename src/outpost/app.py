@@ -5,7 +5,7 @@ import hashlib
 import json
 import secrets
 from collections import defaultdict, deque
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -67,6 +67,7 @@ from outpost.store.maintenance import MaintenanceService
 from outpost.store.members import Member, MemberRepo
 from outpost.store.message_log import MessageLogRepo
 from outpost.store.outbox import OutboxStore
+from outpost.task_supervision import TaskFailureDomain, restart_delay
 from outpost.transport.chunker import chunk_text
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.inbound import InboundPipeline
@@ -289,19 +290,104 @@ class OutpostApp:
         )
 
     def _start_background_task(
-        self, name: str, coroutine: Coroutine[Any, Any, None]
+        self,
+        name: str,
+        factory: Callable[[], Coroutine[Any, Any, None]],
+        failure_domain: TaskFailureDomain = TaskFailureDomain.CORE,
     ) -> asyncio.Task[None]:
         now = int(self.clock.now().timestamp())
         self._task_health[name] = {
             "state": "running",
+            "failure_domain": failure_domain.value,
+            "required": failure_domain is TaskFailureDomain.CORE,
             "started_at": now,
+            "last_started_at": now,
             "last_ok_at": None,
             "stopped_at": None,
             "error": None,
+            "degraded_reason": None,
+            "failure_count": 0,
+            "consecutive_failures": 0,
+            "restart_count": 0,
+            "last_error": None,
+            "last_error_at": None,
+            "next_retry_at": None,
+            "circuit_open": False,
         }
-        task = asyncio.create_task(coroutine, name=name)
+        task = asyncio.create_task(
+            self._run_background_task(name, factory, failure_domain), name=name
+        )
         task.add_done_callback(self._background_task_done)
         return task
+
+    async def _run_background_task(
+        self,
+        name: str,
+        factory: Callable[[], Coroutine[Any, Any, None]],
+        failure_domain: TaskFailureDomain,
+    ) -> None:
+        while True:
+            try:
+                await factory()
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                failure = error
+            else:
+                failure = RuntimeError("task exited unexpectedly")
+            if failure_domain is TaskFailureDomain.CORE:
+                raise failure
+            health = self._record_task_failure(name, failure)
+            consecutive = int(health["consecutive_failures"])
+            delay, circuit_open = restart_delay(failure_domain, consecutive)
+            health.update(
+                {
+                    "state": "circuit_open" if circuit_open else "backoff",
+                    "circuit_open": circuit_open,
+                    "next_retry_at": int(self.clock.now().timestamp()) + delay,
+                }
+            )
+            print(
+                f"Outpost task {name} degraded; retry in {delay}s: {health['last_error']}",
+                flush=True,
+            )
+            await self.clock.sleep(delay)
+            if self._shutting_down:
+                return
+            now = int(self.clock.now().timestamp())
+            health.update(
+                {
+                    "state": "restarting",
+                    "last_started_at": now,
+                    "stopped_at": None,
+                    "restart_count": int(health["restart_count"]) + 1,
+                    "next_retry_at": None,
+                    "circuit_open": False,
+                }
+            )
+
+    def _record_task_failure(self, name: str, error: BaseException | None) -> dict[str, object]:
+        health = self._task_health[name]
+        now = int(self.clock.now().timestamp())
+        detail = (
+            f"{type(error).__name__}: {error}" if error is not None else "task exited unexpectedly"
+        )
+        detail = " ".join(detail.split())[:240]
+        health.update(
+            {
+                "state": "failed",
+                "stopped_at": now,
+                "error": detail,
+                "degraded_reason": detail,
+                "failure_count": int(health["failure_count"]) + 1,
+                "consecutive_failures": int(health["consecutive_failures"]) + 1,
+                "last_error": detail,
+                "last_error_at": now,
+                "next_retry_at": None,
+                "circuit_open": False,
+            }
+        )
+        return health
 
     async def test_ai(self, question: str) -> dict[str, object]:
         member = MemberRepo(self.database, self.clock)
@@ -325,8 +411,18 @@ class OutpostApp:
 
     def _task_progress(self, name: str) -> None:
         health = self._task_health.get(name)
-        if health is not None and health["state"] == "running":
-            health["last_ok_at"] = int(self.clock.now().timestamp())
+        if health is not None and health["state"] in {"running", "restarting"}:
+            health.update(
+                {
+                    "state": "running",
+                    "last_ok_at": int(self.clock.now().timestamp()),
+                    "error": None,
+                    "degraded_reason": None,
+                    "consecutive_failures": 0,
+                    "next_retry_at": None,
+                    "circuit_open": False,
+                }
+            )
 
     def _radio_progress(self) -> None:
         self._task_progress("radio-supervisor")
@@ -342,25 +438,30 @@ class OutpostApp:
         health = self._task_health.get(name)
         if health is None:
             return
-        now = int(self.clock.now().timestamp())
-        health["stopped_at"] = now
         if self._shutting_down or task.cancelled():
+            health["stopped_at"] = int(self.clock.now().timestamp())
             health["state"] = "stopped"
             return
         error = task.exception()
-        detail = (
-            f"{type(error).__name__}: {error}" if error is not None else "task exited unexpectedly"
-        )
-        detail = detail[:240]
-        health.update({"state": "failed", "error": detail})
-        if self._fatal_task_error is None:
-            self._fatal_task_error = f"{name}: {detail}"
-        self._task_failure.set()
+        self._record_task_failure(name, error)
+        if health["failure_domain"] == TaskFailureDomain.CORE.value:
+            detail = str(health["last_error"])
+            if self._fatal_task_error is None:
+                self._fatal_task_error = f"{name}: {detail}"
+            self._task_failure.set()
 
     def background_tasks_healthy(self) -> bool:
         return bool(self._task_health) and all(
             health["state"] == "running" for health in self._task_health.values()
         )
+
+    def core_tasks_healthy(self) -> bool:
+        core = [
+            health
+            for health in self._task_health.values()
+            if health["failure_domain"] == TaskFailureDomain.CORE.value
+        ]
+        return bool(core) and all(health["state"] == "running" for health in core)
 
     async def wait_for_task_failure(self) -> str:
         await self._task_failure.wait()
@@ -515,7 +616,14 @@ class OutpostApp:
 
     async def startup(self) -> None:
         await self.database.open()
-        await self.federation_relay.initialize()
+        if self.config.modules.fed.enabled:
+            try:
+                await self.federation_relay.initialize()
+            except Exception as error:
+                print(
+                    f"Federation initialization deferred after {type(error).__name__}: {error}",
+                    flush=True,
+                )
         if self.config.modules.ai.enabled:
             if self.config.ai.provider == "openai_compat":
                 print(
@@ -523,7 +631,13 @@ class OutpostApp:
                     "leave this node.",
                     flush=True,
                 )
-            await self.ai_service.initialize()
+            try:
+                await self.ai_service.initialize()
+            except Exception as error:
+                print(
+                    f"AI initialization degraded after {type(error).__name__}: {error}",
+                    flush=True,
+                )
         await self.governor.recover()
         await self.runtime_settings.load()
         self.federation_sync.local_mesh_id = self.radio.local_node_id
@@ -533,38 +647,77 @@ class OutpostApp:
             )
         await self.web_auth.ensure_credential()
         self._tasks = [
-            self._start_background_task("radio-supervisor", self.supervisor.run()),
-            self._start_background_task("airtime-governor", self._governor_loop()),
-            self._start_background_task("inbound-router", self._inbound_loop()),
+            self._start_background_task("radio-supervisor", self.supervisor.run),
+            self._start_background_task("airtime-governor", self._governor_loop),
+            self._start_background_task("inbound-router", self._inbound_loop),
             *[
                 self._start_background_task(
-                    f"inbound-worker-{worker}", self._inbound_worker(worker)
+                    f"inbound-worker-{worker}",
+                    lambda worker=worker: self._inbound_worker(worker),
                 )
                 for worker in range(1, self.config.router.inbound_workers + 1)
             ],
             *(
-                [self._start_background_task("bbs-digests", self._digest_loop())]
+                [
+                    self._start_background_task(
+                        "bbs-digests",
+                        self._digest_loop,
+                        TaskFailureDomain.RESTARTABLE_LOCAL,
+                    )
+                ]
                 if self.config.modules.bbs.enabled
                 else []
             ),
-            self._start_background_task("store-maintenance", self._maintenance_loop()),
+            self._start_background_task(
+                "store-maintenance",
+                self._maintenance_loop,
+                TaskFailureDomain.RESTARTABLE_LOCAL,
+            ),
             *(
-                [self._start_background_task("watch-scheduler", self._watch_loop())]
+                [
+                    self._start_background_task(
+                        "watch-scheduler",
+                        self._watch_loop,
+                        TaskFailureDomain.RESTARTABLE_LOCAL,
+                    )
+                ]
                 if self.config.modules.watch.enabled
                 else []
             ),
             *(
-                [self._start_background_task("environment-poller", self._environment_loop())]
+                [
+                    self._start_background_task(
+                        "environment-poller",
+                        self._environment_loop,
+                        TaskFailureDomain.OPTIONAL_PROVIDER,
+                    )
+                ]
                 if self.config.modules.env.enabled
                 else []
             ),
             *(
-                [self._start_background_task("same-receiver", self.same_receiver.run())]
+                [
+                    self._start_background_task(
+                        "same-receiver",
+                        self.same_receiver.run,
+                        TaskFailureDomain.RESTARTABLE_LOCAL,
+                    )
+                ]
                 if self.config.modules.env.enabled and self.config.env.same.enabled
                 else []
             ),
             *(
-                [self._start_background_task("ai-keep-warm", self._ai_keep_warm_loop())]
+                [
+                    self._start_background_task(
+                        "ai-keep-warm",
+                        self._ai_keep_warm_loop,
+                        (
+                            TaskFailureDomain.OPTIONAL_PROVIDER
+                            if self.config.ai.provider == "openai_compat"
+                            else TaskFailureDomain.RESTARTABLE_LOCAL
+                        ),
+                    )
+                ]
                 if self.config.modules.ai.enabled
                 and (self.config.ai.keep_warm.enabled or self.config.ai.required_for_readiness)
                 else []
@@ -572,18 +725,34 @@ class OutpostApp:
             *(
                 [
                     self._start_background_task(
-                        "federation-discovery", self._federation_hello_loop()
+                        "federation-discovery",
+                        self._federation_hello_loop,
+                        TaskFailureDomain.OPTIONAL_PROVIDER,
                     ),
                     self._start_background_task(
-                        "federation-services", self._federation_service_loop()
+                        "federation-services",
+                        self._federation_service_loop,
+                        TaskFailureDomain.OPTIONAL_PROVIDER,
                     ),
-                    self._start_background_task("federation-sync", self._federation_sync_loop()),
                     self._start_background_task(
-                        "federation-delivery", self._federation_delivery_loop()
+                        "federation-sync",
+                        self._federation_sync_loop,
+                        TaskFailureDomain.OPTIONAL_PROVIDER,
                     ),
-                    self._start_background_task("federation-relay", self._federation_relay_loop()),
                     self._start_background_task(
-                        "federation-topology", self._federation_topology_loop()
+                        "federation-delivery",
+                        self._federation_delivery_loop,
+                        TaskFailureDomain.OPTIONAL_PROVIDER,
+                    ),
+                    self._start_background_task(
+                        "federation-relay",
+                        self._federation_relay_loop,
+                        TaskFailureDomain.OPTIONAL_PROVIDER,
+                    ),
+                    self._start_background_task(
+                        "federation-topology",
+                        self._federation_topology_loop,
+                        TaskFailureDomain.OPTIONAL_PROVIDER,
                     ),
                 ]
                 if self.config.modules.fed.enabled
@@ -2054,11 +2223,8 @@ class OutpostApp:
 
     async def _maintenance_loop(self) -> None:
         while True:
-            try:
-                if await self.maintenance.due():
-                    await self.maintenance.run()
-            except Exception as error:
-                print(f"Outpost maintenance failed: {error}", flush=True)
+            if await self.maintenance.due():
+                await self.maintenance.run()
             self._task_progress("store-maintenance")
             await self.clock.sleep(60)
 
@@ -2337,7 +2503,8 @@ class OutpostApp:
             "alert_delivery": self.governor.alert_delivery_status(),
             "same_receiver": self.same_receiver.health(),
             "ai": self.ai_service.snapshot(),
-            "tasks_healthy": self.background_tasks_healthy(),
+            "tasks_healthy": self.core_tasks_healthy(),
+            "subsystems_healthy": self.background_tasks_healthy(),
             "task_failure": self._fatal_task_error,
             "recovery": self.restore_coordinator.maintenance_status(),
             "tasks": {name: dict(health) for name, health in self._task_health.items()},
