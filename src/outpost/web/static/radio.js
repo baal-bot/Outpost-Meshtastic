@@ -7,6 +7,11 @@ const safe = (value) =>
     (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char],
   );
 let csrfToken = "";
+const messagePageSize = 25;
+let messageItems = [];
+let messageNextCursor = null;
+let messageFilterKey = "";
+let messageHistoryExpanded = false;
 
 const api = async (url, options = {}) =>
   fetch(url, {
@@ -31,6 +36,74 @@ function queueItemMatches(item, filter) {
 function messageOutcomeLabel(outcome) {
   if (outcome === "not_requested") return "no ACK requested";
   return outcome || "—";
+}
+
+function messageQuery(cursor) {
+  const query = new URLSearchParams({
+    limit: String(messagePageSize),
+    cursor: String(cursor),
+  });
+  const direction = $("filter-direction").value;
+  const channel = $("filter-channel").value;
+  if (direction) query.set("direction", direction);
+  if (channel) query.set("channel", channel);
+  return query;
+}
+
+function renderMessages() {
+  $("message-count").textContent = messageItems.length;
+  $("message-rows").innerHTML =
+    messageItems
+      .map(
+        (message) =>
+          `<tr><td>${new Date(message.created_at).toLocaleTimeString()}</td>` +
+          `<td>${message.direction === "in" ? "↙ RX" : "↗ TX"}</td>` +
+          `<td><code>${safe(message.peer_mesh_id || "broadcast")}</code></td>` +
+          `<td>${message.channel}</td>` +
+          `<td>${safe(message.text || `${message.byte_len} bytes`)}</td>` +
+          `<td>${safe(messageOutcomeLabel(message.outcome))}</td>` +
+          `<td>${message.rx_snr == null ? "—" : `${safe(message.rx_snr)} dB`}</td></tr>`,
+      )
+      .join("") || '<tr><td colspan="7">No matching messages.</td></tr>';
+  $("load-more-messages").hidden = messageNextCursor === null;
+}
+
+function updateNewestMessages(result) {
+  if (!messageHistoryExpanded) {
+    messageItems = result.items;
+    messageNextCursor = result.next_cursor;
+    renderMessages();
+    return;
+  }
+  const existingIds = new Set(messageItems.map((item) => item.id));
+  const added = result.items.filter((item) => !existingIds.has(item.id));
+  const newestIds = new Set(result.items.map((item) => item.id));
+  messageItems = [
+    ...result.items,
+    ...messageItems.filter((item) => !newestIds.has(item.id)),
+  ];
+  if (messageNextCursor !== null) messageNextCursor += added.length;
+  renderMessages();
+}
+
+async function loadMoreMessages() {
+  if (messageNextCursor === null) return;
+  const button = $("load-more-messages");
+  button.disabled = true;
+  button.textContent = "Loading…";
+  try {
+    const response = await api(`/api/v1/mesh/messages?${messageQuery(messageNextCursor)}`);
+    if (!response.ok) return;
+    const result = await response.json();
+    const existingIds = new Set(messageItems.map((item) => item.id));
+    messageItems.push(...result.items.filter((item) => !existingIds.has(item.id)));
+    messageNextCursor = result.next_cursor;
+    messageHistoryExpanded = true;
+    renderMessages();
+  } finally {
+    button.disabled = false;
+    button.textContent = "Load more";
+  }
 }
 
 function installInboundHealthCard() {
@@ -58,14 +131,18 @@ async function initialize() {
 async function refresh() {
   const direction = $("filter-direction").value;
   const channel = $("filter-channel").value;
-  const query = new URLSearchParams();
-  if (direction) query.set("direction", direction);
-  if (channel) query.set("channel", channel);
+  const selectedFilterKey = `${direction}:${channel}`;
+  if (selectedFilterKey !== messageFilterKey) {
+    messageItems = [];
+    messageNextCursor = null;
+    messageHistoryExpanded = false;
+    messageFilterKey = selectedFilterKey;
+  }
   const [status, airtime, queue, messages] = await Promise.all([
     api("/api/v1/status").then((response) => response.json()),
     api("/api/v1/mesh/airtime").then((response) => response.json()),
     api("/api/v1/mesh/queue").then((response) => response.json()),
-    api(`/api/v1/mesh/messages?limit=100&${query}`).then((response) => response.json()),
+    api(`/api/v1/mesh/messages?${messageQuery(0)}`).then((response) => response.json()),
   ]);
   const state = $("link-state");
   state.className = `ui-pill status ${status.radio}`;
@@ -77,7 +154,7 @@ async function refresh() {
   $("queue-count").textContent = queue.items.filter((item) =>
     ["pending", "held", "sending"].includes(item.state || "pending"),
   ).length;
-  $("message-count").textContent = messages.items.length;
+  updateNewestMessages(messages);
 
   const inbound = status.inbound || {};
   const radioInbound = inbound.radio || {};
@@ -171,19 +248,6 @@ async function refresh() {
       await refresh();
     }),
   );
-  $("message-rows").innerHTML =
-    messages.items
-      .map(
-        (message) =>
-          `<tr><td>${new Date(message.created_at).toLocaleTimeString()}</td>` +
-          `<td>${message.direction === "in" ? "↙ RX" : "↗ TX"}</td>` +
-          `<td><code>${safe(message.peer_mesh_id || "broadcast")}</code></td>` +
-          `<td>${message.channel}</td>` +
-          `<td>${safe(message.text || `${message.byte_len} bytes`)}</td>` +
-          `<td>${safe(messageOutcomeLabel(message.outcome))}</td>` +
-          `<td>${message.rx_snr == null ? "—" : `${safe(message.rx_snr)} dB`}</td></tr>`,
-      )
-      .join("") || '<tr><td colspan="7">No matching messages.</td></tr>';
 }
 
 $("send-form").addEventListener("submit", async (event) => {
@@ -213,4 +277,5 @@ $("refresh-radio").addEventListener("click", refresh);
 $("filter-queue-state").addEventListener("change", refresh);
 $("filter-direction").addEventListener("change", refresh);
 $("filter-channel").addEventListener("change", refresh);
+$("load-more-messages").addEventListener("click", loadMoreMessages);
 initialize();

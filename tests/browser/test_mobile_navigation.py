@@ -1702,6 +1702,81 @@ def test_radio_message_log_explains_ack_not_requested(
         page.close()
 
 
+def test_radio_packet_history_loads_25_at_a_time(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    message_requests: list[str] = []
+
+    def messages(route: object) -> None:
+        message_requests.append(route.request.url)
+        cursor = 25 if "cursor=25" in route.request.url else 0
+        items = [
+            {
+                "id": 50 - index,
+                "direction": "out",
+                "peer_mesh_id": "^all",
+                "channel": 0,
+                "portnum": 260,
+                "is_direct": False,
+                "packet_id": 1_000 + index,
+                "text": None,
+                "byte_len": 100,
+                "toa_ms": 900,
+                "airtime_class": "federation",
+                "command": None,
+                "outcome": "not_requested",
+                "drop_reason": None,
+                "latency_ms": None,
+                "rx_snr": None,
+                "rx_rssi": None,
+                "hops": None,
+                "created_at": "2033-05-18T03:33:20Z",
+            }
+            for index in range(cursor, cursor + 25)
+        ]
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": items,
+                    "next_cursor": 25 if cursor == 0 else None,
+                }
+            ),
+        )
+
+    page.route("**/api/v1/mesh/messages*", messages)
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/radio.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        assert page.locator("#message-rows tr").count() == 25
+        assert page.locator("#message-count").text_content() == "25"
+        assert "limit=25" in message_requests[-1]
+        assert "cursor=0" in message_requests[-1]
+
+        load_more = page.get_by_role("button", name="Load more")
+        assert load_more.is_visible()
+        load_more.click()
+        page.wait_for_function("() => document.querySelectorAll('#message-rows tr').length === 50")
+        assert page.locator("#message-count").text_content() == "50"
+        assert "limit=25" in message_requests[-1]
+        assert "cursor=25" in message_requests[-1]
+        assert load_more.is_hidden()
+
+        page.locator("#filter-direction").select_option("out")
+        page.wait_for_function("() => document.querySelectorAll('#message-rows tr').length === 25")
+        assert page.locator("#message-count").text_content() == "25"
+        assert "direction=out" in message_requests[-1]
+        assert "cursor=0" in message_requests[-1]
+        health.assert_clean()
+    finally:
+        page.close()
+
+
 def test_inbound_queue_color_tracks_current_pressure_not_drop_history(
     browser: object, dashboard_url: str
 ) -> None:
