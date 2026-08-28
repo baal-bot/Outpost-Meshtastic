@@ -1621,7 +1621,7 @@ def test_radio_queue_filter_hides_expired_history_by_default(
         wait_for_navigation(page)
         assert page.locator("#inbound-backlog").text_content() == "0 waiting"
         assert "capacity 256" in page.locator("#inbound-detail").text_content()
-        assert "no drops since restart" in page.locator("#inbound-detail").text_content()
+        assert "no queue loss" in page.locator("#inbound-detail").text_content()
         assert "queue-healthy" in page.locator("#inbound-health").get_attribute("class")
         assert "queue-critical" not in page.locator("#inbound-health").get_attribute("class")
         queue_filter = page.get_by_label("Queue state filter")
@@ -1668,8 +1668,8 @@ def test_inbound_queue_color_tracks_current_pressure_not_drop_history(
             "capacity": 256,
             "busy": 0,
             "workers": 4,
-            "backlog_dropped": 3,
-            "pipeline_dropped": {},
+            "backlog_dropped": 0,
+            "pipeline_dropped": {"duplicate": 70, "self": 3},
             "radio": {"dropped": 0},
         },
     }
@@ -1688,8 +1688,9 @@ def test_inbound_queue_color_tracks_current_pressure_not_drop_history(
         card = page.locator("#inbound-health")
         detail = page.locator("#inbound-detail")
         assert "queue-healthy" in card.get_attribute("class")
-        assert "3 dropped since restart" in detail.text_content()
-        assert "history-warning" in detail.get_attribute("class")
+        assert "no queue loss" in detail.text_content()
+        assert "73 duplicate/self filtered" in detail.text_content()
+        assert "history-warning" not in (detail.get_attribute("class") or "")
 
         status["inbound"]["backlog"] = 3  # type: ignore[index]
         page.reload(wait_until="networkidle")
@@ -1698,6 +1699,11 @@ def test_inbound_queue_color_tracks_current_pressure_not_drop_history(
         status["inbound"]["backlog"] = 256  # type: ignore[index]
         page.reload(wait_until="networkidle")
         assert "queue-critical" in card.get_attribute("class")
+
+        status["inbound"]["backlog_dropped"] = 2  # type: ignore[index]
+        page.reload(wait_until="networkidle")
+        assert "2 queue losses since restart" in detail.text_content()
+        assert "history-warning" in detail.get_attribute("class")
         health.assert_clean()
     finally:
         page.close()

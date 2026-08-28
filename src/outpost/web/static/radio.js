@@ -77,10 +77,12 @@ async function refresh() {
   const inbound = status.inbound || {};
   const radioInbound = inbound.radio || {};
   const pipeline = inbound.pipeline_dropped || {};
-  const drops =
-    Number(inbound.backlog_dropped || 0) +
-    Number(radioInbound.dropped || 0) +
-    Object.values(pipeline).reduce((sum, value) => sum + Number(value || 0), 0);
+  const queueLosses =
+    Number(inbound.backlog_dropped || 0) + Number(radioInbound.dropped || 0);
+  const filtered = Object.values(pipeline).reduce(
+    (sum, value) => sum + Number(value || 0),
+    0,
+  );
   const backlog = Number(inbound.backlog || 0);
   const capacity = Number(inbound.capacity || 0);
   const busy = Number(inbound.busy || 0);
@@ -91,8 +93,11 @@ async function refresh() {
   $("inbound-backlog").textContent = `${backlog} waiting`;
   $("inbound-detail").textContent =
     `capacity ${capacity || "—"} · ${busy}/${workers} workers busy · ` +
-    (drops === 0 ? "no drops since restart" : `${drops} dropped since restart`);
-  $("inbound-detail").classList.toggle("history-warning", drops > 0);
+    (queueLosses === 0
+      ? "no queue loss"
+      : `${queueLosses} queue losses since restart`) +
+    (filtered === 0 ? "" : ` · ${filtered} duplicate/self filtered`);
+  $("inbound-detail").classList.toggle("history-warning", queueLosses > 0);
   $("inbound-health").classList.remove(
     "warning",
     "queue-healthy",
