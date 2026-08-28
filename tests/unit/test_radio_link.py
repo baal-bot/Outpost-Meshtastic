@@ -123,9 +123,24 @@ async def test_radio_configuration_is_guarded_and_never_reads_back_secrets() -> 
 
     assert status["mqtt"]["username_configured"] is True
     assert status["mqtt"]["password_configured"] is True
+    assert status["lora"]["frequency_slot"] == 0
     assert status["position"]["altitude"] == 366
     assert "do-not-return" not in str(status)
     assert "secret-key-material" not in str(status)
+
+    await link.configure(
+        "lora",
+        {
+            "region": "US",
+            "modem_preset": "LONG_FAST",
+            "frequency_slot": 20,
+            "hop_limit": 3,
+            "tx_power": 0,
+            "tx_enabled": True,
+        },
+    )
+    assert local_config.lora.channel_num == 20
+    assert writes == ["lora"]
 
     with pytest.raises(ValueError, match="CLIENT or CLIENT_BASE"):
         await link.configure(
@@ -153,7 +168,7 @@ async def test_radio_configuration_is_guarded_and_never_reads_back_secrets() -> 
     )
     assert len(base64.b64decode(result["generated_psk"])) == 32
     assert channels[1].settings.name == "Rescue"
-    assert writes == [1]
+    assert writes == ["lora", 1]
     assert "generated_psk" not in await link.configuration_status()
 
 

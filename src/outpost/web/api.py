@@ -303,6 +303,7 @@ class RadioDeviceConfigBody(BaseModel):
 class RadioLoraConfigBody(BaseModel):
     region: str = Field(min_length=2, max_length=24, pattern=r"^[A-Z0-9_]+$")
     modem_preset: str = Field(min_length=2, max_length=40, pattern=r"^[A-Z0-9_]+$")
+    frequency_slot: int = Field(ge=0, le=65_535)
     hop_limit: int = Field(default=3, ge=1, le=7)
     tx_power: int = Field(default=0, ge=0, le=30)
     tx_enabled: bool = True

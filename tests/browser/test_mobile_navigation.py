@@ -376,6 +376,7 @@ def route_visual_content_api(page: object) -> None:
             "lora": {
                 "region": "US",
                 "modem_preset": "LONG_FAST",
+                "frequency_slot": 20,
                 "hop_limit": 3,
                 "tx_power": 0,
                 "tx_enabled": True,
@@ -1804,6 +1805,14 @@ def test_radio_configurator_guides_mqtt_and_uses_shared_live_settings(
         wait_for_navigation(page)
         page.get_by_text("Pittsburgh Outpost · CLIENT", exact=True).wait_for()
         page.get_by_role("button", name="Configure radio").click()
+        assert page.locator("#radio-frequency-slot").input_value() == "20"
+        page.locator("#radio-frequency-slot").fill("33")
+        page.get_by_role("button", name="Save LoRa profile").click()
+        page.get_by_role("button", name="Write to radio").click()
+        page.wait_for_function(
+            "() => document.querySelector('#radio-lora-result').textContent.includes('Saved')"
+        )
+        assert writes[-1]["lora"]["frequency_slot"] == 33  # type: ignore[index]
         page.get_by_role("button", name="MQTT", exact=True).click()
         assert page.get_by_text(
             "These are the same live radio settings shown in Federation.", exact=False

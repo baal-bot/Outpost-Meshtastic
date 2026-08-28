@@ -144,6 +144,7 @@ class MeshtasticRadioLink:
             "lora": {
                 "region": region,
                 "modem_preset": preset,
+                "frequency_slot": int(getattr(lora, "channel_num", 0)),
                 "hop_limit": int(getattr(lora, "hop_limit", 3)),
                 "tx_power": int(getattr(lora, "tx_power", 0)),
                 "tx_enabled": bool(getattr(lora, "tx_enabled", True)),
@@ -242,6 +243,10 @@ class MeshtasticRadioLink:
                 self._set_enum(lora, "region", region)
                 self._set_enum(lora, "modem_preset", str(values["modem_preset"]))
                 lora.use_preset = True
+                frequency_slot = int(values["frequency_slot"])
+                if not 0 <= frequency_slot <= 65_535:
+                    raise ValueError("frequency slot must be between 0 and 65535")
+                lora.channel_num = frequency_slot
                 lora.hop_limit = int(values["hop_limit"])
                 lora.tx_power = int(values["tx_power"])
                 lora.tx_enabled = bool(values["tx_enabled"])

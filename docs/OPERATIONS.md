@@ -88,6 +88,9 @@ Meshtastic node and requires recent operator confirmation before every write. Ou
 roles to `CLIENT` and `CLIENT_BASE`, keeps serial enabled, removes unsafe frequency/duty-cycle
 overrides when saving a LoRa profile, and will not disable a channel referenced by Outpost policy.
 Generated channel keys are shown once and are never retained in the database or audit log.
+The LoRa Frequency Slot is separate from messaging channel slots 0–7: `0` uses Meshtastic's
+primary-channel-name calculation, while an explicit slot selects the shared RF frequency for every
+messaging channel.
 
 The compact MQTT controls under **Federation** and the full MQTT form under **Radio** operate on the
 same radio state. Compact edits preserve credentials and advanced flags. Outpost always enables
