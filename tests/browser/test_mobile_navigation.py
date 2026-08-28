@@ -1621,6 +1621,9 @@ def test_radio_queue_filter_hides_expired_history_by_default(
         wait_for_navigation(page)
         assert page.locator("#inbound-backlog").text_content() == "0 waiting"
         assert "capacity 256" in page.locator("#inbound-detail").text_content()
+        assert "no drops since restart" in page.locator("#inbound-detail").text_content()
+        assert "queue-healthy" in page.locator("#inbound-health").get_attribute("class")
+        assert "queue-critical" not in page.locator("#inbound-health").get_attribute("class")
         queue_filter = page.get_by_label("Queue state filter")
         assert queue_filter.input_value() == "current"
         assert page.locator(".queue-card").count() == 3
@@ -1642,6 +1645,59 @@ def test_radio_queue_filter_hides_expired_history_by_default(
         page.get_by_text("Current payload").wait_for()
         assert page.locator(".queue-card").count() == 5
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_inbound_queue_color_tracks_current_pressure_not_drop_history(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    status = {
+        "radio": "up",
+        "radio_config": {
+            "node_id": "!699c2f30",
+            "region": "US",
+            "preset": "LongFast",
+        },
+        "inbound": {
+            "backlog": 0,
+            "capacity": 256,
+            "busy": 0,
+            "workers": 4,
+            "backlog_dropped": 3,
+            "pipeline_dropped": {},
+            "radio": {"dropped": 0},
+        },
+    }
+    page.route(
+        "**/api/v1/status",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(status),
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/radio.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        card = page.locator("#inbound-health")
+        detail = page.locator("#inbound-detail")
+        assert "queue-healthy" in card.get_attribute("class")
+        assert "3 dropped since restart" in detail.text_content()
+        assert "history-warning" in detail.get_attribute("class")
+
+        status["inbound"]["backlog"] = 3  # type: ignore[index]
+        page.reload(wait_until="networkidle")
+        assert "queue-active" in card.get_attribute("class")
+
+        status["inbound"]["backlog"] = 256  # type: ignore[index]
+        page.reload(wait_until="networkidle")
+        assert "queue-critical" in card.get_attribute("class")
         health.assert_clean()
     finally:
         page.close()

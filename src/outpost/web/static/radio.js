@@ -81,11 +81,25 @@ async function refresh() {
     Number(inbound.backlog_dropped || 0) +
     Number(radioInbound.dropped || 0) +
     Object.values(pipeline).reduce((sum, value) => sum + Number(value || 0), 0);
-  $("inbound-backlog").textContent = `${inbound.backlog || 0} waiting`;
+  const backlog = Number(inbound.backlog || 0);
+  const capacity = Number(inbound.capacity || 0);
+  const busy = Number(inbound.busy || 0);
+  const workers = Number(inbound.workers || 0);
+  let queueState = "healthy";
+  if (capacity > 0 && backlog >= capacity) queueState = "critical";
+  else if (backlog > 0) queueState = "active";
+  $("inbound-backlog").textContent = `${backlog} waiting`;
   $("inbound-detail").textContent =
-    `capacity ${inbound.capacity || "—"} · ` +
-    `${inbound.busy || 0}/${inbound.workers || 0} workers busy · ${drops} dropped`;
-  $("inbound-health").classList.toggle("warning", drops > 0);
+    `capacity ${capacity || "—"} · ${busy}/${workers} workers busy · ` +
+    (drops === 0 ? "no drops since restart" : `${drops} dropped since restart`);
+  $("inbound-detail").classList.toggle("history-warning", drops > 0);
+  $("inbound-health").classList.remove(
+    "warning",
+    "queue-healthy",
+    "queue-active",
+    "queue-critical",
+  );
+  $("inbound-health").classList.add(`queue-${queueState}`);
 
   const maximum = Math.max(1, ...Object.values(airtime.by_class_seconds));
   $("airtime-bars").innerHTML = Object.entries(airtime.by_class_seconds)
