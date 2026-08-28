@@ -19,8 +19,16 @@ LIMITS = {
     "responder": (20, 300),
     "operator": (60, 2**31 - 1),
 }
-DEFENSIVE_COMMANDS = {"ALERT", "HELP", "REPORT", "REPORT!", "OK", "HELPME"}
+DEFENSIVE_COMMANDS = {"ALERT", "HELP", "MENU", "REPORT", "REPORT!", "OK", "HELPME"}
 SAFETY_FLOOR = {"REPORT", "REPORT!", "OK", "HELPME"}
+NAVIGATION_COMMANDS = {"HELP", "MENU", "HOME", "BACK", "WHERE"}
+NAVIGATION_LIMITS = {
+    "guest": (12, 60),
+    "member": (20, 120),
+    "trusted": (30, 180),
+    "responder": (30, 180),
+    "operator": (60, 300),
+}
 MAX_RECORDED_EVENTS = 2048
 
 
@@ -46,6 +54,7 @@ class RateLimiter:
         self.clock, self.global_per_minute, self.database = clock, global_per_minute, database
         self.safety_repeat_window_seconds = safety_repeat_window_seconds
         self._events: dict[str, deque[float]] = defaultdict(deque)
+        self._navigation_events: dict[str, deque[float]] = defaultdict(deque)
         self._loaded: set[str] = set()
         self._global: deque[float] = deque()
         self._defensive_until = 0.0
@@ -202,6 +211,16 @@ class RateLimiter:
             self._defensive_until = max(self._defensive_until, now + 60)
         if self.defensive and command.upper() not in DEFENSIVE_COMMANDS:
             return False
+        if command.upper() in NAVIGATION_COMMANDS:
+            events = self._navigation_events[member_id]
+            self._prune(events, now - 3_600)
+            per_minute, per_hour = NAVIGATION_LIMITS.get(trust, NAVIGATION_LIMITS["guest"])
+            recent_minute = sum(timestamp > now - 60 for timestamp in events)
+            if recent_minute >= per_minute or len(events) >= per_hour:
+                return False
+            events.append(now)
+            self._global.append(now)
+            return True
         events = self._events[member_id]
         self._prune(events, now - 3_600)
         # These inputs must be accepted even when ordinary member buckets are exhausted.

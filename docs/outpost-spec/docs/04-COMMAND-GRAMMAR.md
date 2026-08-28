@@ -20,10 +20,11 @@ Deep menus are unusable here. TC²-BBS works, but every interaction is expensive
 no notion of *where you are*, so anything conversational becomes an unwieldy single line:
 `/reply board=roads thread=42 text=bridge is open again`.
 
-**Outpost uses both, in one router.** Global verbs always work, at any depth, with no
-preamble. A session *may additionally* carry a context stack that supplies defaults, so a
-bare word does the obvious thing. The user never has to know which mode they are in,
-because both are always available.
+**Outpost uses both, behind a first-class conversational interface.** A direct-message member can
+send `?`, choose from one-screen capability areas, and answer guided prompts without learning
+syntax. Global verbs still work at any depth with no preamble. A session may additionally carry a
+context stack that supplies defaults, so a bare word does the obvious thing. Screen state and
+context are accelerators, never prerequisites.
 
 **REQ-CMD-001** — Every command **MUST** be executable as a single self-contained message
 with no prior state. Context is an accelerator, never a prerequisite.
@@ -103,6 +104,36 @@ it explicitly changes context. `WX` inside `BOARD(roads)` returns weather and le
 
 **REQ-CMD-012** — `BACK` pops one frame. `HOME` clears the stack. `WHERE` renders the stack
 in ≤60 bytes, e.g. `In: roads > thread 42`.
+
+### 3.3 Direct-message screens
+
+A screen is a compact interaction contract, not a terminal emulator. It carries a title, semantic
+result lines, numbered choices, an optional one-value prompt, and recovery actions.
+
+```text
+OUTPOST / MAIL
+1 Open inbox
+2 Send a message
+3 How private is mail?
+0 Home · ? Menu
+```
+
+**REQ-CMD-012a** — `?`, `HELP`, and `MENU` in a DM **MUST** open a capability- and trust-aware Home
+screen. Disabled or unauthorized actions **MUST NOT** be advertised.
+
+**REQ-CMD-012b** — Displayed numbers and labels **MUST** resolve only against the current screen. A
+bare number without live screen state **MUST NOT** be guessed and **MUST** return a one-line `?`
+recovery hint.
+
+**REQ-CMD-012c** — Every screen **MUST** start with `OUTPOST / <TITLE>` and end with stable recovery
+actions. Fixed discovery screens **MUST** fit one 200-byte application payload.
+
+**REQ-CMD-012d** — Guided composition **MUST** ask for one conceptual value at a time. Exact global
+commands retain precedence and cancel an unfinished prompt. `0`, `HOME`, or `?` **MUST** reconstruct
+navigation after lost or stale state.
+
+**REQ-CMD-012e** — Stateful screens are DM-only. Channel interactions remain terse and prefixed,
+and `!?` **MUST** direct the member to DM the node.
 
 ### 3.3 Pending actions
 
@@ -481,7 +512,7 @@ messages deserve no transmission at all, and the system **MUST** make silence ea
 | ❌ | ✅ |
 |---|---|
 | `Welcome to the Cedar Ridge BBS! Please select an option:` | Answer the command they sent |
-| Numbered menus requiring a follow-up selection | One-shot commands with context defaults |
+| Deep modal menu trees that make commands unavailable | Shallow discovery screens plus one-shot commands at every depth |
 | `Are you sure? (Y/N)` for non-destructive actions | Just do it; provide `UNDO` where it matters |
 | `Command not recognized. Type HELP for a list of commands.` | `Unknown. Did you mean BOARDS or BOARD?` |
 | Reflowing the user's text back with quoting | Reference by number |

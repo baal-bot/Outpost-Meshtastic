@@ -8,11 +8,24 @@ from .models import ContextFrame
 
 
 @dataclass
+class PendingAction:
+    """A bounded menu selection or one-shot guided input continuation."""
+
+    action: str
+    partial_args: str
+    prompt: str
+    expires_at: float
+    on_timeout: str = "discard"
+    choices: dict[str, str] = field(default_factory=dict)
+    input_command: str | None = None
+
+
+@dataclass
 class Session:
     member_id: str
     channel: int
     context: list[ContextFrame] = field(default_factory=list)
-    pending: object | None = None
+    pending: PendingAction | None = None
     last_seen: float = 0.0
     page_refs: list[int] = field(default_factory=list)
     cursor_kind: str | None = None
@@ -21,6 +34,8 @@ class Session:
     cursor_expires_at: float = 0.0
     last_mail_id: int | None = None
     last_mail_sender: str | None = None
+    tui_active: bool = False
+    tui_screen: str | None = None
 
     def push(self, frame: ContextFrame) -> None:
         if len(self.context) >= 3:
@@ -44,5 +59,7 @@ class SessionStore:
         elif session.last_seen + self.idle_seconds < now:
             session.context.clear()
             session.pending = None
+            session.tui_active = False
+            session.tui_screen = None
         session.last_seen = now
         return session

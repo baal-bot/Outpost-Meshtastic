@@ -12,6 +12,12 @@ def test_multibyte_chunks_are_valid_and_bounded() -> None:
     assert all("�" not in part for part in parts)
 
 
+def test_short_screen_keeps_intentional_line_breaks() -> None:
+    parts = chunk_text("OUTPOST / HOME\n1 Weather\n2 Mail\n0 Home")
+
+    assert parts == ["OUTPOST / HOME\n1 Weather\n2 Mail\n0 Home"]
+
+
 @given(
     st.lists(
         st.text(alphabet=st.characters(blacklist_categories=("Cs",)), min_size=1, max_size=20),

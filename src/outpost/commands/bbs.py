@@ -9,6 +9,8 @@ from outpost.router.models import (
     Response,
     ResponseKind,
     TrustLevel,
+    TuiChoice,
+    TuiScreen,
 )
 from outpost.transport.models import TrafficClass
 
@@ -31,6 +33,20 @@ def _age(timestamp: int, now: int) -> str:
 def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpec]:
     async def boards(ctx: CommandContext) -> Response:
         values = await service.boards(ctx.member)
+        if ctx.message.is_direct:
+            choices = tuple(
+                TuiChoice(
+                    f"{board.title} ({board.thread_count})",
+                    f"BOARD {board.slug}",
+                    (board.slug,),
+                )
+                for board in values
+            )
+            return Response(
+                ResponseKind.LISTING,
+                [Line("No boards are available.")] if not choices else [],
+                screen=TuiScreen("boards", "COMMUNITY BOARDS", choices=choices),
+            )
         text = " · ".join(
             f"{board.slug} {board.thread_count}" if board.thread_count else board.slug
             for board in values
@@ -52,8 +68,37 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
         ctx.session.cursor_offset = len(values)
         ctx.session.cursor_expires_at = service.clock.monotonic() + 15 * 60
         if not values:
+            if ctx.message.is_direct:
+                return Response(
+                    ResponseKind.LISTING,
+                    [Line("No threads yet.")],
+                    screen=TuiScreen(
+                        "board",
+                        f"BOARD: {slug.upper()}",
+                        input_command="POST",
+                        input_prompt="Send text to create the first post",
+                    ),
+                )
             return _response(f"{slug} · no threads")
         now = int(service.clock.now().timestamp())
+        if ctx.message.is_direct:
+            return Response(
+                ResponseKind.LISTING,
+                screen=TuiScreen(
+                    "board",
+                    f"BOARD: {slug.upper()}",
+                    choices=tuple(
+                        TuiChoice(
+                            f"{value.subject[:30]} · {max(0, value.post_count - 1)} replies · "
+                            f"{_age(value.last_post_at, now)}",
+                            f"READ {index}",
+                        )
+                        for index, value in enumerate(values, 1)
+                    ),
+                    input_command="POST",
+                    input_prompt="Reply with a number to read, or send text to post",
+                ),
+            )
         lines = [f"{slug} · {len(values)} recent"]
         for index, value in enumerate(values, 1):
             replies = max(0, value.post_count - 1)
@@ -65,6 +110,23 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
 
     async def post(ctx: CommandContext) -> Response:
         raw = ctx.args.strip()
+        if not raw and ctx.message.is_direct:
+            if ctx.member.handle is None:
+                return _response("Claim a NAME before posting.", ResponseKind.ERROR)
+            boards_available = await service.boards(ctx.member)
+            return Response(
+                ResponseKind.DETAIL,
+                screen=TuiScreen(
+                    "post-board",
+                    "CHOOSE A BOARD",
+                    choices=tuple(
+                        TuiChoice(board.title, f"MENU POSTTO {board.slug}", (board.slug,))
+                        for board in boards_available
+                    ),
+                    input_command="MENU POSTTO",
+                    input_prompt="Choose a number, or send a board name",
+                ),
+            )
         context_board = next(
             (frame.ref for frame in reversed(ctx.session.context) if frame.kind == "BOARD"), None
         )
@@ -80,7 +142,14 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             created = await service.create_thread(slug, body, ctx.member)
         except (ValueError, PermissionError) as error:
             return _response(str(error), ResponseKind.ERROR)
-        return _response(f"✓ {created.board_slug}#{created.id}.", ResponseKind.ACK)
+        response = _response(f"✓ {created.board_slug}#{created.id}.", ResponseKind.ACK)
+        if ctx.message.is_direct and ctx.session.tui_active:
+            response.screen = TuiScreen(
+                "post-sent",
+                "POST SENT",
+                choices=(TuiChoice("Return to board", f"BOARD {created.board_slug}"),),
+            )
+        return response
 
     def resolve_thread(ctx: CommandContext, token: str) -> int | None:
         if "#" in token:
@@ -106,7 +175,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
         ctx.session.cursor_offset = 1
         ctx.session.cursor_expires_at = service.clock.monotonic() + 15 * 60
         replies = max(0, value.post_count - 1)
-        return Response(
+        response = Response(
             ResponseKind.DETAIL,
             [
                 Line(f"{value.board_slug}#{thread_id} {value.subject} · @{value.author_label}"),
@@ -114,6 +183,16 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
                 Line(f"{replies} replies · RE <text> to reply"),
             ],
         )
+        if ctx.message.is_direct:
+            response.lines[-1] = Line(f"{replies} replies")
+            response.screen = TuiScreen(
+                "thread",
+                f"THREAD: {value.board_slug}#{thread_id}",
+                choices=(TuiChoice("More replies", "MORE", key="+"),) if replies else (),
+                input_command="REPLY",
+                input_prompt="Send text to reply",
+            )
+        return response
 
     async def reply(ctx: CommandContext) -> Response:
         raw = ctx.args.strip()
@@ -132,9 +211,16 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             created = await service.reply(thread_id, body, ctx.member)
         except (ValueError, PermissionError) as error:
             return _response(str(error), ResponseKind.ERROR)
-        return _response(
+        response = _response(
             f"✓ {created.board_slug}#{created.thread_id}.{created.seq}.", ResponseKind.ACK
         )
+        if ctx.message.is_direct and ctx.session.tui_active:
+            response.screen = TuiScreen(
+                "reply-sent",
+                "REPLY SENT",
+                choices=(TuiChoice("Return to thread", f"READ {created.thread_id}"),),
+            )
+        return response
 
     async def search(ctx: CommandContext) -> Response:
         terms = ctx.args.strip()
@@ -147,6 +233,23 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
         if not values:
             return _response("No match. Try SEARCH bridge, or B roads.")
         now = int(service.clock.now().timestamp())
+        if ctx.message.is_direct:
+            ctx.session.page_refs = [value.thread_id for value in values]
+            return Response(
+                ResponseKind.LISTING,
+                screen=TuiScreen(
+                    "search-results",
+                    "SEARCH RESULTS",
+                    choices=tuple(
+                        TuiChoice(
+                            f"{value.subject[:32]} · {value.board_slug} · "
+                            f"{_age(value.created_at, now)}",
+                            f"READ {value.thread_id}",
+                        )
+                        for value in values
+                    ),
+                ),
+            )
         return _response(
             " · ".join(
                 f"{value.board_slug}#{value.thread_id} {value.subject[:32]} "
@@ -187,6 +290,25 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             ctx.session.cursor_offset += len(board_values)
             ctx.session.page_refs = [value.id for value in board_values]
             now = int(service.clock.now().timestamp())
+            if ctx.message.is_direct:
+                return Response(
+                    ResponseKind.LISTING,
+                    screen=TuiScreen(
+                        "board",
+                        f"BOARD: {slug.upper()}",
+                        choices=tuple(
+                            TuiChoice(
+                                f"{value.subject[:30]} · "
+                                f"{max(0, value.post_count - 1)} replies · "
+                                f"{_age(value.last_post_at, now)}",
+                                f"READ {index}",
+                            )
+                            for index, value in enumerate(board_values, 1)
+                        ),
+                        input_command="POST",
+                        input_prompt="Reply with a number to read, or send text to post",
+                    ),
+                )
             return Response(
                 ResponseKind.LISTING,
                 [
@@ -220,7 +342,17 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
             lines.append(f"…MORE {values[-1].post_count - values[-1].seq}")
         else:
             ctx.session.cursor_kind = None
-        return Response(ResponseKind.LISTING, [Line(line) for line in lines])
+        response = Response(ResponseKind.LISTING, [Line(line) for line in lines])
+        if ctx.message.is_direct:
+            has_more = ctx.session.cursor_kind == "replies"
+            response.screen = TuiScreen(
+                "thread-replies",
+                f"THREAD: #{thread_id}",
+                choices=(TuiChoice("More replies", "MORE", key="+"),) if has_more else (),
+                input_command="REPLY",
+                input_prompt="Send text to reply",
+            )
+        return response
 
     async def subscribe(ctx: CommandContext) -> Response:
         parts = ctx.args.strip().lower().split()

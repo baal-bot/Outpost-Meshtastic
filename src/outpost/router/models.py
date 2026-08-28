@@ -29,6 +29,28 @@ class ResponseKind(StrEnum):
 
 
 @dataclass(frozen=True)
+class TuiChoice:
+    """One low-friction action displayed on a mesh TUI screen."""
+
+    label: str
+    command: str
+    aliases: tuple[str, ...] = ()
+    key: str | None = None
+
+
+@dataclass(frozen=True)
+class TuiScreen:
+    """Presentation and continuation metadata for a direct-message screen."""
+
+    name: str
+    title: str
+    choices: tuple[TuiChoice, ...] = ()
+    input_command: str | None = None
+    input_prompt: str | None = None
+    parent_command: str = "MENU"
+
+
+@dataclass(frozen=True)
 class Line:
     text: str
 
@@ -43,6 +65,7 @@ class Response:
     broadcast: bool = False
     supersedes: str | None = None
     data: dict[str, Any] | None = None
+    screen: TuiScreen | None = None
 
 
 @dataclass(frozen=True)

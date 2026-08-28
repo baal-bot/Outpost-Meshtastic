@@ -15,6 +15,8 @@ from outpost.router.models import (
     Response,
     ResponseKind,
     TrustLevel,
+    TuiChoice,
+    TuiScreen,
 )
 from outpost.transport.models import TrafficClass
 
@@ -236,9 +238,31 @@ def specs(
                     f"WARN {item['id']} · {item['event']} · {item['area_desc']} · "
                     f"{item['severity']}/{item['urgency']} · {detail[:260]}"
                 )
-                return Response(ResponseKind.DETAIL, [Line(_fit_radio(text))])
+                response = Response(ResponseKind.DETAIL, [Line(_fit_radio(text))])
+                if ctx.message.is_direct and ctx.session.tui_active:
+                    response.screen = TuiScreen(
+                        "alert-detail",
+                        "OFFICIAL ALERT",
+                        choices=(TuiChoice("Back to alerts", "WARN"),),
+                    )
+                return response
             if not alerts:
                 return Response(ResponseKind.LISTING, [Line("No active NWS alerts here.")])
+            if ctx.message.is_direct:
+                return Response(
+                    ResponseKind.LISTING,
+                    screen=TuiScreen(
+                        "official-alerts",
+                        "OFFICIAL ALERTS",
+                        choices=tuple(
+                            TuiChoice(
+                                f"{item['event']} · {item['area_desc']}",
+                                f"WARN {item['id']}",
+                            )
+                            for item in alerts[:3]
+                        ),
+                    ),
+                )
             lines = [
                 Line(f"WARN {item['id']} · {item['event']} · {item['area_desc']}")
                 for item in alerts[:3]
@@ -320,9 +344,32 @@ def specs(
                     f"at {item['bearing_deg']}° · depth {item['depth_km']:.1f}km · "
                     f"{item['place']} · USGS"
                 )
-                return Response(ResponseKind.DETAIL, [Line(_fit_radio(text))])
+                response = Response(ResponseKind.DETAIL, [Line(_fit_radio(text))])
+                if ctx.message.is_direct and ctx.session.tui_active:
+                    response.screen = TuiScreen(
+                        "quake-detail",
+                        "EARTHQUAKE",
+                        choices=(TuiChoice("Back to earthquakes", "QUAKE"),),
+                    )
+                return response
             if not items:
                 return Response(ResponseKind.LISTING, [Line("No nearby earthquakes in 24h.")])
+            if ctx.message.is_direct:
+                return Response(
+                    ResponseKind.LISTING,
+                    screen=TuiScreen(
+                        "earthquakes",
+                        "NEARBY EARTHQUAKES",
+                        choices=tuple(
+                            TuiChoice(
+                                f"M{item['magnitude']:.1f} · {item['distance_km']:.0f}km · "
+                                f"{item['place']}",
+                                f"QUAKE {item['id']}",
+                            )
+                            for item in items[:2]
+                        ),
+                    ),
+                )
             return Response(
                 ResponseKind.LISTING,
                 [
@@ -444,6 +491,22 @@ def specs(
                 items = await waypoints.list()
                 if not items:
                     return Response(ResponseKind.LISTING, [Line("No saved waypoints.")])
+                if ctx.message.is_direct:
+                    return Response(
+                        ResponseKind.LISTING,
+                        screen=TuiScreen(
+                            "waypoints",
+                            "PUBLIC WAYPOINTS",
+                            choices=tuple(
+                                TuiChoice(
+                                    f"{item['name']} · {item['category']}",
+                                    f"WP {item['slug']}",
+                                    (str(item["slug"]),),
+                                )
+                                for item in items[:5]
+                            ),
+                        ),
+                    )
                 return Response(
                     ResponseKind.LISTING,
                     [Line(f"WP {item['slug']} · {item['name']}") for item in items[:5]],
@@ -495,12 +558,25 @@ def specs(
                 return Response(ResponseKind.LISTING, [Line("No waypoints in range.")])
             imperial = config.node.units == "imperial"
             lines = []
+            choices = []
             for km, item in located[:5]:
                 distance = ""
                 if km is not None:
                     amount = km / 1.609344 if imperial else km
                     distance = f" · {amount:.1f}{'mi' if imperial else 'km'}"
                 lines.append(Line(f"WP {item['slug']} · {item['name']}{distance}"))
+                choices.append(
+                    TuiChoice(
+                        f"{item['name']}{distance}",
+                        f"WP {item['slug']}",
+                        (str(item["slug"]),),
+                    )
+                )
+            if ctx.message.is_direct:
+                return Response(
+                    ResponseKind.LISTING,
+                    screen=TuiScreen("waypoints", "PUBLIC WAYPOINTS", choices=tuple(choices)),
+                )
             return Response(ResponseKind.LISTING, lines)
 
         async def distance(ctx: CommandContext) -> Response:

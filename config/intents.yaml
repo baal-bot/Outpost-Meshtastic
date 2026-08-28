@@ -1,5 +1,30 @@
-- pattern: "^(help|what can you do|commands)$"
-  command: HELP
-- pattern: "^where am i$"
-  command: WHERE
-
+- pattern: "^(help|menu|commands|what can you do)\\??$"
+  command: MENU
+- pattern: "^(what('s| is) the weather|weather now|current weather)\\??$"
+  command: WX
+- pattern: "^(forecast|weather forecast|is it going to rain)\\??$"
+  command: FC 5
+- pattern: "^(alerts|warnings|any alerts)\\??$"
+  command: WARN
+- pattern: "^(incidents|active incidents|what('s| is) happening)\\??$"
+  command: INCIDENTS
+- pattern: "^(boards|community|community boards)\\??$"
+  command: BOARDS
+- pattern: "^(mail|inbox|my messages)\\??$"
+  command: MAIL
+- pattern: "^(send mail|send a message|new message)$"
+  command: SEND
+- pattern: "^(who('s| is) (around|here|online)|people nearby)\\??$"
+  command: WHO
+- pattern: "^(anything new|what('s| is) new|catch me up)\\??$"
+  command: NEW
+- pattern: "^(i('m| am) ok|checking in|all clear)$"
+  command: OK
+- pattern: "^(i need help|need help)$"
+  command: HELPME
+- pattern: "^(check in|check-in)$"
+  command: MENU CHECKIN
+- pattern: "^(report a problem|report incident|new incident)$"
+  command: MENU REPORT
+- pattern: "^(where am i|my (position|location))\\??$"
+  command: POS

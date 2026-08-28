@@ -32,13 +32,14 @@ async def test_phase1_two_member_journey_from_cold_database(tmp_path) -> None:
         async def ask(packet: int, sender: str, text: str) -> str:
             return render_response(await app.router.dispatch(inbound(packet, sender, text)))
 
-        assert "HELP BBS" in await ask(1, "!00000001", "HELP")
+        first_help = await ask(1, "!00000001", "HELP")
+        assert first_help.startswith("OUTPOST / HOME") and "Community boards" in first_help
         registration = await ask(2, "!00000001", "NAME dana")
         assert "@dana" in registration and "operator-readable" in registration
         assert "@ray" in await ask(3, "!00000002", "NAME ray")
-        assert "roads" in await ask(4, "!00000001", "BOARDS")
+        assert "Roads & Access" in await ask(4, "!00000001", "BOARDS")
         posted = await ask(5, "!00000001", "POST roads Bridge open one lane.")
-        assert posted.startswith("✓ roads#")
+        assert "✓ roads#" in posted
         assert "Bridge open" in await ask(6, "!00000002", "B roads")
         assert "Bridge open one lane" in await ask(7, "!00000002", "R 1")
         assert "✓ roads#" in await ask(8, "!00000002", "RE Confirmed at noon.")

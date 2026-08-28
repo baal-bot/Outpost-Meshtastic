@@ -3,10 +3,13 @@ from __future__ import annotations
 from outpost.router.models import (
     CommandContext,
     CommandSpec,
+    ContextFrame,
     Line,
     Response,
     ResponseKind,
     TrustLevel,
+    TuiChoice,
+    TuiScreen,
 )
 from outpost.transport.models import TrafficClass
 from outpost.watch.incidents import IncidentService
@@ -40,7 +43,14 @@ def specs(service: IncidentService) -> list[CommandSpec]:
                 f"✓ INC {created.local_ref} {created.type} · "
                 f"GPS {created.lat:.3f},{created.lon:.3f}"
             )
-        return Response(ResponseKind.ACK, [Line(text)])
+        response = Response(ResponseKind.ACK, [Line(text)])
+        if ctx.message.is_direct and ctx.session.tui_active:
+            response.screen = TuiScreen(
+                "incident-filed",
+                "INCIDENT FILED",
+                choices=(TuiChoice("View incident", f"INC {created.local_ref}"),),
+            )
+        return response
 
     async def report_force(ctx: CommandContext) -> Response:
         created, _ = await service.create(ctx.args, ctx.member, force=True)
@@ -71,6 +81,27 @@ def specs(service: IncidentService) -> list[CommandSpec]:
         values = await service.list(limit=5)
         if not values:
             return Response(ResponseKind.LISTING, [Line("No active incidents.")])
+        if ctx.message.is_direct:
+            markers = {
+                "critical": "CRITICAL",
+                "urgent": "URGENT",
+                "caution": "CAUTION",
+                "info": "INFO",
+            }
+            return Response(
+                ResponseKind.LISTING,
+                screen=TuiScreen(
+                    "incidents",
+                    "ACTIVE INCIDENTS",
+                    choices=tuple(
+                        TuiChoice(
+                            f"INC {item.local_ref} · {markers[item.severity]} · {item.title[:34]}",
+                            f"INC {item.local_ref}",
+                        )
+                        for item in values
+                    ),
+                ),
+            )
         lines = [Line(f"{len(values)} active · no position")]
         markers = {"critical": "⚠⚠", "urgent": "⚠", "caution": "!", "info": ""}
         lines.extend(
@@ -102,7 +133,19 @@ def specs(service: IncidentService) -> list[CommandSpec]:
             Line(f"{update['kind']} @{update['author_label']}: {update['body'] or 'noted'}")
             for update in updates
         )
-        return Response(ResponseKind.DETAIL, lines)
+        response = Response(ResponseKind.DETAIL, lines)
+        if ctx.message.is_direct:
+            ctx.session.push(ContextFrame("INCIDENT", str(value.local_ref)))
+            response.screen = TuiScreen(
+                "incident",
+                f"INCIDENT {value.local_ref}",
+                choices=(
+                    TuiChoice("Confirm this report", f"CONFIRM {value.local_ref}"),
+                    TuiChoice("Dispute or correct", f"MENU DISPUTE {value.local_ref}"),
+                    TuiChoice("Acknowledge", f"MENU ACK {value.local_ref}"),
+                ),
+            )
+        return response
 
     base = dict(
         module="watch",

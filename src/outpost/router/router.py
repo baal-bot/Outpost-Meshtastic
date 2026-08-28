@@ -13,9 +13,11 @@ from outpost.security.rate_limit import SAFETY_FLOOR, RateLimiter
 from outpost.store.members import MemberRepo
 from outpost.transport.models import InboundMessage
 
+from .intents import IntentResolver
 from .models import CommandContext, Line, Response, ResponseKind, TrustLevel
 from .registry import CommandRegistry
 from .session import SessionStore
+from .tui import TuiController
 
 
 class Router:
@@ -32,6 +34,8 @@ class Router:
         for spec in core_specs():
             self.registry.register(spec)
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self.tui = TuiController()
+        self.intents = IntentResolver(config.router.intents_file)
 
     def _invoked(self, inbound: InboundMessage) -> str | None:
         if inbound.text is None:
@@ -81,11 +85,38 @@ class Router:
         session = self.sessions.get(member.mesh_id, channel)
         parts = invoked.split(maxsplit=1)
         token = parts[0] if parts else ""
+        if self.registry.resolve(token) is not None:
+            self.tui.cancel_for_command(session)
+        else:
+            invoked, pending_response = self.tui.prepare(
+                invoked,
+                session,
+                self.sessions.clock.monotonic(),
+                direct=inbound.is_direct,
+            )
+            if pending_response is not None:
+                if not await self.rate_limiter.allow(member.mesh_id, member.trust, "MENU"):
+                    return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
+                return pending_response
+            parts = invoked.split(maxsplit=1)
+            token = parts[0] if parts else ""
+        if self.registry.resolve(token) is None:
+            invoked, _match_mode = self.intents.resolve(
+                invoked,
+                member.trust,
+                self.registry,
+            )
+            parts = invoked.split(maxsplit=1)
+            token = parts[0] if parts else ""
+        if self.registry.resolve(token) is not None:
+            self.tui.cancel_for_command(session)
         args = parts[1] if len(parts) > 1 else ""
         if not await self.rate_limiter.allow(member.mesh_id, member.trust, token):
             return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
         spec = self.registry.resolve(token)
         if spec is None and inbound.is_direct and self.config.modules.ai.enabled:
+            if session.tui_active:
+                return Response(ResponseKind.ERROR, [Line("Not an option. Send ? for the menu.")])
             spec = self.registry.resolve("ASK")
             args = invoked
         if spec is None:
@@ -129,4 +160,10 @@ class Router:
             await self.rate_limiter.release_safety_floor(
                 member.mesh_id, token, safety_decision.fingerprint
             )
-        return response
+        return self.tui.activate(
+            response,
+            session,
+            self.sessions.clock.monotonic(),
+            direct=inbound.is_direct,
+            fallback_title=spec.name,
+        )

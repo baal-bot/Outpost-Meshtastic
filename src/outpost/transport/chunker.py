@@ -17,7 +17,7 @@ def _fit(text: str, budget: int) -> tuple[str, str]:
 
 
 def chunk_text(text: str, *, byte_limit: int = 200, max_parts: int = 3) -> list[str]:
-    text = " ".join(text.strip().split())
+    text = "\n".join(" ".join(line.split()) for line in text.strip().splitlines() if line.strip())
     if not text:
         return []
     if len(text.encode()) <= byte_limit:

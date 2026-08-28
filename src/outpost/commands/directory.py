@@ -8,6 +8,8 @@ from outpost.router.models import (
     Response,
     ResponseKind,
     TrustLevel,
+    TuiChoice,
+    TuiScreen,
 )
 from outpost.transport.models import TrafficClass
 
@@ -15,6 +17,23 @@ from outpost.transport.models import TrafficClass
 def specs(directory: ChannelDirectory) -> list[CommandSpec]:
     async def chans(ctx: CommandContext) -> Response:
         values = await directory.list(ctx.member)
+        if ctx.message.is_direct:
+            return Response(
+                ResponseKind.LISTING,
+                [Line("No community channels are published.")] if not values else [],
+                screen=TuiScreen(
+                    "channels",
+                    "COMMUNITY CHANNELS",
+                    choices=tuple(
+                        TuiChoice(
+                            f"{value.name} · {value.description or 'No description'}",
+                            f"CHAN {value.name}",
+                            (value.name,),
+                        )
+                        for value in values
+                    ),
+                ),
+            )
         text = " · ".join(
             f"{value.name}: {value.description}" if value.description else value.name
             for value in values

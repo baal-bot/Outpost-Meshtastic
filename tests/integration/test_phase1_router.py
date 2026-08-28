@@ -34,23 +34,23 @@ async def test_phase1_commands_work_from_cold_session(tmp_path) -> None:
     app = OutpostApp(config)
     await app.database.open()
     try:
-        assert "roads" in render_response(await app.router.dispatch(inbound(1, "BOARDS")))
+        assert "Roads & Access" in render_response(await app.router.dispatch(inbound(1, "BOARDS")))
         assert "@dana" in render_response(await app.router.dispatch(inbound(2, "NAME dana")))
         posted = render_response(
             await app.router.dispatch(inbound(3, "POST roads Bridge open one lane."))
         )
-        assert posted.startswith("✓ roads#")
+        assert "✓ roads#" in posted
         listing = render_response(await app.router.dispatch(inbound(4, "B roads")))
         assert "Bridge open" in listing
         opened = render_response(await app.router.dispatch(inbound(5, "R 1")))
         assert "Bridge open one lane." in opened
         replied = render_response(await app.router.dispatch(inbound(6, "RE Confirmed at 16:10.")))
-        assert replied.startswith("✓ roads#") and replied.endswith(".2.")
+        assert "✓ roads#1.2." in replied
         first_new = render_response(await app.router.dispatch(inbound(7, "NEW")))
         assert "roads 1" in first_new
-        assert render_response(await app.router.dispatch(inbound(8, "NEW"))) == "Nothing new."
-        assert render_response(await app.router.dispatch(inbound(9, "!WP"))) == (
-            "No saved waypoints."
+        assert "Nothing new." in render_response(await app.router.dispatch(inbound(8, "NEW")))
+        assert "No saved waypoints." in render_response(
+            await app.router.dispatch(inbound(9, "!WP"))
         )
         await app.waypoints.create("Spring", 40.12345, -79.54321, "water", "")
         waypoint = render_response(await app.router.dispatch(inbound(10, "!WP spring")))

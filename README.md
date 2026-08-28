@@ -30,7 +30,8 @@ hardware, revision, limitation, and roadmap evidence.
 
 ## What it provides
 
-- Meshtastic command router with direct-message and configured-channel support
+- First-class Meshtastic interface with guided, capability-aware direct-message screens and
+  command shortcuts
 - Member handles, trust levels, approval controls, and recently heard radios
 - Bulletin boards, threaded posts, subscriptions, search, digests, private mail, and an audited
   operator operations inbox
@@ -127,20 +128,24 @@ MQTT, AI, or federation.
 
 ## Use from Meshtastic
 
-Commands normally start with `!`; direct messages also accept commands without it.
+Direct-message the Outpost and send `?` to open the guided interface. Reply with a displayed number;
+forms ask for one value at a time, and `0` returns Home. Available choices reflect enabled modules
+and the sender's trust level.
+
+Commands remain fast shortcuts from any screen. They normally start with `!` on channels; direct
+messages accept them without a prefix.
 
 ```text
-!PING
-!HELP
-!NAME riverwatch
-!POST general Road closure reported near the bridge
-!WX TODAY
-!REPORT Tree blocking the eastbound lane
-!WPS 10
+?
+WX TODAY
+WARN
+BOARDS
+REPORT Tree blocking the eastbound lane
 ```
 
 Responses may return by direct message. Availability depends on trust, modules, and channel policy.
-See the [mesh command reference](docs/COMMANDS.md).
+See the [Meshtastic interface guide](docs/MESH-INTERFACE.md) and
+[mesh command reference](docs/COMMANDS.md).
 
 ## Operate
 
@@ -188,6 +193,7 @@ field acceptance.
 - [Field-appliance onboarding](docs/ONBOARDING.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Mesh commands](docs/COMMANDS.md)
+- [Meshtastic interface](docs/MESH-INTERFACE.md)
 - [Dashboard and API](docs/DASHBOARD.md)
 - [Dashboard design system](docs/UI-DESIGN-SYSTEM.md)
 - [Operations](docs/OPERATIONS.md)

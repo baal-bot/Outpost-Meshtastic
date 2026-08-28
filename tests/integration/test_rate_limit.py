@@ -47,6 +47,20 @@ async def test_safety_floor_bypasses_exhausted_member_bucket() -> None:
 
 
 @pytest.mark.asyncio
+async def test_navigation_has_a_separate_guest_bucket() -> None:
+    limiter = RateLimiter(VirtualClock())
+
+    for _ in range(12):
+        assert await limiter.allow("!00000001", "guest", "MENU") is True
+    assert await limiter.allow("!00000001", "guest", "MENU") is False
+
+    # Exploring the interface must not consume the member's ordinary command budget.
+    for _ in range(4):
+        assert await limiter.allow("!00000001", "guest", "PING") is True
+    assert await limiter.allow("!00000001", "guest", "PING") is False
+
+
+@pytest.mark.asyncio
 async def test_safety_floor_attempts_contribute_to_global_defensive_mode() -> None:
     limiter = RateLimiter(VirtualClock(), global_per_minute=2)
     assert await limiter.allow("!00000001", "guest", "HELPME") is True

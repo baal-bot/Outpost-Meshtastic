@@ -60,7 +60,7 @@ description = "Live radio traffic and recovery were exercised between physical O
 [[capabilities]]
 id = "command_routing"
 area = "Command routing"
-present = "DM/channel parsing, sessions, paging, trust checks, module gates, and bounded inbound workers."
+present = "Guided capability-aware DM screens, tolerant commands, contextual composition, recovery, channel parsing, paging, trust/module gates, and bounded inbound workers."
 maturity = "automated_tested"
 introduced_commit = "04e74ca"
 limitations = ["The full handheld/firmware/preset matrix is not field-qualified."]
@@ -77,6 +77,10 @@ description = "Phase 1 command and radio-response behavior."
 kind = "automated"
 path = "tests/integration/test_inbound_workers.py"
 description = "Bounded concurrency, backpressure, and drop telemetry."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_mesh_tui.py"
+description = "First-class mesh journeys, capability and trust filtering, interruption recovery, guided composition, and packet budgets."
 
 [[capabilities]]
 id = "airtime_delivery"

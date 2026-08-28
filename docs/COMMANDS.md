@@ -1,8 +1,13 @@
 # Mesh command reference
 
-Commands are case-insensitive. Configured channels normally require `!`; direct messages accept an
-optional prefix. `HELP` lists only commands available to the sender under current trust, module,
-and channel policy.
+Send `?` in a direct message to open Outpost's guided interface. Its numbered, capability-aware
+screens cover weather, safety, boards, mail, people, places, identity, and the local assistant;
+guided forms ask for one value at a time. `0`, `HOME`, or `?` recovers navigation if a response is
+lost. See the [Meshtastic interface guide](MESH-INTERFACE.md).
+
+The commands below remain first-class shortcuts and work from any screen. Commands are
+case-insensitive. Configured channels normally require `!`; direct messages accept an optional
+prefix. `HELP <command>` shows exact syntax.
 
 ## Basics and identity
 
@@ -10,7 +15,8 @@ and channel policy.
 | --- | --- |
 | `PING` | Test reachability. |
 | `ABOUT` | Show Outpost identity, operator, and disclaimer. |
-| `HELP [command]` | List commands or show help. Aliases: `?`, `H`. |
+| `HELP [command]` | Open the guided interface or show command syntax. Aliases: `?`, `H`. |
+| `MENU [section]` | Open Home or a guided section. Alias: `COMMANDS`. |
 | `WHOAMI` | Show identity and trust. Alias: `ME`. |
 | `NAME <handle>` | Claim/change a handle. Alias: `HANDLE`. |
 | `WHO` | List recently heard nodes. Alias: `NODES`. |
@@ -96,7 +102,10 @@ The dashboard provides a reviewed solicitation preview before sending to actual 
 
 ## Behavior
 
+- Direct-message screens accept displayed numbers, labels, and guided free-text replies.
+- Exact commands always interrupt an unfinished menu or compose prompt.
+- Minor command typos and common phrases are resolved before optional AI fallback.
 - Long results are shortened or paged to protect airtime.
 - Replies can be delayed by quiet hours, utilization, priority, or multipart pacing.
-- Unknown commands receive a help hint rather than being treated as prose.
+- A number without live screen state receives a recovery hint instead of being guessed.
 - `OP STATUS|RM` is restricted; dashboards are preferred for high-impact operations.
