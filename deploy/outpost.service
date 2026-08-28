@@ -30,6 +30,7 @@ DeviceAllow=/dev/h1x-0 rw
 DeviceAllow=char-usb_device rw
 Restart=always
 RestartSec=10
+TimeoutStopSec=30
 WatchdogSec=120
 
 [Install]

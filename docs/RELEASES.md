@@ -60,7 +60,9 @@ checksum matches: the attestation and source-commit checks establish where that 
 
 Before an upgrade, keep a validated off-device backup and retain the previous release. The
 installer creates an integrity-checked database snapshot and automatically restores code and data
-if the new service fails its health check. After a successful activation, run:
+if the new service fails its health check. Required local-AI readiness is part of that check; an
+enabled Hailo model that cannot acquire the accelerator cannot cause an upgrade to be accepted as
+healthy. After a successful activation, run:
 
 ```sh
 sudo outpost-rollback

@@ -492,7 +492,7 @@ when no peer nodes are known.
 | Radio disconnects (USB unplug, firmware reboot) | Detect immediately on a transport-level disconnect event, or within `radio.liveness_timeout_s` (default 300) if the link fails silently (REQ-TRANSPORT-008); exponential backoff reconnect; queue outbound (bounded, with TTL per class); dashboard shows `radio: down`; **never** exit |
 | BLE link flaps | Same, plus a hard reconnect cycle that fully tears down the Bleak client (Linux BlueZ requires it); after 5 consecutive failures, log a recommendation to switch to serial |
 | Channel utilisation exceeds ceiling | Governor stops scheduling all classes except `alert`; emits a metric; dashboard warns |
-| Inference sidecar down or 5xx | AI commands answer with one terse line offering non-AI alternatives; module health `degraded`; retry with backoff; **never** block the BBS |
+| Inference sidecar/device down or 5xx | AI commands answer with one terse line offering non-AI alternatives; module health `degraded`; retry with backoff; **never** block the BBS. If AI is configured as readiness-required, deployment health is 503 until it recovers; disabled or best-effort AI is non-blocking. |
 | Inference cold start (25–40 s) | Keep-warm task pings the model on an interval; if a request lands cold, respond immediately with `Thinking…` **only if** the requester is on a DM and the airtime class allows, else answer late without the placeholder |
 | Model returns oversized output | Truncate at the render step to the configured part budget with an ellipsis marker; never emit an unbounded chunk train |
 | SQLite `SQLITE_BUSY` | Serialised writer plus `busy_timeout=5000`; on persistent failure, degrade to read-only mode and alert the operator |

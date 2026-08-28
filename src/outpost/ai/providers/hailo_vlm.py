@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -34,6 +34,7 @@ class VLMRuntime(Protocol):
 
 
 RuntimeFactory = Callable[[Path, bool], VLMRuntime]
+Sleep = Callable[[float], Awaitable[None]]
 
 
 class _HailoRuntime:
@@ -114,12 +115,20 @@ class HailoVLMProvider:
         max_output_tokens: int,
         *,
         runtime_factory: RuntimeFactory = _default_runtime_factory,
+        load_attempts: int = 5,
+        load_retry_initial_s: float = 0.5,
+        close_timeout_s: float = 10,
+        sleep: Sleep = asyncio.sleep,
     ) -> None:
         self.endpoint = endpoint
         self.model = model
         self.timeout_s = timeout_s
         self.max_output_tokens = max_output_tokens
         self._runtime_factory = runtime_factory
+        self._load_attempts = max(1, load_attempts)
+        self._load_retry_initial_s = max(0, load_retry_initial_s)
+        self._close_timeout_s = max(0.001, close_timeout_s)
+        self._sleep = sleep
         self._runtime: VLMRuntime | None = None
         self._load_lock = asyncio.Lock()
         self._request_lock = asyncio.Lock()
@@ -130,17 +139,23 @@ class HailoVLMProvider:
                 return self._runtime
             if not self.endpoint.model_path.is_file():
                 raise ProviderUnavailable("hailo_vlm: configured HEF model file was not found")
-            try:
-                self._runtime = await asyncio.to_thread(
-                    self._runtime_factory,
-                    self.endpoint.model_path,
-                    self.endpoint.optimize_memory_on_device,
-                )
-            except ProviderUnavailable:
-                raise
-            except Exception as exc:
-                raise ProviderUnavailable(f"hailo_vlm: {type(exc).__name__}") from exc
-            return self._runtime
+            last_error: Exception | None = None
+            for attempt in range(self._load_attempts):
+                try:
+                    self._runtime = await asyncio.to_thread(
+                        self._runtime_factory,
+                        self.endpoint.model_path,
+                        self.endpoint.optimize_memory_on_device,
+                    )
+                    return self._runtime
+                except ProviderUnavailable:
+                    raise
+                except Exception as exc:
+                    last_error = exc
+                    if attempt + 1 < self._load_attempts:
+                        await self._sleep(min(self._load_retry_initial_s * (2**attempt), 4.0))
+            assert last_error is not None
+            raise ProviderUnavailable(f"hailo_vlm: {type(last_error).__name__}") from last_error
 
     async def health(self) -> ProviderHealth:
         started = time.perf_counter()
@@ -198,7 +213,18 @@ class HailoVLMProvider:
             async with self._load_lock:
                 runtime, self._runtime = self._runtime, None
                 if runtime is not None:
-                    await asyncio.to_thread(runtime.close)
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(runtime.close), timeout=self._close_timeout_s
+                        )
+                    except TimeoutError as exc:
+                        raise ProviderUnavailable(
+                            "hailo_vlm: timed out releasing the Hailo device"
+                        ) from exc
+                    except Exception as exc:
+                        raise ProviderUnavailable(
+                            f"hailo_vlm: device release failed ({type(exc).__name__})"
+                        ) from exc
 
 
 def _strip_generation_markers(content: str) -> str:

@@ -562,7 +562,8 @@ class OutpostApp:
             ),
             *(
                 [self._start_background_task("ai-keep-warm", self._ai_keep_warm_loop())]
-                if self.config.modules.ai.enabled and self.config.ai.keep_warm.enabled
+                if self.config.modules.ai.enabled
+                and (self.config.ai.keep_warm.enabled or self.config.ai.required_for_readiness)
                 else []
             ),
             *(
@@ -2025,10 +2026,17 @@ class OutpostApp:
             await self.clock.sleep(60)
 
     async def _ai_keep_warm_loop(self) -> None:
+        retry_seconds = 1.0
         while True:
-            await self.ai_service.warm()
+            ready = await self.ai_service.warm()
             self._task_progress("ai-keep-warm")
-            await self.clock.sleep(self.config.ai.keep_warm.interval_s)
+            if ready:
+                retry_seconds = 1.0
+                delay = float(self.config.ai.keep_warm.interval_s)
+            else:
+                delay = retry_seconds
+                retry_seconds = min(retry_seconds * 2, 30.0)
+            await self.clock.sleep(delay)
 
     async def shutdown(self) -> None:
         self._shutting_down = True
@@ -2036,8 +2044,12 @@ class OutpostApp:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
-        await self.ai_service.close()
-        await self.database.close()
+        try:
+            await asyncio.wait_for(self.ai_service.close(), timeout=15)
+        except Exception as error:
+            print(f"AI provider shutdown failed: {type(error).__name__}", flush=True)
+        finally:
+            await self.database.close()
 
     async def _governor_loop(self) -> None:
         while True:

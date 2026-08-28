@@ -32,9 +32,10 @@ class FakeProvider:
         self.content = content
         self.calls: list[ChatRequest] = []
         self.fail = False
+        self.health_state = ProviderState.HEALTHY
 
     async def health(self) -> ProviderHealth:
-        return ProviderHealth(state=ProviderState.HEALTHY, detail="test")
+        return ProviderHealth(state=self.health_state, detail="test")
 
     async def capabilities(self) -> Capabilities:
         return Capabilities(
@@ -63,6 +64,33 @@ class Registry:
         if name == "POST":
             return SimpleNamespace(help_short="POST <board> <text>")
         return None
+
+
+@pytest.mark.asyncio
+async def test_required_ai_readiness_recovers_without_process_restart(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    provider = FakeProvider()
+    provider.health_state = ProviderState.UNAVAILABLE
+    config = Config.model_validate({"modules": {"ai": {"enabled": True}}})
+    service = AIService(
+        config,
+        provider,
+        RetrievalEngine(database, now=lambda: 1),
+        AIStore(database),
+        now=lambda: 1,
+    )
+
+    await service.initialize()
+    assert service.snapshot()["ready"] is False
+    assert service.snapshot()["required_for_readiness"] is True
+
+    provider.health_state = ProviderState.HEALTHY
+    assert await service.warm() is True
+    assert service.snapshot()["ready"] is True
+    assert service.snapshot()["health_state"] == "healthy"
+    await service.close()
+    await database.close()
 
 
 @pytest.mark.asyncio

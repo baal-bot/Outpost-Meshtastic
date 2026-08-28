@@ -12,6 +12,7 @@ from outpost.ai.providers.models import (
     ChatMessage,
     ChatRequest,
     InferenceProvider,
+    ProviderHealth,
     ProviderState,
 )
 from outpost.ai.retrieval import RetrievalEngine
@@ -83,6 +84,10 @@ class AIService:
         self._failures: deque[int] = deque()
         self._circuit_open_until = 0
         self._capabilities: Any = None
+        self._provider_health = ProviderHealth(
+            state=ProviderState.UNAVAILABLE, detail="provider has not been checked"
+        )
+        self._provider_health_checked_at: int | None = None
 
     async def initialize(self) -> None:
         self._capabilities = await self.provider.capabilities()
@@ -95,31 +100,58 @@ class AIService:
         )
         budgeter.plan(system=system, question="startup validation")
         budgeter.plan(system=UNGROUNDED_PROMPT, question="startup validation")
-        health = await self.provider.health()
-        AI_PROVIDER_HEALTH.labels(self.provider.name).set(
-            1 if health.state is ProviderState.HEALTHY else 0
-        )
+        await self.check_health()
 
     async def close(self) -> None:
         await self.provider.close()
 
-    async def warm(self) -> None:
-        if not self.config.ai.keep_warm.enabled or self.circuit_open:
-            return
+    def _remember_health(self, health: ProviderHealth) -> ProviderHealth:
+        self._provider_health = health
+        self._provider_health_checked_at = int(self.now())
+        AI_PROVIDER_HEALTH.labels(self.provider.name).set(
+            1 if health.state is ProviderState.HEALTHY else 0
+        )
+        if health.state is ProviderState.HEALTHY:
+            self._failures.clear()
+            self._circuit_open_until = 0
+        return health
+
+    @property
+    def provider_ready(self) -> bool:
+        return self._provider_health.state is ProviderState.HEALTHY
+
+    async def check_health(self) -> ProviderHealth:
         try:
-            await asyncio.wait_for(self.provider.warm(), timeout=self.config.ai.timeout_s)
-        except Exception:
-            self._record_failure()
+            health = await asyncio.wait_for(
+                self.provider.health(), timeout=self.config.ai.timeout_s
+            )
+        except Exception as error:
+            health = ProviderHealth(
+                state=ProviderState.UNAVAILABLE,
+                detail=f"health check failed ({type(error).__name__})",
+            )
+        return self._remember_health(health)
+
+    async def warm(self) -> bool:
+        try:
+            if self.provider_ready and self.config.ai.keep_warm.enabled:
+                await asyncio.wait_for(self.provider.warm(), timeout=self.config.ai.timeout_s)
+            health = await self.check_health()
+        except Exception as error:
+            health = self._remember_health(
+                ProviderHealth(
+                    state=ProviderState.UNAVAILABLE,
+                    detail=f"warmup failed ({type(error).__name__})",
+                )
+            )
+        return health.state is ProviderState.HEALTHY
 
     @property
     def circuit_open(self) -> bool:
         return int(self.now()) < self._circuit_open_until
 
     async def status(self) -> dict[str, Any]:
-        health = await self.provider.health()
-        AI_PROVIDER_HEALTH.labels(self.provider.name).set(
-            1 if health.state is ProviderState.HEALTHY else 0
-        )
+        health = await self.check_health()
         capabilities = self._capabilities or await self.provider.capabilities()
         return {
             "provider": self.provider.name,
@@ -139,6 +171,7 @@ class AIService:
         }
 
     def snapshot(self) -> dict[str, Any]:
+        module_enabled = self.config.modules.ai.enabled
         return {
             "provider": self.provider.name,
             "model": self.provider.model,
@@ -146,6 +179,13 @@ class AIService:
             "pending": self._pending,
             "circuit_open": self.circuit_open,
             "circuit_open_until": self._circuit_open_until or None,
+            "ready": self.provider_ready if module_enabled else None,
+            "health_state": (self._provider_health.state.value if module_enabled else "disabled"),
+            "health_detail": (
+                self._provider_health.detail if module_enabled else "AI module disabled"
+            ),
+            "health_checked_at": self._provider_health_checked_at,
+            "required_for_readiness": (module_enabled and self.config.ai.required_for_readiness),
         }
 
     async def answer(self, question: str, member: Member, channel: int, registry: Any) -> AIAnswer:
@@ -283,11 +323,18 @@ class AIService:
                 timeout=self.config.ai.timeout_s,
             )
         except Exception:
+            self._remember_health(
+                ProviderHealth(
+                    state=ProviderState.UNAVAILABLE,
+                    detail="inference request failed",
+                )
+            )
             self._record_failure()
             answer = self._offline(primary, "provider_error")
             await self._log(answer, question, member, channel, tuple(c.ref for c in pack.chunks))
             self._record_request(answer, channel)
             return answer
+        self._remember_health(ProviderHealth(state=ProviderState.HEALTHY, detail="ready"))
         if response.ttft_ms is not None:
             AI_TTFT.labels(self.provider.name, self.provider.model).observe(response.ttft_ms / 1000)
         AI_TOTAL.labels(self.provider.name, self.provider.model).observe(response.total_ms / 1000)

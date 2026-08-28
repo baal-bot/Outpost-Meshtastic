@@ -153,6 +153,13 @@ fifth person waits 100 s for an answer to a question they've forgotten asking.
 `ai.keep_warm.interval_s` (default 240) when the provider reports idle unload behaviour,
 and **MUST** be suppressed when the system is on battery/UPS power if that state is known.
 
+**REQ-AI-013a** — When AI is enabled and `ai.required_for_readiness` is true, provider health
+**MUST** participate in application and deployment readiness. Provider acquisition **MUST** retry
+with bounded backoff, a successful probe **MUST** clear stale failure/circuit state, and a disabled
+or explicitly best-effort AI module **MUST NOT** block core offline service. Shutdown **MUST** close
+the provider within a bounded service-stop window before a replacement process acquires exclusive
+accelerator resources.
+
 **REQ-AI-014** — If a request arrives while cold and the estimated wait exceeds
 `ai.cold_placeholder_threshold_s` (default 15), the node **MAY** send a single ≤40-byte
 placeholder — **only** on a DM, **only** if the `ai` airtime class has budget, and **never**

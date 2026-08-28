@@ -178,6 +178,103 @@ async def test_hailo_vlm_reports_missing_hef_without_importing_runtime(tmp_path)
     assert "HEF model file was not found" in health.detail
 
 
+@pytest.mark.asyncio
+async def test_hailo_vlm_retries_while_prior_process_releases_device(tmp_path) -> None:
+    model = tmp_path / "Qwen3-VL-2B-Instruct.hef"
+    model.write_bytes(b"test HEF")
+    runtime = FakeVLMRuntime()
+    attempts = 0
+    delays: list[float] = []
+
+    def factory(_path: object, _optimize: object) -> FakeVLMRuntime:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise RuntimeError("HAILO_OUT_OF_PHYSICAL_DEVICES")
+        return runtime
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    provider = HailoVLMProvider(
+        AIHailoVLMConfig(model_path=model),
+        "Qwen3-VL-2B-Instruct",
+        45,
+        64,
+        runtime_factory=factory,
+        load_attempts=5,
+        load_retry_initial_s=0.25,
+        sleep=sleep,
+    )
+
+    health = await provider.health()
+
+    assert health.state is ProviderState.HEALTHY
+    assert attempts == 3
+    assert delays == [0.25, 0.5]
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_hailo_vlm_reports_unavailable_after_bounded_acquisition_retries(tmp_path) -> None:
+    model = tmp_path / "Qwen3-VL-2B-Instruct.hef"
+    model.write_bytes(b"test HEF")
+    attempts = 0
+    delays: list[float] = []
+
+    def factory(_path: object, _optimize: object) -> FakeVLMRuntime:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("HAILO_OUT_OF_PHYSICAL_DEVICES")
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    provider = HailoVLMProvider(
+        AIHailoVLMConfig(model_path=model),
+        "Qwen3-VL-2B-Instruct",
+        45,
+        64,
+        runtime_factory=factory,
+        load_attempts=3,
+        load_retry_initial_s=0.25,
+        sleep=sleep,
+    )
+
+    health = await provider.health()
+
+    assert health.state is ProviderState.UNAVAILABLE
+    assert "RuntimeError" in health.detail
+    assert attempts == 3
+    assert delays == [0.25, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_hailo_vlm_device_release_has_a_bounded_timeout(tmp_path) -> None:
+    class SlowCloseRuntime(FakeVLMRuntime):
+        def close(self) -> None:
+            time.sleep(0.05)
+            super().close()
+
+    model = tmp_path / "Qwen3-VL-2B-Instruct.hef"
+    model.write_bytes(b"test HEF")
+    runtime = SlowCloseRuntime()
+    provider = HailoVLMProvider(
+        AIHailoVLMConfig(model_path=model),
+        "Qwen3-VL-2B-Instruct",
+        45,
+        64,
+        runtime_factory=lambda _path, _optimize: runtime,
+        close_timeout_s=0.01,
+    )
+    await provider.warm()
+
+    with pytest.raises(ProviderUnavailable, match="timed out releasing"):
+        await provider.close()
+    await asyncio.sleep(0.06)
+    assert runtime.closed
+
+
 def test_native_hailo_vlm_clears_context_and_builds_structured_prompt() -> None:
     class FakeNativeVLM:
         def __init__(self) -> None:

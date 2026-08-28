@@ -53,6 +53,10 @@ sudo OUTPOST_HAILORT_WHEEL="$HOME/Downloads/hailo-5.3.0/hailort-5.3.0-cp313-cp31
 The wheel's CPython tag must match the host Python. The native adapter serialises hardware access,
 clears the VLM's retained conversation context before every request, and keeps the model loaded.
 Outpost currently uses its text capability; image input is a separate future interface change.
+With AI enabled, `ai.required_for_readiness` defaults to `true`: a missing model or unavailable
+accelerator keeps `/api/v1/health` at HTTP 503 so an upgrade cannot silently accept a broken AI
+runtime. Bounded background probes restore readiness without restarting Outpost. Set this option
+to `false` only when the operator intentionally wants AI to be best-effort.
 
 The older `hailo` provider remains available as a rollback path. When it is selected,
 `deploy/install.sh` installs a hardened
@@ -119,4 +123,5 @@ errors, qualifying the model behind Outpost's deterministic guards and evidence-
 - AI never receives mail, exact member positions, or operator notes.
 - It has read-only tools and cannot create, broadcast, escalate, or cancel alerts.
 - Grounded answers use `[AI]`; narrowly allowed ungrounded answers use `[AI?]`.
-- Provider failure must degrade only the assistant, never BBS, mail, Watch, or radio routing.
+- Provider failure never stops BBS, mail, Watch, or radio routing. When AI is readiness-required,
+  it does mark the deployment health gate degraded until the provider recovers.

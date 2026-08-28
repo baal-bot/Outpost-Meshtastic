@@ -41,8 +41,8 @@ revision on which CI runs this manifest check.
 | Retention and privacy controls | Bounded retention, exact-position expiry/deletion, message limits, maintenance batches, and auditable policy changes. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `4d8af9c` |
 | Outpost federation | Pairing, authenticated framing, policy, board/incident sync, peer services, encrypted mail relay, signed multi-hop custody, privacy-gated topology health, receipts, pagination, and reconciliation. | Two-node field-tested | unreleased @ `HEAD` (2026-08-27); introduced `8f7219e` |
 | Meshtastic MQTT federation path | Optional radio-firmware MQTT discovery, targeted bootstrap, transport observation, and resilient pairing approvals. | Two-node field-tested | unreleased @ `HEAD` (2026-08-26); introduced `f75f8af` |
-| Local AI assistant | ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, and native HailoRT Qwen3-VL provider. | Hardware-gated | unreleased @ `HEAD` (2026-08-27); introduced `6b3d01a` |
-| Installation and diagnostics | Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, authenticated releases, and hardened service tooling. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `d614d85` |
+| Local AI assistant | ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, native HailoRT Qwen3-VL provider, bounded device reacquisition, and explicit readiness state. | Hardware-gated | unreleased @ `HEAD` (2026-08-27); introduced `6b3d01a` |
+| Installation and diagnostics | Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, authenticated releases, health-gated Hailo handoff, and hardened service tooling. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `d614d85` |
 
 ## Evidence and limitations
 

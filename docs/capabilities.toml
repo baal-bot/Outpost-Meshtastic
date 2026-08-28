@@ -386,7 +386,7 @@ description = "Radio/MQTT path selection and transport failure behavior."
 [[capabilities]]
 id = "local_ai"
 area = "Local AI assistant"
-present = "ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, and native HailoRT Qwen3-VL provider."
+present = "ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, native HailoRT Qwen3-VL provider, bounded device reacquisition, and explicit readiness state."
 maturity = "hardware_gated"
 introduced_commit = "6b3d01a"
 limitations = [
@@ -414,7 +414,7 @@ description = "Opt-in hardware release-gate assertion for the full guarded corpu
 [[capabilities]]
 id = "installation_operations"
 area = "Installation and diagnostics"
-present = "Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, authenticated releases, and hardened service tooling."
+present = "Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, authenticated releases, health-gated Hailo handoff, and hardened service tooling."
 maturity = "automated_tested"
 introduced_commit = "d614d85"
 limitations = ["A recorded fresh-Pi mDNS/hotspot onboarding drill and extended unattended wallboard soak remain field gates."]

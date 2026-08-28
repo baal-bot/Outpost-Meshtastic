@@ -164,6 +164,14 @@ installer; it copies the HEF into `/var/lib/outpost/models` and validates the kn
 Follow [Local AI](AI.md) for exact commands, rollback provider details, and the hardware benchmark.
 Do not install the Hailo-8 `hailo-all` package on an AI HAT+ 2.
 
+When AI is enabled, `ai.required_for_readiness: true` makes the configured provider part of the
+deployment health gate. A missing HEF, unavailable accelerator, or failed model load makes
+`/api/v1/health` return HTTP 503 until bounded background probes recover it. Set the option to
+`false` only when AI is intentionally best-effort. Disabling the AI module is always non-blocking.
+During an upgrade the installer stops the old process, waits for the configured release grace
+(`OUTPOST_HAILO_RELEASE_GRACE_SECONDS`, default 5), and then starts the replacement. This avoids
+two processes competing for the one Hailo VDevice.
+
 Leave AI disabled until the model passes the safety evaluation. The radio, BBS, mail, Watch,
 Environment, and federation features do not require the accelerator or any inference provider.
 
@@ -190,7 +198,7 @@ used interactively; the local USGS pack is the fallback.
    development installs but is not a verified release. A pull by itself does not update the running
    process. See [Releases and artifact verification](RELEASES.md).
 4. Compare active config with `/etc/outpost/config.yaml.dist`.
-5. Verify health, login, radio connectivity, and a mesh `PING`.
+5. Verify health, login, radio connectivity, local-AI readiness when required, and a mesh `PING`.
 
 Migrations run forward at startup. Do not downgrade a production database without a specific
 recovery plan.

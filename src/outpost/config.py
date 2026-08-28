@@ -218,6 +218,7 @@ class AIConfig(StrictModel):
     queue_depth: int = Field(default=3, ge=0, le=20)
     max_tool_rounds: int = Field(default=2, ge=0, le=2)
     max_output_tokens: int = Field(default=220, ge=32, le=512)
+    required_for_readiness: bool = True
     budget: AIBudgetConfig = Field(default_factory=AIBudgetConfig)
     keep_warm: AIKeepWarmConfig = Field(default_factory=AIKeepWarmConfig)
     embeddings: AIEmbeddingConfig = Field(default_factory=AIEmbeddingConfig)

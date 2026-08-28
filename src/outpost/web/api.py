@@ -1074,10 +1074,20 @@ def create_web_app(
             return JSONResponse({"status": "maintenance", "version": __version__}, status_code=503)
         radio = status.get("radio", "down")
         tasks_healthy = status.get("tasks_healthy", True) is not False
-        return {
-            "status": "ok" if radio == "up" and tasks_healthy else "degraded",
-            "version": __version__,
-        }
+        ai = status.get("ai", {})
+        ai_ready = not (
+            isinstance(ai, dict)
+            and ai.get("required_for_readiness") is True
+            and ai.get("ready") is not True
+        )
+        ready = radio == "up" and tasks_healthy and ai_ready
+        return JSONResponse(
+            {
+                "status": "ok" if ready else "degraded",
+                "version": __version__,
+            },
+            status_code=200 if ready else 503,
+        )
 
     @app.get("/api/v1/diagnostics/status", response_class=JSONResponse, response_model=None)
     async def diagnostic_status(request: Request) -> dict[str, Any] | Response:
@@ -1127,6 +1137,11 @@ def create_web_app(
                     "pending",
                     "circuit_open",
                     "circuit_open_until",
+                    "ready",
+                    "health_state",
+                    "health_detail",
+                    "health_checked_at",
+                    "required_for_readiness",
                 }
             }
             if isinstance(ai, dict)

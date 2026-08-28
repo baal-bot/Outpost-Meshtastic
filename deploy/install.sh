@@ -12,8 +12,16 @@ NONINTERACTIVE=${OUTPOST_NONINTERACTIVE:-0}
 HAILORT_WHEEL=${OUTPOST_HAILORT_WHEEL:-}
 HAILO_VLM_MODEL_SOURCE=${OUTPOST_HAILO_VLM_MODEL:-}
 MDNS_ENABLED=${OUTPOST_MDNS:-1}
+HAILO_RELEASE_GRACE_SECONDS=${OUTPOST_HAILO_RELEASE_GRACE_SECONDS:-5}
 
 fail() { echo "Outpost install: $*" >&2; exit 1; }
+
+wait_for_hailo_release() {
+  if [ "$AI_PROVIDER" = hailo_vlm ] && [ "$HAILO_RELEASE_GRACE_SECONDS" -gt 0 ]; then
+    echo "Waiting ${HAILO_RELEASE_GRACE_SECONDS}s for the Hailo device to be released"
+    sleep "$HAILO_RELEASE_GRACE_SECONDS"
+  fi
+}
 
 [ "$(id -u)" -eq 0 ] || fail "run as root: sudo $0"
 for command in python3 getent groupadd useradd usermod install systemctl udevadm ln mv readlink curl; do
@@ -23,6 +31,11 @@ python3 -c 'import sys; raise SystemExit(not ((3, 12) <= sys.version_info < (3, 
   fail "Python 3.12 or 3.13 is required"
 python3 -m venv --help >/dev/null 2>&1 || fail "Python venv support is missing; install python3-venv"
 case "$MDNS_ENABLED" in 0|1) ;; *) fail "OUTPOST_MDNS must be 0 or 1" ;; esac
+case "$HAILO_RELEASE_GRACE_SECONDS" in
+  ''|*[!0-9]*) fail "OUTPOST_HAILO_RELEASE_GRACE_SECONDS must be an integer from 0 to 30" ;;
+esac
+[ "$HAILO_RELEASE_GRACE_SECONDS" -le 30 ] || \
+  fail "OUTPOST_HAILO_RELEASE_GRACE_SECONDS must be an integer from 0 to 30"
 
 if command -v git >/dev/null 2>&1 && git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   REVISION=$(git -C "$PROJECT_DIR" rev-parse --short=12 HEAD)
@@ -277,7 +290,11 @@ if [ "$AI_PROVIDER" = hailo_vlm ]; then
   systemctl disable --now hailo-ollama.service 2>/dev/null || true
 fi
 systemctl enable "$SERVICE_NAME"
-systemctl restart "$SERVICE_NAME"
+if [ -n "$OLD_TARGET" ]; then
+  systemctl stop "$SERVICE_NAME"
+  wait_for_hailo_release
+fi
+systemctl start "$SERVICE_NAME"
 
 healthy=0
 attempt=0
@@ -288,6 +305,7 @@ done
 if [ "$healthy" -ne 1 ]; then
   echo "New release failed health verification; rolling back." >&2
   systemctl stop "$SERVICE_NAME" || true
+  wait_for_hailo_release
   if [ -n "$OLD_TARGET" ]; then
     ln -sfn "$OLD_TARGET" "$CURRENT_LINK.next"
     mv -Tf "$CURRENT_LINK.next" "$CURRENT_LINK"

@@ -87,6 +87,7 @@ def test_ai_runtime_policy_defaults_are_bounded() -> None:
     assert config.ai.max_tool_rounds == 2
     assert config.ai.provider == "hailo_vlm"
     assert config.ai.model == "Qwen3-VL-2B-Instruct"
+    assert config.ai.required_for_readiness
     assert config.ai.hailo_vlm.context_tokens == 2048
     assert config.ai.hailo.context_tokens == 2048
 

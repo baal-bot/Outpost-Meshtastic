@@ -50,9 +50,16 @@ def test_installer_stages_health_checked_release_with_rollback() -> None:
     assert "3e302b1d0bdc4beaf4ff982cb34f18bc957d3acd1e20e275eb0dd3536b3043a7" in script
     assert "from hailo_platform.genai import VLM" in script
     assert "systemctl disable --now hailo-ollama.service" in script
+    assert "OUTPOST_HAILO_RELEASE_GRACE_SECONDS" in script
+    assert 'systemctl stop "$SERVICE_NAME"' in script
+    assert 'sleep "$HAILO_RELEASE_GRACE_SECONDS"' in script
+    assert 'systemctl start "$SERVICE_NAME"' in script
     assert "OUTPOST_MDNS:-1" in script
     assert "render_avahi.py" in script
     assert "avahi-daemon.service" in script
+
+    unit = (Path(__file__).parents[2] / "deploy" / "outpost.service").read_text()
+    assert "TimeoutStopSec=30" in unit
 
     hotspot = (Path(__file__).parents[2] / "deploy" / "setup-hotspot.sh").read_text()
     assert "802-11-wireless.ap-isolation yes" in hotspot

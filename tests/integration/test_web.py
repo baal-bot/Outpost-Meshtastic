@@ -32,6 +32,7 @@ def test_health_is_minimal_and_status_has_detail() -> None:
     )
     client = TestClient(app)
     health = client.get("/api/v1/health")
+    assert health.status_code == 503
     assert health.json() == {"status": "degraded", "version": "0.1.0"}
     assert "queues" not in health.json()
     assert client.get("/api/v1/status").json()["radio"] == "down"
@@ -63,7 +64,32 @@ def test_health_is_minimal_and_status_has_detail() -> None:
     failed_tasks = TestClient(create_web_app(lambda: {"radio": "up", "tasks_healthy": False})).get(
         "/api/v1/health"
     )
+    assert failed_tasks.status_code == 503
     assert failed_tasks.json() == {"status": "degraded", "version": "0.1.0"}
+
+    required_ai = TestClient(
+        create_web_app(
+            lambda: {
+                "radio": "up",
+                "tasks_healthy": True,
+                "ai": {"required_for_readiness": True, "ready": False},
+            }
+        )
+    ).get("/api/v1/health")
+    assert required_ai.status_code == 503
+    assert required_ai.json() == {"status": "degraded", "version": "0.1.0"}
+
+    disabled_ai = TestClient(
+        create_web_app(
+            lambda: {
+                "radio": "up",
+                "tasks_healthy": True,
+                "ai": {"required_for_readiness": False, "ready": None},
+            }
+        )
+    ).get("/api/v1/health")
+    assert disabled_ai.status_code == 200
+    assert disabled_ai.json() == {"status": "ok", "version": "0.1.0"}
 
 
 @pytest.mark.asyncio
