@@ -60,7 +60,7 @@ description = "Live radio traffic and recovery were exercised between physical O
 [[capabilities]]
 id = "command_routing"
 area = "Command routing"
-present = "Guided capability-aware DM screens, tolerant commands, contextual composition, recovery, channel parsing, paging, trust/module gates, PKI-bound elevated actions, and bounded inbound workers."
+present = "Guided capability-aware DM screens, mutation-safe tolerant commands, globally reserved disabled-feature vocabulary, contextual composition, recovery, channel parsing, paging, trust/module gates, PKI-bound elevated actions, and bounded inbound workers."
 maturity = "automated_tested"
 introduced_commit = "04e74ca"
 limitations = ["The full handheld/firmware/preset matrix is not field-qualified."]
@@ -80,7 +80,7 @@ description = "Bounded concurrency, backpressure, and drop telemetry."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_mesh_tui.py"
-description = "First-class mesh journeys, capability and trust filtering, interruption recovery, guided composition, and packet budgets."
+description = "First-class mesh journeys, capability and trust filtering, mutation-safe fuzzy resolution, disabled-command reservation, interruption recovery, guided composition, and packet budgets."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_mesh_pki_trust.py"

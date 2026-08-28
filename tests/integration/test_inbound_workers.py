@@ -68,6 +68,7 @@ async def test_unordered_worker_dispatch_retains_command_timeout(tmp_path) -> No
             max_parts=1,
             rate_key="commands",
             help_short="test timeout",
+            mutates=False,
             handler=never_returns,
         )
     )

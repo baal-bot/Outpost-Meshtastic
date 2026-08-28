@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -14,6 +15,11 @@ TOLERANT_MATCHES = Counter(
     "outpost_router_tolerant_matches_total",
     "Command inputs recovered without exact command syntax",
     ("mode", "command"),
+)
+TOLERANT_REJECTIONS = Counter(
+    "outpost_router_tolerant_rejections_total",
+    "Command inputs not automatically corrected for safety",
+    ("reason", "command"),
 )
 
 BUILTIN_INTENTS = (
@@ -60,6 +66,13 @@ def _distance(left: str, right: str) -> int:
     return previous[-1]
 
 
+@dataclass(frozen=True)
+class IntentResolution:
+    invoked: str
+    mode: str | None = None
+    candidates: tuple[str, ...] = ()
+
+
 class IntentResolver:
     def __init__(self, path: str) -> None:
         self.path = Path(path)
@@ -103,33 +116,64 @@ class IntentResolver:
         invoked: str,
         trust: str,
         registry: CommandRegistry,
-    ) -> tuple[str, str | None]:
+    ) -> IntentResolution:
         token, separator, args = invoked.strip().partition(" ")
         normalized_token = _normalized(token)
         if len(normalized_token) >= 3:
-            matches: list[tuple[int, str, str]] = []
-            for spec in registry.commands():
-                if TrustLevel.parse(trust) < spec.min_trust:
+            trust_level = TrustLevel.parse(trust)
+            max_distance = 1 if len(normalized_token) <= 4 else 2
+            mutation_matches: list[tuple[int, str]] = []
+            for spec in registry.known_commands():
+                if not spec.mutates:
                     continue
                 for name in (spec.name, *spec.aliases):
                     normalized_name = _normalized(name)
                     if len(normalized_name) < 3:
                         continue
                     distance = _distance(normalized_token, normalized_name)
-                    if distance <= 2:
+                    if distance <= max_distance:
+                        mutation_matches.append((distance, spec.name))
+            if mutation_matches:
+                best_distance = min(value[0] for value in mutation_matches)
+                best_mutations = sorted(
+                    {value[1] for value in mutation_matches if value[0] == best_distance}
+                )
+                eligible: list[str] = []
+                for command in best_mutations:
+                    candidate_spec = registry.resolve(command)
+                    if candidate_spec is not None and trust_level >= candidate_spec.min_trust:
+                        eligible.append(command)
+                candidates = tuple(eligible)
+                label = candidates[0].lower() if len(candidates) == 1 else "multiple"
+                mode = "mutation_confirmation" if candidates else "mutation_protected"
+                TOLERANT_REJECTIONS.labels(mode, label).inc()
+                return IntentResolution(invoked, mode, candidates[:3])
+
+            matches: list[tuple[int, str, str]] = []
+            for spec in registry.commands():
+                if spec.mutates or trust_level < spec.min_trust:
+                    continue
+                for name in (spec.name, *spec.aliases):
+                    normalized_name = _normalized(name)
+                    if len(normalized_name) < 3:
+                        continue
+                    distance = _distance(normalized_token, normalized_name)
+                    if distance <= max_distance:
                         matches.append((distance, spec.name, name))
             if matches:
                 best_distance = min(value[0] for value in matches)
-                best_specs = {value[1] for value in matches if value[0] == best_distance}
+                best_specs = sorted({value[1] for value in matches if value[0] == best_distance})
                 if len(best_specs) == 1:
-                    command = best_specs.pop()
+                    command = best_specs[0]
                     TOLERANT_MATCHES.labels("fuzzy", command.lower()).inc()
-                    return f"{command}{' ' + args if separator else ''}", "fuzzy"
+                    return IntentResolution(f"{command}{' ' + args if separator else ''}", "fuzzy")
+                TOLERANT_REJECTIONS.labels("ambiguous", "multiple").inc()
+                return IntentResolution(invoked, "ambiguous", tuple(best_specs[:3]))
         self._reload()
         normalized_invoked = _normalized(invoked)
         for pattern, command in self._patterns:
             if pattern.search(normalized_invoked) and self._allowed(command, trust, registry):
                 target = command.split(maxsplit=1)[0]
                 TOLERANT_MATCHES.labels("intent", target.lower()).inc()
-                return command, "intent"
-        return invoked, None
+                return IntentResolution(command, "intent")
+        return IntentResolution(invoked)

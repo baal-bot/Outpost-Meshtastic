@@ -21,7 +21,7 @@ RESERVED = {"admin", "operator", "system", "outpost", "all", "here"}
 def specs(members: MemberRepo, mail: MailService, require_approval: bool) -> list[CommandSpec]:
     async def name(ctx: CommandContext) -> Response:
         handle = ctx.args.strip().lower()
-        command_names = {spec.name.lower() for spec in ctx.registry.commands()}
+        command_names = {spec.name.lower() for spec in ctx.registry.known_commands()}
         if not HANDLE.fullmatch(handle) or handle in RESERVED | command_names:
             return Response(ResponseKind.ERROR, [Line("NAME: 2-12 letters, numbers, _ or -.")])
         try:
@@ -61,7 +61,19 @@ def specs(members: MemberRepo, mail: MailService, require_approval: bool) -> lis
     )
     return [
         CommandSpec(
-            "NAME", ("HANDLE",), help_short="NAME <handle> · claim handle", handler=name, **base
+            "NAME",
+            ("HANDLE",),
+            help_short="NAME <handle> · claim handle",
+            handler=name,
+            mutates=True,
+            **base,
         ),
-        CommandSpec("WHO", ("NODES",), help_short="WHO · recently heard", handler=who, **base),
+        CommandSpec(
+            "WHO",
+            ("NODES",),
+            help_short="WHO · recently heard",
+            handler=who,
+            mutates=False,
+            **base,
+        ),
     ]

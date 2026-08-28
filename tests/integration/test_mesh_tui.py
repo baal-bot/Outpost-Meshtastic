@@ -5,8 +5,16 @@ import pytest
 from outpost.app import OutpostApp
 from outpost.config import Config
 from outpost.render import render_response
+from outpost.router.models import (
+    CommandContext,
+    CommandSpec,
+    Line,
+    Response,
+    ResponseKind,
+    TrustLevel,
+)
 from outpost.transport.chunker import chunk_text
-from outpost.transport.models import InboundMessage
+from outpost.transport.models import InboundMessage, TrafficClass
 
 
 def inbound(packet_id: int, sender: str, text: str, *, direct: bool = True) -> InboundMessage:
@@ -171,6 +179,145 @@ async def test_typo_intent_channel_boundary_and_cold_number_recovery(tmp_path) -
         assert "OUTPOST /" not in channel
     finally:
         await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_disabled_report_is_reserved_and_cannot_fuzzy_delete_a_post(tmp_path) -> None:
+    app = OutpostApp(Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}}))
+    await app.database.open()
+    try:
+        sender = "!00000001"
+        assert "@dana" in await send(app, 1, sender, "NAME dana")
+        assert "✓ gen#1" in await send(app, 2, sender, "POST gen Tree blocks road")
+
+        rejected = await send(app, 3, sender, "REPORT gen#1.1")
+
+        assert rejected == "REPORT unavailable · Watch is disabled."
+        rows = await app.database.read("SELECT body,hidden FROM post WHERE thread_id=1")
+        assert [dict(row) for row in rows] == [{"body": "Tree blocks road", "hidden": 0}]
+    finally:
+        await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_mutating_fuzzy_match_requires_numbered_confirmation(tmp_path) -> None:
+    app = OutpostApp(Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}}))
+    await app.database.open()
+    try:
+        sender = "!00000001"
+        await send(app, 1, sender, "NAME dana")
+        await send(app, 2, sender, "POST gen Temporary post")
+
+        prompt = await send(app, 3, sender, "RMPOSTX gen#1.1")
+
+        assert prompt.startswith("OUTPOST / CONFIRM COMMAND\nNothing was run.\n1 RMPOST")
+        assert (
+            int((await app.database.read("SELECT hidden FROM post WHERE id=1"))[0]["hidden"]) == 0
+        )
+
+        channel_prompt = render_response(
+            await app.router.dispatch(inbound(4, "!00000002", "!RMPOSTX gen#1.1", direct=False))
+        )
+        assert channel_prompt == "Not run · send exact RMPOST, or DM ? for help."
+        assert (
+            int((await app.database.read("SELECT hidden FROM post WHERE id=1"))[0]["hidden"]) == 0
+        )
+
+        confirmed = await send(app, 5, sender, "1")
+        assert "✓ Removed." in confirmed
+        assert (
+            int((await app.database.read("SELECT hidden FROM post WHERE id=1"))[0]["hidden"]) == 1
+        )
+    finally:
+        await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_fuzzy_match_offers_choices_without_executing(tmp_path) -> None:
+    app = OutpostApp(Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}}))
+    await app.database.open()
+    calls: list[tuple[str, str]] = []
+
+    def command(name: str) -> CommandSpec:
+        async def handler(ctx: CommandContext) -> Response:
+            calls.append((name, ctx.args))
+            return Response(ResponseKind.ACK, [Line(f"ran {name}")])
+
+        return CommandSpec(
+            name,
+            (),
+            module="test",
+            min_trust=TrustLevel.GUEST,
+            airtime_class=TrafficClass.REPLY,
+            max_parts=1,
+            rate_key="commands",
+            help_short=name,
+            mutates=False,
+            handler=handler,
+        )
+
+    try:
+        app.router.registry.register(command("CART"))
+        app.router.registry.register(command("CAST"))
+
+        prompt = await send(app, 1, "!00000001", "CAT payload")
+
+        assert prompt.startswith("OUTPOST / CHOOSE COMMAND\nNothing was run.\n1 CART\n2 CAST")
+        assert calls == []
+        assert "ran CART" in await send(app, 2, "!00000001", "1")
+        assert calls == [("CART", "payload")]
+    finally:
+        await app.database.close()
+
+
+def test_mutating_command_typos_never_execute_across_trust_levels(tmp_path) -> None:
+    config = full_config(tmp_path / "outpost.db")
+    app = OutpostApp(config)
+    mutations = {spec.name for spec in app.router.registry.known_commands() if spec.mutates}
+    assert mutations == {
+        "ACK",
+        "ALERT",
+        "CONFIRM",
+        "DELMAIL",
+        "DISPUTE",
+        "EVENT",
+        "HELPME",
+        "NAME",
+        "NEW",
+        "OK",
+        "OP",
+        "POS",
+        "POST",
+        "READMAIL",
+        "REPLY",
+        "REPLYMAIL",
+        "REPORT",
+        "REPORT!",
+        "RMPOST",
+        "SEND",
+        "SUB",
+        "UNSUB",
+        "WAYPOINT",
+    }
+
+    for spec in app.router.registry.known_commands():
+        if not spec.mutates:
+            continue
+        for name in (spec.name, *spec.aliases):
+            if len(name) < 3:
+                continue
+            typo = f"{name}X"
+            assert app.router.registry.known(typo) is None
+            for trust in TrustLevel:
+                resolution = app.router.intents.resolve(
+                    f"{typo} preserved arguments", trust.name.lower(), app.router.registry
+                )
+                if trust >= spec.min_trust:
+                    assert resolution.mode in {"mutation_confirmation", "ambiguous"}
+                    assert spec.name in resolution.candidates
+                else:
+                    assert spec.name not in resolution.candidates
+                assert resolution.mode != "fuzzy"
 
 
 @pytest.mark.asyncio

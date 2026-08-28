@@ -57,6 +57,7 @@ def specs(directory: ChannelDirectory) -> list[CommandSpec]:
         airtime_class=TrafficClass.REPLY,
         max_parts=2,
         rate_key="commands",
+        mutates=False,
     )
     return [
         CommandSpec("CHANS", (), help_short="CHANS · community channels", handler=chans, **base),

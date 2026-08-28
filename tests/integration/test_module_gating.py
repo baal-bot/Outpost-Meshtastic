@@ -84,6 +84,21 @@ async def test_disabled_modules_remove_commands_and_background_workers(tmp_path)
     assert app.router.registry.resolve("REPORT") is None
     assert app.router.registry.resolve("WX") is None
     assert app.router.registry.resolve("MAIL") is not None
+    assert app.router.registry.known("REPORT") is not None
+    assert app.router.registry.known("REPORT").module == "watch"
+    assert app.router.registry.known("WX") is not None
+    assert app.router.registry.known("BOARDS") is not None
+
+    enabled_modules = config.modules.enabled_map()
+    for spec in app.router.registry.known_commands():
+        expected_active = (
+            enabled_modules.get(spec.module, True)
+            if spec.module != "operator"
+            else enabled_modules["bbs"]
+        )
+        for token in (spec.name, *spec.aliases):
+            assert app.router.registry.known(token) is spec
+            assert (app.router.registry.resolve(token) is spec) is expected_active
 
     await app.startup()
     try:

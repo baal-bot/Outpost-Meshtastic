@@ -54,6 +54,7 @@ def specs(service: AlertService) -> list[CommandSpec]:
             rate_key="commands",
             help_short="ALERT <severity> <inc> <headline> · responder broadcast",
             handler=alert,
+            mutates=True,
         ),
         CommandSpec(
             "ACK",
@@ -65,5 +66,6 @@ def specs(service: AlertService) -> list[CommandSpec]:
             rate_key="commands",
             help_short="ACK <inc> [note] · acknowledge active alert",
             handler=ack,
+            mutates=True,
         ),
     ]

@@ -579,6 +579,7 @@ def specs() -> list[CommandSpec]:
         airtime_class=TrafficClass.REPLY,
         max_parts=2,
         rate_key="commands",
+        mutates=False,
     )
     return [
         CommandSpec("PING", (), help_short="PING · test node reachability", handler=ping, **base),

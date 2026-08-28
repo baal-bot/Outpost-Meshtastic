@@ -67,6 +67,7 @@ def specs(service: AIService, config: Config) -> list[CommandSpec]:
         airtime_class=TrafficClass.AI,
         max_parts=2,
         rate_key="commands",
+        mutates=False,
     )
     return [
         CommandSpec(

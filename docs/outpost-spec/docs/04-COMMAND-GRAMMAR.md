@@ -403,9 +403,12 @@ AI airtime on trivial cases.
 **REQ-CMD-026** — Before falling through to the AI, the router **MUST** attempt, in order:
 
 1. **Exact command / alias match.**
-2. **Fuzzy match** on the first token — Levenshtein ≤2 against the command set, disambiguated
-   by trust level and enabled modules. `bords` → `BOARDS`. A fuzzy match **MUST** execute
-   directly, not ask for confirmation.
+2. **Fuzzy match** on the first token — Levenshtein ≤2 for longer command-like tokens and ≤1 for
+   tokens of four characters or fewer, disambiguated by trust level and enabled modules.
+   `bords` → `BOARDS`. An unambiguous read-only match **MAY** execute directly. A match to a
+   persistent, destructive, privacy, messaging, incident, alert, welfare, or operator mutation
+   **MUST NOT** execute until the member selects an explicit numbered confirmation. An ambiguous
+   match **MUST** offer bounded numbered choices without executing any candidate.
 3. **Intent phrase table.** A curated, operator-extensible table of phrasings mapped to
    commands, evaluated as case-insensitive regex over the whole message. Ships with at
    minimum:
@@ -428,6 +431,12 @@ AI airtime on trivial cases.
 **REQ-CMD-028** — Fuzzy and intent matches **MUST** be counted as metrics with the matched
 command as a label, so operators can see what people are actually trying to do and extend
 the table accordingly.
+
+**REQ-CMD-028a** — Every built-in command and alias **MUST** remain globally reserved regardless
+of module state. An exact token for a disabled or unavailable feature **MUST** receive a concise
+feature-unavailable response and **MUST NOT** enter fuzzy matching. Command specifications **MUST**
+classify mutations, and rejected mutation corrections, disabled commands, and ambiguities **MUST**
+emit bounded, content-free telemetry.
 
 ---
 

@@ -163,6 +163,7 @@ def specs(service: IncidentService) -> list[CommandSpec]:
                 "attached position is visible. Not 911."
             ),
             handler=report,
+            mutates=True,
             **base,
         ),
         CommandSpec(
@@ -170,6 +171,7 @@ def specs(service: IncidentService) -> list[CommandSpec]:
             (),
             help_short="REPORT! <details> · file despite duplicate suggestion",
             handler=report_force,
+            mutates=True,
             **base,
         ),
         CommandSpec(
@@ -177,19 +179,31 @@ def specs(service: IncidentService) -> list[CommandSpec]:
             (),
             help_short="CONFIRM <inc> · independently confirm",
             handler=confirm,
+            mutates=True,
             **base,
         ),
         CommandSpec(
-            "DISPUTE", (), help_short="DISPUTE <inc> [note] · flag concern", handler=dispute, **base
+            "DISPUTE",
+            (),
+            help_short="DISPUTE <inc> [note] · flag concern",
+            handler=dispute,
+            mutates=True,
+            **base,
         ),
         CommandSpec(
             "INCIDENTS",
             ("INCS",),
             help_short="INCIDENTS · active incident list",
             handler=incidents,
+            mutates=False,
             **base,
         ),
         CommandSpec(
-            "INC", ("I",), help_short="INC <number> · incident detail", handler=detail, **base
+            "INC",
+            ("I",),
+            help_short="INC <number> · incident detail",
+            handler=detail,
+            mutates=False,
+            **base,
         ),
     ]

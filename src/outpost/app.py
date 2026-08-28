@@ -201,21 +201,23 @@ class OutpostApp:
         )
         self.federation_codec = FrameCodec(self.config.fed.max_fragments)
         self.federation_reassembler = Reassembler(self.config.fed.reassembly_timeout_s)
-        for spec in (
-            *identity_specs(members, mail, self.config.security.require_approval),
-            *(
-                bbs_specs(bbs, self.config.bbs.self_delete_minutes)
-                if self.config.modules.bbs.enabled
-                else ()
+        command_groups = (
+            (
+                identity_specs(members, mail, self.config.security.require_approval),
+                True,
             ),
-            *mail_specs(mail),
-            *directory_specs(directory),
-            *(ai_specs(self.ai_service, self.config) if self.config.modules.ai.enabled else ()),
-            *(operator_specs(bbs) if self.config.modules.bbs.enabled else ()),
-            *(watch_specs(self.incidents) if self.config.modules.watch.enabled else ()),
-            *(alert_specs(self.alerts) if self.config.modules.watch.enabled else ()),
-            *(checkin_specs(self.checkins) if self.config.modules.watch.enabled else ()),
-            *(
+            (
+                bbs_specs(bbs, self.config.bbs.self_delete_minutes),
+                self.config.modules.bbs.enabled,
+            ),
+            (mail_specs(mail), True),
+            (directory_specs(directory), True),
+            (ai_specs(self.ai_service, self.config), self.config.modules.ai.enabled),
+            (operator_specs(bbs), self.config.modules.bbs.enabled),
+            (watch_specs(self.incidents), self.config.modules.watch.enabled),
+            (alert_specs(self.alerts), self.config.modules.watch.enabled),
+            (checkin_specs(self.checkins), self.config.modules.watch.enabled),
+            (
                 environment_specs(
                     self.weather,
                     self.config,
@@ -223,15 +225,16 @@ class OutpostApp:
                     self.astronomy,
                     self.seismic,
                     self.waypoints,
-                )
-                if self.config.modules.env.enabled
-                else ()
+                ),
+                self.config.modules.env.enabled,
             ),
-        ):
-            self.router.registry.register(spec)
+        )
+        for specs, enabled in command_groups:
+            for spec in specs:
+                self.router.registry.register(spec, enabled=enabled)
         reserved_slugs = {
             value.lower()
-            for spec in self.router.registry.commands()
+            for spec in self.router.registry.known_commands()
             for value in (spec.name, *spec.aliases)
         }
         self.bbs_admin = BBSAdmin(

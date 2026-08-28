@@ -48,5 +48,6 @@ def specs(bbs: BBSService) -> list[CommandSpec]:
             rate_key="commands",
             help_short="OP STATUS|RM · operator tools",
             handler=op,
+            mutates=True,
         )
     ]

@@ -166,13 +166,44 @@ def specs(service: MailService) -> list[CommandSpec]:
         rate_key="mail",
     )
     return [
-        CommandSpec("SEND", ("SM",), help_short="SEND <handle> <text>", handler=send, **base),
-        CommandSpec("MAIL", ("MB",), help_short="MAIL · inbox", handler=inbox, **base),
         CommandSpec(
-            "READMAIL", ("RM",), help_short="READMAIL <n> · read mail", handler=readmail, **base
+            "SEND",
+            ("SM",),
+            help_short="SEND <handle> <text>",
+            handler=send,
+            mutates=True,
+            **base,
         ),
         CommandSpec(
-            "REPLYMAIL", ("RR",), help_short="RR <text> · reply mail", handler=replymail, **base
+            "MAIL",
+            ("MB",),
+            help_short="MAIL · inbox",
+            handler=inbox,
+            mutates=False,
+            **base,
         ),
-        CommandSpec("DELMAIL", ("DM",), help_short="DELMAIL <n>", handler=delmail, **base),
+        CommandSpec(
+            "READMAIL",
+            ("RM",),
+            help_short="READMAIL <n> · read mail",
+            handler=readmail,
+            mutates=True,
+            **base,
+        ),
+        CommandSpec(
+            "REPLYMAIL",
+            ("RR",),
+            help_short="RR <text> · reply mail",
+            handler=replymail,
+            mutates=True,
+            **base,
+        ),
+        CommandSpec(
+            "DELMAIL",
+            ("DM",),
+            help_short="DELMAIL <n>",
+            handler=delmail,
+            mutates=True,
+            **base,
+        ),
     ]

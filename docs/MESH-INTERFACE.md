@@ -34,8 +34,11 @@ therefore see fewer choices than a named member or responder.
   lost.
 - A command such as `WX`, `WARN`, `BOARDS`, `MAIL`, `REPORT`, or `PING` works at any screen and
   cancels an unfinished prompt. This makes screen state an accelerator, never a prerequisite.
-- Command names are case-insensitive. Common phrases and minor command typos are resolved before
-  the local AI is considered.
+- Command names are case-insensitive. Common phrases and unambiguous read-only command typos are
+  resolved before the local AI is considered. A typo that could change data, send a message, or
+  create a safety record is never run automatically; Outpost asks for a numbered confirmation.
+- Commands belonging to a disabled feature remain reserved and return a short unavailable message.
+  They are never reinterpreted as another active command.
 - A bare number without an active screen is never guessed. Outpost asks the member to send `?`.
 
 ## Guided journeys

@@ -98,6 +98,7 @@ def specs(service: CheckinService) -> list[CommandSpec]:
             min_trust=TrustLevel.GUEST,
             help_short="OK [note] · welfare check-in",
             handler=ok,
+            mutates=True,
             **base,
         ),
         CommandSpec(
@@ -106,6 +107,7 @@ def specs(service: CheckinService) -> list[CommandSpec]:
             min_trust=TrustLevel.GUEST,
             help_short="HELPME [note] · record need-help and notify responders",
             handler=helpme,
+            mutates=True,
             **base,
         ),
         CommandSpec(
@@ -114,6 +116,7 @@ def specs(service: CheckinService) -> list[CommandSpec]:
             min_trust=TrustLevel.GUEST,
             help_short="ROSTER · current welfare summary",
             handler=roster,
+            mutates=False,
             **base,
         ),
         CommandSpec(
@@ -122,6 +125,7 @@ def specs(service: CheckinService) -> list[CommandSpec]:
             min_trust=TrustLevel.RESPONDER,
             help_short="ROSTER? · responder-visible names",
             handler=roster_names,
+            mutates=False,
             **base,
         ),
         CommandSpec(
@@ -130,6 +134,7 @@ def specs(service: CheckinService) -> list[CommandSpec]:
             min_trust=TrustLevel.RESPONDER,
             help_short="EVENT OPEN <policy> <name>|CLOSE",
             handler=event,
+            mutates=True,
             **base,
         ),
     ]

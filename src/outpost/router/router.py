@@ -13,10 +13,10 @@ from outpost.security.rate_limit import SAFETY_FLOOR, RateLimiter
 from outpost.store.members import MemberRepo
 from outpost.transport.models import InboundMessage
 
-from .intents import IntentResolver
-from .models import CommandContext, Line, Response, ResponseKind, TrustLevel
+from .intents import TOLERANT_REJECTIONS, IntentResolver
+from .models import CommandContext, Line, Response, ResponseKind, TrustLevel, TuiChoice, TuiScreen
 from .registry import CommandRegistry
-from .session import SessionStore
+from .session import Session, SessionStore
 from .tui import TuiController
 
 
@@ -59,6 +59,43 @@ class Router:
         parts = invoked.split(maxsplit=1)
         return parts[0].upper() if parts else ""
 
+    def _clarify_command(
+        self,
+        invoked: str,
+        candidates: tuple[str, ...],
+        session: Session,
+        inbound: InboundMessage,
+    ) -> Response:
+        _, separator, args = invoked.strip().partition(" ")
+        if not inbound.is_direct:
+            names = "/".join(candidates)
+            return Response(
+                ResponseKind.ERROR,
+                [Line(f"Not run · send exact {names}, or DM ? for help.")],
+            )
+        title = "CONFIRM COMMAND" if len(candidates) == 1 else "CHOOSE COMMAND"
+        response = Response(
+            ResponseKind.ERROR,
+            [Line("Nothing was run.")],
+            screen=TuiScreen(
+                "command-clarification",
+                title,
+                choices=tuple(
+                    TuiChoice(
+                        candidate,
+                        f"{candidate}{' ' + args if separator else ''}",
+                    )
+                    for candidate in candidates
+                ),
+            ),
+        )
+        return self.tui.activate(
+            response,
+            session,
+            self.sessions.clock.monotonic(),
+            direct=True,
+        )
+
     async def dispatch(self, inbound: InboundMessage, *, ordered: bool = True) -> Response:
         try:
             async with asyncio.timeout(self.config.router.member_lock_timeout_s):
@@ -88,6 +125,16 @@ class Router:
         session = self.sessions.get(member.mesh_id, channel)
         parts = invoked.split(maxsplit=1)
         token = parts[0] if parts else ""
+        known = self.registry.known(token)
+        if known is not None and self.registry.resolve(token) is None:
+            self.tui.cancel_for_command(session)
+            if not await self.rate_limiter.allow(member.mesh_id, member.trust, "COMMAND_REJECTED"):
+                return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
+            TOLERANT_REJECTIONS.labels("module_disabled", known.name.lower()).inc()
+            return Response(
+                ResponseKind.ERROR,
+                [Line(f"{known.name} unavailable · {known.module.title()} is disabled.")],
+            )
         if self.registry.resolve(token) is not None:
             self.tui.cancel_for_command(session)
         else:
@@ -104,11 +151,27 @@ class Router:
             parts = invoked.split(maxsplit=1)
             token = parts[0] if parts else ""
         if self.registry.resolve(token) is None:
-            invoked, _match_mode = self.intents.resolve(
+            resolution = self.intents.resolve(
                 invoked,
                 member.trust,
                 self.registry,
             )
+            if resolution.candidates:
+                if not await self.rate_limiter.allow(
+                    member.mesh_id, member.trust, "COMMAND_REJECTED"
+                ):
+                    return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
+                return self._clarify_command(invoked, resolution.candidates, session, inbound)
+            if resolution.mode == "mutation_protected":
+                if not await self.rate_limiter.allow(
+                    member.mesh_id, member.trust, "COMMAND_REJECTED"
+                ):
+                    return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
+                return Response(
+                    ResponseKind.ERROR,
+                    [Line("Command not run. Send ? for available actions.")],
+                )
+            invoked = resolution.invoked
             parts = invoked.split(maxsplit=1)
             token = parts[0] if parts else ""
         if self.registry.resolve(token) is not None:

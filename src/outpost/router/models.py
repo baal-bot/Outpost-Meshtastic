@@ -88,6 +88,7 @@ class CommandSpec:
     max_parts: int
     rate_key: str
     help_short: str
+    mutates: bool
     handler: CommandHandler
 
 

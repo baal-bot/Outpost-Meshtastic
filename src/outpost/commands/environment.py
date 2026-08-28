@@ -202,6 +202,7 @@ def specs(
             max_parts=1,
             rate_key="commands",
             help_short="WX [TODAY|TOMORROW|HOURLY] · local weather",
+            mutates=False,
             handler=weather,
         ),
         CommandSpec(
@@ -213,6 +214,7 @@ def specs(
             max_parts=1,
             rate_key="commands",
             help_short="FC [1-5] [-long] · local forecast",
+            mutates=False,
             handler=forecast,
         ),
     ]
@@ -279,6 +281,7 @@ def specs(
                 max_parts=1,
                 rate_key="commands",
                 help_short="WARN [number] · active official alerts",
+                mutates=False,
                 handler=warn,
             )
         )
@@ -323,6 +326,7 @@ def specs(
                 max_parts=1,
                 rate_key="commands",
                 help_short="SUN · sunrise, twilight, and moon",
+                mutates=False,
                 handler=sun,
             )
         )
@@ -391,6 +395,7 @@ def specs(
                 max_parts=1,
                 rate_key="commands",
                 help_short="QUAKE [number] · nearby USGS earthquakes",
+                mutates=False,
                 handler=quake,
             )
         )
@@ -611,6 +616,7 @@ def specs(
                     rate_key="positions",
                     help_short="POS [handle] / POS SHARE full|coarse|off",
                     handler=position,
+                    mutates=True,
                 ),
                 CommandSpec(
                     "WAYPOINT",
@@ -622,6 +628,7 @@ def specs(
                     rate_key="commands",
                     help_short="WP [name] / WP ADD <name> · public waypoint",
                     handler=waypoint,
+                    mutates=True,
                 ),
                 CommandSpec(
                     "WPS",
@@ -632,6 +639,7 @@ def specs(
                     max_parts=1,
                     rate_key="commands",
                     help_short="WPS [radius_km] · nearby public waypoints",
+                    mutates=False,
                     handler=waypoint_list,
                 ),
                 CommandSpec(
@@ -643,6 +651,7 @@ def specs(
                     max_parts=1,
                     rate_key="commands",
                     help_short="DIST <waypoint> · range and bearing",
+                    mutates=False,
                     handler=distance,
                 ),
             ]

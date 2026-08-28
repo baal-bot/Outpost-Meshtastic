@@ -28,7 +28,7 @@ revision on which CI runs this manifest check.
 | Capability | Present behavior | Maturity | Verification |
 | --- | --- | --- | --- |
 | Meshtastic transport | Serial, TCP, and BLE links; reconnect, liveness supervision, inbound backpressure, and radio status. | Single-node field-tested | unreleased @ `HEAD` (2026-08-27); introduced `04e74ca` |
-| Command routing | Guided capability-aware DM screens, tolerant commands, contextual composition, recovery, channel parsing, paging, trust/module gates, PKI-bound elevated actions, and bounded inbound workers. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `04e74ca` |
+| Command routing | Guided capability-aware DM screens, mutation-safe tolerant commands, globally reserved disabled-feature vocabulary, contextual composition, recovery, channel parsing, paging, trust/module gates, PKI-bound elevated actions, and bounded inbound workers. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `04e74ca` |
 | Airtime and outbound delivery | Durable priority queue, airtime shares, emergency reserve, quiet hours, dedupe, pacing, receipts, and restart recovery. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `3d65058` |
 | Identity and member directory | Handles, social trust, reviewed Meshtastic PKI fingerprints, conflict demotion, explicit key rotation, recently-heard radio discovery, exact-position controls, and operator triage. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `8accdf3` |
 | BBS, mail, and operator inbox | Boards, threads, posts, subscriptions, digests, private mail, moderation, and one replyable operations inbox. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `41a6c85` |
@@ -68,7 +68,7 @@ Evidence:
 
 - Automated: [tests/acceptance/test_phase1_acceptance.py](../tests/acceptance/test_phase1_acceptance.py) — Phase 1 command and radio-response behavior.
 - Automated: [tests/integration/test_inbound_workers.py](../tests/integration/test_inbound_workers.py) — Bounded concurrency, backpressure, and drop telemetry.
-- Automated: [tests/integration/test_mesh_tui.py](../tests/integration/test_mesh_tui.py) — First-class mesh journeys, capability and trust filtering, interruption recovery, guided composition, and packet budgets.
+- Automated: [tests/integration/test_mesh_tui.py](../tests/integration/test_mesh_tui.py) — First-class mesh journeys, capability and trust filtering, mutation-safe fuzzy resolution, disabled-command reservation, interruption recovery, guided composition, and packet budgets.
 - Automated: [tests/integration/test_mesh_pki_trust.py](../tests/integration/test_mesh_pki_trust.py) — Direct authenticated command gates, downgrade denial, key conflict demotion, explicit rotation, and durable replay rejection.
 
 Known limitations:

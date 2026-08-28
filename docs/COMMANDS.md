@@ -104,7 +104,10 @@ The dashboard provides a reviewed solicitation preview before sending to actual 
 
 - Direct-message screens accept displayed numbers, labels, and guided free-text replies.
 - Exact commands always interrupt an unfinished menu or compose prompt.
-- Minor command typos and common phrases are resolved before optional AI fallback.
+- Unambiguous read-only command typos and common phrases are resolved before optional AI fallback.
+- A typo near a state-changing command opens a numbered confirmation and does not run the command;
+  ambiguous typos offer choices. Disabled-feature commands stay reserved and cannot match an
+  unrelated active command.
 - Long results are shortened or paged to protect airtime.
 - Replies can be delayed by quiet hours, utilization, priority, or multipart pacing.
 - A number without live screen state receives a recovery hint instead of being guessed.
