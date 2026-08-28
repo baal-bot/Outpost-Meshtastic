@@ -1650,6 +1650,58 @@ def test_radio_queue_filter_hides_expired_history_by_default(
         page.close()
 
 
+def test_radio_message_log_explains_ack_not_requested(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    page.route(
+        "**/api/v1/mesh/messages*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": 1,
+                            "direction": "out",
+                            "peer_mesh_id": "^all",
+                            "channel": 0,
+                            "portnum": 260,
+                            "is_direct": False,
+                            "packet_id": 123,
+                            "text": None,
+                            "byte_len": 188,
+                            "toa_ms": 1200,
+                            "airtime_class": "federation",
+                            "command": None,
+                            "outcome": "not_requested",
+                            "drop_reason": None,
+                            "latency_ms": None,
+                            "rx_snr": None,
+                            "rx_rssi": None,
+                            "hops": None,
+                            "created_at": "2033-05-18T03:33:20Z",
+                        }
+                    ],
+                    "next_cursor": None,
+                }
+            ),
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/radio.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        page.get_by_text("no ACK requested", exact=True).wait_for()
+        assert page.get_by_text("not_requested", exact=True).count() == 0
+        health.assert_clean()
+    finally:
+        page.close()
+
+
 def test_inbound_queue_color_tracks_current_pressure_not_drop_history(
     browser: object, dashboard_url: str
 ) -> None:

@@ -28,6 +28,11 @@ function queueItemMatches(item, filter) {
   return state !== "expired";
 }
 
+function messageOutcomeLabel(outcome) {
+  if (outcome === "not_requested") return "no ACK requested";
+  return outcome || "—";
+}
+
 function installInboundHealthCard() {
   const nodeCard = $("radio-node").closest("article");
   nodeCard.insertAdjacentHTML(
@@ -175,7 +180,7 @@ async function refresh() {
           `<td><code>${safe(message.peer_mesh_id || "broadcast")}</code></td>` +
           `<td>${message.channel}</td>` +
           `<td>${safe(message.text || `${message.byte_len} bytes`)}</td>` +
-          `<td>${safe(message.outcome || "—")}</td>` +
+          `<td>${safe(messageOutcomeLabel(message.outcome))}</td>` +
           `<td>${message.rx_snr == null ? "—" : `${safe(message.rx_snr)} dB`}</td></tr>`,
       )
       .join("") || '<tr><td colspan="7">No matching messages.</td></tr>';
