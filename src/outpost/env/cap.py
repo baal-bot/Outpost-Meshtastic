@@ -100,6 +100,15 @@ class CapAlertService:
         return zone or None
 
     @staticmethod
+    def _references_text(value: object) -> str | None:
+        """Normalize NWS CAP references to the legacy space-delimited text form."""
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return " ".join(str(item) for item in value if item is not None)
+        return str(value)
+
+    @staticmethod
     def _peer_items(payload: dict[str, Any]) -> list[dict[str, object]]:
         features = payload.get("features")
         if not isinstance(features, list):
@@ -335,7 +344,7 @@ class CapAlertService:
                 properties.get("certainty"),
                 properties.get("effective"),
                 str(properties.get("expires") or now_dt.isoformat()),
-                properties.get("references"),
+                self._references_text(properties.get("references")),
                 decision,
                 json.dumps(reasons, separators=(",", ":")),
                 json.dumps(feature, separators=(",", ":")),

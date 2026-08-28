@@ -98,9 +98,9 @@ async def test_cap_update_supersedes_and_cancel_issues_all_clear(tmp_path, monke
 
     update = feature("cap-update")
     update["properties"]["messageType"] = "Update"
-    update["properties"]["references"] = (
+    update["properties"]["references"] = [
         "w-nws.webmaster@noaa.gov,cap-original,2026-01-01T00:00:00Z"
-    )
+    ]
     update["properties"]["headline"] = "Updated Tornado Warning"
     payload["features"] = [update]
     await cap.poll(40.4406, -79.9959)
