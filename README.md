@@ -24,7 +24,7 @@ The database schema, API, command grammar, and federation protocol are not stabl
 publishes a compatibility policy and a 1.0 release.
 
 <!-- capability-summary:start -->
-Capability evidence snapshot (2026-08-27): 16 tracked — Automated-tested 9, Simulated 2, Single-node field-tested 1, Two-node field-tested 2, Hardware-gated 2. No capability is marked production-ready. See [Features and maturity](docs/FEATURES.md) for test, field,
+Capability evidence snapshot (2026-08-28): 16 tracked — Automated-tested 9, Simulated 2, Single-node field-tested 1, Two-node field-tested 2, Hardware-gated 2. No capability is marked production-ready. See [Features and maturity](docs/FEATURES.md) for test, field,
 hardware, revision, limitation, and roadmap evidence.
 <!-- capability-summary:end -->
 
@@ -111,6 +111,9 @@ token is never written to the service journal. Follow the complete
 The migrated first account is named `operator` and has the Administrator role. From **Access**, an
 administrator can create named Administrator, Operator, or Read-only / wallboard accounts, enable
 offline TOTP authentication, save one-use recovery codes, and revoke active browser sessions.
+Web access is normally limited to the local operator while community users interact over the mesh.
+The optional wallboard role receives only a redacted aggregate status contract; HTTPS remains an
+operator-supplied option rather than an installation requirement for offline field deployments.
 
 ## Configure
 

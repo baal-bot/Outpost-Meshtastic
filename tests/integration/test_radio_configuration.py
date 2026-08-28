@@ -177,9 +177,7 @@ async def test_radio_writes_require_recent_operator_confirmation(tmp_path) -> No
     )
     setup = await auth.ensure_credential()
     assert setup is not None
-    first = client.post(
-        "/api/v1/auth/login", json={"password": setup.path.read_text().strip()}
-    )
+    first = client.post("/api/v1/auth/login", json={"password": setup.path.read_text().strip()})
     csrf = first.json()["csrf_token"]
     password = "radio-operator-password-42"  # noqa: S105 - isolated test credential
     changed = client.post(

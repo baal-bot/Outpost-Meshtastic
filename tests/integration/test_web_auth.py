@@ -1,14 +1,17 @@
 import asyncio
 import base64
 import os
+import re
 import sqlite3
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from outpost.clock import SystemClock
 from outpost.setup_token import _run as run_setup_token
 from outpost.store import Database
+from outpost.store.members import MemberRepo
 from outpost.web.api import create_web_app
 from outpost.web.auth import WebAuthService, _totp
 
@@ -89,6 +92,28 @@ async def test_password_session_csrf_and_forced_change(tmp_path) -> None:
             "reason": "Known neighbor verified",
         },
     )
+    assert update.status_code == 422
+    assert update.json()["error"]["code"] == "pki_required"
+    await MemberRepo(database, SystemClock()).resolve(
+        "!00000001", authenticated_pki_key=bytes(range(32))
+    )
+    pending = client.get(f"/api/v1/members/{member_id}").json()["member"]
+    assert pending["pki_state"] == "pending"
+    reviewed_key = client.post(
+        f"/api/v1/members/{member_id}/pki",
+        headers={"x-csrf-token": csrf},
+        json={"action": "approve", "reason": "Fingerprint verified in person"},
+    )
+    assert reviewed_key.status_code == 200
+    update = client.patch(
+        f"/api/v1/members/{member_id}",
+        headers={"x-csrf-token": csrf},
+        json={
+            "trust": "trusted",
+            "notes": "known neighbor",
+            "reason": "Known neighbor verified",
+        },
+    )
     assert update.status_code == 200
     detail = client.get(f"/api/v1/members/{member_id}")
     assert detail.status_code == 200
@@ -97,7 +122,11 @@ async def test_password_session_csrf_and_forced_change(tmp_path) -> None:
     assert exported.status_code == 200
     assert "position_lat" not in exported.text
     audit = client.get("/api/v1/audit").json()["items"]
-    assert {item["action"] for item in audit} >= {"member.update", "member.export"}
+    assert {item["action"] for item in audit} >= {
+        "member.update",
+        "member.export",
+        "member.pki.approve",
+    }
     mail_id = await database.write(
         """
         INSERT INTO mail(
@@ -246,7 +275,13 @@ async def test_named_roles_sessions_and_last_administrator_guard(tmp_path: Path)
     assert only_admin.status_code == 422
     assert "administrator" in only_admin.json()["error"]["message"]
 
-    viewer = TestClient(create_web_app(lambda: {"radio": "up"}, database, auth))
+    viewer_app = create_web_app(lambda: {"radio": "up"}, database, auth)
+    viewer_app.add_api_route(
+        "/api/v1/future-sensitive",
+        lambda: {"secret": "a newly registered route must not inherit viewer access"},
+        methods=["GET"],
+    )
+    viewer = TestClient(viewer_app)
     first = viewer.post(
         "/api/v1/auth/login",
         json={"username": "wallboard", "password": "wallboard-initial-42"},
@@ -264,9 +299,57 @@ async def test_named_roles_sessions_and_last_administrator_guard(tmp_path: Path)
     )
     assert login.status_code == 200 and login.json()["role"] == "viewer"
     viewer_csrf = login.json()["csrf_token"]
-    assert viewer.get("/api/v1/status").status_code == 200
+    sensitive_routes = (
+        "/api/v1/status",
+        "/api/v1/dashboard/overview",
+        "/api/v1/dashboard/poll",
+        "/api/v1/members",
+        "/api/v1/members/map",
+        "/api/v1/members/1",
+        "/api/v1/watch/map",
+        "/api/v1/mesh/messages",
+        "/api/v1/mail",
+        "/api/v1/mail/",
+        "/api/v1/config",
+        "/api/v1/radio/config",
+        "/api/v1/audit",
+        "/api/v1/backups",
+        "/api/v1/ai/status",
+        "/api/v1/future-sensitive",
+    )
+    for route in sensitive_routes:
+        response = viewer.get(route)
+        assert response.status_code == 403, route
+        assert response.json()["error"]["code"] == "read_only"
+    wallboard = viewer.get("/api/v1/wallboard/summary")
+    assert wallboard.status_code == 200
+    assert wallboard.json()["privacy"]["mode"] == "aggregate"
+    assert viewer.get("/api/v1/wallboard/summary/").status_code == 404
     assert viewer.get("/api/v1/auth/sessions").status_code == 200
     assert viewer.get("/api/v1/auth/accounts").status_code == 403
+    public_or_self_service = {
+        "/api/v1/health",
+        "/api/v1/diagnostics/status",
+        "/api/v1/auth/setup",
+        "/api/v1/auth/session",
+        "/api/v1/auth/sessions",
+        "/api/v1/wallboard/summary",
+    }
+    for route in viewer_app.routes:
+        path = getattr(route, "path", "")
+        methods = getattr(route, "methods", set())
+        if (
+            not path.startswith("/api/v1/")
+            or "GET" not in methods
+            or path in public_or_self_service
+            or path.startswith("/api/v1/recovery/restores/")
+        ):
+            continue
+        concrete = re.sub(r"\{[^}]+\}", "1", path)
+        for candidate in (concrete, f"{concrete}/"):
+            gated = viewer.get(candidate)
+            assert gated.status_code == 403, candidate
+            assert gated.json()["error"]["code"] == "read_only", candidate
     denied = viewer.patch(
         "/api/v1/members/1",
         headers={"x-csrf-token": viewer_csrf},
@@ -280,7 +363,89 @@ async def test_named_roles_sessions_and_last_administrator_guard(tmp_path: Path)
         json={"enabled": False},
     )
     assert disabled.status_code == 200 and disabled.json()["enabled"] is False
-    assert viewer.get("/api/v1/status").status_code == 401
+    assert viewer.get("/api/v1/wallboard/summary").status_code == 401
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_wallboard_summary_omits_sensitive_fields_and_does_not_mutate(tmp_path: Path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    auth = WebAuthService(database, 12)
+    operator = TestClient(create_web_app(lambda: {"radio": "up"}, database, auth))
+    csrf = await _permanent_operator(auth, operator, "operator-password-42")
+    created = operator.post(
+        "/api/v1/auth/accounts",
+        headers={"x-csrf-token": csrf},
+        json={
+            "username": "wallboard",
+            "display_name": "Shared display",
+            "role": "viewer",
+            "initial_password": "wallboard-password-42",
+        },
+    )
+    assert created.status_code == 200
+    member_id = await database.write(
+        "INSERT INTO member(mesh_id,mesh_num,handle,trust,first_seen,last_seen,notes) "
+        "VALUES('!00abcdef',11259375,'private-handle','member',1,unixepoch(),"
+        "'private operator note')"
+    )
+    await database.write(
+        "INSERT INTO member_position(member_id,lat,lon,received_at,expires_at) "
+        "VALUES(?,40.44061,-79.99591,unixepoch(),unixepoch()+3600)",
+        (member_id,),
+    )
+    await database.write(
+        "INSERT INTO message_log(direction,member_id,peer_mesh_id,channel,portnum,is_direct,"
+        "packet_id,text,byte_len,created_at) VALUES('in',?,'!00abcdef',0,1,1,7,"
+        "'private direct message',22,unixepoch())",
+        (member_id,),
+    )
+    await database.write(
+        "INSERT INTO mail(uid,from_id,from_label,to_label,subject,body,"
+        "created_at,state,expires_at) "
+        "VALUES('private:1',?,'private-handle','operator','private subject','private mail body',"
+        "unixepoch(),'delivered',unixepoch()+3600)",
+        (member_id,),
+    )
+
+    viewer = TestClient(create_web_app(lambda: {"radio": "up"}, database, auth))
+    first = viewer.post(
+        "/api/v1/auth/login",
+        json={"username": "wallboard", "password": "wallboard-password-42"},
+    )
+    changed = viewer.post(
+        "/api/v1/auth/password",
+        headers={"x-csrf-token": first.json()["csrf_token"]},
+        json={"current_password": "", "new_password": "wallboard-permanent-42"},
+    )
+    assert changed.status_code == 200
+    assert (
+        viewer.post(
+            "/api/v1/auth/login",
+            json={"username": "wallboard", "password": "wallboard-permanent-42"},
+        ).status_code
+        == 200
+    )
+
+    before = await database.read("SELECT operator_read_at,read_at FROM mail WHERE uid='private:1'")
+    response = viewer.get("/api/v1/wallboard/summary")
+    assert response.status_code == 200
+    encoded = response.text
+    for secret in (
+        "!00abcdef",
+        "private-handle",
+        "private operator note",
+        "private direct message",
+        "private subject",
+        "private mail body",
+        "40.44061",
+        "-79.99591",
+    ):
+        assert secret not in encoded
+    assert response.json()["overview"]["members"]["members_total"] == 1
+    after = await database.read("SELECT operator_read_at,read_at FROM mail WHERE uid='private:1'")
+    assert [tuple(row) for row in after] == [tuple(row) for row in before]
     await database.close()
 
 
@@ -345,7 +510,7 @@ async def test_totp_recovery_step_up_and_named_audit_actor(
     protected = client.patch(
         f"/api/v1/members/{member_id}",
         headers={"x-csrf-token": csrf},
-        json={"trust": "trusted", "reason": "Identity verified in person"},
+        json={"trust": "member", "reason": "Identity verified in person"},
     )
     assert protected.status_code == 428
     stepped = client.post(
@@ -357,7 +522,7 @@ async def test_totp_recovery_step_up_and_named_audit_actor(
     updated = client.patch(
         f"/api/v1/members/{member_id}",
         headers={"x-csrf-token": csrf},
-        json={"trust": "trusted", "reason": "Identity verified in person"},
+        json={"trust": "member", "reason": "Identity verified in person"},
     )
     assert updated.status_code == 200
     audit = await database.read(
@@ -414,7 +579,7 @@ async def test_audit_uses_named_web_account_not_shared_operator_label(tmp_path: 
     update = client.patch(
         f"/api/v1/members/{member_id}",
         headers={"x-csrf-token": login.json()["csrf_token"]},
-        json={"trust": "trusted", "reason": "Verified by Alice"},
+        json={"trust": "member", "reason": "Verified by Alice"},
     )
     assert update.status_code == 200
     audit = await database.read(

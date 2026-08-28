@@ -78,6 +78,9 @@ class Router:
             inbound.from_id,
             last_heard_snr=inbound.rx_snr,
             hops_away=inbound.hops_away,
+            authenticated_pki_key=(
+                inbound.pki_public_key if inbound.is_direct and inbound.pki_encrypted else None
+            ),
         )
         if member.trust == "blocked":
             return Response(ResponseKind.NONE)
@@ -123,6 +126,18 @@ class Router:
             return Response(ResponseKind.ERROR, [Line(message("unknown"))])
         if TrustLevel.parse(member.trust) < spec.min_trust:
             return Response(ResponseKind.ERROR, [Line(message("unknown"))])
+        if spec.min_trust >= TrustLevel.RESPONDER:
+            authorized, _reason = await self.members.authorize_elevated(member, inbound, spec.name)
+            if not authorized:
+                return Response(
+                    ResponseKind.ERROR,
+                    [
+                        Line(
+                            "Elevated action denied. Use a verified PKI direct message or ask "
+                            "the operator to review this radio key."
+                        )
+                    ],
+                )
         safety_decision = None
         if token.upper() in SAFETY_FLOOR:
             decision = await self.rate_limiter.safety_floor_decision(member.mesh_id, token, args)

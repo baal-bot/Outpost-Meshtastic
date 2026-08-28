@@ -69,10 +69,12 @@ and operator credentials work.
 ## Read-only wallboard
 
 In **Access**, create a separate account with the **Read-only / wallboard** role and sign the kiosk
-in with that account. A viewer can see ordinary operational status but cannot mutate state, manage
-accounts, restore backups, inspect audit/private mail details, export identity data, or use AI review
-controls. Never leave an Administrator session on a wall display. Revoke the wallboard session from
-Access if the display is lost or reassigned.
+in with that account. The wallboard receives aggregate node/radio health, traffic/member counts,
+and explicitly public board/channel labels only. It cannot retrieve identities, exact locations,
+individual activity, messages, mail metadata, welfare or operator notes, configuration, audit,
+backups, or AI review data. This role is optional; most Outposts should keep web access limited to
+the operator and serve everyone else over the mesh. Never leave an Administrator session on a wall
+display. Revoke the wallboard session from Access if the display is lost or reassigned.
 
 ## Diagnostic bundle
 

@@ -42,6 +42,43 @@ async def test_callback_hands_message_to_event_loop_without_thread_clock_access(
 
 
 @pytest.mark.asyncio
+async def test_callback_preserves_firmware_authenticated_pki_public_key() -> None:
+    clock = VirtualClock()
+    link = MeshtasticRadioLink(RadioConfig(), clock)
+    link._loop = asyncio.get_running_loop()
+    link._local_id = "!699c2f30"
+    public_key = bytes(range(32))
+    link._on_receive(
+        {
+            "id": 43,
+            "fromId": "!12345678",
+            "toId": "!699c2f30",
+            "pkiEncrypted": True,
+            "publicKey": base64.b64encode(public_key).decode(),
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "text": "ROSTER?"},
+        }
+    )
+    await asyncio.sleep(0)
+    message = await anext(link.inbound())
+    assert message.pki_encrypted is True
+    assert message.pki_public_key == public_key
+
+    link._on_receive(
+        {
+            "id": 44,
+            "fromId": "!12345678",
+            "toId": "!699c2f30",
+            "pkiEncrypted": False,
+            "publicKey": base64.b64encode(bytes(reversed(public_key))).decode(),
+            "decoded": {"portnum": "TEXT_MESSAGE_APP", "text": "ROSTER?"},
+        }
+    )
+    await asyncio.sleep(0)
+    unverified = await anext(link.inbound())
+    assert unverified.pki_public_key is None
+
+
+@pytest.mark.asyncio
 async def test_limited_mqtt_configuration_preserves_advanced_values() -> None:
     writes: list[object] = []
     mqtt = SimpleNamespace(

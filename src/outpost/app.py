@@ -1968,9 +1968,7 @@ class OutpostApp:
     def _radio_configuration_context(self, result: dict[str, Any]) -> dict[str, Any]:
         location = self.config.node.location
         result["outpost_location"] = (
-            {"latitude": location.lat, "longitude": location.lon}
-            if location is not None
-            else None
+            {"latitude": location.lat, "longitude": location.lon} if location is not None else None
         )
         result["outpost_policy_channels"] = sorted(self.config.channels)
         return result
@@ -1978,9 +1976,7 @@ class OutpostApp:
     async def radio_configuration_status(self) -> dict[str, Any]:
         return self._radio_configuration_context(await self.radio.configuration_status())
 
-    async def configure_radio(
-        self, section: str, values: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def configure_radio(self, section: str, values: dict[str, Any]) -> dict[str, Any]:
         if (
             section == "channel"
             and str(values.get("role", "")).upper() == "DISABLED"

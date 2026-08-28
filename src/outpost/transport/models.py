@@ -46,6 +46,7 @@ class InboundMessage:
     hops_away: int | None = None
     want_ack: bool = False
     pki_encrypted: bool = False
+    pki_public_key: bytes | None = None
     via_mqtt: bool = False
     no_reply: bool = False
     request_id: int | None = None

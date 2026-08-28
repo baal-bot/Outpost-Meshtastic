@@ -91,9 +91,7 @@ class MeshtasticRadioLink:
     @staticmethod
     def _psk_kind(value: Any) -> str:
         size = len(bytes(value or b""))
-        return {0: "open", 1: "default", 16: "AES-128", 32: "AES-256"}.get(
-            size, f"{size}-byte key"
-        )
+        return {0: "open", 1: "default", 16: "AES-128", 32: "AES-256"}.get(size, f"{size}-byte key")
 
     async def configuration_status(self) -> dict[str, Any]:
         if self._interface is None:
@@ -137,9 +135,7 @@ class MeshtasticRadioLink:
             "device": {
                 "role": role,
                 "rebroadcast_mode": self._enum_name(device, "rebroadcast_mode"),
-                "node_info_broadcast_secs": int(
-                    getattr(device, "node_info_broadcast_secs", 0)
-                ),
+                "node_info_broadcast_secs": int(getattr(device, "node_info_broadcast_secs", 0)),
             },
             "lora": {
                 "region": region,
@@ -166,18 +162,12 @@ class MeshtasticRadioLink:
                     "role": self._enum_name(channel, "role"),
                     "name": str(getattr(channel.settings, "name", "")),
                     "psk": self._psk_kind(getattr(channel.settings, "psk", b"")),
-                    "uplink_enabled": bool(
-                        getattr(channel.settings, "uplink_enabled", False)
-                    ),
-                    "downlink_enabled": bool(
-                        getattr(channel.settings, "downlink_enabled", False)
-                    ),
+                    "uplink_enabled": bool(getattr(channel.settings, "uplink_enabled", False)),
+                    "downlink_enabled": bool(getattr(channel.settings, "downlink_enabled", False)),
                     "position_precision": int(
                         getattr(channel.settings.module_settings, "position_precision", 0)
                     ),
-                    "muted": bool(
-                        getattr(channel.settings.module_settings, "is_muted", False)
-                    ),
+                    "muted": bool(getattr(channel.settings.module_settings, "is_muted", False)),
                 }
                 for index, channel in enumerate(channels)
             ],
@@ -193,9 +183,7 @@ class MeshtasticRadioLink:
                     value for value in self._enum_options(lora, "region") if value != "UNSET"
                 ],
                 "modem_presets": [
-                    value
-                    for value in self._enum_options(lora, "modem_preset")
-                    if value != "UNSET"
+                    value for value in self._enum_options(lora, "modem_preset") if value != "UNSET"
                 ],
                 "gps_modes": self._enum_options(position, "gps_mode"),
             },
@@ -419,6 +407,21 @@ class MeshtasticRadioLink:
             return int(portnums_pb2.PortNum.Value(value))
         return 0
 
+    @staticmethod
+    def _pki_public_key(packet: dict[str, Any]) -> bytes | None:
+        value: object = packet.get("publicKey", packet.get("public_key"))
+        raw_packet = packet.get("raw")
+        if raw_packet is not None and getattr(raw_packet, "public_key", None):
+            value = bytes(raw_packet.public_key)
+        if isinstance(value, str):
+            try:
+                value = base64.b64decode(value, validate=True)
+            except (binascii.Error, ValueError):
+                return None
+        if isinstance(value, (bytes, bytearray)) and len(value) == 32:
+            return bytes(value)
+        return None
+
     def _on_receive(self, packet: dict[str, Any], interface: Any = None, **_: Any) -> None:
         """Pubsub callback: construct and hand off only; never parse, log, or perform I/O."""
         if self._loop is None:
@@ -440,6 +443,7 @@ class MeshtasticRadioLink:
             latitude = float(position["latitudeI"]) / 10_000_000
         if longitude is None and position.get("longitudeI") is not None:
             longitude = float(position["longitudeI"]) / 10_000_000
+        pki_encrypted = bool(packet.get("pkiEncrypted", False))
         message = InboundMessage(
             packet_id=int(packet.get("id", 0)),
             from_id=sender,
@@ -454,7 +458,8 @@ class MeshtasticRadioLink:
             rx_rssi=packet.get("rxRssi"),
             hops_away=packet.get("hopsAway"),
             want_ack=bool(packet.get("wantAck", False)),
-            pki_encrypted=bool(packet.get("pkiEncrypted", False)),
+            pki_encrypted=pki_encrypted,
+            pki_public_key=self._pki_public_key(packet) if pki_encrypted else None,
             via_mqtt=bool(packet.get("viaMqtt", packet.get("via_mqtt", False))),
             request_id=decoded.get("requestId"),
             routing_error=(decoded.get("routing") or {}).get("errorReason"),
@@ -516,9 +521,7 @@ class MeshtasticRadioLink:
             "password_configured": bool(str(getattr(module, "password", ""))),
             "json_enabled": bool(getattr(module, "json_enabled", False)),
             "proxy_to_client_enabled": bool(getattr(module, "proxy_to_client_enabled", False)),
-            "map_reporting_enabled": bool(
-                getattr(module, "map_reporting_enabled", False)
-            ),
+            "map_reporting_enabled": bool(getattr(module, "map_reporting_enabled", False)),
             "channels": [
                 {
                     "index": index,

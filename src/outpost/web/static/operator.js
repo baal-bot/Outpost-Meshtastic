@@ -95,7 +95,8 @@ function renderMemberRows() {
       `<small>${safe(signal)}</small></td>` +
       `<td><span class="position-state ${member.active_position ? "active" : ""}">${safe(positionLabel(member))}</span>` +
       `<small>${member.position_expires_at ? `Until ${safe(exactTime(member.position_expires_at))}` : "No retained coordinate"}</small></td>` +
-      `<td><span class="trust-pill ${safe(member.trust)}">${safe(member.trust)}</span></td>` +
+      `<td><span class="trust-pill ${safe(member.trust)}">${safe(member.trust)}</span>` +
+      `<small>PKI ${safe(member.pki_state)}</small></td>` +
       `<td><button type="button" class="small-button secondary" data-review-member="${safe(member.id)}">Review</button></td></tr>`;
   }).join("") || '<tr><td colspan="7" class="ui-empty empty">No identities match this view.</td></tr>';
   $("member-more").hidden = memberCursor === null;
@@ -213,6 +214,13 @@ function renderTrustHistory(items) {
     `<span>${safe(item.reason)}</span></div><small>${safe(item.changed_by)} · ${safe(relative(item.created_at))}</small></li>`).join("");
 }
 
+function renderPkiEvents(items) {
+  if (!items.length) return '<p class="ui-empty empty">No PKI identity events recorded.</p>';
+  return items.map(item => `<li><div><strong>${safe(item.event.replaceAll("_", " "))}</strong>` +
+    `<span>${safe(item.fingerprint ? item.fingerprint.slice(0, 16) : "No key fingerprint")}</span></div>` +
+    `<small>${safe(item.actor)} · ${safe(relative(item.created_at))}</small></li>`).join("");
+}
+
 function renderDetail(result) {
   selectedDetail = result;
   const member = result.member;
@@ -256,11 +264,16 @@ function renderDetail(result) {
       </article>
       <article class="detail-card">
         <p class="eyebrow">IDENTITY EVIDENCE</p><h3>Radio profile</h3>
-        <dl class="detail-list"><div><dt>First heard</dt><dd>${safe(exactTime(member.first_seen))}</dd></div><div><dt>Long name</dt><dd>${safe(member.long_name || "—")}</dd></div><div><dt>Short name</dt><dd>${safe(member.short_name || "—")}</dd></div><div><dt>Hardware</dt><dd>${safe(member.hw_model || "Unknown")}</dd></div><div><dt>Directory state</dt><dd>${safe(member.directory_state)}</dd></div></dl>
+        <dl class="detail-list"><div><dt>First heard</dt><dd>${safe(exactTime(member.first_seen))}</dd></div><div><dt>Long name</dt><dd>${safe(member.long_name || "—")}</dd></div><div><dt>Short name</dt><dd>${safe(member.short_name || "—")}</dd></div><div><dt>Hardware</dt><dd>${safe(member.hw_model || "Unknown")}</dd></div><div><dt>Directory state</dt><dd>${safe(member.directory_state)}</dd></div><div><dt>PKI state</dt><dd>${safe(member.pki_state)}</dd></div><div><dt>Reviewed key</dt><dd><code>${safe(member.pki_fingerprint || "None")}</code></dd></div><div><dt>Pending key</dt><dd><code>${safe(member.pki_pending_fingerprint || "None")}</code></dd></div><div><dt>Last authenticated</dt><dd>${safe(exactTime(member.pki_last_seen_at))}</dd></div></dl>
+        ${member.pki_pending_fingerprint ? '<div class="form-actions"><button type="button" data-pki-action="approve">Approve authenticated key</button><button type="button" class="small-button danger" data-pki-action="reject">Reject pending key</button></div>' : ""}
       </article>
       <article class="detail-card">
         <p class="eyebrow">TRUST HISTORY</p><h3>Reviewed changes</h3>
         <ul class="trust-history">${renderTrustHistory(result.trust_history)}</ul>
+      </article>
+      <article class="detail-card">
+        <p class="eyebrow">PKI HISTORY</p><h3>Authentication evidence</h3>
+        <ul class="trust-history">${renderPkiEvents(result.pki_events)}</ul>
       </article>
     </section>
     <section class="detail-card activity-card"><div class="detail-card-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>Retained radio events</h3></div><span>${result.stats.incidents} incidents · ${result.stats.checkins} check-ins · ${result.stats.mail} mail</span></div><ul class="member-activity">${renderActivity(result.recent_activity)}</ul></section>`;
@@ -269,6 +282,37 @@ function renderDetail(result) {
     $("detail-reason").required = event.target.value !== member.trust;
   });
   $("member-review-form").addEventListener("submit", saveMemberReview);
+  document.querySelectorAll("[data-pki-action]").forEach(button =>
+    button.addEventListener("click", () => reviewPki(button.dataset.pkiAction)),
+  );
+}
+
+async function reviewPki(action) {
+  const member = selectedDetail.member;
+  const reason = await window.OutpostUI.prompt({
+    title: `${action === "approve" ? "Approve" : "Reject"} this authenticated radio key?`,
+    message: action === "approve"
+      ? "The displayed fingerprint will become the identity required for elevated mesh commands."
+      : "The pending fingerprint will be discarded. The reviewed key, if any, remains authoritative.",
+    label: "Operator reason",
+    confirmLabel: action === "approve" ? "Approve key" : "Reject key",
+    danger: action === "reject",
+  });
+  if (!reason) return;
+  const response = await fetch(`/api/v1/members/${member.id}/pki`, {
+    method: "POST",
+    headers: {"content-type": "application/json", "x-csrf-token": csrfToken},
+    body: JSON.stringify({action, reason}),
+  });
+  if (!response.ok) {
+    await window.OutpostUI.alert({
+      title: "PKI review not changed",
+      message: await apiError(response, "PKI review failed."),
+    });
+    return;
+  }
+  await Promise.all([loadMembers(), loadAudit(false)]);
+  await openMemberDetail(member.id);
 }
 
 async function openMemberDetail(memberId) {

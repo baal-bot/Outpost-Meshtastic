@@ -1,5 +1,5 @@
 schema_version = 1
-as_of = "2026-08-27"
+as_of = "2026-08-28"
 
 [states.designed]
 label = "Designed"
@@ -60,7 +60,7 @@ description = "Live radio traffic and recovery were exercised between physical O
 [[capabilities]]
 id = "command_routing"
 area = "Command routing"
-present = "Guided capability-aware DM screens, tolerant commands, contextual composition, recovery, channel parsing, paging, trust/module gates, and bounded inbound workers."
+present = "Guided capability-aware DM screens, tolerant commands, contextual composition, recovery, channel parsing, paging, trust/module gates, PKI-bound elevated actions, and bounded inbound workers."
 maturity = "automated_tested"
 introduced_commit = "04e74ca"
 limitations = ["The full handheld/firmware/preset matrix is not field-qualified."]
@@ -68,7 +68,7 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-27"
+date = "2026-08-28"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/acceptance/test_phase1_acceptance.py"
@@ -81,6 +81,10 @@ description = "Bounded concurrency, backpressure, and drop telemetry."
 kind = "automated"
 path = "tests/integration/test_mesh_tui.py"
 description = "First-class mesh journeys, capability and trust filtering, interruption recovery, guided composition, and packet budgets."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_mesh_pki_trust.py"
+description = "Direct authenticated command gates, downgrade denial, key conflict demotion, explicit rotation, and durable replay rejection."
 
 [[capabilities]]
 id = "airtime_delivery"
@@ -108,15 +112,18 @@ description = "Priority, budget, reserve, pacing, and failure-path policy."
 [[capabilities]]
 id = "identity_directory"
 area = "Identity and member directory"
-present = "Handles, trust, approvals, recently-heard radio discovery, exact-position controls, and operator triage."
+present = "Handles, social trust, reviewed Meshtastic PKI fingerprints, conflict demotion, explicit key rotation, recently-heard radio discovery, exact-position controls, and operator triage."
 maturity = "automated_tested"
 introduced_commit = "8accdf3"
-limitations = ["Trust decisions still require local operator policy and identity verification."]
+limitations = [
+  "Social trust and first/replacement fingerprint decisions still require local operator identity verification.",
+  "Authenticated-key ingestion depends on metadata supplied by compatible Meshtastic firmware; the full firmware/transport field matrix remains open.",
+]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-27"
+date = "2026-08-28"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_directory_moderation.py"
@@ -125,6 +132,10 @@ description = "Handle claims, approval, trust, and moderation boundaries."
 kind = "automated"
 path = "tests/integration/test_member_triage.py"
 description = "Discovered-radio triage and accountable operator actions."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_mesh_pki_trust.py"
+description = "Fingerprint enrollment, promotion binding, conflict quarantine, audited rotation, and restart-persistent replay protection."
 
 [[capabilities]]
 id = "bbs_mail"
@@ -241,15 +252,15 @@ description = "Process supervision and parser failure boundaries."
 [[capabilities]]
 id = "dashboard_access"
 area = "Dashboard and operator access"
-present = "Responsive module-aware pages/API, named roles, TOTP/recovery, sessions, step-up protection, accessibility, shared map controls, and an offline-capable federation topology view."
+present = "Responsive module-aware pages/API, named roles, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, accessibility, shared map controls, and an offline-capable federation topology view."
 maturity = "automated_tested"
 introduced_commit = "5295868"
-limitations = ["Trusted-LAN or operator-provided TLS/VPN deployment is still assumed."]
+limitations = ["Most deployments assume operator-only trusted-LAN web access; Internet exposure and operator-supplied TLS/VPN remain opt-in deployment choices."]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-27"
+date = "2026-08-28"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/browser/test_mobile_navigation.py"
@@ -257,7 +268,7 @@ description = "Desktop/mobile, accessibility, role, navigation, and interaction 
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_web_auth.py"
-description = "Authentication, role authorization, recovery, session, and step-up boundaries."
+description = "Authentication, route-registration fail-closed wallboard authorization, redacted data boundaries, recovery, session, and step-up behavior."
 
 [[capabilities]]
 id = "backup_recovery"

@@ -7,7 +7,7 @@ Outpost is pre-release. Maturity records the strongest relevant evidence categor
 not a claim that every lower category is complete. `Production-ready` requires an
 explicit release decision and is never inferred from test count alone.
 
-Evidence snapshot: **2026-08-27**. Verification commit `HEAD` means the exact
+Evidence snapshot: **2026-08-28**. Verification commit `HEAD` means the exact
 revision on which CI runs this manifest check.
 
 ## Maturity states
@@ -28,15 +28,15 @@ revision on which CI runs this manifest check.
 | Capability | Present behavior | Maturity | Verification |
 | --- | --- | --- | --- |
 | Meshtastic transport | Serial, TCP, and BLE links; reconnect, liveness supervision, inbound backpressure, and radio status. | Single-node field-tested | unreleased @ `HEAD` (2026-08-27); introduced `04e74ca` |
-| Command routing | Guided capability-aware DM screens, tolerant commands, contextual composition, recovery, channel parsing, paging, trust/module gates, and bounded inbound workers. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `04e74ca` |
+| Command routing | Guided capability-aware DM screens, tolerant commands, contextual composition, recovery, channel parsing, paging, trust/module gates, PKI-bound elevated actions, and bounded inbound workers. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `04e74ca` |
 | Airtime and outbound delivery | Durable priority queue, airtime shares, emergency reserve, quiet hours, dedupe, pacing, receipts, and restart recovery. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `3d65058` |
-| Identity and member directory | Handles, trust, approvals, recently-heard radio discovery, exact-position controls, and operator triage. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `8accdf3` |
+| Identity and member directory | Handles, social trust, reviewed Meshtastic PKI fingerprints, conflict demotion, explicit key rotation, recently-heard radio discovery, exact-position controls, and operator triage. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `8accdf3` |
 | BBS, mail, and operator inbox | Boards, threads, posts, subscriptions, digests, private mail, moderation, and one replyable operations inbox. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `41a6c85` |
 | Community Watch | Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, responder alerts, bounded repeats, escalation, all-clear, and maps. | Simulated | unreleased @ `HEAD` (2026-08-27); introduced `8323143` |
 | Welfare events and check-ins | Events, reviewed solicitation, roster states, HELP/OK handling, derived unaccounted members, and CSV export. | Simulated | unreleased @ `HEAD` (2026-08-27); introduced `04e74ca` |
 | Environmental information | Weather observations/forecasts, CAP alerts, astronomy, earthquakes, caching, provenance, maps, and waypoints. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `72763e5` |
 | NOAA SAME / RTL-SDR | Supervised receive-only rtl_fm/samedec pipeline, county and review gates, CAP dedupe, health, and bounded restart. | Hardware-gated | unreleased @ `HEAD` (2026-08-26); introduced `764516a` |
-| Dashboard and operator access | Responsive module-aware pages/API, named roles, TOTP/recovery, sessions, step-up protection, accessibility, shared map controls, and an offline-capable federation topology view. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `5295868` |
+| Dashboard and operator access | Responsive module-aware pages/API, named roles, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, accessibility, shared map controls, and an offline-capable federation topology view. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `5295868` |
 | Backup, restore, upgrade, and rollback | Online verified backups, rotation, quiesced web restore, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `df0ee14` |
 | Retention and privacy controls | Bounded retention, exact-position expiry/deletion, message limits, maintenance batches, and auditable policy changes. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `4d8af9c` |
 | Outpost federation | Pairing, authenticated framing, policy, board/incident sync, peer services, encrypted mail relay, signed multi-hop custody, privacy-gated topology health, receipts, pagination, and reconciliation. | Two-node field-tested | unreleased @ `HEAD` (2026-08-27); introduced `8f7219e` |
@@ -69,6 +69,7 @@ Evidence:
 - Automated: [tests/acceptance/test_phase1_acceptance.py](../tests/acceptance/test_phase1_acceptance.py) — Phase 1 command and radio-response behavior.
 - Automated: [tests/integration/test_inbound_workers.py](../tests/integration/test_inbound_workers.py) — Bounded concurrency, backpressure, and drop telemetry.
 - Automated: [tests/integration/test_mesh_tui.py](../tests/integration/test_mesh_tui.py) — First-class mesh journeys, capability and trust filtering, interruption recovery, guided composition, and packet budgets.
+- Automated: [tests/integration/test_mesh_pki_trust.py](../tests/integration/test_mesh_pki_trust.py) — Direct authenticated command gates, downgrade denial, key conflict demotion, explicit rotation, and durable replay rejection.
 
 Known limitations:
 
@@ -95,10 +96,12 @@ Evidence:
 
 - Automated: [tests/integration/test_directory_moderation.py](../tests/integration/test_directory_moderation.py) — Handle claims, approval, trust, and moderation boundaries.
 - Automated: [tests/integration/test_member_triage.py](../tests/integration/test_member_triage.py) — Discovered-radio triage and accountable operator actions.
+- Automated: [tests/integration/test_mesh_pki_trust.py](../tests/integration/test_mesh_pki_trust.py) — Fingerprint enrollment, promotion binding, conflict quarantine, audited rotation, and restart-persistent replay protection.
 
 Known limitations:
 
-- Trust decisions still require local operator policy and identity verification.
+- Social trust and first/replacement fingerprint decisions still require local operator identity verification.
+- Authenticated-key ingestion depends on metadata supplied by compatible Meshtastic firmware; the full firmware/transport field matrix remains open.
 
 ### BBS, mail, and operator inbox
 
@@ -174,11 +177,11 @@ Maturity: **Automated-tested**.
 Evidence:
 
 - Automated: [tests/browser/test_mobile_navigation.py](../tests/browser/test_mobile_navigation.py) — Desktop/mobile, accessibility, role, navigation, and interaction matrix.
-- Automated: [tests/integration/test_web_auth.py](../tests/integration/test_web_auth.py) — Authentication, role authorization, recovery, session, and step-up boundaries.
+- Automated: [tests/integration/test_web_auth.py](../tests/integration/test_web_auth.py) — Authentication, route-registration fail-closed wallboard authorization, redacted data boundaries, recovery, session, and step-up behavior.
 
 Known limitations:
 
-- Trusted-LAN or operator-provided TLS/VPN deployment is still assumed.
+- Most deployments assume operator-only trusted-LAN web access; Internet exposure and operator-supplied TLS/VPN remain opt-in deployment choices.
 
 ### Backup, restore, upgrade, and rollback
 

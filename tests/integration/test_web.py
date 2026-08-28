@@ -156,6 +156,10 @@ async def test_dashboard_poll_batches_status_and_revalidates_with_etag(tmp_path)
         "conversation_key,mail_direction) VALUES('remote:mail','operator@REMOTE','operator',"
         "'Please review',1,'delivered',9999999999,'fed:remote:one','in')"
     )
+    await database.write(
+        "INSERT INTO member(mesh_id,mesh_num,first_seen,last_seen,pending_public_key,pki_state) "
+        "VALUES('!00000003',3,1,1,zeroblob(32),'pending')"
+    )
 
     client = TestClient(create_web_app(lambda: {"radio": "up"}, database))
     response = client.get("/api/v1/dashboard/poll")
@@ -165,6 +169,7 @@ async def test_dashboard_poll_batches_status_and_revalidates_with_etag(tmp_path)
         "board": 1,
         "incidents": 1,
         "alerts": 1,
+        "members": 1,
     }
     assert response.json()["mail"] == {"actionable": 1}
     assert response.json()["modules"]["items"]["bbs"]["enabled"] is True

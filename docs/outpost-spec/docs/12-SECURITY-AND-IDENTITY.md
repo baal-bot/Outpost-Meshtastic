@@ -33,10 +33,19 @@ is visible to anyone in radio range.
 **REQ-SEC-002** — The identity anchor is the Meshtastic node ID (`mesh_id`). Handles are
 labels bound to a node ID, never identity themselves.
 
-**REQ-SEC-003** — Where the peer's Meshtastic public key is known (firmware ≥2.5 PKI), the
-node **MUST** record it and **MUST** treat a change of public key for a known node ID as a
-security event: log, audit, dashboard warning, and automatic demotion to `guest` pending
-operator review.
+**REQ-SEC-003** — Where the connected radio reports the peer's Meshtastic public key after a
+successful PKI direct-message decrypt, the node **MUST** record its fingerprint. A first-seen key
+is pending until an operator explicitly approves it. Promotion above `member` requires an approved
+key, and every elevated mesh action requires a direct PKI packet matching that key. Packet IDs are
+retained with the approved fingerprint to reject replay across process restarts.
+
+A different public key for a known node ID **MUST** be treated as a security event: deny the
+action, log and audit both fingerprints, place the key in the dashboard review queue, demote the
+identity to `guest`, and prevent handle re-enrollment until an operator approves or rejects the
+change. Approving a replacement preserves the member record but does not silently restore elevated
+social trust; the operator must separately review that promotion. Radios or firmware that do not
+provide usable authenticated key metadata may use ordinary member features, but elevated mesh
+actions are dashboard-only.
 
 **REQ-SEC-004** — Handle claim rules: 2–12 chars `[a-z0-9_-]`, unique, not a command name or
 alias, not reserved (`admin`, `operator`, `system`, `outpost`, `all`, `here`, the node's own
@@ -177,6 +186,13 @@ change mesh trust.
 **REQ-SEC-026b** — TOTP recovery values **MUST** be suitable for offline field transcription,
 displayed only at issuance, stored only as hashes, and consumed atomically on use. Diagnostic
 bundles **MUST** redact account password hashes, TOTP secrets, and recovery-code hashes.
+
+**REQ-SEC-026c** — Web access is operator-only by default. The optional `viewer` account is an
+unattended-display principal, not a junior operator: it **MUST** be default-denied from authenticated
+APIs except its own credential/session controls and a purpose-built aggregate wallboard contract.
+That contract **MUST NOT** contain identities, stable member identifiers, message content, private
+mail metadata, coordinates, welfare or operator notes, backups, audit records, AI review data, or
+configuration secrets. Registering a new API route **MUST NOT** grant viewer access implicitly.
 
 ---
 

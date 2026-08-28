@@ -96,7 +96,7 @@ def dashboard_poll_body(
         name: {"enabled": True, "restart_required_to_change": True}
         for name in ("bbs", "ai", "watch", "env", "fed")
     }
-    review_counts = {"total": 0, "board": 0, "incidents": 0, "alerts": 0}
+    review_counts = {"total": 0, "board": 0, "incidents": 0, "alerts": 0, "members": 0}
     review_counts.update(reviews or {})
     return json.dumps(
         {
@@ -217,6 +217,85 @@ def prepare_page(
     page.goto(dashboard_url, wait_until="domcontentloaded")
     wait_for_navigation(page)
     return page
+
+
+def test_viewer_overview_requests_only_the_redacted_wallboard_contract(
+    browser: object, dashboard_url: str
+) -> None:
+    page = browser.new_page(viewport={"width": 1024, "height": 900})  # type: ignore[attr-defined]
+    api_requests: list[str] = []
+    page.on(
+        "request",
+        lambda request: api_requests.append(request.url) if "/api/v1/" in request.url else None,
+    )
+    page.route(
+        "**/api/v1/auth/session",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "authenticated": True,
+                    "csrf_token": "viewer-test",
+                    "must_change": False,
+                    "account_id": 2,
+                    "username": "wallboard",
+                    "display_name": "Shared display",
+                    "role": "viewer",
+                    "mfa_enabled": False,
+                    "step_up_until": None,
+                }
+            ),
+        ),
+    )
+    page.route(
+        "**/api/v1/wallboard/summary",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "status": {
+                        "node": "Relief Outpost",
+                        "radio": "up",
+                        "airtime_used_ratio": 0.01,
+                        "queues": {"governed": 0},
+                        "tasks_healthy": True,
+                    },
+                    "overview": {
+                        "members": {"members_total": 4, "heard_24h": 3, "heard_7d": 4},
+                        "traffic_24h": {
+                            "inbound": {"count": 8, "bytes": 80},
+                            "outbound": {"count": 5, "bytes": 50},
+                        },
+                    },
+                    "boards": {"items": []},
+                    "channels": {"items": []},
+                    "navigation": {
+                        "modules": {"items": {}, "change_policy": "restart_required"},
+                        "reviews": {
+                            "total": 0,
+                            "board": 0,
+                            "incidents": 0,
+                            "alerts": 0,
+                            "members": 0,
+                        },
+                        "environment": {"same_pending": 0},
+                        "mail": {"actionable": 0},
+                    },
+                    "privacy": {"mode": "aggregate", "omitted": ["identities"]},
+                }
+            ),
+        ),
+    )
+
+    page.goto(dashboard_url, wait_until="networkidle")
+    assert page.locator("#node-name").text_content() == "Relief Outpost"
+    assert page.locator(".read-only-banner").is_visible()
+    assert page.locator("#system").is_hidden()
+    paths = {url.split(dashboard_url, 1)[-1] for url in api_requests}
+    assert paths <= {"/api/v1/auth/session", "/api/v1/wallboard/summary"}
+    page.close()
 
 
 class BrowserHealth:
@@ -1734,9 +1813,7 @@ def test_radio_queue_filter_hides_expired_history_by_default(
         page.close()
 
 
-def test_radio_message_log_explains_ack_not_requested(
-    browser: object, dashboard_url: str
-) -> None:
+def test_radio_message_log_explains_ack_not_requested(browser: object, dashboard_url: str) -> None:
     page = prepare_page(browser, 1280, dashboard_url, theme="night")
     route_shared_operator_api(page)
     route_visual_content_api(page)
@@ -1795,9 +1872,11 @@ def test_radio_configurator_guides_mqtt_and_uses_shared_live_settings(
     writes: list[dict[str, object]] = []
     page.on(
         "request",
-        lambda request: writes.append(request.post_data_json)
-        if request.method == "PUT" and request.url.endswith("/api/v1/radio/config")
-        else None,
+        lambda request: (
+            writes.append(request.post_data_json)
+            if request.method == "PUT" and request.url.endswith("/api/v1/radio/config")
+            else None
+        ),
     )
     health = BrowserHealth(page)
     try:
@@ -1841,9 +1920,7 @@ def test_radio_configurator_guides_mqtt_and_uses_shared_live_settings(
         page.close()
 
 
-def test_radio_packet_history_loads_25_at_a_time(
-    browser: object, dashboard_url: str
-) -> None:
+def test_radio_packet_history_loads_25_at_a_time(browser: object, dashboard_url: str) -> None:
     page = prepare_page(browser, 1280, dashboard_url, theme="night")
     route_shared_operator_api(page)
     route_visual_content_api(page)

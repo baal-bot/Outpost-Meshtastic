@@ -173,15 +173,18 @@ async function showOperatorIdentity() {
       footer.prepend(chip);
     }
     if (session.role === "viewer" && !document.querySelector(".read-only-banner")) {
+      for (const link of navigation?.querySelectorAll("a") || []) {
+        if (new URL(link.href).pathname !== "/") link.remove();
+      }
       const main = document.querySelector("main");
-      main?.insertAdjacentHTML("afterbegin", '<div class="read-only-banner" role="status"><b>Read-only wallboard</b><span>Operational views are available; changes and private exports require an Operator or Administrator.</span></div>');
+      main?.insertAdjacentHTML("afterbegin", '<div class="read-only-banner" role="status"><b>Aggregate wallboard</b><span>Identities, message content, locations, welfare, mail, configuration, and operator data are not available to this display.</span></div>');
     }
   } catch (_) {
     // Identity presentation is optional while the authenticated page remains usable.
   }
 }
 
-showOperatorIdentity();
+const operatorIdentity = showOperatorIdentity();
 
 const moduleLinks = {
   BBS: "bbs",
@@ -217,13 +220,18 @@ let navigationStatusRequest = null;
 async function loadNavigationStatus() {
   if (navigationStatusRequest) return navigationStatusRequest;
   navigationStatusRequest = (async () => {
-    const response = await fetch("/api/v1/dashboard/poll", {
+    const viewer = document.body.dataset.operatorRole === "viewer";
+    const response = await fetch(
+      viewer ? "/api/v1/wallboard/summary" : "/api/v1/dashboard/poll",
+      {
       headers: navigationStatusEtag ? {"if-none-match": navigationStatusEtag} : {},
-    });
+      },
+    );
     if (response.status === 304) return navigationStatus;
     if (!response.ok) throw new Error(`navigation status ${response.status}`);
     navigationStatusEtag = response.headers.get("etag") || "";
-    navigationStatus = await response.json();
+    const value = await response.json();
+    navigationStatus = viewer ? value.navigation : value;
     return navigationStatus;
   })();
   try {
@@ -305,7 +313,7 @@ navigation?.addEventListener("click", event => {
   }
 }, true);
 new MutationObserver(applyModuleState).observe(document.body, {childList: true, subtree: true});
-refreshModuleState();
+operatorIdentity.then(refreshModuleState);
 
 function updateCurrentPage() {
   if (!navigation) return;
@@ -450,6 +458,11 @@ async function refreshFederationReviews() {
     setReviewBadge("/bbs.html", counts.board);
     setReviewBadge("/watch.html", counts.incidents + counts.alerts);
     setReviewBadge(
+      "/operator.html",
+      Number(reviews.members || 0),
+      "authenticated radio keys pending review",
+    );
+    setReviewBadge(
       "/environment.html",
       Number(navigationState.environment?.same_pending || 0),
       "SAME alerts pending review",
@@ -464,7 +477,7 @@ async function refreshFederationReviews() {
   }
 }
 
-refreshFederationReviews();
+operatorIdentity.then(refreshFederationReviews);
 window.addEventListener("outpost:federation-reviewed", refreshFederationReviews);
 window.addEventListener("outpost:reviews-updated", refreshFederationReviews);
 
@@ -477,7 +490,7 @@ async function refreshOperationsInboxBadge() {
   }
 }
 
-refreshOperationsInboxBadge();
+operatorIdentity.then(refreshOperationsInboxBadge);
 window.addEventListener("outpost:mail-updated", refreshOperationsInboxBadge);
 scheduler.schedule(
   "navigation-status",

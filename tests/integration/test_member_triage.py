@@ -2,7 +2,9 @@ import time
 
 import pytest
 
+from outpost.clock import VirtualClock
 from outpost.store import Database
+from outpost.store.members import MemberRepo
 from outpost.web.member_triage import MemberTriageError, MemberTriageService
 
 
@@ -85,6 +87,18 @@ async def test_member_triage_filters_review_history_and_detail(tmp_path) -> None
             notes_supplied=False,
             reason=None,
         )
+    with pytest.raises(MemberTriageError, match="approve"):
+        await service.update(
+            discovered_id,
+            trust="trusted",
+            notes="Known neighbor",
+            notes_supplied=True,
+            reason="Identity verified in person",
+        )
+    await MemberRepo(database, VirtualClock()).resolve(
+        "!00000001", authenticated_pki_key=bytes(range(32))
+    )
+    await service.review_pki(discovered_id, "approve", "Fingerprint verified in person")
     await service.update(
         discovered_id,
         trust="trusted",
@@ -95,6 +109,9 @@ async def test_member_triage_filters_review_history_and_detail(tmp_path) -> None
     reviewed = await service.detail(discovered_id)
     assert reviewed is not None
     assert reviewed["member"]["trust"] == "trusted"
+    assert reviewed["member"]["pki_state"] == "verified"
+    assert reviewed["member"]["pki_fingerprint"] is not None
+    assert reviewed["pki_events"][0]["event"] == "verified"
     assert reviewed["member"]["notes"] == "Known neighbor"
     assert reviewed["trust_history"][0]["reason"] == "Identity verified in person"
     assert await database.read(

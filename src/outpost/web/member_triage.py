@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import time
@@ -49,8 +50,9 @@ SAVED_FILTERS = (
     (
         "review",
         "Needs review",
-        "Discovered radios with no recorded operator review.",
-        f"directory_state='active' AND {DISCOVERED_SQL} AND reviewed_at IS NULL",
+        "Unreviewed discoveries and authenticated radio keys awaiting an operator decision.",
+        f"directory_state='active' AND (({DISCOVERED_SQL} AND reviewed_at IS NULL) "
+        "OR pki_state IN ('pending','conflict'))",
     ),
 )
 
@@ -67,6 +69,19 @@ class MemberTriageService:
 
     @staticmethod
     def _classification(item: dict[str, Any]) -> dict[str, Any]:
+        public_key = item.pop("public_key", None)
+        pending_public_key = item.pop("pending_public_key", None)
+        item["pki_fingerprint"] = (
+            hashlib.sha256(bytes(public_key)).hexdigest() if public_key is not None else None
+        )
+        item["pki_pending_fingerprint"] = (
+            hashlib.sha256(bytes(pending_public_key)).hexdigest()
+            if pending_public_key is not None
+            else None
+        )
+        item["pki_elevated_eligible"] = bool(
+            item.get("pki_state") == "verified" and public_key is not None
+        )
         state = str(item.get("directory_state") or "active")
         trust = str(item.get("trust") or "guest")
         handle = item.get("handle")
@@ -111,10 +126,11 @@ class MemberTriageService:
             ),
             "responder": (
                 "Includes member access and eligibility for responder alerts and welfare "
-                "operations."
+                "operations. Requires a reviewed Meshtastic PKI key for mesh actions."
             ),
             "operator": (
-                "Grants the highest mesh-command trust; it does not create a web operator account."
+                "Grants the highest mesh-command trust after PKI review; it does not create a "
+                "web operator account."
             ),
             "blocked": "Keeps identity evidence while suppressing mesh command responses.",
         }
@@ -163,6 +179,7 @@ class MemberTriageService:
             SELECT id,mesh_id,handle,long_name,short_name,hw_model,trust,first_seen,last_seen,
                    last_heard_snr,hops_away,notes,directory_state,directory_state_at,
                    directory_state_by,reviewed_at,reviewed_by,
+                   public_key,pending_public_key,pki_state,pki_verified_at,pki_last_seen_at,
                    COALESCE(json_extract(prefs,'$.position'),'coarse') position_consent,
                    EXISTS(SELECT 1 FROM member_position p
                           WHERE p.member_id=member.id AND p.expires_at>unixepoch()) active_position,
@@ -191,8 +208,9 @@ class MemberTriageService:
                    trust IN ('member','trusted','responder','operator'))) approved_count,
               SUM(directory_state='active' AND handle IS NULL AND
                   trust IN ('guest','blocked')) discovered_count,
-              SUM(directory_state='active' AND handle IS NULL AND
-                  trust IN ('guest','blocked') AND reviewed_at IS NULL)
+              SUM(directory_state='active' AND
+                  ((handle IS NULL AND trust IN ('guest','blocked') AND reviewed_at IS NULL)
+                   OR pki_state IN ('pending','conflict')))
                 review_count,
               SUM(directory_state='archived') archived_count,
               SUM(directory_state='ignored') ignored_count,
@@ -210,8 +228,9 @@ class MemberTriageService:
                   last_seen<unixepoch()-2592000) stale,
               SUM(directory_state='active' AND trust IN ('member','trusted')) member,
               SUM(directory_state='active' AND trust='responder') responder,
-              SUM(directory_state='active' AND handle IS NULL AND
-                  trust IN ('guest','blocked') AND reviewed_at IS NULL) review
+              SUM(directory_state='active' AND
+                  ((handle IS NULL AND trust IN ('guest','blocked') AND reviewed_at IS NULL)
+                   OR pki_state IN ('pending','conflict'))) review
             FROM member"""
         )
         items = [self._classification(dict(row)) for row in rows[:limit]]
@@ -238,6 +257,7 @@ class MemberTriageService:
             SELECT id,mesh_id,mesh_num,handle,long_name,short_name,hw_model,trust,first_seen,
                    last_seen,last_heard_snr,hops_away,notes,directory_state,directory_state_at,
                    directory_state_by,reviewed_at,reviewed_by,
+                   public_key,pending_public_key,pki_state,pki_verified_at,pki_last_seen_at,
                    COALESCE(json_extract(prefs,'$.position'),'coarse') position_consent,
                    p.lat position_lat,p.lon position_lon,p.received_at position_received_at,
                    p.source position_source,p.expires_at position_expires_at
@@ -266,6 +286,13 @@ class MemberTriageService:
             """,
             (member_id,),
         )
+        pki_events = await self.database.read(
+            """
+            SELECT event,fingerprint,prior_fingerprint,actor,detail,created_at
+            FROM member_pki_event WHERE member_id=? ORDER BY created_at DESC,id DESC LIMIT 20
+            """,
+            (member_id,),
+        )
         stats = await self.database.read(
             """
             SELECT
@@ -289,6 +316,7 @@ class MemberTriageService:
             "member": member,
             "recent_activity": [dict(row) for row in activity],
             "trust_history": [dict(row) for row in history],
+            "pki_events": [dict(row) for row in pki_events],
             "stats": {key: int(value or 0) for key, value in dict(stats[0]).items()},
         }
 
@@ -305,7 +333,9 @@ class MemberTriageService:
         now_reason = (reason or "").strip()
         async with self.database.transaction() as transaction:
             rows = await transaction.read(
-                "SELECT mesh_id,trust,notes,directory_state FROM member WHERE id=?", (member_id,)
+                "SELECT mesh_id,trust,notes,directory_state,public_key,pki_state "
+                "FROM member WHERE id=?",
+                (member_id,),
             )
             if not rows:
                 raise MemberTriageError("not_found", "Member not found.")
@@ -314,6 +344,13 @@ class MemberTriageService:
             if trust_changed and len(now_reason) < 3:
                 raise MemberTriageError(
                     "reason_required", "Record a reason before changing member trust."
+                )
+            if trust in {"trusted", "responder", "operator"} and (
+                before["public_key"] is None or before["pki_state"] != "verified"
+            ):
+                raise MemberTriageError(
+                    "pki_required",
+                    "Observe and approve this radio's Meshtastic PKI key before elevating trust.",
                 )
             assignments = ["reviewed_at=?", "reviewed_by=?"]
             now = int(time.time())
@@ -363,6 +400,85 @@ class MemberTriageService:
                 (actor.removeprefix("web:"), before["mesh_id"], detail, now),
             )
         return {"ok": True}
+
+    async def review_pki(
+        self,
+        member_id: int,
+        action: str,
+        reason: str,
+        *,
+        actor: str = "web:operator",
+    ) -> dict[str, Any]:
+        if action not in {"approve", "reject"}:
+            raise MemberTriageError("invalid_action", "Unknown PKI review action.")
+        clean_reason = reason.strip()
+        if len(clean_reason) < 3:
+            raise MemberTriageError("reason_required", "Record a reason for the PKI review.")
+        now = int(time.time())
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT mesh_id,public_key,pending_public_key,pki_state FROM member WHERE id=?",
+                (member_id,),
+            )
+            if not rows:
+                raise MemberTriageError("not_found", "Member not found.")
+            row = rows[0]
+            if row["pending_public_key"] is None:
+                raise MemberTriageError("no_pending_key", "No authenticated PKI key awaits review.")
+            current = bytes(row["public_key"]) if row["public_key"] is not None else None
+            pending = bytes(row["pending_public_key"])
+            current_fingerprint = (
+                hashlib.sha256(current).hexdigest() if current is not None else None
+            )
+            pending_fingerprint = hashlib.sha256(pending).hexdigest()
+            if action == "approve":
+                await transaction.write(
+                    "UPDATE member SET public_key=pending_public_key,pending_public_key=NULL,"
+                    "pki_state='verified',pki_verified_at=?,pki_last_seen_at=COALESCE("
+                    "pki_last_seen_at,?) WHERE id=?",
+                    (now, now, member_id),
+                )
+                state = "verified"
+                event = "verified"
+            else:
+                state = "verified" if current is not None else "unknown"
+                await transaction.write(
+                    "UPDATE member SET pending_public_key=NULL,pki_state=? WHERE id=?",
+                    (state, member_id),
+                )
+                event = "rejected"
+            await transaction.write(
+                "INSERT INTO member_pki_event(member_id,event,fingerprint,prior_fingerprint,"
+                "actor,detail,created_at) VALUES(?,?,?,?,?,?,?)",
+                (
+                    member_id,
+                    event,
+                    pending_fingerprint,
+                    current_fingerprint,
+                    actor,
+                    json.dumps({"reason": clean_reason}, separators=(",", ":")),
+                    now,
+                ),
+            )
+            await transaction.write(
+                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                "VALUES('web',?,?,?,?,?)",
+                (
+                    actor.removeprefix("web:"),
+                    f"member.pki.{action}",
+                    row["mesh_id"],
+                    json.dumps(
+                        {
+                            "fingerprint": pending_fingerprint,
+                            "prior_fingerprint": current_fingerprint,
+                            "reason": clean_reason,
+                        },
+                        separators=(",", ":"),
+                    ),
+                    now,
+                ),
+            )
+        return {"ok": True, "state": state, "fingerprint": pending_fingerprint}
 
     async def set_state(
         self, member_id: int, action: str, reason: str, *, actor: str = "web:operator"

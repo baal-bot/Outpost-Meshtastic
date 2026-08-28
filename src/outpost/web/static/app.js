@@ -2,6 +2,7 @@ import("/nav.js");
 const $ = (id) => document.getElementById(id);
 const authHintKey = "outpost.operator.authenticated";
 let refreshSchedulersStarted = false;
+let viewerMode = false;
 if (sessionStorage.getItem(authHintKey) === "true") $("login-screen").classList.add("hidden");
 const safe = (value) => String(value).replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"})[char]);
 const ago = (stamp) => { const seconds = Math.max(0, (Date.now() - new Date(stamp)) / 1000); if (seconds < 60) return "now"; if (seconds < 3600) return `${Math.floor(seconds / 60)}m`; if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`; return `${Math.floor(seconds / 86400)}d`; };
@@ -48,12 +49,19 @@ function activityRow(entry) {
 
 async function refresh() {
   try {
-    const [status, overview, boards, channels] = await Promise.all([
-      fetch("/api/v1/status").then((r) => r.json()),
-      fetch("/api/v1/dashboard/overview").then((r) => r.json()),
-      fetch("/api/v1/boards").then((r) => r.json()),
-      fetch("/api/v1/channels").then((r) => r.json()),
-    ]);
+    let status, overview, boards, channels;
+    if (viewerMode) {
+      const response = await fetch("/api/v1/wallboard/summary");
+      if (!response.ok) throw new Error(`wallboard summary ${response.status}`);
+      ({status, overview, boards, channels} = await response.json());
+    } else {
+      [status, overview, boards, channels] = await Promise.all([
+        fetch("/api/v1/status").then((r) => r.json()),
+        fetch("/api/v1/dashboard/overview").then((r) => r.json()),
+        fetch("/api/v1/boards").then((r) => r.json()),
+        fetch("/api/v1/channels").then((r) => r.json()),
+      ]);
+    }
     $("node-name").textContent = status.node;
     const radio = $("radio-state");
     radio.className = `ui-pill status ${status.radio}`;
@@ -65,10 +73,12 @@ async function refresh() {
     const budget = $("budget-state");
     budget.className = ratio > .9 ? "chip bad" : ratio > .7 ? "chip warn" : "chip";
     budget.textContent = ratio > .9 ? "Budget critical" : ratio > .7 ? "Budget elevated" : "Within budget";
-    $("node-id").textContent = status.radio_config.node_id || "—";
-    $("region").textContent = status.radio_config.region || "—";
-    $("preset").textContent = status.radio_config.preset || "—";
-    $("channel-count").textContent = status.radio_config.channels.length;
+    $("node-id").textContent = viewerMode ? "Restricted" : status.radio_config.node_id || "—";
+    $("region").textContent = viewerMode ? "Restricted" : status.radio_config.region || "—";
+    $("preset").textContent = viewerMode ? "Restricted" : status.radio_config.preset || "—";
+    $("channel-count").textContent = viewerMode
+      ? channels.items.length
+      : status.radio_config.channels.length;
     const inbound = overview.traffic_24h.inbound?.count || 0;
     const outbound = overview.traffic_24h.outbound?.count || 0;
     $("messages-24h").textContent = inbound + outbound;
@@ -80,7 +90,9 @@ async function refresh() {
     $("queued-total").textContent = queued;
     const maxQueue = Math.max(1, ...Object.values(status.queues));
     $("queues").innerHTML = Object.entries(status.queues).map(([name, count]) => `<div class="queue-row"><span>${safe(name)}</span><div class="queue-track"><i style="width:${safe(count / maxQueue * 100)}%"></i></div><strong>${safe(count)}</strong></div>`).join("");
-    $("activity-list").innerHTML = overview.activity.map(activityRow).join("") || `<p class="ui-empty empty">No mesh activity recorded yet.</p>`;
+    $("activity-list").innerHTML = viewerMode
+      ? `<p class="ui-empty empty">Individual mesh activity is hidden on this aggregate wallboard.</p>`
+      : overview.activity.map(activityRow).join("") || `<p class="ui-empty empty">No mesh activity recorded yet.</p>`;
     $("boards").innerHTML = boards.items.map((board) => item(board.title, board.description, `${board.thread_count} threads`)).join("") || `<p class="ui-empty empty">No boards.</p>`;
     $("channels").innerHTML = channels.items.map((channel) => item(channel.name, channel.description, `slot ${channel.slot}`)).join("") || `<p class="ui-empty empty">No channels.</p>`;
     $("updated").textContent = `Updated ${new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`;
@@ -122,6 +134,20 @@ async function initialize() {
   const sessionResponse = await fetch("/api/v1/auth/session");
   if (sessionResponse.ok) {
     const session = await sessionResponse.json();
+    viewerMode = session.role === "viewer";
+    if (viewerMode) {
+      document.body.dataset.operatorRole = "viewer";
+      for (const selector of [
+        "#system",
+        ".weather-panel",
+        ".forecast-panel",
+        ".astronomy-panel",
+        ".seismic-panel",
+      ]) {
+        document.querySelector(selector)?.setAttribute("hidden", "");
+      }
+      document.querySelectorAll("#community a").forEach((link) => link.setAttribute("hidden", ""));
+    }
     sessionStorage.setItem(authHintKey, "true");
     csrfToken = session.csrf_token;
     if (session.must_change) {
@@ -176,6 +202,10 @@ $("login-form").addEventListener("submit", async (event) => {
     $("login-form").classList.add("hidden");
     $("change-form").classList.remove("hidden");
   } else {
+    if (session.role === "viewer") {
+      window.location.reload();
+      return;
+    }
     $("login-screen").classList.add("hidden");
     await refresh();
     startRefreshSchedulers();
@@ -363,6 +393,7 @@ async function startRefreshSchedulers() {
   refreshSchedulersStarted = true;
   const {scheduler} = await import("/refresh-scheduler.js");
   scheduler.schedule("overview-main", refresh, {interval:15000});
+  if (viewerMode) return;
   scheduler.schedule("overview-weather", refreshWeather, {initial:1500, interval:30000});
   scheduler.schedule("overview-forecast", refreshForecast, {initial:1700, interval:30000});
   scheduler.schedule("overview-providers", refreshProviderHealth, {initial:1800, interval:30000});

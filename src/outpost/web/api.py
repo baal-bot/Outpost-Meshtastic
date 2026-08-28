@@ -140,6 +140,11 @@ class MemberStateBody(BaseModel):
     reason: str = Field(default="", max_length=240)
 
 
+class MemberPkiReviewBody(BaseModel):
+    action: Literal["approve", "reject"]
+    reason: str = Field(min_length=3, max_length=240)
+
+
 class MemberBulkBody(BaseModel):
     member_ids: list[int] = Field(min_length=1, max_length=200)
     action: Literal["archive", "ignore", "restore"]
@@ -361,17 +366,13 @@ class RadioConfigurationBody(BaseModel):
 
     @model_validator(mode="after")
     def exactly_one_section(self) -> RadioConfigurationBody:
-        populated = [
-            name for name in type(self).model_fields if getattr(self, name) is not None
-        ]
+        populated = [name for name in type(self).model_fields if getattr(self, name) is not None]
         if len(populated) != 1:
             raise ValueError("provide exactly one radio configuration section")
         return self
 
     def change(self) -> tuple[str, dict[str, Any]]:
-        section = next(
-            name for name in type(self).model_fields if getattr(self, name) is not None
-        )
+        section = next(name for name in type(self).model_fields if getattr(self, name) is not None)
         value = getattr(self, section)
         return section, value.model_dump()
 
@@ -601,20 +602,29 @@ def create_web_app(
             or path.startswith("/api/v1/environment/same")
             or (path.startswith("/api/v1/backups/") and path.endswith("/restore"))
             or (path.startswith("/api/v1/members/") and method in {"PATCH", "DELETE"})
+            or (path.startswith("/api/v1/members/") and path.endswith("/pki"))
         )
 
-    def viewer_private_path(path: str) -> bool:
-        return (
-            path.startswith("/api/v1/auth/accounts")
-            or path.startswith("/api/v1/auth/sessions")
-            or path.startswith("/api/v1/audit")
-            or path.startswith("/api/v1/ai")
-            or path.startswith("/api/v1/backups")
-            or path.startswith("/api/v1/mail/")
-            or path.startswith("/api/v1/members/export")
-            or re.fullmatch(r"/api/v1/members/\d+", path) is not None
-            or path.endswith("/csv")
-        )
+    viewer_self_service = {
+        ("GET", "/api/v1/auth/session"),
+        ("GET", "/api/v1/auth/sessions"),
+        ("POST", "/api/v1/auth/logout"),
+        ("POST", "/api/v1/auth/password"),
+        ("POST", "/api/v1/auth/step-up"),
+        ("POST", "/api/v1/auth/mfa/begin"),
+        ("POST", "/api/v1/auth/mfa/confirm"),
+        ("DELETE", "/api/v1/auth/mfa"),
+        ("DELETE", "/api/v1/auth/sessions"),
+    }
+
+    def viewer_allowed(method: str, path: str) -> bool:
+        """Default-deny API capabilities for an unattended wallboard session."""
+        normalized = path.rstrip("/") or "/"
+        if (method, normalized) in viewer_self_service:
+            return True
+        if method == "DELETE" and re.fullmatch(r"/api/v1/auth/sessions/[A-Za-z0-9_-]+", normalized):
+            return True
+        return method in {"GET", "HEAD"} and normalized == "/api/v1/wallboard/summary"
 
     @app.middleware("http")
     async def security_headers(request: Any, call_next: Any) -> Any:
@@ -628,7 +638,9 @@ def create_web_app(
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         if request.url.path.endswith((".html", ".js", ".css")) or request.url.path == "/":
             response.headers["Cache-Control"] = "no-cache"
-        if request.url.path.startswith("/api/v1/auth/"):
+        if request.url.path.startswith("/api/v1/auth/") or request.url.path == (
+            "/api/v1/wallboard/summary"
+        ):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -666,22 +678,10 @@ def create_web_app(
                         {"error": {"code": "csrf", "message": "Invalid CSRF token."}},
                         status_code=403,
                     )
-            self_service = path in {
-                "/api/v1/auth/logout",
-                "/api/v1/auth/password",
-                "/api/v1/auth/step-up",
-                "/api/v1/auth/mfa/begin",
-                "/api/v1/auth/mfa/confirm",
-                "/api/v1/auth/mfa",
-                "/api/v1/auth/sessions",
-            } or path.startswith("/api/v1/auth/sessions/")
-            if session.role == "viewer" and (
-                (request.method not in {"GET", "HEAD", "OPTIONS"} and not self_service)
-                or (
-                    request.method in {"GET", "HEAD"}
-                    and viewer_private_path(path)
-                    and not self_service
-                )
+            if (
+                session.role == "viewer"
+                and request.method != "OPTIONS"
+                and not viewer_allowed(request.method, path)
             ):
                 return JSONResponse(
                     {
@@ -1811,7 +1811,7 @@ def create_web_app(
 
     @app.get("/api/v1/dashboard/poll", response_model=None)
     async def dashboard_poll(request: Request) -> Response:
-        reviews = {"total": 0, "board": 0, "incidents": 0, "alerts": 0}
+        reviews = {"total": 0, "board": 0, "incidents": 0, "alerts": 0, "members": 0}
         actionable_mail = 0
         same_pending = 0
         if database is not None:
@@ -1829,10 +1829,14 @@ def create_web_app(
                         ((operator_read_at IS NULL AND mail_direction<>'out')
                          OR state IN ('failed','undeliverable'))) actionable,
                      (SELECT COUNT(*) FROM same_event
-                      WHERE review_state='pending') same_pending
+                      WHERE review_state='pending') same_pending,
+                     (SELECT COUNT(*) FROM member
+                      WHERE directory_state='active' AND
+                        pki_state IN ('pending','conflict')) member_key_reviews
                    FROM reviews"""
             )
             reviews = {key: int(rows[0][key]) for key in ("total", "board", "incidents", "alerts")}
+            reviews["members"] = int(rows[0]["member_key_reviews"])
             actionable_mail = int(rows[0]["actionable"])
             same_pending = int(rows[0]["same_pending"])
         value = {
@@ -3189,6 +3193,100 @@ def create_web_app(
                 "activity": activity_items,
             }
 
+        @app.get("/api/v1/wallboard/summary")
+        async def wallboard_summary() -> dict[str, Any]:
+            """Aggregate operational status without identities, content, or exact locations."""
+            runtime = status_provider()
+            counts = await database.read(
+                """
+                SELECT
+                  SUM(directory_state='active' AND
+                      (handle IS NOT NULL OR
+                       trust IN ('member','trusted','responder','operator'))) members_total,
+                  SUM(last_seen>=unixepoch()-86400) heard_24h,
+                  SUM(last_seen>=unixepoch()-604800) heard_7d
+                FROM member
+                """
+            )
+            traffic = await database.read(
+                """
+                SELECT direction,COUNT(*) count,COALESCE(SUM(byte_len),0) bytes
+                FROM message_log WHERE created_at>=unixepoch()-86400 GROUP BY direction
+                """
+            )
+            boards = await database.read(
+                """
+                SELECT b.title,b.description,COUNT(t.id) thread_count
+                FROM board b LEFT JOIN thread t ON t.board_id=b.id AND t.hidden=0
+                WHERE b.archived=0 AND b.min_read_trust='guest'
+                GROUP BY b.id ORDER BY b.sort_order,b.id
+                """
+            )
+            channels = await database.read(
+                """
+                SELECT name,description,slot FROM channel_dir
+                WHERE published=1 ORDER BY slot,name
+                """
+            )
+            queue_counts = runtime.get("queues", {})
+            queue_total = (
+                sum(int(value or 0) for value in queue_counts.values())
+                if isinstance(queue_counts, dict)
+                else 0
+            )
+            modules = {
+                "items": {
+                    name: {"enabled": enabled, "restart_required_to_change": True}
+                    for name, enabled in effective_modules().items()
+                },
+                "change_policy": "restart_required",
+            }
+            return {
+                "status": {
+                    "node": str(runtime.get("node") or "Outpost"),
+                    "radio": str(runtime.get("radio") or "down"),
+                    "airtime_used_ratio": float(runtime.get("airtime_used_ratio") or 0),
+                    "queues": {"governed": queue_total},
+                    "tasks_healthy": runtime.get("tasks_healthy") is not False,
+                },
+                "overview": {
+                    "members": {key: int(value or 0) for key, value in dict(counts[0]).items()},
+                    "traffic_24h": {
+                        ("outbound" if row["direction"] == "out" else "inbound"): {
+                            "count": int(row["count"]),
+                            "bytes": int(row["bytes"]),
+                        }
+                        for row in traffic
+                    },
+                },
+                "boards": {"items": [dict(row) for row in boards]},
+                "channels": {"items": [dict(row) for row in channels]},
+                "navigation": {
+                    "modules": modules,
+                    "reviews": {
+                        "total": 0,
+                        "board": 0,
+                        "incidents": 0,
+                        "alerts": 0,
+                        "members": 0,
+                    },
+                    "environment": {"same_pending": 0},
+                    "mail": {"actionable": 0},
+                },
+                "privacy": {
+                    "mode": "aggregate",
+                    "omitted": [
+                        "identities",
+                        "stable_identifiers",
+                        "message_content",
+                        "mail_metadata",
+                        "coordinates",
+                        "welfare_notes",
+                        "operator_notes",
+                    ],
+                },
+            }
+
         @app.get("/api/v1/members/map")
         async def member_map() -> dict[str, Any]:
             now = int(datetime.now(UTC).timestamp())
@@ -3316,6 +3414,8 @@ def create_web_app(
                     "last_seen",
                     "directory_state_at",
                     "reviewed_at",
+                    "pki_verified_at",
+                    "pki_last_seen_at",
                     "position_received_at",
                     "position_expires_at",
                 ):
@@ -3367,6 +3467,8 @@ def create_web_app(
                 "last_seen",
                 "directory_state_at",
                 "reviewed_at",
+                "pki_verified_at",
+                "pki_last_seen_at",
                 "position_received_at",
                 "position_expires_at",
             ):
@@ -3376,7 +3478,26 @@ def create_web_app(
                 item["created_at"] = _timestamp(int(item["created_at"]))
             for item in result["trust_history"]:
                 item["created_at"] = _timestamp(int(item["created_at"]))
+            for item in result["pki_events"]:
+                item["created_at"] = _timestamp(int(item["created_at"]))
             return result
+
+        @app.post("/api/v1/members/{member_id}/pki", response_model=None)
+        async def member_pki_review(
+            member_id: int, body: MemberPkiReviewBody
+        ) -> dict[str, Any] | Response:
+            try:
+                return await member_triage.review_pki(
+                    member_id,
+                    body.action,
+                    body.reason,
+                    actor=current_actor(),
+                )
+            except MemberTriageError as error:
+                status = 404 if error.code == "not_found" else 422
+                return JSONResponse(
+                    {"error": {"code": error.code, "message": str(error)}}, status_code=status
+                )
 
         @app.post("/api/v1/members/{member_id}/state", response_model=None)
         async def member_state(member_id: int, body: MemberStateBody) -> dict[str, Any] | Response:

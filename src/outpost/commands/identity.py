@@ -28,7 +28,12 @@ def specs(members: MemberRepo, mail: MailService, require_approval: bool) -> lis
             member = await members.claim_handle(
                 ctx.member.mesh_id, handle, approve=not require_approval
             )
-        except ValueError:
+        except ValueError as error:
+            if "key conflict" in str(error):
+                return Response(
+                    ResponseKind.ERROR,
+                    [Line("Identity key changed. Ask the Outpost operator to review it.")],
+                )
             return Response(ResponseKind.ERROR, [Line("Handle already claimed.")])
         await mail.bind_handle(member)
         status = "pending approval" if require_approval else "member"

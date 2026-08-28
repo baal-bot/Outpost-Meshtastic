@@ -82,6 +82,14 @@ Sessions expire according to `web.auth.session_hours`; state-changing requests r
 Protected actions additionally use a 10-minute password/TOTP step-up window. The browser asks only
 when that window has expired and safely retries the original request after successful confirmation.
 
+The web console is intended for the local operator; mesh users do not need web accounts. A
+Read-only / wallboard account is optional and should be created only for a shared status display.
+It receives one aggregate contract and cannot browse operator pages or general read APIs. The
+wallboard omits member/radio identifiers, individual activity, message and mail data, coordinates,
+welfare state, notes, configuration, audits, backups, and AI review data. Viewer authorization is
+default-deny, so a newly registered API route is operator-only until deliberately added to the
+wallboard contract.
+
 ## Appearance
 
 Settings → Appearance offers Outpost Dark, high-contrast Daylight, low-light Night Ops, and a
@@ -143,6 +151,7 @@ member's mesh mailbox; system messages addressed to `@operator` remain web-only.
 The JSON API is rooted at `/api/v1`. Important read surfaces include:
 
 - `/api/v1/health` and `/api/v1/status`
+- `/api/v1/wallboard/summary` (aggregate wallboard data only)
 - `/api/v1/config`
 - `/api/v1/dashboard/overview` and the ETag-enabled `/api/v1/dashboard/poll`
 - `/api/v1/members`, `/api/v1/members/{id}`, `/api/v1/members/map`,
@@ -171,6 +180,19 @@ The source of truth for paths and request models is `src/outpost/web/api.py`; th
 and has no compatibility promise. Browser authentication uses an HTTP-only cookie. Clients making
 state changes must first establish a session and send the CSRF token expected by the API. Do not
 build unattended automation by embedding the operator password.
+
+Authenticated GET data classification is enforced by this role boundary:
+
+| Surface | Data class | Minimum role |
+| --- | --- | --- |
+| `/api/v1/health`, setup state, bounded diagnostic status, restore job token | Public bootstrap/health | Public |
+| Own `/api/v1/auth/session` and `/api/v1/auth/sessions` | Current-account security metadata | Any authenticated account |
+| `/api/v1/wallboard/summary` | Redacted aggregate status and explicitly public directory text | Viewer |
+| `/api/v1/auth/accounts` | Account administration | Administrator |
+| Every other authenticated GET, including status, modules, domain records, maps, messages, mail, configuration, audit, backups, AI, radio, and federation | Operator/private or secret-bearing | Operator |
+
+Trailing-slash variants have the same authorization decision. The viewer allowlist is exact and
+all other current or future API paths fail closed.
 
 ## Maps
 
