@@ -8,6 +8,7 @@ STATE_DIR=${OUTPOST_STATE_DIR:-/var/lib/outpost}
 CONFIG_DIR=${OUTPOST_CONFIG_DIR:-/etc/outpost}
 SERVICE_NAME=${OUTPOST_SERVICE_NAME:-outpost.service}
 HEALTH_URL=${OUTPOST_HEALTH_URL:-}
+METRICS_URL=
 NONINTERACTIVE=${OUTPOST_NONINTERACTIVE:-0}
 HAILORT_WHEEL=${OUTPOST_HAILORT_WHEEL:-}
 HAILO_VLM_MODEL_SOURCE=${OUTPOST_HAILO_VLM_MODEL:-}
@@ -36,8 +37,16 @@ health_probe() {
   fi
 }
 
+metrics_probe() {
+  if [ "$WEB_TRANSPORT_MODE" = direct_https ]; then
+    curl -fkSs "$METRICS_URL"
+  else
+    curl -fsS "$METRICS_URL"
+  fi
+}
+
 [ "$(id -u)" -eq 0 ] || fail "run as root: sudo $0"
-for command in python3 getent groupadd useradd usermod install systemctl udevadm ln mv readlink curl; do
+for command in python3 getent groupadd useradd usermod install systemctl udevadm ln mv readlink curl grep; do
   command -v "$command" >/dev/null 2>&1 || fail "missing required command: $command"
 done
 python3 -c 'import sys; raise SystemExit(not ((3, 12) <= sys.version_info < (3, 14)))' || \
@@ -254,6 +263,13 @@ print(f"{scheme}://127.0.0.1:{config.web.port}/api/v1/health")
 PY
   )
 fi
+METRICS_URL=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
+from outpost.config import load_config
+config = load_config()
+scheme = "https" if config.web.transport.mode == "direct_https" else "http"
+print(f"{scheme}://127.0.0.1:{config.web.port}/metrics")
+PY
+)
 
 if [ ! -f "$STATE_DIR/.data/tiles/manifest.json" ] && \
   "$RELEASE_DIR/bin/python" -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])) or {}; raise SystemExit(0 if d.get("node",{}).get("location") else 1)' "$CONFIG_DIR/config.yaml"; then
@@ -344,6 +360,10 @@ while [ "$attempt" -lt 30 ]; do
   if health_probe >/dev/null 2>&1; then healthy=1; break; fi
   attempt=$((attempt + 1)); sleep 2
 done
+if [ "$healthy" -eq 1 ] && ! metrics_probe | grep -q '^# HELP outpost_'; then
+  echo "Exact /metrics deployment smoke check failed." >&2
+  healthy=0
+fi
 if [ "$healthy" -ne 1 ]; then
   echo "New release failed health verification; rolling back." >&2
   systemctl stop "$SERVICE_NAME" || true

@@ -85,6 +85,13 @@ def test_health_is_minimal_and_status_has_detail() -> None:
     assert "gps" not in str(diagnostics.json())
     assert "queues" not in diagnostics.json()
 
+    metrics = client.get("/metrics")
+    assert metrics.status_code == 200
+    assert metrics.headers["content-type"].startswith("text/plain; version=")
+    assert "charset=utf-8" in metrics.headers["content-type"]
+    assert "# HELP outpost_radio_reconnects_total" in metrics.text
+    assert client.get("/metrics/").status_code == 200
+
     failed_tasks = TestClient(create_web_app(lambda: {"radio": "up", "tasks_healthy": False})).get(
         "/api/v1/health"
     )

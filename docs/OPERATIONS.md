@@ -25,7 +25,8 @@ The minimal health endpoint and systemd watchdog reflect core offline progress. 
 and restartable-local failures remain visible in the authenticated dashboard and loopback-only
 diagnostics while the core continues serving mesh traffic.
 
-Prometheus metrics are mounted at `/metrics`. Restrict them to trusted networks because labels and
+Prometheus metrics use canonical `/metrics` (HTTP 200); `/metrics/` remains compatible. Restrict
+them to trusted networks because labels and
 traffic characteristics can reveal operational patterns.
 
 ## Operator access and shift changes

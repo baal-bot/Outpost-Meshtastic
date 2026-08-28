@@ -66,6 +66,9 @@ def test_installer_stages_health_checked_release_with_rollback() -> None:
     assert 'WEB_TRANSPORT_MODE" = direct_https' in script
     assert 'config.web.transport.mode == "direct_https"' in script
     assert "health_probe" in script
+    assert 'f"{scheme}://127.0.0.1:{config.web.port}/metrics"' in script
+    assert "metrics_probe | grep -q '^# HELP outpost_'" in script
+    assert "Exact /metrics deployment smoke check failed." in script
 
     unit = (Path(__file__).parents[2] / "deploy" / "outpost.service").read_text()
     assert "TimeoutStopSec=30" in unit

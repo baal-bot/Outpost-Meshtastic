@@ -13,7 +13,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from prometheus_client import make_asgi_app
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest, make_asgi_app
 from pydantic import BaseModel, Field, model_validator
 
 from outpost import __version__
@@ -4008,6 +4008,10 @@ def create_web_app(
                 _timestamp(value["last_seen_at"]) if value["last_seen_at"] is not None else None
             )
             return {"summary": value, "items": items}
+
+    @app.get("/metrics", include_in_schema=False, response_model=None)
+    async def prometheus_metrics() -> Response:
+        return Response(generate_latest(), headers={"Content-Type": CONTENT_TYPE_LATEST})
 
     app.mount("/metrics", make_asgi_app())
     static_dir = Path(__file__).parent / "static"
