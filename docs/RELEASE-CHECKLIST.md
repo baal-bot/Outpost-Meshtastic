@@ -21,6 +21,8 @@ itself promote any capability to production-ready.
 
 - [ ] Both supported Python versions pass the complete CI matrix, browser suite, critical coverage
   gates, package smoke test, and dependency audit.
+- [ ] `deploy/update.sh` selects that successful exact-commit run, and the activated release's
+  `ci-evidence.json` identifies the same commit and run URL.
 - [ ] Schema/version compatibility and migration behavior are documented for this release.
 - [ ] A verified off-device backup exists before upgrading field nodes.
 - [ ] Upgrade, health-check failure, and rollback procedures match the release artifacts.

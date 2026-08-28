@@ -13,6 +13,9 @@ HAILORT_WHEEL=${OUTPOST_HAILORT_WHEEL:-}
 HAILO_VLM_MODEL_SOURCE=${OUTPOST_HAILO_VLM_MODEL:-}
 MDNS_ENABLED=${OUTPOST_MDNS:-1}
 HAILO_RELEASE_GRACE_SECONDS=${OUTPOST_HAILO_RELEASE_GRACE_SECONDS:-5}
+ALLOW_UNVERIFIED_CI=${OUTPOST_ALLOW_UNVERIFIED_CI:-0}
+CI_VERIFIED_REVISION=${OUTPOST_CI_VERIFIED_REVISION:-}
+CI_EVIDENCE=${OUTPOST_CI_EVIDENCE:-}
 
 fail() { echo "Outpost install: $*" >&2; exit 1; }
 
@@ -31,6 +34,10 @@ python3 -c 'import sys; raise SystemExit(not ((3, 12) <= sys.version_info < (3, 
   fail "Python 3.12 or 3.13 is required"
 python3 -m venv --help >/dev/null 2>&1 || fail "Python venv support is missing; install python3-venv"
 case "$MDNS_ENABLED" in 0|1) ;; *) fail "OUTPOST_MDNS must be 0 or 1" ;; esac
+case "$ALLOW_UNVERIFIED_CI" in
+  0|1) ;;
+  *) fail "OUTPOST_ALLOW_UNVERIFIED_CI must be 0 or 1" ;;
+esac
 case "$HAILO_RELEASE_GRACE_SECONDS" in
   ''|*[!0-9]*) fail "OUTPOST_HAILO_RELEASE_GRACE_SECONDS must be an integer from 0 to 30" ;;
 esac
@@ -38,8 +45,10 @@ esac
   fail "OUTPOST_HAILO_RELEASE_GRACE_SECONDS must be an integer from 0 to 30"
 
 if command -v git >/dev/null 2>&1 && git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  FULL_REVISION=$(git -C "$PROJECT_DIR" rev-parse HEAD)
   REVISION=$(git -C "$PROJECT_DIR" rev-parse --short=12 HEAD)
 else
+  FULL_REVISION=
   REVISION=$(date -u +%Y%m%dT%H%M%SZ)
 fi
 RELEASE_ID=$(date -u +%Y%m%dT%H%M%SZ)-$REVISION
@@ -47,6 +56,17 @@ RELEASE_DIR=$PREFIX/releases/$RELEASE_ID
 CURRENT_LINK=$PREFIX/current
 PREVIOUS_LINK=$PREFIX/previous
 OLD_TARGET=$(readlink "$CURRENT_LINK" 2>/dev/null || true)
+
+if [ -n "$OLD_TARGET" ] && [ -n "$FULL_REVISION" ]; then
+  if [ "$ALLOW_UNVERIFIED_CI" = 1 ]; then
+    echo "WARNING: proceeding with an unverified upgrade by explicit operator override." >&2
+  elif [ "$CI_VERIFIED_REVISION" != "$FULL_REVISION" ] || [ -z "$CI_EVIDENCE" ]; then
+    fail "upgrades from a Git checkout require exact-commit green CI via deploy/update.sh; "\
+"for an offline emergency only, set OUTPOST_ALLOW_UNVERIFIED_CI=1"
+  else
+    echo "Accepted exact-commit CI evidence for $FULL_REVISION"
+  fi
+fi
 
 getent group outpost >/dev/null 2>&1 || groupadd --system outpost
 getent group outpost-sdr >/dev/null 2>&1 || groupadd --system outpost-sdr
@@ -63,6 +83,10 @@ udevadm trigger --subsystem-match=usb --action=change
 
 echo "Staging Outpost release $RELEASE_ID"
 python3 -m venv "$RELEASE_DIR"
+if [ -n "$CI_EVIDENCE" ] && [ "$CI_VERIFIED_REVISION" = "$FULL_REVISION" ]; then
+  printf '%s\n' "$CI_EVIDENCE" > "$RELEASE_DIR/ci-evidence.json"
+  chmod 0644 "$RELEASE_DIR/ci-evidence.json"
+fi
 "$RELEASE_DIR/bin/pip" install --upgrade pip
 "$RELEASE_DIR/bin/pip" install -c "$PROJECT_DIR/requirements.lock" "$PROJECT_DIR[radio]"
 "$RELEASE_DIR/bin/pip" check

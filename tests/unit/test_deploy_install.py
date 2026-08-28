@@ -57,6 +57,11 @@ def test_installer_stages_health_checked_release_with_rollback() -> None:
     assert "OUTPOST_MDNS:-1" in script
     assert "render_avahi.py" in script
     assert "avahi-daemon.service" in script
+    assert "OUTPOST_CI_VERIFIED_REVISION" in script
+    assert "OUTPOST_CI_EVIDENCE" in script
+    assert "OUTPOST_ALLOW_UNVERIFIED_CI" in script
+    assert "upgrades from a Git checkout require exact-commit green CI" in script
+    assert '"$RELEASE_DIR/ci-evidence.json"' in script
 
     unit = (Path(__file__).parents[2] / "deploy" / "outpost.service").read_text()
     assert "TimeoutStopSec=30" in unit
@@ -85,10 +90,11 @@ def test_release_update_verifies_artifacts_before_checkout_and_install() -> None
     script = (Path(__file__).parents[2] / "deploy" / "update.sh").read_text()
 
     checksum = script.index("tools/verify_release.py")
-    attestation = script.index('gh attestation verify "$artifact"')
+    attestation = script.index('"$GH" attestation verify "$artifact"')
+    ci_verification = script.index("tools/check_ci_evidence.py")
     checkout = script.index('git -C "$PROJECT_DIR" checkout --detach "$target"')
-    install = script.index('sudo "$SCRIPT_DIR/install.sh"')
-    assert checksum < attestation < checkout < install
+    install = script.index('"$SCRIPT_DIR/install.sh"')
+    assert checksum < attestation < ci_verification < checkout < install
     assert 'case "$TARGET" in' in script
     assert "v[0-9]*)" in script
     assert "source checkout with uncommitted changes" not in script
@@ -97,6 +103,22 @@ def test_release_update_verifies_artifacts_before_checkout_and_install() -> None
     assert (
         "Development update from $TARGET; signed release verification applies to v* tags." in script
     )
+    assert 'OUTPOST_CI_VERIFIED_REVISION="$target"' in script
+    assert 'OUTPOST_ALLOW_UNVERIFIED_CI="$ALLOW_UNVERIFIED_CI"' in script
+    assert 'OUTPOST_HAILORT_WHEEL="$HAILORT_WHEEL"' in script
+    assert "Refusing to deploy $target without successful exact-commit CI." in script
+    assert "origin fetch failed; using only the already-local target revision" in script
+    assert "/home/linuxbrew/.linuxbrew/bin/gh" in script
+
+    pre_push = (Path(__file__).parents[2] / "tools" / "pre-push.sh").read_text()
+    workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "ci.yml").read_text()
+    expected_scope = (
+        "src tests tools/build_release_metadata.py tools/check_capabilities.py "
+        "tools/check_ci_evidence.py tools/verify_release.py deploy/configure.py "
+        "deploy/render_avahi.py"
+    )
+    assert expected_scope in " ".join(pre_push.replace("\\\n", "").split())
+    assert " ".join(workflow.split()).count(expected_scope) == 2
 
 
 def test_setup_hotspot_applies_network_isolation_before_activation(

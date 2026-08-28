@@ -39,14 +39,24 @@ config, database, API/channel key, member export, precise location, or tile cach
 
 ## Quality gates
 
+Before pushing, run the lightweight formatting helper. Its scope is kept identical to the first CI
+gate so formatting drift cannot hide the later checks:
+
 ```sh
-.venv/bin/ruff format src tests
-.venv/bin/ruff check src tests
+./tools/pre-push.sh
+```
+
+```sh
+.venv/bin/ruff format --check src tests tools/build_release_metadata.py tools/check_capabilities.py \
+  tools/check_ci_evidence.py tools/verify_release.py deploy/configure.py deploy/render_avahi.py
+.venv/bin/ruff check src tests tools/build_release_metadata.py tools/check_capabilities.py \
+  tools/check_ci_evidence.py tools/verify_release.py deploy/configure.py deploy/render_avahi.py
 .venv/bin/mypy
 .venv/bin/python tools/check_capabilities.py --check
 .venv/bin/pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json
 .venv/bin/python tools/check_critical_coverage.py coverage.json
-sh -n deploy/install.sh deploy/install-test-host.sh deploy/smoke-package.sh
+sh -n deploy/install.sh deploy/install-test-host.sh deploy/rollback.sh deploy/update.sh \
+  deploy/smoke-package.sh tools/pre-push.sh
 sh deploy/smoke-package.sh
 .venv/bin/pip-audit
 ```

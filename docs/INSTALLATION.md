@@ -194,14 +194,26 @@ used interactively; the local USGS pack is the fallback.
 2. Review release and configuration changes.
 3. From a clean checkout, pass a signed release tag such as `./deploy/update.sh v0.2.0`. The updater
    requires the GitHub CLI and verifies checksums, metadata, provenance attestations, and the exact
-   tagged commit before activation. `./deploy/update.sh origin/main` remains available for explicit
-   development installs but is not a verified release. A pull by itself does not update the running
-   process. See [Releases and artifact verification](RELEASES.md).
+   tagged commit before activation. Tagged and development updates also require a completed,
+   successful `ci.yml` run whose commit exactly matches the target. The normalized run evidence is
+   stored in the activated release. A pull by itself does not update the running process. See
+   [Releases and artifact verification](RELEASES.md).
 4. Compare active config with `/etc/outpost/config.yaml.dist`.
 5. Verify health, login, radio connectivity, local-AI readiness when required, and a mesh `PING`.
 
 Migrations run forward at startup. Do not downgrade a production database without a specific
 recovery plan.
+
+A fresh install remains available without internet or GitHub so a field node can be commissioned
+offline. An upgrade from a Git checkout is fail-closed when CI cannot be verified. Only when an
+existing installation must be repaired without network access may the operator explicitly run
+`OUTPOST_ALLOW_UNVERIFIED_CI=1 ./deploy/update.sh <local-ref>`. If origin is unreachable, only an
+already-local revision can be selected. The updater and installer print a warning, and the release
+receives no green-CI evidence file. Run the complete local gates first whenever the field situation
+permits; the override is not a routine development shortcut.
+If `gh` is installed outside PATH, set `OUTPOST_GH` to its executable; the standard Linuxbrew path
+is detected automatically. Hardware-specific installer inputs such as `OUTPOST_HAILORT_WHEEL` and
+`OUTPOST_HAILO_VLM_MODEL` are forwarded through the guarded updater.
 
 ## Roll back
 

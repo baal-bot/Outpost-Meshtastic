@@ -12,8 +12,12 @@ import pytest
 ROOT = Path(__file__).parents[2]
 BUILD = runpy.run_path(str(ROOT / "tools" / "build_release_metadata.py"), run_name="release_build")
 VERIFY = runpy.run_path(str(ROOT / "tools" / "verify_release.py"), run_name="release_verify")
+CI_VERIFY = runpy.run_path(
+    str(ROOT / "tools" / "check_ci_evidence.py"), run_name="ci_evidence_verify"
+)
 build_metadata = cast(Callable[..., dict[str, Any]], BUILD["build_metadata"])
 verify_release = cast(Callable[[Path, str], dict[str, Any]], VERIFY["verify_release"])
+verified_run = cast(Callable[[object, str], dict[str, Any]], CI_VERIFY["verified_run"])
 
 
 def _sha256(path: Path) -> str:
@@ -101,6 +105,47 @@ def test_release_verification_rejects_wrong_tag(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="source tag or commit"):
         verify_release(release, "v1.2.4")
+
+
+def test_ci_evidence_requires_exact_completed_success() -> None:
+    commit = "a" * 40
+    runs = [
+        {
+            "headSha": commit,
+            "status": "in_progress",
+            "conclusion": "",
+            "databaseId": 10,
+        },
+        {
+            "headSha": "b" * 40,
+            "status": "completed",
+            "conclusion": "success",
+            "databaseId": 11,
+        },
+        {
+            "headSha": commit,
+            "status": "completed",
+            "conclusion": "success",
+            "databaseId": 12,
+            "url": "https://example.test/run/12",
+        },
+    ]
+
+    assert verified_run(runs, commit)["databaseId"] == 12
+
+
+@pytest.mark.parametrize(
+    "runs",
+    (
+        [],
+        [{"headSha": "b" * 40, "status": "completed", "conclusion": "success"}],
+        [{"headSha": "a" * 40, "status": "in_progress", "conclusion": ""}],
+        [{"headSha": "a" * 40, "status": "completed", "conclusion": "failure"}],
+    ),
+)
+def test_ci_evidence_rejects_missing_pending_or_failed_runs(runs: object) -> None:
+    with pytest.raises(ValueError, match="no successful completed run"):
+        verified_run(runs, "a" * 40)
 
 
 def test_release_verification_requires_spdx_sbom(tmp_path: Path) -> None:

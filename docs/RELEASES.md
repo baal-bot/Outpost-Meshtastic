@@ -38,9 +38,18 @@ Before changing the checkout or running the installer, the updater:
 5. verifies that the authenticated metadata commit is exactly the commit addressed by the Git
    tag.
 
-Any failed check stops the update before activation. `origin/main` and other development refs can
-still be installed deliberately for development, but the updater clearly reports that those refs
-do not have release verification. Production nodes should use only `v*` tags.
+Any failed check stops the update before activation. Every tag or development ref must also have a
+successful completed `ci.yml` run for its exact commit. The updater passes normalized CI evidence
+to the installer, which stores it as `ci-evidence.json` in that release. A direct Git-checkout
+upgrade cannot claim evidence or bypass this handoff. `origin/main` and other development refs can
+still be installed deliberately after CI, but they do not gain signed-release provenance.
+Production nodes should use only `v*` tags.
+
+Fresh field installation does not require GitHub access. For recovery of an existing offline node,
+`OUTPOST_ALLOW_UNVERIFIED_CI=1 ./deploy/update.sh <local-ref>` is the explicit emergency override.
+When origin cannot be fetched, the ref must already exist locally. The override is prominently
+warned and produces no green-CI evidence file; use it only after running whatever local gates the
+incident allows.
 
 To inspect a release without installing it:
 
