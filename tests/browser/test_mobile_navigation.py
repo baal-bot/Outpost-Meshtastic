@@ -361,6 +361,89 @@ def route_visual_content_api(page: object) -> None:
             "alert_delivery": {},
         },
     )
+    fulfill(
+        "**/api/v1/radio/config",
+        {
+            "available": True,
+            "connection": "serial",
+            "node_id": "!699c2f30",
+            "identity": {"long_name": "Pittsburgh Outpost", "short_name": "PGH"},
+            "device": {
+                "role": "CLIENT",
+                "rebroadcast_mode": "ALL",
+                "node_info_broadcast_secs": 10800,
+            },
+            "lora": {
+                "region": "US",
+                "modem_preset": "LONG_FAST",
+                "hop_limit": 3,
+                "tx_power": 0,
+                "tx_enabled": True,
+            },
+            "position": {
+                "fixed_position": True,
+                "gps_mode": "NOT_PRESENT",
+                "smart_broadcast": True,
+                "broadcast_secs": 0,
+                "latitude": 40.4406,
+                "longitude": -79.9959,
+                "altitude": 366,
+            },
+            "channels": [
+                {
+                    "index": 0,
+                    "role": "PRIMARY",
+                    "name": "LongFast",
+                    "psk": "default",
+                    "uplink_enabled": True,
+                    "downlink_enabled": True,
+                    "position_precision": 16,
+                    "muted": False,
+                },
+                {
+                    "index": 1,
+                    "role": "SECONDARY",
+                    "name": "Outpost",
+                    "psk": "AES-256",
+                    "uplink_enabled": False,
+                    "downlink_enabled": False,
+                    "position_precision": 0,
+                    "muted": False,
+                },
+            ],
+            "mqtt": {
+                "available": True,
+                "enabled": True,
+                "address": "mqtt.example.test",
+                "tls_enabled": True,
+                "encryption_enabled": True,
+                "root": "msh",
+                "username_configured": True,
+                "password_configured": True,
+                "json_enabled": False,
+                "proxy_to_client_enabled": False,
+                "map_reporting_enabled": False,
+            },
+            "options": {
+                "roles": ["CLIENT", "CLIENT_BASE"],
+                "rebroadcast_modes": ["ALL", "LOCAL_ONLY", "CORE_PORTNUMS_ONLY"],
+                "regions": ["US", "EU_868"],
+                "modem_presets": ["LONG_FAST", "LONG_SLOW"],
+                "gps_modes": ["DISABLED", "ENABLED", "NOT_PRESENT"],
+            },
+            "recommendations": {
+                "role": "CLIENT",
+                "modem_preset": "LONG_FAST",
+                "hop_limit": 3,
+                "tx_power": 0,
+                "mqtt_encryption": True,
+                "mqtt_tls": True,
+            },
+            "warnings": [],
+            "outpost_location": {"latitude": 40.4406, "longitude": -79.9959},
+            "outpost_policy_channels": [0, 1],
+        },
+    )
     fulfill("**/api/v1/incidents*", {"items": []})
     fulfill("**/api/v1/alerts*", {"items": []})
     fulfill("**/api/v1/events*", {"current": None})
@@ -1697,6 +1780,53 @@ def test_radio_message_log_explains_ack_not_requested(
         wait_for_navigation(page)
         page.get_by_text("no ACK requested", exact=True).wait_for()
         assert page.get_by_text("not_requested", exact=True).count() == 0
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_radio_configurator_guides_mqtt_and_uses_shared_live_settings(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    writes: list[dict[str, object]] = []
+    page.on(
+        "request",
+        lambda request: writes.append(request.post_data_json)
+        if request.method == "PUT" and request.url.endswith("/api/v1/radio/config")
+        else None,
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/radio.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        page.get_by_text("Pittsburgh Outpost · CLIENT", exact=True).wait_for()
+        page.get_by_role("button", name="Configure radio").click()
+        page.get_by_role("button", name="MQTT", exact=True).click()
+        assert page.get_by_text(
+            "These are the same live radio settings shown in Federation.", exact=False
+        ).is_visible()
+        page.locator("#radio-mqtt-address").fill("mqtt.changed.test")
+        page.locator(".radio-advanced summary").click()
+        page.locator("#radio-mqtt-json").check()
+        page.get_by_role("button", name="Save MQTT settings").click()
+        page.get_by_role("button", name="Write to radio").click()
+        page.wait_for_function(
+            "() => document.querySelector('#radio-mqtt-result').textContent.includes('Saved')"
+        )
+        assert writes[-1]["mqtt"]["address"] == "mqtt.changed.test"  # type: ignore[index]
+        assert writes[-1]["mqtt"]["json_enabled"] is True  # type: ignore[index]
+        assert "password" not in writes[-1]["mqtt"]  # type: ignore[operator]
+        accessibility = Axe().run(
+            page,
+            options={
+                "runOnly": {"type": "tag", "values": ["wcag2a", "wcag2aa", "wcag22aa"]},
+                "resultTypes": ["violations"],
+            },
+        )
+        assert accessibility.violations_count == 0, accessibility.generate_report()
         health.assert_clean()
     finally:
         page.close()

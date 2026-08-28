@@ -281,6 +281,8 @@ class OutpostApp:
             ai_test=self.test_ai,
             federation_relay=self.federation_relay,
             federation_topology=self.federation_topology,
+            radio_configuration_status=self.radio_configuration_status,
+            radio_configuration_configure=self.configure_radio,
         )
 
     def _start_background_task(
@@ -1962,6 +1964,33 @@ class OutpostApp:
 
     async def reconnect_radio(self) -> None:
         await self.radio.close()
+
+    def _radio_configuration_context(self, result: dict[str, Any]) -> dict[str, Any]:
+        location = self.config.node.location
+        result["outpost_location"] = (
+            {"latitude": location.lat, "longitude": location.lon}
+            if location is not None
+            else None
+        )
+        result["outpost_policy_channels"] = sorted(self.config.channels)
+        return result
+
+    async def radio_configuration_status(self) -> dict[str, Any]:
+        return self._radio_configuration_context(await self.radio.configuration_status())
+
+    async def configure_radio(
+        self, section: str, values: dict[str, Any]
+    ) -> dict[str, Any]:
+        if (
+            section == "channel"
+            and str(values.get("role", "")).upper() == "DISABLED"
+            and int(values.get("index", -1)) in self.config.channels
+        ):
+            raise ValueError(
+                "This channel is required by Outpost policy; change Outpost policy "
+                "before disabling it"
+            )
+        return self._radio_configuration_context(await self.radio.configure(section, values))
 
     async def _digest_loop(self) -> None:
         while True:

@@ -14,7 +14,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import make_asgi_app
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from outpost import __version__
 from outpost.ai import AIService
@@ -289,6 +289,92 @@ class FederationMqttBody(BaseModel):
     downlink_enabled: bool = True
 
 
+class RadioIdentityConfigBody(BaseModel):
+    long_name: str = Field(min_length=1, max_length=40)
+    short_name: str = Field(min_length=1, max_length=4)
+
+
+class RadioDeviceConfigBody(BaseModel):
+    role: Literal["CLIENT", "CLIENT_BASE"]
+    rebroadcast_mode: Literal["ALL", "LOCAL_ONLY", "CORE_PORTNUMS_ONLY"] = "ALL"
+    node_info_broadcast_secs: int = Field(default=10_800, ge=900, le=86_400)
+
+
+class RadioLoraConfigBody(BaseModel):
+    region: str = Field(min_length=2, max_length=24, pattern=r"^[A-Z0-9_]+$")
+    modem_preset: str = Field(min_length=2, max_length=40, pattern=r"^[A-Z0-9_]+$")
+    hop_limit: int = Field(default=3, ge=1, le=7)
+    tx_power: int = Field(default=0, ge=0, le=30)
+    tx_enabled: bool = True
+
+
+class RadioPositionConfigBody(BaseModel):
+    fixed_position: bool = False
+    gps_mode: str = Field(min_length=2, max_length=24, pattern=r"^[A-Z0-9_]+$")
+    smart_broadcast: bool = True
+    broadcast_secs: int = Field(default=0, ge=0, le=86_400)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    altitude: int = Field(default=0, ge=-500, le=10_000)
+
+    @model_validator(mode="after")
+    def fixed_coordinates_are_complete(self) -> RadioPositionConfigBody:
+        if self.fixed_position and (self.latitude is None or self.longitude is None):
+            raise ValueError("fixed position requires latitude and longitude")
+        return self
+
+
+class RadioChannelConfigBody(BaseModel):
+    index: int = Field(ge=0, le=7)
+    role: Literal["PRIMARY", "SECONDARY", "DISABLED"]
+    name: str = Field(default="", max_length=12)
+    psk: str | None = Field(default=None, max_length=44)
+    generate_psk: bool = False
+    uplink_enabled: bool = False
+    downlink_enabled: bool = False
+    position_precision: int = Field(default=0, ge=0, le=32)
+    muted: bool = False
+
+    @model_validator(mode="after")
+    def key_source_is_unambiguous(self) -> RadioChannelConfigBody:
+        if self.psk and self.generate_psk:
+            raise ValueError("provide a channel key or generate one, not both")
+        return self
+
+
+class RadioMqttConfigBody(FederationMqttBody):
+    username: str | None = Field(default=None, max_length=128)
+    password: str | None = Field(default=None, max_length=256)
+    json_enabled: bool | None = None
+    proxy_to_client_enabled: bool | None = None
+    map_reporting_enabled: bool | None = None
+
+
+class RadioConfigurationBody(BaseModel):
+    identity: RadioIdentityConfigBody | None = None
+    device: RadioDeviceConfigBody | None = None
+    lora: RadioLoraConfigBody | None = None
+    position: RadioPositionConfigBody | None = None
+    channel: RadioChannelConfigBody | None = None
+    mqtt: RadioMqttConfigBody | None = None
+
+    @model_validator(mode="after")
+    def exactly_one_section(self) -> RadioConfigurationBody:
+        populated = [
+            name for name in type(self).model_fields if getattr(self, name) is not None
+        ]
+        if len(populated) != 1:
+            raise ValueError("provide exactly one radio configuration section")
+        return self
+
+    def change(self) -> tuple[str, dict[str, Any]]:
+        section = next(
+            name for name in type(self).model_fields if getattr(self, name) is not None
+        )
+        value = getattr(self, section)
+        return section, value.model_dump()
+
+
 class FederationServiceBody(BaseModel):
     service: Literal["weather", "alerts", "knowledge"]
     lat: float | None = Field(default=None, ge=-90, le=90)
@@ -459,6 +545,10 @@ def create_web_app(
     ai_test: Callable[[str], Awaitable[dict[str, object]]] | None = None,
     federation_relay: FederationRelayService | None = None,
     federation_topology: FederationTopologyService | None = None,
+    radio_configuration_status: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+    radio_configuration_configure: (
+        Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
+    ) = None,
 ) -> FastAPI:
     app = FastAPI(title="Outpost API", version=__version__, docs_url="/api/docs")
 
@@ -498,6 +588,7 @@ def create_web_app(
         return (
             path.startswith("/api/v1/auth/accounts")
             or path.startswith("/api/v1/auth/mfa")
+            or path.startswith("/api/v1/radio/config")
             or path.startswith("/api/v1/federation/peers")
             or path.startswith("/api/v1/federation/mqtt")
             or path.startswith("/api/v1/federation/origins")
@@ -1655,6 +1746,53 @@ def create_web_app(
                         {"error": {"code": "service_unavailable", "message": str(error)}},
                         status_code=409,
                     )
+
+    if radio_configuration_status is not None:
+
+        @app.get("/api/v1/radio/config")
+        async def radio_configuration_view(response: Response) -> dict[str, Any]:
+            response.headers["Cache-Control"] = "no-store"
+            return await radio_configuration_status()
+
+    if radio_configuration_configure is not None:
+
+        @app.put("/api/v1/radio/config", response_model=None)
+        async def radio_configuration_update(
+            body: RadioConfigurationBody, response: Response
+        ) -> dict[str, Any] | Response:
+            response.headers["Cache-Control"] = "no-store"
+            section, values = body.change()
+            try:
+                result = await radio_configuration_configure(section, values)
+            except (ConnectionError, KeyError, TypeError, ValueError) as error:
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "radio_config_failed",
+                            "message": str(error),
+                        }
+                    },
+                    status_code=409,
+                    headers={"Cache-Control": "no-store"},
+                )
+            if database is not None:
+                secret_fields = {"password", "psk"}
+                changed_fields = sorted(
+                    name
+                    for name, value in values.items()
+                    if value is not None and name not in secret_fields
+                )
+                detail: dict[str, Any] = {"fields": changed_fields}
+                if section == "channel":
+                    detail["channel"] = int(values["index"])
+                await database.write(
+                    """
+                    INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
+                    VALUES('web',?,'radio.config_update',?,?,unixepoch())
+                    """,
+                    (current_actor_ref(), f"radio/{section}", json.dumps(detail)),
+                )
+            return result
 
     @app.get("/api/v1/status")
     async def status() -> dict[str, Any]:

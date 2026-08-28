@@ -14,7 +14,9 @@ phones and desktops and uses bundled assets so its interface remains available w
 - **Environment:** separate environmental map, weather/forecast, official alerts, earthquakes,
   astronomy, editable waypoints, and the reviewed RTL-SDR/SAME inbox and receiver health.
 - **Radio:** connection state, firmware/node details, telemetry, durable outbound state and
-  cancellation, airtime, reconnect, and MQTT.
+  cancellation, airtime, reconnect, and a guarded Meshtastic configurator for identity, connected
+  device role, legal LoRa profile, channels, fixed location, and MQTT. Channel keys and broker
+  credentials are write-only.
 - **Federation:** peer directory, pairing, transport policy, per-path transfer telemetry, durable
   retry/recovery health, sync policy/inbox, services, relay mail, and signed multi-hop custody queues
   with per-peer limits and operator origin-key review. Its topology workspace maps only active peers

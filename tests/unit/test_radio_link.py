@@ -1,7 +1,9 @@
 import asyncio
+import base64
 from types import SimpleNamespace
 
 import pytest
+from meshtastic.protobuf import channel_pb2, config_pb2, module_config_pb2
 
 from outpost.clock import VirtualClock
 from outpost.config import RadioConfig
@@ -40,7 +42,7 @@ async def test_callback_hands_message_to_event_loop_without_thread_clock_access(
 
 
 @pytest.mark.asyncio
-async def test_mqtt_configuration_is_written_to_radio_and_forces_encryption() -> None:
+async def test_limited_mqtt_configuration_preserves_advanced_values() -> None:
     writes: list[object] = []
     mqtt = SimpleNamespace(
         enabled=False,
@@ -72,9 +74,87 @@ async def test_mqtt_configuration_is_written_to_radio_and_forces_encryption() ->
 
     assert status["enabled"] is True
     assert mqtt.encryption_enabled is True
-    assert mqtt.proxy_to_client_enabled is False
+    assert mqtt.proxy_to_client_enabled is True
     assert settings.uplink_enabled and settings.downlink_enabled
     assert writes == ["mqtt", 0]
+
+
+@pytest.mark.asyncio
+async def test_radio_configuration_is_guarded_and_never_reads_back_secrets() -> None:
+    writes: list[object] = []
+    local_config = config_pb2.Config()
+    module_config = module_config_pb2.ModuleConfig()
+    link = MeshtasticRadioLink(RadioConfig(), VirtualClock())
+
+    link._set_enum(local_config.device, "role", "CLIENT")
+    link._set_enum(local_config.device, "rebroadcast_mode", "ALL")
+    local_config.device.node_info_broadcast_secs = 10_800
+    link._set_enum(local_config.lora, "region", "US")
+    link._set_enum(local_config.lora, "modem_preset", "LONG_FAST")
+    local_config.lora.hop_limit = 3
+    link._set_enum(local_config.position, "gps_mode", "NOT_PRESENT")
+    module_config.mqtt.username = "operator"
+    module_config.mqtt.password = "".join(("do", "-not-return"))
+
+    channels = []
+    for role, name in (("PRIMARY", "LongFast"), ("SECONDARY", "Outpost")):
+        channel = channel_pb2.Channel()
+        link._set_enum(channel, "role", role)
+        channel.settings.name = name
+        channel.settings.psk = b"secret-key-material-that-stays-radio"
+        channels.append(channel)
+    local = SimpleNamespace(
+        localConfig=local_config,
+        moduleConfig=module_config,
+        channels=channels,
+        setOwner=lambda *_: None,
+        writeConfig=lambda name: writes.append(name),
+        writeChannel=lambda index: writes.append(index),
+    )
+    link._interface = SimpleNamespace(
+        localNode=local,
+        getMyNodeInfo=lambda: {
+            "user": {"longName": "Outpost", "shortName": "OUT"},
+            "position": {"latitude": 40.44, "longitude": -79.99, "altitude": 366},
+        },
+    )
+
+    status = await link.configuration_status()
+
+    assert status["mqtt"]["username_configured"] is True
+    assert status["mqtt"]["password_configured"] is True
+    assert status["position"]["altitude"] == 366
+    assert "do-not-return" not in str(status)
+    assert "secret-key-material" not in str(status)
+
+    with pytest.raises(ValueError, match="CLIENT or CLIENT_BASE"):
+        await link.configure(
+            "device",
+            {
+                "role": "ROUTER",
+                "rebroadcast_mode": "ALL",
+                "node_info_broadcast_secs": 10_800,
+            },
+        )
+
+    result = await link.configure(
+        "channel",
+        {
+            "index": 1,
+            "role": "SECONDARY",
+            "name": "Rescue",
+            "psk": None,
+            "generate_psk": True,
+            "uplink_enabled": True,
+            "downlink_enabled": True,
+            "position_precision": 16,
+            "muted": False,
+        },
+    )
+    assert len(base64.b64decode(result["generated_psk"])) == 32
+    assert channels[1].settings.name == "Rescue"
+    assert writes == [1]
+    assert "generated_psk" not in await link.configuration_status()
 
 
 @pytest.mark.asyncio

@@ -94,6 +94,9 @@ Never approve based only on a claimed Outpost name.
 Meshtastic's default MQTT infrastructure may improve reach but is not a new trust domain. Discovery
 is untrusted and paired payload authentication is still required. Broker availability/retention,
 topic visibility, and radio uplink/downlink settings affect behavior. Keep it off unless understood.
+The limited controls on this page and the full configurator on **Radio** share live firmware state;
+changes made in either view are reflected in the other without clearing advanced settings or stored
+credentials.
 
 ## Peer services and mail
 

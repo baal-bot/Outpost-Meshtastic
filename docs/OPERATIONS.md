@@ -83,6 +83,17 @@ sudo systemctl start outpost
 
 Then verify serial path, node ID, DM `PING`, channel handling, positions, and telemetry.
 
+For normal changes, use **Radio → Configure radio**. It reads live settings from the attached
+Meshtastic node and requires recent operator confirmation before every write. Outpost limits device
+roles to `CLIENT` and `CLIENT_BASE`, keeps serial enabled, removes unsafe frequency/duty-cycle
+overrides when saving a LoRa profile, and will not disable a channel referenced by Outpost policy.
+Generated channel keys are shown once and are never retained in the database or audit log.
+
+The compact MQTT controls under **Federation** and the full MQTT form under **Radio** operate on the
+same radio state. Compact edits preserve credentials and advanced flags. Outpost always enables
+Meshtastic MQTT channel encryption; JSON and map reporting can disclose identity or location and
+should remain disabled unless the broker and operating policy explicitly require them.
+
 Queued work survives a normal service restart or host power loss until its traffic-class TTL. An
 item interrupted at the radio-call boundary may be transmitted again after recovery because the
 radio cannot provide a transactional exactly-once boundary; its outbox ID still produces only one

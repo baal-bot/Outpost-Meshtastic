@@ -50,6 +50,15 @@ async function loadMqtt() {
   panel.innerHTML = `<div class="heading"><div><p class="eyebrow">MQTT TRANSPORT</p><h2>Meshtastic gateway</h2></div><span class="chip ${mqtt.enabled ? "active" : ""}">${mqtt.enabled ? "Enabled" : "Disabled"}</span></div><p class="mqtt-note">The radio firmware handles broker access and Meshtastic channel encryption. Discovery still creates pending peers and never establishes trust.</p><form id="mqtt-form" class="mqtt-form"><label><span>Enable MQTT</span><input id="mqtt-enabled" type="checkbox" ${mqtt.enabled ? "checked" : ""}></label><label><span>Broker address</span><input id="mqtt-address" value="${safe(mqtt.address)}" placeholder="mqtt.meshtastic.org (firmware default)"></label><label><span>Root topic</span><input id="mqtt-root" value="${safe(mqtt.root || "msh")}"></label><label><span>Federation channel</span><select id="mqtt-channel">${mqtt.channels.map(channel => `<option value="${channel.index}">${safe(channel.name)} · ${channel.index}</option>`).join("")}</select></label><label><span>Use TLS</span><input id="mqtt-tls" type="checkbox" ${mqtt.tls_enabled ? "checked" : ""}></label><label><span>Uplink announcements</span><input id="mqtt-uplink" type="checkbox" ${mqtt.channels[0]?.uplink_enabled ? "checked" : ""}></label><label><span>Receive federation traffic</span><input id="mqtt-downlink" type="checkbox" ${mqtt.channels[0]?.downlink_enabled ? "checked" : ""}></label><button>Apply to radio</button><p id="mqtt-result"></p></form>`;
   const policy = document.querySelector(".path-grid").closest(".panel");
   policy.parentElement.insertBefore(panel, policy);
+  const activeChannel = mqtt.channels.find(channel => channel.uplink_enabled || channel.downlink_enabled);
+  if (activeChannel) $("mqtt-channel").value = String(activeChannel.index);
+  const syncChannelState = () => {
+    const channel = mqtt.channels.find(entry => entry.index === Number($("mqtt-channel").value));
+    $("mqtt-uplink").checked = Boolean(channel?.uplink_enabled);
+    $("mqtt-downlink").checked = Boolean(channel?.downlink_enabled);
+  };
+  $("mqtt-channel").addEventListener("change", syncChannelState);
+  syncChannelState();
   $("mqtt-form").addEventListener("submit", async event => {
     event.preventDefault();
     $("mqtt-result").textContent = "Writing radio configuration…";

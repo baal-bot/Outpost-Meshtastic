@@ -123,6 +123,8 @@ async function initialize() {
     return;
   }
   csrfToken = (await response.json()).csrf_token;
+  const {initRadioConfigurator} = await import("/radio-config.js");
+  await initRadioConfigurator({api});
   await refresh();
   const {scheduler} = await import("/refresh-scheduler.js");
   scheduler.schedule("radio-main", refresh, {interval:10000});
