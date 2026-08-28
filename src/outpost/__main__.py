@@ -7,10 +7,12 @@ import uvicorn
 from outpost.app import OutpostApp
 from outpost.config import load_config
 from outpost.systemd import notify, watchdog
+from outpost.web.transport import uvicorn_options
 
 
 def main() -> None:
     config = load_config()
+    server_options = uvicorn_options(config.web)
     application = OutpostApp(config)
 
     async def serve() -> None:
@@ -21,7 +23,11 @@ def main() -> None:
         )
         server = uvicorn.Server(
             uvicorn.Config(
-                application.web, host=config.web.bind, port=config.web.port, log_level="info"
+                application.web,
+                host=config.web.bind,
+                port=config.web.port,
+                log_level="info",
+                **server_options,
             )
         )
         notify("READY=1")

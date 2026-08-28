@@ -7,6 +7,7 @@ import platform
 import re
 import shutil
 import sqlite3
+import ssl
 import subprocess
 import time
 import urllib.error
@@ -66,6 +67,11 @@ def diagnostic_summary(config: Config) -> dict[str, object]:
             "enabled": config.modules.ai.enabled,
             "provider": config.ai.provider,
             "model": config.ai.model,
+        },
+        "web": {
+            "bind": config.web.bind,
+            "port": config.web.port,
+            "transport_mode": config.web.transport.mode,
         },
         "modules": config.modules.model_dump(),
     }
@@ -170,9 +176,16 @@ def _service_status() -> dict[str, object]:
 
 
 def _live_status(config: Config) -> dict[str, Any]:
-    url = f"http://127.0.0.1:{config.web.port}/api/v1/diagnostics/status"
+    direct_https = config.web.transport.mode == "direct_https"
+    scheme = "https" if direct_https else "http"
+    url = f"{scheme}://127.0.0.1:{config.web.port}/api/v1/diagnostics/status"
     try:
-        with urllib.request.urlopen(url, timeout=3) as response:  # noqa: S310
+        if direct_https:
+            context = ssl._create_unverified_context()  # noqa: SLF001, S323
+            request = urllib.request.urlopen(url, timeout=3, context=context)  # noqa: S310
+        else:
+            request = urllib.request.urlopen(url, timeout=3)  # noqa: S310
+        with request as response:
             content = response.read(1024 * 1024 + 1)
         if len(content) > 1024 * 1024:
             return {"reachable": False, "reason": "response_too_large"}

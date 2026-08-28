@@ -62,11 +62,16 @@ def test_installer_stages_health_checked_release_with_rollback() -> None:
     assert "OUTPOST_ALLOW_UNVERIFIED_CI" in script
     assert "upgrades from a Git checkout require exact-commit green CI" in script
     assert '"$RELEASE_DIR/ci-evidence.json"' in script
+    assert '"$CONFIG_DIR/tls"' in script
+    assert 'WEB_TRANSPORT_MODE" = direct_https' in script
+    assert 'config.web.transport.mode == "direct_https"' in script
+    assert "health_probe" in script
 
     unit = (Path(__file__).parents[2] / "deploy" / "outpost.service").read_text()
     assert "TimeoutStopSec=30" in unit
     assert "StartLimitIntervalSec=300" in unit
     assert "StartLimitBurst=5" in unit
+    assert "uvicorn_options(load_config().web)" in unit
 
     hotspot = (Path(__file__).parents[2] / "deploy" / "setup-hotspot.sh").read_text()
     assert "802-11-wireless.ap-isolation yes" in hotspot
@@ -74,6 +79,7 @@ def test_installer_stages_health_checked_release_with_rollback() -> None:
     assert "hook forward" in hotspot
     assert "outpost-setup-hotspot-expiry" in hotspot
     assert '[ "$minutes" -ge 5 ] && [ "$minutes" -le 60 ]' in hotspot
+    assert '"$transport" = trusted_http' in hotspot
 
 
 def test_acceptance_host_installer_keeps_test_tools_out_of_production() -> None:

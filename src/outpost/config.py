@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from ipaddress import ip_network
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -325,10 +326,49 @@ class WebAuth(StrictModel):
     session_hours: int = 12
 
 
+class WebTransport(StrictModel):
+    mode: Literal["trusted_http", "direct_https", "trusted_proxy"] = "trusted_http"
+    certificate_file: Path | None = None
+    private_key_file: Path | None = None
+    trusted_proxies: list[str] = Field(default_factory=list)
+    public_port: int = Field(default=443, ge=1, le=65535)
+    hsts_seconds: int = Field(default=31_536_000, ge=0, le=63_072_000)
+
+    @model_validator(mode="after")
+    def validate_mode(self) -> WebTransport:
+        if self.mode == "direct_https":
+            if self.certificate_file is None or self.private_key_file is None:
+                raise ValueError(
+                    "web.transport direct_https requires certificate_file and private_key_file"
+                )
+            if not self.certificate_file.is_absolute() or not self.private_key_file.is_absolute():
+                raise ValueError("web.transport TLS file paths must be absolute")
+            if self.trusted_proxies:
+                raise ValueError("direct_https must not configure trusted_proxies")
+        elif self.mode == "trusted_proxy":
+            if not self.trusted_proxies:
+                raise ValueError("trusted_proxy requires at least one explicit trusted proxy")
+            if self.certificate_file is not None or self.private_key_file is not None:
+                raise ValueError("trusted_proxy TLS material belongs on the terminating proxy")
+        elif self.certificate_file is not None or self.private_key_file is not None:
+            raise ValueError("trusted_http does not use TLS certificate files")
+        if self.mode != "trusted_proxy" and self.public_port != 443:
+            raise ValueError("web.transport.public_port applies only to trusted_proxy")
+        for value in self.trusted_proxies:
+            try:
+                network = ip_network(value, strict=False)
+            except ValueError as error:
+                raise ValueError(f"invalid trusted proxy address or network: {value}") from error
+            if network.prefixlen == 0:
+                raise ValueError("trusted proxy networks must not trust every address")
+        return self
+
+
 class WebConfig(StrictModel):
     bind: str = "0.0.0.0"  # noqa: S104 - LAN bind is an explicit product requirement.
     port: int = Field(default=8080, ge=1, le=65535)
     auth: WebAuth = Field(default_factory=WebAuth)
+    transport: WebTransport = Field(default_factory=WebTransport)
 
 
 class RetentionConfig(StrictModel):

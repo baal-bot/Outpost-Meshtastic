@@ -11,7 +11,7 @@ Group=outpost
 SupplementaryGroups=dialout outpost-sdr
 WorkingDirectory=/var/lib/outpost
 Environment=OUTPOST_CONFIG=/etc/outpost/config.yaml
-ExecStartPre=/opt/outpost/current/bin/python -c "from outpost.config import load_config; load_config()"
+ExecStartPre=/opt/outpost/current/bin/python -c "from outpost.config import load_config; from outpost.web.transport import uvicorn_options; uvicorn_options(load_config().web)"
 ExecStart=/opt/outpost/current/bin/python -m outpost
 NoNewPrivileges=yes
 PrivateTmp=yes

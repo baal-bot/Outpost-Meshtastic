@@ -31,8 +31,8 @@ The checklist covers:
 
 ## Local discovery
 
-The installer writes an Avahi `_http._tcp` service for the configured dashboard port and enables it
-when `avahi-daemon` is installed. On a LAN with mDNS support, open:
+The installer writes an Avahi `_http._tcp` or `_https._tcp` service for the configured dashboard
+transport and enables it when `avahi-daemon` is installed. On a LAN with mDNS support, open:
 
 ```text
 http://HOSTNAME.local:8080/
@@ -42,7 +42,8 @@ Use the host's actual static hostname and configured port. If the installer repo
 absent, installing `avahi-daemon` requires package-network access; then run
 `sudo systemctl enable --now avahi-daemon`. Set `OUTPOST_MDNS=0` only when site policy provides a
 different discovery mechanism. mDNS announces the local service—it does not add WAN exposure,
-authentication, or TLS.
+authentication, or create TLS. Most sites should keep it operator-only while community members use
+Outpost over mesh.
 
 ## Temporary setup hotspot
 
@@ -61,6 +62,10 @@ forwarded traffic, and limits host input to DHCP, DNS/mDNS, and the configured d
 Plain HTTP port 80 redirects to the dashboard for a captive-style setup entry point. A transient
 systemd timer removes the NetworkManager connection and its password at expiry; `stop` removes it
 early. The script requires NetworkManager (`nmcli`), nftables, and systemd.
+
+The hotspot requires `web.transport.mode: trusted_http`; it never silently weakens configured TLS
+or proxy operation. For isolated recovery, switch modes locally, validate and restart Outpost, then
+start the hotspot. See [Web transport and network boundary](WEB-TRANSPORT.md).
 
 This is a local bootstrap path, not a general guest network or an internet-sharing feature. Do not
 run it on a Wi-Fi interface needed for the node's backhaul. Stop it as soon as permanent LAN access

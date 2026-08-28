@@ -20,6 +20,7 @@ from outpost import __version__
 from outpost.ai import AIService
 from outpost.ai.store import AIStore
 from outpost.bbs.admin import BBSAdmin
+from outpost.config import WebConfig
 from outpost.env import (
     AstronomyService,
     CapAlertService,
@@ -48,6 +49,7 @@ from outpost.web.auth import MfaChallenge, WebAuthService
 from outpost.web.member_triage import MemberTriageError, MemberTriageService
 from outpost.web.operator_inbox import OperatorInboxService
 from outpost.web.settings import RuntimeSettings
+from outpost.web.transport import WebTransportMiddleware, transport_status
 
 
 class LoginBody(BaseModel):
@@ -570,8 +572,10 @@ def create_web_app(
     radio_configuration_apply: (
         Callable[[str, str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
     ) = None,
+    web_config: WebConfig | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Outpost API", version=__version__, docs_url="/api/docs")
+    effective_web_config = web_config or WebConfig()
 
     def effective_modules() -> dict[str, bool]:
         if module_provider is not None:
@@ -655,6 +659,10 @@ def create_web_app(
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if request.url.scheme == "https" and effective_web_config.transport.hsts_seconds:
+            response.headers["Strict-Transport-Security"] = (
+                f"max-age={effective_web_config.transport.hsts_seconds}"
+            )
         if request.url.path.endswith((".html", ".js", ".css")) or request.url.path == "/":
             response.headers["Cache-Control"] = "no-cache"
         if request.url.path.startswith("/api/v1/auth/") or request.url.path == (
@@ -1916,6 +1924,13 @@ def create_web_app(
     @app.get("/api/v1/status")
     async def status() -> dict[str, Any]:
         return status_provider()
+
+    @app.get("/api/v1/web/transport", tags=["web-transport"])
+    async def web_transport(request: Request) -> dict[str, object]:
+        return transport_status(
+            effective_web_config,
+            request_secure=request.url.scheme == "https",
+        )
 
     @app.get("/api/v1/modules")
     async def modules() -> dict[str, Any]:
@@ -3998,4 +4013,5 @@ def create_web_app(
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="dashboard")
+    app.add_middleware(WebTransportMiddleware, config=effective_web_config.transport)
     return app

@@ -51,6 +51,10 @@ def main() -> None:
     data: dict[str, Any] = yaml.safe_load(args.config.read_text()) or {}
     node, radio = data["node"], data["radio"]
     print("\nOutpost first-run setup. Press Enter to accept each default.\n")
+    print(
+        "Web access defaults to operator-only trusted local HTTP; community access remains "
+        "on the mesh. Optional HTTPS/proxy modes can be configured after setup.\n"
+    )
     node["name"] = ask("Outpost name", str(node["name"]))
     node["short_name"] = ask("Radio short name (1-4 bytes)", str(node["short_name"]))
     node["operator_contact"] = ask("Operator contact", str(node["operator_contact"]))

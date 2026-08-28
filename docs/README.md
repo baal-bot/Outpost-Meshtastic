@@ -20,6 +20,7 @@ detailed intended product design.
 - [Meshtastic interface](MESH-INTERFACE.md)
 - [Mesh command reference](COMMANDS.md)
 - [Security and privacy](SECURITY.md)
+- [Web transport and network boundary](WEB-TRANSPORT.md)
 
 ## Federation operators
 

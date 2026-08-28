@@ -152,6 +152,28 @@ if (navigation) {
   }).join("");
 }
 
+async function showTransportBoundary(role) {
+  if (role === "viewer" || document.querySelector(".web-transport-banner")) return;
+  const response = await nativeFetch("/api/v1/web/transport", {cache: "no-store"});
+  if (!response.ok) return;
+  const transport = await response.json();
+  if (!transport.warning) return;
+  const main = document.querySelector("main");
+  if (!main) return;
+  const banner = document.createElement("aside");
+  banner.className = "web-transport-banner";
+  banner.setAttribute("role", "status");
+  const title = document.createElement("b");
+  title.textContent = transport.warning.title;
+  const message = document.createElement("span");
+  message.textContent = transport.warning.message;
+  const link = document.createElement("a");
+  link.href = "/api/v1/web/transport";
+  link.textContent = "Transport status →";
+  banner.append(title, message, link);
+  main.prepend(banner);
+}
+
 async function showOperatorIdentity() {
   try {
     const response = await nativeFetch("/api/v1/auth/session", {cache: "no-store"});
@@ -178,6 +200,8 @@ async function showOperatorIdentity() {
       }
       const main = document.querySelector("main");
       main?.insertAdjacentHTML("afterbegin", '<div class="read-only-banner" role="status"><b>Aggregate wallboard</b><span>Identities, message content, locations, welfare, mail, configuration, and operator data are not available to this display.</span></div>');
+    } else {
+      await showTransportBoundary(session.role);
     }
   } catch (_) {
     // Identity presentation is optional while the authenticated page remains usable.
@@ -185,6 +209,7 @@ async function showOperatorIdentity() {
 }
 
 const operatorIdentity = showOperatorIdentity();
+window.addEventListener("outpost:authenticated", showOperatorIdentity);
 
 const moduleLinks = {
   BBS: "bbs",

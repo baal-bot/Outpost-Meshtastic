@@ -107,3 +107,11 @@ def test_mdns_declaration_escapes_identity_and_advertises_dashboard() -> None:
     assert "<type>_http._tcp</type>" in declaration
     assert "<port>8181</port>" in declaration
     assert "<txt-record>application=outpost</txt-record>" in declaration
+    assert "<txt-record>transport=http</txt-record>" in declaration
+
+    direct_tls = render_avahi("Secure Outpost", 8443, "direct_https", 443)
+    assert "<type>_https._tcp</type>" in direct_tls
+    assert "<port>8443</port>" in direct_tls
+    proxy_tls = render_avahi("Proxy Outpost", 8080, "trusted_proxy", 443)
+    assert "<type>_https._tcp</type>" in proxy_tls
+    assert "<port>443</port>" in proxy_tls

@@ -17,6 +17,7 @@ import uvicorn
 from axe_playwright_python.sync_playwright import Axe
 from PIL import Image
 
+from outpost.config import WebConfig
 from outpost.web.api import create_web_app
 
 playwright = pytest.importorskip("playwright.sync_api")
@@ -150,7 +151,7 @@ def assert_visual_signature(
 
 @pytest.fixture(scope="module")
 def dashboard_url() -> Iterator[str]:
-    app = create_web_app(lambda: {"radio": "up"})
+    app = create_web_app(lambda: {"radio": "up"}, web_config=WebConfig(bind="127.0.0.1"))
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     sock.listen(128)
@@ -699,6 +700,40 @@ def test_operator_styles_follow_static_component_contract() -> None:
         source = script.read_text()
         assert 'createElement("link")' not in source, script.name
         assert "createElement('link')" not in source, script.name
+
+
+def test_operator_gets_one_nonblocking_http_boundary_notice(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url)
+    try:
+        page.route(
+            "**/api/v1/web/transport",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "mode": "trusted_http",
+                        "request_encrypted": False,
+                        "warning": {
+                            "code": "trusted_http_nonloopback",
+                            "title": "Trusted local HTTP",
+                            "message": "Dashboard traffic is not encrypted.",
+                        },
+                    }
+                ),
+            ),
+        )
+        page.reload(wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        notice = page.locator(".web-transport-banner")
+        notice.wait_for(state="visible")
+        assert notice.count() == 1
+        assert "not encrypted" in notice.text_content()
+        assert page.locator("#overview").is_visible()
+    finally:
+        page.close()
 
 
 @pytest.mark.parametrize("width", VIEWPORTS)

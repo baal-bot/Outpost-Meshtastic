@@ -16,6 +16,7 @@ HAILO_RELEASE_GRACE_SECONDS=${OUTPOST_HAILO_RELEASE_GRACE_SECONDS:-5}
 ALLOW_UNVERIFIED_CI=${OUTPOST_ALLOW_UNVERIFIED_CI:-0}
 CI_VERIFIED_REVISION=${OUTPOST_CI_VERIFIED_REVISION:-}
 CI_EVIDENCE=${OUTPOST_CI_EVIDENCE:-}
+WEB_TRANSPORT_MODE=trusted_http
 
 fail() { echo "Outpost install: $*" >&2; exit 1; }
 
@@ -23,6 +24,15 @@ wait_for_hailo_release() {
   if [ "$AI_PROVIDER" = hailo_vlm ] && [ "$HAILO_RELEASE_GRACE_SECONDS" -gt 0 ]; then
     echo "Waiting ${HAILO_RELEASE_GRACE_SECONDS}s for the Hailo device to be released"
     sleep "$HAILO_RELEASE_GRACE_SECONDS"
+  fi
+}
+
+health_probe() {
+  if [ "$WEB_TRANSPORT_MODE" = direct_https ]; then
+    # Loopback liveness is certificate-name agnostic; startup separately validates dates/key match.
+    curl -fkSs "$HEALTH_URL"
+  else
+    curl -fsS "$HEALTH_URL"
   fi
 }
 
@@ -77,6 +87,7 @@ install -d -m 0755 "$PREFIX" "$PREFIX/releases"
 install -d -m 0750 -o outpost -g outpost "$STATE_DIR" "$STATE_DIR/.data" \
   "$STATE_DIR/backups" "$STATE_DIR/models" /var/log/outpost
 install -d -m 0750 -o root -g outpost "$CONFIG_DIR"
+install -d -m 0750 -o root -g outpost "$CONFIG_DIR/tls"
 install -m 0644 "$SCRIPT_DIR/70-outpost-rtl-sdr.rules" /etc/udev/rules.d/70-outpost-rtl-sdr.rules
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=usb --action=change
@@ -113,6 +124,11 @@ else
   echo "First-run wizard skipped; edit $CONFIG_DIR/config.yaml before production use."
 fi
 OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" -c 'from outpost.config import load_config; load_config(); print("Configuration validated")'
+WEB_TRANSPORT_MODE=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
+from outpost.config import load_config
+print(load_config().web.transport.mode)
+PY
+)
 if [ "$MDNS_ENABLED" = 1 ]; then
   "$RELEASE_DIR/bin/python" "$SCRIPT_DIR/render_avahi.py" \
     --config "$CONFIG_DIR/config.yaml" --output /etc/avahi/services/outpost.service
@@ -232,7 +248,9 @@ fi
 if [ -z "$HEALTH_URL" ]; then
   HEALTH_URL=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
 from outpost.config import load_config
-print(f"http://127.0.0.1:{load_config().web.port}/api/v1/health")
+config = load_config()
+scheme = "https" if config.web.transport.mode == "direct_https" else "http"
+print(f"{scheme}://127.0.0.1:{config.web.port}/api/v1/health")
 PY
   )
 fi
@@ -323,7 +341,7 @@ systemctl start "$SERVICE_NAME"
 healthy=0
 attempt=0
 while [ "$attempt" -lt 30 ]; do
-  if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then healthy=1; break; fi
+  if health_probe >/dev/null 2>&1; then healthy=1; break; fi
   attempt=$((attempt + 1)); sleep 2
 done
 if [ "$healthy" -ne 1 ]; then

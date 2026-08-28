@@ -9,7 +9,7 @@ trusted local service, not an anonymous public web application.
 - Complete the short-lived local setup-token flow, set a permanent dashboard password, and create
   a named account for each person who operates the node.
 - Enable TOTP for administrator accounts and store their one-use recovery codes offline.
-- Limit port 8080 and `/metrics` to a LAN, VPN, or authenticated TLS proxy.
+- Limit the dashboard and `/metrics` to the operator LAN, VPN, or authenticated TLS proxy.
 - Protect `/etc/outpost`, `/var/lib/outpost`, backups, and radio keys.
 - Retain the dedicated non-login service account installed by the project.
 - Keep encrypted off-device backups and test recovery.
@@ -63,6 +63,12 @@ can still contain community-sensitive information.
 The optional setup hotspot is an expiring bootstrap boundary, not trusted infrastructure. It uses a
 generated WPA2 password, AP client isolation, no forwarding, and a host-input allowlist. Stop it as
 soon as LAN access works, and use a dedicated read-only account for unattended wall displays.
+
+Trusted local HTTP is a supported offline field mode, not a claim of encryption. Direct HTTPS and
+trusted-proxy HTTPS are optional. `Secure` cookies and HSTS follow the effective request scheme;
+forwarded scheme/client data is ignored unless its TCP peer is explicitly allowlisted. Deployment,
+firewall, certificate rotation, and recovery guidance is in
+[Web transport and network boundary](WEB-TRANSPORT.md).
 
 The audit API and dashboard redact credential-shaped keys and assignments before displaying or
 copying structured detail. This is a defense in depth, not permission to write secrets into audit

@@ -98,6 +98,11 @@ password:
 sudo outpost-setup-token show
 ```
 
+The default URL is intentionally plain HTTP for an offline, operator-only trusted LAN or setup
+hotspot. It requires no internet, DNS, or certificate. Do not expose it to a shared/WAN network.
+Operator-supplied direct HTTPS and explicitly trusted reverse-proxy/VPN modes are supported after
+initial setup; see [Web transport and network boundary](WEB-TRANSPORT.md).
+
 The first login consumes the token. Completing setup invalidates every dashboard session and asks
 you to sign in with the permanent password. If the token expires, is lost, or setup is interrupted,
 issue a replacement locally; this also revokes existing dashboard sessions:

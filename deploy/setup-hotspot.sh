@@ -54,7 +54,14 @@ from outpost.config import load_config
 print(load_config().web.port)
 PY
     )
+    transport=$(OUTPOST_CONFIG="$CONFIG" "$OUTPOST_PYTHON" - <<'PY'
+from outpost.config import load_config
+print(load_config().web.transport.mode)
+PY
+    )
     case "$port" in *[!0-9]*|'') fail "configured dashboard port is invalid" ;; esac
+    [ "$transport" = trusted_http ] || fail \
+      "setup hotspot requires trusted_http mode; use the documented local recovery procedure"
     active=$(nmcli -g GENERAL.CONNECTION device show "$interface" 2>/dev/null || true)
     if [ -n "$active" ] && [ "$active" != "--" ]; then
       fail "$interface is carrying '$active'; disconnect it explicitly before starting setup access"

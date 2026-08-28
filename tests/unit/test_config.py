@@ -31,6 +31,43 @@ def test_unsafe_no_auth_is_rejected() -> None:
         )
 
 
+def test_web_transport_defaults_to_offline_trusted_http() -> None:
+    config = Config()
+
+    assert config.web.transport.mode == "trusted_http"
+    assert config.web.transport.certificate_file is None
+    assert config.web.transport.trusted_proxies == []
+
+
+@pytest.mark.parametrize(
+    ("transport", "message"),
+    [
+        ({"mode": "direct_https"}, "certificate_file"),
+        (
+            {
+                "mode": "direct_https",
+                "certificate_file": "relative.pem",
+                "private_key_file": "/etc/outpost/tls/key.pem",
+            },
+            "absolute",
+        ),
+        ({"mode": "trusted_proxy"}, "explicit trusted proxy"),
+        (
+            {"mode": "trusted_proxy", "trusted_proxies": ["0.0.0.0/0"]},
+            "must not trust every address",
+        ),
+        (
+            {"mode": "trusted_proxy", "trusted_proxies": ["not-an-address"]},
+            "invalid trusted proxy",
+        ),
+        ({"mode": "trusted_http", "public_port": 8443}, "only to trusted_proxy"),
+    ],
+)
+def test_invalid_web_transport_is_rejected(transport: dict[str, object], message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        Config.model_validate({"web": {"transport": transport}})
+
+
 @pytest.mark.parametrize(
     "security",
     [

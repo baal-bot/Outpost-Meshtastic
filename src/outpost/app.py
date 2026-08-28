@@ -294,6 +294,7 @@ class OutpostApp:
             radio_configuration_status=self.radio_configuration_status,
             radio_configuration_preflight=self.preflight_radio_configuration,
             radio_configuration_apply=self.configure_radio,
+            web_config=self.config.web,
         )
 
     def _start_background_task(

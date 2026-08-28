@@ -160,6 +160,8 @@ async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp
     assert dashboard.status_code == 200 and "AIRTIME · ROLLING HOUR" in dashboard.text
     assert "Subsystem health" in client.get("/app.js").text
     assert "outpost.operator.authenticated" in client.get("/app.js").text
+    assert "login-transport-warning" in client.get("/app.js").text
+    assert "showTransportBoundary" in client.get("/nav.js").text
     assert "System capabilities" in dashboard.text
     assert client.get("/Figtree-Variable.ttf").status_code == 200
     operator = client.get("/operator.html")

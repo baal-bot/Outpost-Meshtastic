@@ -5,6 +5,9 @@ let refreshSchedulersStarted = false;
 let viewerMode = false;
 if (sessionStorage.getItem(authHintKey) === "true") $("login-screen").classList.add("hidden");
 const safe = (value) => String(value).replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"})[char]);
+if (location.protocol === "http:" && !["localhost", "127.0.0.1", "::1"].includes(location.hostname)) {
+  $("login-copy").insertAdjacentHTML("afterend", '<p class="login-transport-warning" role="status"><b>Trusted local HTTP</b><span>This sign-in is not encrypted. Use it only on the operator’s isolated LAN, Outpost hotspot, or encrypted VPN.</span></p>');
+}
 const ago = (stamp) => { const seconds = Math.max(0, (Date.now() - new Date(stamp)) / 1000); if (seconds < 60) return "now"; if (seconds < 3600) return `${Math.floor(seconds / 60)}m`; if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`; return `${Math.floor(seconds / 86400)}d`; };
 const item = (title, description, badge) => `<div class="item"><div><strong>${safe(title)}</strong><p>${safe(description || "")}</p></div><span class="badge">${safe(badge || "")}</span></div>`;
 document.querySelector("#system").insertAdjacentHTML("beforebegin", '<section id="subsystems" class="ui-card panel content-panel subsystem-panel"><div class="heading"><div><p class="eyebrow">FAILURE DOMAINS</p><h2>Subsystem health</h2></div><span id="subsystem-state" class="chip">Checking</span></div><p class="subsystem-intro">Core mesh routing fails safe. Local services and optional providers recover independently without taking the radio offline.</p><div id="subsystem-list" class="subsystem-list"><p class="ui-empty empty">Loading task health…</p></div></section>');
@@ -235,6 +238,7 @@ $("login-form").addEventListener("submit", async (event) => {
       return;
     }
     $("login-screen").classList.add("hidden");
+    window.dispatchEvent(new Event("outpost:authenticated"));
     await refresh();
     startRefreshSchedulers();
   }

@@ -9,18 +9,27 @@ from xml.sax.saxutils import escape
 from outpost.config import load_config
 
 
-def render(name: str, port: int) -> str:
+def render(
+    name: str,
+    port: int,
+    mode: str = "trusted_http",
+    public_port: int = 443,
+) -> str:
     clean_name = " ".join(name.split()).replace("%", "%%") or "Outpost"
     display_name = escape(f"{clean_name} on %h")
+    secure = mode in {"direct_https", "trusted_proxy"}
+    service_type = "_https._tcp" if secure else "_http._tcp"
+    advertised_port = public_port if mode == "trusted_proxy" else port
     return f"""<?xml version="1.0" standalone="no"?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <service-group>
   <name replace-wildcards="yes">{display_name}</name>
   <service>
-    <type>_http._tcp</type>
-    <port>{port}</port>
+    <type>{service_type}</type>
+    <port>{advertised_port}</port>
     <txt-record>path=/</txt-record>
     <txt-record>application=outpost</txt-record>
+    <txt-record>transport={"https" if secure else "http"}</txt-record>
   </service>
 </service-group>
 """
@@ -35,7 +44,15 @@ def main() -> int:
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     temporary = arguments.output.with_name(f".{arguments.output.name}.{os.getpid()}.tmp")
     try:
-        temporary.write_text(render(config.node.name, config.web.port), encoding="utf-8")
+        temporary.write_text(
+            render(
+                config.node.name,
+                config.web.port,
+                config.web.transport.mode,
+                config.web.transport.public_port,
+            ),
+            encoding="utf-8",
+        )
         os.chmod(temporary, 0o644)
         os.replace(temporary, arguments.output)
     except BaseException:

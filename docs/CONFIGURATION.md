@@ -143,8 +143,10 @@ Discovery never grants trust. See [Federation](FEDERATION.md).
 
 Named password authentication is the expected LAN mode; account roles, MFA, and sessions are
 managed in the Access workspace rather than YAML. `auth.session_hours` sets the absolute browser
-session lifetime. `auth.mode: none` is valid only on loopback. Do not expose port 8080 directly to
-the internet; use an authenticated VPN or carefully configured TLS proxy for remote administration.
+session lifetime. `auth.mode: none` is valid only on loopback. `transport.mode` explicitly selects
+offline `trusted_http`, Outpost-terminated `direct_https`, or `trusted_proxy`. HTTPS is optional and
+never required for radio/mesh operation. Forwarded client/scheme headers are accepted only from the
+configured proxy networks. See [Web transport and network boundary](WEB-TRANSPORT.md).
 
 ### `store`
 
