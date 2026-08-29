@@ -293,6 +293,7 @@ def test_mutating_command_typos_never_execute_across_trust_levels(tmp_path) -> N
         "NEW",
         "OK",
         "OP",
+        "OPS",
         "POS",
         "POST",
         "READMAIL",

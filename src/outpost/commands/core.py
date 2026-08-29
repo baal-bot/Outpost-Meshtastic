@@ -196,6 +196,7 @@ def _menu_screen(ctx: CommandContext, topic: str) -> Response:
             "responder",
             "RESPONDER TOOLS",
             [
+                ("Operations center", "OPS", "OPS", ("operations", "ops")),
                 ("Named welfare roster", "ROSTER?", "ROSTER?", ("roster",)),
                 ("Acknowledge incident", "MENU ACK", "ACK", ("acknowledge",)),
                 ("Broadcast incident alert", "MENU ALERT", "ALERT", ("alert",)),
@@ -510,7 +511,7 @@ async def help_command(ctx: CommandContext) -> Response:
         "MAIL": {"mail"},
         "IDENTITY": {"identity"},
         "RADIO": {"core", "directory"},
-        "OPERATOR": {"operator"},
+        "OPERATOR": {"operations", "operator"},
         "WATCH": {"watch"},
         "ENV": {"env"},
         "AI": {"ai"},
@@ -563,6 +564,7 @@ async def help_command(ctx: CommandContext) -> Response:
         topics = [name for name, modules in groups.items() if group_commands(modules)]
         return _detail(f"Help topics: {' · '.join(topics)} · PRIVACY")
     if ctx.message.is_direct:
+        ctx.session.clear_tui_sensitive()
         return _home_screen(ctx)
     shortcuts = _broadcast_shortcuts(ctx)
     return _detail(f"DM this node for the menu. Here: {shortcuts}")
@@ -571,6 +573,8 @@ async def help_command(ctx: CommandContext) -> Response:
 async def menu(ctx: CommandContext) -> Response:
     if not ctx.message.is_direct:
         return _detail(f"Menu is DM only. Here: {_broadcast_shortcuts(ctx)}")
+    if ctx.args.strip().upper() in {"", "HOME", "MAIN"}:
+        ctx.session.clear_tui_sensitive()
     return _menu_screen(ctx, ctx.args)
 
 
@@ -588,7 +592,7 @@ async def where(ctx: CommandContext) -> Response:
 
 async def home(ctx: CommandContext) -> Response:
     ctx.session.context.clear()
-    ctx.session.pending = None
+    ctx.session.clear_tui_sensitive()
     if ctx.message.is_direct:
         return _home_screen(ctx)
     return _detail(message("home"))

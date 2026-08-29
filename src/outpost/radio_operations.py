@@ -166,6 +166,18 @@ class RadioOperations:
         result.update({"retention_days": self.retention_days, "filter": state_filter})
         return result
 
+    async def history_item(self, item_id: int) -> dict[str, Any] | None:
+        rows = await self.database.read(
+            """
+            SELECT id,state,text,destination,channel,traffic_class,severity,want_ack,
+                   length(binary_payload) binary_len,created_at,expires_at,attempts,
+                   last_attempt_at,next_attempt_at,packet_id,outcome,last_error,completed_at
+            FROM outbound_work WHERE id=?
+            """,
+            (item_id,),
+        )
+        return self._explain(dict(rows[0])) if rows else None
+
     async def cancel(self, item_id: int) -> bool:
         cancelled = await self.governor.cancel_work(item_id)
         if cancelled:

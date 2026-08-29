@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -21,6 +23,22 @@ async def test_alert_preempts_reply_and_broadcast_has_no_ack() -> None:
     sent = await governor.tick()
     assert sent is not None and sent.traffic_class == TrafficClass.ALERT
     assert link.sent[0].want_ack is False
+
+
+@pytest.mark.asyncio
+async def test_user_reply_continues_while_federation_waits_through_quiet_hours() -> None:
+    clock = VirtualClock(epoch=datetime(2026, 1, 1, 23, tzinfo=UTC))
+    link = SimulatedRadioLink()
+    await link.connect()
+    governor = AirtimeGovernor(link, AirtimeConfig(min_gap_s=0), clock)
+    federation = OutboundItem("background", "^all", 0, TrafficClass.FEDERATION)
+    reply = OutboundItem("requested", "!peer", 0, TrafficClass.REPLY)
+    governor.enqueue(federation)
+    governor.enqueue(reply)
+
+    assert await governor.tick() is reply
+    assert await governor.tick() is None
+    assert federation in governor.queued_items()
 
 
 @pytest.mark.asyncio

@@ -23,11 +23,12 @@ class TuiController:
     ) -> tuple[str, Response | None]:
         if not direct:
             return invoked, None
+        session.expire_tui_sensitive(now)
         if session.pending is not None and session.pending.expires_at <= now:
             session.pending = None
         answer = _choice_key(invoked)
         if answer == "0":
-            session.pending = None
+            session.clear_tui_sensitive()
             return "MENU", None
         pending = session.pending
         if pending is None:
@@ -58,8 +59,10 @@ class TuiController:
         return invoked, None
 
     @staticmethod
-    def cancel_for_command(session: Session) -> None:
+    def cancel_for_command(session: Session, *, preserve_operations: bool = False) -> None:
         session.pending = None
+        if not preserve_operations:
+            session.clear_operations_state()
 
     @staticmethod
     def activate(

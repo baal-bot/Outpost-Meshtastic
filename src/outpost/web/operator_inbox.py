@@ -184,7 +184,12 @@ class OperatorInboxService:
         return {"conversation": summary, "messages": values}
 
     async def set_state(
-        self, conversation_key: str, state: Literal["read", "unread", "archive", "active"]
+        self,
+        conversation_key: str,
+        state: Literal["read", "unread", "archive", "active"],
+        *,
+        actor_kind: Literal["web", "mesh"] = "web",
+        actor_ref: str | None = None,
     ) -> bool:
         rows = await self.database.read(
             "SELECT 1 FROM mail WHERE conversation_key=? LIMIT 1", (conversation_key,)
@@ -210,9 +215,10 @@ class OperatorInboxService:
             )
             await transaction.write(
                 "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web',?,?,?,NULL,?)",
+                "VALUES(?,?,?,?,NULL,?)",
                 (
-                    current_actor_ref(),
+                    actor_kind,
+                    actor_ref or current_actor_ref(),
                     f"mail.conversation.{state}",
                     f"conversation:{conversation_key}",
                     now,

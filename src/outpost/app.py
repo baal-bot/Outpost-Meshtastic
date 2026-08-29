@@ -28,6 +28,7 @@ from outpost.commands.directory import specs as directory_specs
 from outpost.commands.environment import specs as environment_specs
 from outpost.commands.identity import specs as identity_specs
 from outpost.commands.mail import specs as mail_specs
+from outpost.commands.operations import specs as operations_specs
 from outpost.commands.operator import specs as operator_specs
 from outpost.commands.watch import specs as watch_specs
 from outpost.config import Config
@@ -55,6 +56,7 @@ from outpost.fed import (
     Peer,
     Reassembler,
 )
+from outpost.operations_center import MeshOperationsCenter
 from outpost.operator_context import current_actor
 from outpost.radio_configuration import RadioConfigurationManager
 from outpost.radio_operations import RadioOperations
@@ -213,6 +215,15 @@ class OutpostApp:
         )
         self.federation_codec = FrameCodec(self.config.fed.max_fragments)
         self.federation_reassembler = Reassembler(self.config.fed.reassembly_timeout_s)
+        self.operations_center = MeshOperationsCenter(
+            self.database,
+            self.clock,
+            self.incidents,
+            self.checkins,
+            self.radio_operations,
+            importer=self.import_federation_inbox_as,
+            reply_sender=self.reply_operations_conversation,
+        )
         command_groups = (
             (
                 identity_specs(members, mail, self.config.security.require_approval),
@@ -226,6 +237,7 @@ class OutpostApp:
             (directory_specs(directory), True),
             (ai_specs(self.ai_service), self.config.modules.ai.enabled),
             (operator_specs(bbs), self.config.modules.bbs.enabled),
+            (operations_specs(self.operations_center), True),
             (watch_specs(self.incidents), self.config.modules.watch.enabled),
             (alert_specs(self.alerts), self.config.modules.watch.enabled),
             (checkin_specs(self.checkins), self.config.modules.watch.enabled),
@@ -496,10 +508,40 @@ class OutpostApp:
         return await self.backups.restore_quiesced(name)
 
     async def import_federation_inbox(self, item_id: int) -> str:
+        actor = current_actor()
+        stream = await self.import_federation_inbox_as(item_id, actor)
+        await self.database.write(
+            "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+            "VALUES('web',?,'federation.inbox.import',?,?,?)",
+            (
+                actor.removeprefix("web:"),
+                f"federation-inbox:{item_id}",
+                json.dumps({"stream": stream}, separators=(",", ":"), sort_keys=True),
+                int(self.clock.now().timestamp()),
+            ),
+        )
+        return stream
+
+    async def import_federation_inbox_as(self, item_id: int, actor: str) -> str:
         if not self.config.modules.fed.enabled:
             raise ValueError("federation module is disabled")
         return await self.federation_sync.import_inbox(
-            item_id, current_actor(), int(self.clock.now().timestamp())
+            item_id, actor, int(self.clock.now().timestamp())
+        )
+
+    async def reply_operations_conversation(
+        self, route: dict[str, str], body: str, actor: str
+    ) -> dict[str, object]:
+        return await self.send_federation_mail(
+            route["source_peer_mesh_id"],
+            route["reply_recipient_handle"],
+            route["subject"] or "Mesh reply",
+            body,
+            conversation_id=route["federation_conversation_id"],
+            message_kind=route["message_kind"],
+            participant_handle=route["participant_handle"],
+            reply_to="operator",
+            operator_actor=actor,
         )
 
     async def send_federation_mail(
@@ -534,6 +576,7 @@ class OutpostApp:
             peer_id,
             MessageType.MAIL_RELAY,
             {"mesh_id": self.federation.local_mesh_id, **envelope},
+            traffic_class=TrafficClass.REPLY,
         )
         async with self.database.transaction() as transaction:
             await transaction.write(
@@ -836,6 +879,7 @@ class OutpostApp:
         *,
         want_ack: bool,
         queue_key: str | None = None,
+        traffic_class: TrafficClass = TrafficClass.FEDERATION,
     ) -> list[int]:
         admitted = await self.governor.admit_many(
             [
@@ -845,7 +889,7 @@ class OutpostApp:
                     portnum=self.config.radio.federation_portnum,
                     dest=destination,
                     channel=0,
-                    traffic_class=TrafficClass.FEDERATION,
+                    traffic_class=traffic_class,
                     want_ack=want_ack,
                     multipart=len(frames) > 1,
                     queue_key=queue_key,
@@ -858,13 +902,21 @@ class OutpostApp:
         return admitted
 
     async def _queue_trusted_federation_frames(
-        self, frames: list[bytes], *, queue_key: str | None = None
+        self,
+        frames: list[bytes],
+        *,
+        queue_key: str | None = None,
+        traffic_class: TrafficClass = TrafficClass.FEDERATION,
     ) -> list[int]:
         # Meshtastic direct custom-app packets can be radio-ACKed without being surfaced to the
         # destination client. Federation already authenticates and encrypts each peer's frames,
         # so use the same RF/MQTT-compatible carrier as pairing and rely on application receipts.
         return await self._queue_federation_frames(
-            frames, "^all", want_ack=False, queue_key=queue_key
+            frames,
+            "^all",
+            want_ack=False,
+            queue_key=queue_key,
+            traffic_class=traffic_class,
         )
 
     @staticmethod
@@ -1206,6 +1258,7 @@ class OutpostApp:
         *,
         counter: int | None = None,
         queue_key: str | None = None,
+        traffic_class: TrafficClass = TrafficClass.FEDERATION,
     ) -> int:
         local_id = self.radio.local_node_id
         if not local_id:
@@ -1216,7 +1269,9 @@ class OutpostApp:
         secret = await self.federation.secret(peer_id)
         counter = counter or await self.federation.next_counter(peer_id)
         frames = self.federation_codec.encode(msg_type, value, counter, secret)
-        await self._queue_trusted_federation_frames(frames, queue_key=queue_key)
+        await self._queue_trusted_federation_frames(
+            frames, queue_key=queue_key, traffic_class=traffic_class
+        )
         return counter
 
     @staticmethod
@@ -2150,6 +2205,7 @@ class OutpostApp:
             await self.clock.sleep(15)
 
     async def reconnect_radio(self) -> None:
+        self.router.sessions.clear_sensitive()
         await self.radio.close()
 
     def _radio_configuration_context(self, result: dict[str, Any]) -> dict[str, Any]:
@@ -2477,7 +2533,12 @@ class OutpostApp:
         if response.kind == ResponseKind.NONE:
             return
         text = render_response(response)
-        max_parts = self.config.airtime.max_parts.get(response.airtime_class.value, 1)
+        configured_max_parts = self.config.airtime.max_parts.get(response.airtime_class.value, 1)
+        max_parts = (
+            min(response.max_parts, configured_max_parts)
+            if response.max_parts is not None
+            else configured_max_parts
+        )
         parts = chunk_text(text, max_parts=max_parts)
         await self.governor.admit_many(
             [

@@ -77,6 +77,7 @@ class Response:
     supersedes: str | None = None
     data: dict[str, Any] | None = None
     screen: TuiScreen | None = None
+    max_parts: int | None = None
 
 
 @dataclass(frozen=True)

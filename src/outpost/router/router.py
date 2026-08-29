@@ -138,7 +138,7 @@ class Router:
                 [Line(f"{known.name} unavailable · {known.module.title()} is disabled.")],
             )
         if self.registry.resolve(token) is not None:
-            self.tui.cancel_for_command(session)
+            self.tui.cancel_for_command(session, preserve_operations=token.casefold() == "ops")
         else:
             invoked, pending_response = self.tui.prepare(
                 invoked,
@@ -159,12 +159,14 @@ class Router:
                 self.registry,
             )
             if resolution.candidates:
+                session.clear_operations_state()
                 if not await self.rate_limiter.allow(
                     member.mesh_id, member.trust, "COMMAND_REJECTED"
                 ):
                     return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
                 return self._clarify_command(invoked, resolution.candidates, session, inbound)
             if resolution.mode == "mutation_protected":
+                session.clear_operations_state()
                 if not await self.rate_limiter.allow(
                     member.mesh_id, member.trust, "COMMAND_REJECTED"
                 ):
@@ -177,7 +179,7 @@ class Router:
             parts = invoked.split(maxsplit=1)
             token = parts[0] if parts else ""
         if self.registry.resolve(token) is not None:
-            self.tui.cancel_for_command(session)
+            self.tui.cancel_for_command(session, preserve_operations=token.casefold() == "ops")
         args = parts[1] if len(parts) > 1 else ""
         if not await self.rate_limiter.allow(member.mesh_id, member.trust, token):
             return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
@@ -188,6 +190,7 @@ class Router:
             spec = self.registry.resolve("ASK")
             args = invoked
         if spec is None:
+            session.clear_operations_state()
             return Response(ResponseKind.ERROR, [Line(message("unknown"))])
         if TrustLevel.parse(member.trust) < spec.min_trust:
             return Response(ResponseKind.ERROR, [Line(message("unknown"))])
@@ -217,6 +220,7 @@ class Router:
         if spec.min_trust >= TrustLevel.RESPONDER:
             authorized, _reason = await self.members.authorize_elevated(member, inbound, spec.name)
             if not authorized:
+                session.clear_operations_state()
                 return Response(
                     ResponseKind.ERROR,
                     [
@@ -264,6 +268,7 @@ class Router:
             await self.rate_limiter.release_safety_floor(
                 member.mesh_id, token, safety_decision.fingerprint
             )
+        response.max_parts = spec.max_parts
         return self.tui.activate(
             response,
             session,

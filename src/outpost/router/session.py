@@ -20,6 +20,14 @@ class PendingAction:
     input_command: str | None = None
 
 
+@dataclass(frozen=True)
+class TuiConfirmation:
+    action: str
+    target: str
+    payload: dict[str, str]
+    expires_at: float
+
+
 @dataclass
 class Session:
     member_id: str
@@ -36,12 +44,41 @@ class Session:
     last_mail_sender: str | None = None
     tui_active: bool = False
     tui_screen: str | None = None
+    tui_snapshots: dict[str, list[str]] = field(default_factory=dict)
+    tui_snapshot_expires_at: float = 0.0
+    tui_confirmations: dict[str, TuiConfirmation] = field(default_factory=dict)
 
     def push(self, frame: ContextFrame) -> None:
         if len(self.context) >= 3:
             self.context[-1] = frame
         else:
             self.context.append(frame)
+
+    def expire_tui_sensitive(self, now: float) -> None:
+        if self.tui_snapshot_expires_at <= now:
+            self.tui_snapshots.clear()
+            self.tui_snapshot_expires_at = 0.0
+        self.tui_confirmations = {
+            token: confirmation
+            for token, confirmation in self.tui_confirmations.items()
+            if confirmation.expires_at > now
+        }
+
+    def clear_operations_state(self) -> None:
+        self.tui_snapshots.clear()
+        self.tui_snapshot_expires_at = 0.0
+        self.tui_confirmations.clear()
+
+    def clear_tui_sensitive(self) -> None:
+        self.pending = None
+        self.page_refs.clear()
+        self.cursor_kind = None
+        self.cursor_target = None
+        self.cursor_offset = 0
+        self.cursor_expires_at = 0.0
+        self.last_mail_id = None
+        self.last_mail_sender = None
+        self.clear_operations_state()
 
 
 class SessionStore:
@@ -58,8 +95,13 @@ class SessionStore:
             self._sessions[key] = session
         elif session.last_seen + self.idle_seconds < now:
             session.context.clear()
-            session.pending = None
+            session.clear_tui_sensitive()
             session.tui_active = False
             session.tui_screen = None
+        session.expire_tui_sensitive(now)
         session.last_seen = now
         return session
+
+    def clear_sensitive(self) -> None:
+        for session in self._sessions.values():
+            session.clear_tui_sensitive()
