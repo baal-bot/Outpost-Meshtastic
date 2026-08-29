@@ -6,19 +6,16 @@ an evidence index, not permission to close field-gated work. The original review
 
 ## Tracker status
 
-The P0/P1 implementation findings linked by #44 are closed upstream. The remaining enhancement
-issues #34–#37, #40, and #41 are implemented in this working tree with source, migrations, operator
-UI, tests, and documentation. They remain open on GitHub until these changes are reviewed, committed,
-pushed, and their issue evidence is accepted.
+All software findings linked by #44 are closed upstream. This includes the original review issues
+#2 and #7–#43 and the August 28 follow-up issues #47–#60. Their implementations, tests, operational
+evidence, and issue-specific closeout notes are in the repository and GitHub history. The latest
+follow-up snapshot passed 656 tests with one environment-dependent skip, every declared critical
+coverage floor, both supported Python versions in hosted CI, the browser regression suite, package
+smoke installation, and dependency audit.
 
-| Remaining issue | Local evidence |
-| --- | --- |
-| #34 federation topology | `tests/integration/test_federation_topology.py`, topology browser workflow, `FEDERATION-TOPOLOGY.md` |
-| #35 signed multi-hop relay | `tests/integration/test_federation_relay.py`, `FEDERATION-RELAY-PROTOCOL.md` |
-| #36 incident reconciliation | `tests/integration/test_incident_reconciliation.py`, `INCIDENT-RECONCILIATION.md` |
-| #37 appliance onboarding | diagnostics tests, `ONBOARDING.md`, installation/operations guides |
-| #40 release supply chain | pinned CI/release workflows, release verification tools, `RELEASES.md` and checklist |
-| #41 capability matrix | `docs/capabilities.toml`, generated `FEATURES.md`/README summary, CI drift check |
+The tracker remains open only for the field evidence below. Closing linked software findings does
+not convert simulated or automated coverage into evidence from a destructive power cut or a
+physical two-node transport transition.
 
 ## Exit criteria
 
@@ -61,8 +58,8 @@ test count is not presented as production readiness.
 
 ## Close decision
 
-Keep #44 open as a field-acceptance tracker. Software remediation is ready for review, but its exit
-criteria are not all satisfied until both of these are recorded:
+Keep #44 open as a field-acceptance tracker. Software remediation is complete, but its exit criteria
+are not all satisfied until both of these are recorded:
 
 1. destructive power interruption and recovery on deployment hardware; and
 2. physical two-node MQTT-only traffic plus automatic LoRa/MQTT fallback through a partition,
