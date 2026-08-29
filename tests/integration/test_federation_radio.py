@@ -246,6 +246,65 @@ async def test_sync_retry_is_single_flight_and_recognizes_legacy_work(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_offline_peer_pauses_sync_until_authenticated_activity_returns(tmp_path) -> None:
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "modules": {"fed": {"enabled": True}},
+            "fed": {"peer_stale_hours": 1},
+        }
+    )
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    secret = bytes(range(32))
+    peer = await app.federation.discover("!remote", "Remote", 1, {}, "radio")
+    now = int(app.clock.now().timestamp())
+    await app.database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,boards='[\"gen\"]',"
+        "local_approved=1,remote_approved=1,last_seen_at=? WHERE id=?",
+        (secret, now - 3_601, peer.id),
+    )
+
+    await app._federation_sync_once()
+    assert app.governor.queued_items() == []
+    assert not app.federation.is_online(await app.federation.by_mesh_id("!remote"))
+
+    frame = app.federation_codec.encode(
+        MessageType.SYNC_REQ,
+        {
+            "mesh_id": "!remote",
+            "target_mesh_id": "!local",
+            "limit": 8,
+            "budget": 20,
+            "snapshot": now,
+            "before": None,
+        },
+        1,
+        secret,
+    )[0]
+    await app._handle_federation_discovery(
+        InboundMessage(
+            79,
+            "!remote",
+            "^all",
+            0,
+            config.radio.federation_portnum,
+            False,
+            None,
+            frame,
+            datetime.now(UTC),
+        )
+    )
+
+    recovered = await app.federation.by_mesh_id("!remote")
+    assert recovered.state == "active"
+    assert app.federation.is_online(recovered)
+    assert app.governor.queued_items()[0].queue_key == "federation:!remote:sync_manifest"
+    await app.database.close()
+
+
+@pytest.mark.asyncio
 async def test_repeated_sync_requests_enqueue_one_manifest_response(tmp_path) -> None:
     config = Config.model_validate(
         {

@@ -47,7 +47,7 @@ from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.store.maintenance import MaintenanceService
 from outpost.watch import AlertService, CheckinService, IncidentService
 from outpost.web.auth import MfaChallenge, WebAuthService
-from outpost.web.member_triage import MemberTriageError, MemberTriageService
+from outpost.web.member_triage import NEEDS_REVIEW_SQL, MemberTriageError, MemberTriageService
 from outpost.web.operator_inbox import OperatorInboxService
 from outpost.web.settings import RuntimeSettings
 from outpost.web.transport import WebTransportMiddleware, transport_status
@@ -1460,7 +1460,10 @@ def create_web_app(
                     status_code=400,
                 )
             peers = await federation.list(state)
-            return {"items": [peer.__dict__ for peer in peers], "count": len(peers)}
+            return {
+                "items": [{**peer.__dict__, **federation.liveness(peer)} for peer in peers],
+                "count": len(peers),
+            }
 
         @app.patch("/api/v1/federation/peers/{mesh_id}", response_model=None)
         async def federation_peer_state(
@@ -1791,6 +1794,18 @@ def create_web_app(
                     "items": [
                         {
                             **dict(peer),
+                            "connectivity": (
+                                "online"
+                                if federation.is_online_at(str(peer["state"]), peer["last_seen_at"])
+                                else "offline"
+                                if peer["state"] == "active"
+                                else None
+                            ),
+                            "sync_paused": peer["state"] == "active"
+                            and not federation.is_online_at(
+                                str(peer["state"]), peer["last_seen_at"]
+                            ),
+                            "stale_after_seconds": federation.peer_stale_seconds,
                             "service_permissions": json.loads(peer["service_permissions"]),
                             "cursors": cursor_map.get(int(peer["id"]), []),
                             "transfers": transfer_map[int(peer["id"])],
@@ -2050,9 +2065,10 @@ def create_web_app(
         reviews = {"total": 0, "board": 0, "incidents": 0, "alerts": 0, "members": 0}
         actionable_mail = 0
         same_pending = 0
+        local_incident_reviews = 0
         if database is not None:
             rows = await database.read(
-                """WITH reviews AS (
+                f"""WITH reviews AS (
                      SELECT COUNT(*) total,
                             COALESCE(SUM(stream LIKE 'board:%'),0) board,
                             COALESCE(SUM(stream='incidents'),0) incidents,
@@ -2068,13 +2084,17 @@ def create_web_app(
                       WHERE review_state='pending') same_pending,
                      (SELECT COUNT(*) FROM member
                       WHERE directory_state='active' AND
-                        pki_state IN ('pending','conflict')) member_key_reviews
-                   FROM reviews"""
+                        {NEEDS_REVIEW_SQL}) member_key_reviews,
+                     (SELECT COUNT(*) FROM incident
+                      WHERE reporter_id IS NOT NULL AND status='open'
+                        AND merged_into_id IS NULL) local_incident_reviews
+                   FROM reviews"""  # noqa: S608 - review expression is a fixed application constant.
             )
             reviews = {key: int(rows[0][key]) for key in ("total", "board", "incidents", "alerts")}
             reviews["members"] = int(rows[0]["member_key_reviews"])
             actionable_mail = int(rows[0]["actionable"])
             same_pending = int(rows[0]["same_pending"])
+            local_incident_reviews = int(rows[0]["local_incident_reviews"])
         value = {
             "modules": {
                 "items": {
@@ -2084,6 +2104,7 @@ def create_web_app(
                 "change_policy": "restart_required",
             },
             "reviews": reviews,
+            "watch": {"incidents_pending_review": local_incident_reviews},
             "environment": {"same_pending": same_pending},
             "mail": {"actionable": actionable_mail},
         }
@@ -2558,6 +2579,17 @@ def create_web_app(
             ) -> dict[str, Any]:
                 values = await incidents.list(status=status, kind=type, limit=limit)
                 return {"items": await incident_origins([value.json() for value in values])}
+
+            @app.get("/api/v1/incidents/history")
+            async def incident_history(
+                type: str | None = None,
+                limit: int = Query(100, ge=1, le=200),
+            ) -> dict[str, Any]:
+                values = await incidents.history(kind=type, limit=limit)
+                return {
+                    "items": await incident_origins([value.json() for value in values]),
+                    "retention_days": incidents.history_retention_days,
+                }
 
             @app.get("/api/v1/watch/map")
             async def watch_map(hours_ago: int = Query(0, ge=0, le=24)) -> dict[str, Any]:
@@ -3525,18 +3557,28 @@ def create_web_app(
             }
 
         @app.get("/api/v1/members/map")
-        async def member_map() -> dict[str, Any]:
+        async def member_map(
+            view: Literal["approved", "discovered", "all"] = "approved",
+        ) -> dict[str, Any]:
             now = int(datetime.now(UTC).timestamp())
+            view_conditions = {
+                "approved": "(m.handle IS NOT NULL OR m.trust IN "
+                "('member','trusted','responder','operator'))",
+                "discovered": "m.handle IS NULL AND m.trust IN ('guest','blocked')",
+                "all": "1=1",
+            }
             rows = await database.read(
-                """SELECT m.id,m.mesh_id,m.handle,m.trust,m.last_seen,m.last_heard_snr,
+                f"""SELECT m.id,m.mesh_id,m.handle,m.long_name,m.short_name,m.trust,
+                          CASE WHEN m.handle IS NULL AND m.trust IN ('guest','blocked')
+                               THEN 'discovered' ELSE 'approved' END AS category,
+                          m.last_seen,m.last_heard_snr,
                           m.hops_away,json_extract(m.prefs,'$.position') AS privacy,
                           p.lat,p.lon,p.received_at,p.source,p.expires_at
                    FROM member m JOIN member_position p ON p.member_id=m.id
                    WHERE m.directory_state='active'
-                     AND (m.handle IS NOT NULL
-                      OR m.trust IN ('member','trusted','responder','operator'))
+                     AND {view_conditions[view]}
                      AND p.expires_at>?
-                   ORDER BY p.received_at DESC""",
+                   ORDER BY p.received_at DESC""",  # noqa: S608 - view is a fixed expression.
                 (now,),
             )
             items = [dict(row) for row in rows]
@@ -3546,7 +3588,11 @@ def create_web_app(
                 item["deletes_in_seconds"] = max(0, expires_at - now)
                 item["retention_hours"] = max(1, (expires_at - received_at) // 3_600)
                 item["privacy"] = item["privacy"] or "coarse"
-                item["visibility"] = f"operator exact; member {item['privacy']}"
+                item["visibility"] = (
+                    "operator exact; discovered from mesh broadcast"
+                    if item["category"] == "discovered"
+                    else f"operator exact; member {item['privacy']}"
+                )
                 item["last_seen"] = _timestamp(item["last_seen"])
                 item["received_at"] = _timestamp(received_at)
                 item["expires_at"] = _timestamp(expires_at)

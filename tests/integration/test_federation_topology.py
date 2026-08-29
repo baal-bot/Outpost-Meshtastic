@@ -116,9 +116,9 @@ async def test_topology_health_states_paths_backlog_successor_and_forgotten(tmp_
     assert current["!eeeeeeee"]["state"] == "adopted"
     assert all(item["location"] is None for item in current.values())
 
-    clock.advance(86_401)
-    stale = {item["mesh_id"]: item for item in (await topology.overview())["items"]}[B]
-    assert stale["state"] == "stale" and stale["degraded"] is True
+    clock.advance(peers.peer_stale_seconds + 1)
+    offline = {item["mesh_id"]: item for item in (await topology.overview())["items"]}[B]
+    assert offline["state"] == "offline" and offline["degraded"] is True
     await database.close()
 
 

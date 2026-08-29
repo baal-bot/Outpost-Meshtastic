@@ -253,10 +253,12 @@ class MemberRepo:
         await self.database.write(
             """
             UPDATE member SET handle=?,trust=?,handle_changed_at=?,last_seen=?,
-              directory_state='active',directory_state_at=?,directory_state_by='mesh:enrollment'
+              directory_state='active',directory_state_at=?,directory_state_by='mesh:enrollment',
+              reviewed_at=CASE WHEN ? THEN reviewed_at ELSE NULL END,
+              reviewed_by=CASE WHEN ? THEN reviewed_by ELSE NULL END
             WHERE mesh_id=?
             """,
-            (normalized, trust, now, now, now, mesh_id),
+            (normalized, trust, now, now, now, approve, approve, mesh_id),
         )
         return await self.resolve(mesh_id)
 

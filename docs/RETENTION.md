@@ -21,7 +21,8 @@ policy; Outpost never silently replaces audit detail with a summary.
 | `message_log_days` / `message_log_max_rows` | 30 days / 500,000 | Packet and command telemetry; whichever limit removes a row first. |
 | `authentication_days` | 30 days | Login-attempt history; expired sessions are removed immediately. |
 | `digest_days` | 90 days | Digest-delivery history. |
-| `watch_history_days` | 365 days | Terminal incidents/alerts, closed events, and check-ins. |
+| `incident_history_days` | 30 days | Resolved, false-alarm, and expired incidents. |
+| `watch_history_days` | 365 days | Concluded alerts, closed events, and check-ins. |
 | `environment_history_days` | 30 days | CAP, earthquake, and SAME review history. |
 | `provider_cache_days` | 2 days | Environment caches and federation quota windows. |
 | `federation_service_days` | 7 days | Completed, failed, or expired peer-service requests/results. |
@@ -61,7 +62,7 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | BBS/mail | `mail` | Retain by age or explicit expiry. |
 | BBS/mail | `digest_delivery_log` | Retain for `digest_days`. |
 | Watch | `pending_incident_location` | Expire at its workflow deadline. |
-| Watch | `incident` | Retain only resolved, false-alarm, or expired incidents; open/monitoring are protected. |
+| Watch | `incident` | Retain resolved, false-alarm, or expired incidents for `incident_history_days`; open/monitoring are protected. |
 | Watch | `incident_update` | Cascade with its incident. |
 | Watch | `alert` | Retain concluded/expired alerts; active alerts are protected. |
 | Watch | `alert_ack`, `alert_audience` | Cascade with their alert. |

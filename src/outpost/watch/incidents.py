@@ -57,6 +57,9 @@ class Incident:
     created_at: int
     updated_at: int
     expires_at: int | None
+    resolved_at: int | None
+    resolved_by: str | None
+    resolution_note: str | None
     confirm_count: int
     dispute_count: int
     location_unconfirmed: int
@@ -77,9 +80,11 @@ class IncidentService:
         clock: Clock,
         origin_node: str = "local",
         position_retention_hours: int = 168,
+        history_retention_days: int = 30,
     ) -> None:
         self.database, self.clock, self.origin_node = database, clock, origin_node
         self.position_retention_seconds = position_retention_hours * 3_600
+        self.history_retention_days = history_retention_days
 
     @staticmethod
     def infer(text: str) -> str:
@@ -427,6 +432,26 @@ class IncidentService:
             "CASE severity WHEN 'critical' THEN 4 WHEN 'urgent' THEN 3 "
             "WHEN 'caution' THEN 2 ELSE 1 END DESC, updated_at DESC LIMIT ?",
             (*params, limit),
+        )
+        return [self._row(row) for row in rows]
+
+    async def history(
+        self, *, kind: str | None = None, limit: int = 100
+    ) -> builtins.list[Incident]:
+        cutoff = int(self.clock.now().timestamp()) - self.history_retention_days * 86_400
+        clauses = [
+            "status IN ('resolved','false_alarm','expired')",
+            "merged_into_id IS NULL",
+            "COALESCE(resolved_at,expires_at,updated_at)>=?",
+        ]
+        params: builtins.list[object] = [cutoff]
+        if kind:
+            clauses.append("type=?")
+            params.append(kind)
+        rows = await self.database.read(
+            f"SELECT * FROM incident WHERE {' AND '.join(clauses)} "  # noqa: S608
+            "ORDER BY COALESCE(resolved_at,expires_at,updated_at) DESC,id DESC LIMIT ?",
+            (*params, max(1, min(limit, 200))),
         )
         return [self._row(row) for row in rows]
 

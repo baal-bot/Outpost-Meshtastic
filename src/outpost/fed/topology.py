@@ -10,7 +10,6 @@ from outpost.fed.peers import FederationPeerService
 from outpost.store import Database
 
 TOPOLOGY_INTERVAL_SECONDS = 6 * 3_600
-TOPOLOGY_STALE_SECONDS = 24 * 3_600
 TOPOLOGY_CLOCK_SKEW_SECONDS = 300
 
 
@@ -151,12 +150,17 @@ class FederationTopologyService:
     async def due(self, *, now: int | None = None) -> list[str]:
         stamp = int(self.clock.now().timestamp()) if now is None else now
         rows = await self.database.read(
-            "SELECT p.mesh_id FROM fed_peer p LEFT JOIN fed_topology_policy t ON t.peer_id=p.id "
+            "SELECT p.mesh_id,p.state,p.last_seen_at FROM fed_peer p "
+            "LEFT JOIN fed_topology_policy t ON t.peer_id=p.id "
             "WHERE p.state='active' AND (t.last_sent_at IS NULL OR t.last_sent_at<=?) "
             "ORDER BY p.mesh_id",
             (stamp - TOPOLOGY_INTERVAL_SECONDS,),
         )
-        return [str(row["mesh_id"]) for row in rows]
+        return [
+            str(row["mesh_id"])
+            for row in rows
+            if self.peers.is_online_at(str(row["state"]), row["last_seen_at"], now=stamp)
+        ]
 
     async def mark_sent(self, mesh_id: str, *, now: int | None = None) -> None:
         stamp = int(self.clock.now().timestamp()) if now is None else now
@@ -369,14 +373,17 @@ class FederationTopologyService:
             )
         )[0]
         raw_state = str(row["state"])
-        stale = raw_state == "active" and (
-            row["last_seen_at"] is None or now - int(row["last_seen_at"]) > TOPOLOGY_STALE_SECONDS
+        offline = raw_state == "active" and not self.peers.is_online_at(
+            raw_state, row["last_seen_at"], now=now
         )
-        state = "discovered" if raw_state == "pending" else "stale" if stale else raw_state
+        state = "discovered" if raw_state == "pending" else "offline" if offline else raw_state
         sync_enabled = bool(json.loads(str(row["boards"]))) or bool(row["sync_incidents"])
         degraded_reasons: list[str] = []
-        if stale:
-            degraded_reasons.append("Peer has not been seen for 24 hours")
+        if offline:
+            stale_hours = self.peers.peer_stale_seconds // 3_600
+            degraded_reasons.append(
+                f"Peer has not been seen for {stale_hours} hours; federation traffic is paused"
+            )
         if sync_enabled and (
             row["last_sync_at"] is None or now - int(row["last_sync_at"]) > 86_400
         ):

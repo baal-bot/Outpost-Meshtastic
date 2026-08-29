@@ -1,5 +1,5 @@
 import("/nav.js");
-import("/member-map.js?v=6");
+import("/member-map.js?v=7");
 
 const $ = id => document.getElementById(id);
 const safe = value => String(value ?? "").replace(
@@ -97,7 +97,7 @@ function renderMemberRows() {
       `<small>${member.position_expires_at ? `Until ${safe(exactTime(member.position_expires_at))}` : "No retained coordinate"}</small></td>` +
       `<td><span class="trust-pill ${safe(member.trust)}">${safe(member.trust)}</span>` +
       `<small>PKI ${safe(member.pki_state)}</small></td>` +
-      `<td><button type="button" class="small-button secondary" data-review-member="${safe(member.id)}">Review</button></td></tr>`;
+      `<td><button type="button" class="small-button secondary" data-review-member="${safe(member.id)}">${member.needs_review ? "Review" : "Details"}</button></td></tr>`;
   }).join("") || '<tr><td colspan="7" class="ui-empty empty">No identities match this view.</td></tr>';
   $("member-more").hidden = memberCursor === null;
   updateSelectionBar();
@@ -120,7 +120,7 @@ function renderMembers(result, append) {
   const activeFilter = result.saved_filters.find(item => item.key === memberSavedFilter);
   $("member-view-title").textContent = activeFilter?.label || labels[$("member-view").value];
   $("discovered-note").hidden = $("member-view").value !== "discovered" &&
-    !["new", "stale", "review"].includes(memberSavedFilter);
+    !["new", "stale"].includes(memberSavedFilter);
   $("member-summary").textContent = `${result.total} matching ${result.total === 1 ? "identity" : "identities"}`;
   renderSavedFilters(result.saved_filters);
   renderMemberRows();
@@ -224,8 +224,10 @@ function renderPkiEvents(items) {
 function renderDetail(result) {
   selectedDetail = result;
   const member = result.member;
+  const passiveDiscovery = ["discovered", "blocked"].includes(member.category);
   const label = member.handle ? `@${member.handle}` :
     (member.long_name || member.short_name || "Unnamed radio");
+  $("detail-eyebrow").textContent = member.needs_review ? "IDENTITY REVIEW" : "IDENTITY DETAILS";
   $("detail-title").textContent = label;
   $("detail-subtitle").textContent = `${member.mesh_id} · ${categoryLabel(member)}`;
   const position = member.position_state === "active"
@@ -247,19 +249,19 @@ function renderDetail(result) {
     </section>
     <section class="detail-grid">
       <article class="detail-card">
-        <div class="detail-card-heading"><div><p class="eyebrow">OPERATOR REVIEW</p><h3>Trust & notes</h3></div><span>${member.reviewed_at ? `Reviewed ${safe(relative(member.reviewed_at))}` : "Not reviewed"}</span></div>
+        <div class="detail-card-heading"><div><p class="eyebrow">${member.needs_review ? "OPERATOR REVIEW" : "DIRECTORY RECORD"}</p><h3>Trust & notes</h3></div><span>${member.needs_review ? "Needs review" : member.reviewed_at ? `Updated ${safe(relative(member.reviewed_at))}` : passiveDiscovery ? "Discovery only" : "No pending review"}</span></div>
         <form id="member-review-form" class="review-form">
           <label><span>Trust level</span><select id="detail-trust">${trustLevels.map(level => `<option value="${level}" ${level === member.trust ? "selected" : ""}>${level}</option>`).join("")}</select></label>
           <p id="trust-impact" class="trust-impact">${safe(member.promotion_effects[member.trust])}</p>
           <label><span>Operator notes</span><textarea id="detail-notes" maxlength="2000" rows="4" placeholder="Context that will help the next operator">${safe(member.notes || "")}</textarea></label>
           <label><span>Reason for trust change</span><input id="detail-reason" maxlength="240" placeholder="Required when trust changes"></label>
           <p id="detail-result" class="form-result" aria-live="polite"></p>
-          <div class="form-actions"><button type="submit">Save reviewed changes</button>${stateActions}</div>
+          <div class="form-actions"><button type="submit">${member.needs_review ? "Save reviewed changes" : "Save directory changes"}</button>${stateActions}</div>
         </form>
       </article>
       <article class="detail-card">
-        <p class="eyebrow">POSITION CONSENT</p><h3>${safe(position)}</h3>
-        <dl class="detail-list"><div><dt>Member visibility</dt><dd>${safe(member.position_consent)}</dd></div><div><dt>State</dt><dd>${safe(member.position_state.replace("_", " "))}</dd></div><div><dt>Source</dt><dd>${safe(member.position_source || "—")}</dd></div><div><dt>Scheduled expiry</dt><dd>${safe(exactTime(member.position_expires_at))}</dd></div></dl>
+        <p class="eyebrow">${passiveDiscovery ? "POSITION EVIDENCE" : "POSITION CONSENT"}</p><h3>${safe(position)}</h3>
+        <dl class="detail-list"><div><dt>${passiveDiscovery ? "Directory use" : "Member visibility"}</dt><dd>${passiveDiscovery ? "Operator only" : safe(member.position_consent)}</dd></div><div><dt>State</dt><dd>${safe(member.position_state.replace("_", " "))}</dd></div><div><dt>Source</dt><dd>${safe(member.position_source || "—")}</dd></div><div><dt>Scheduled expiry</dt><dd>${safe(exactTime(member.position_expires_at))}</dd></div></dl>
         <p class="privacy-copy">Exact coordinates stay in this operator-only detail and are never included in directory CSV exports.</p>
       </article>
       <article class="detail-card">
@@ -351,12 +353,12 @@ async function saveMemberReview(event) {
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    $("detail-result").textContent = await apiError(response, "Reviewed changes could not be saved.");
+    $("detail-result").textContent = await apiError(response, "Directory changes could not be saved.");
     return;
   }
   await Promise.all([loadMembers(), loadAudit(false)]);
   await openMemberDetail(member.id);
-  $("detail-result").textContent = "Reviewed changes saved.";
+  $("detail-result").textContent = "Directory changes saved.";
 }
 
 async function changeDirectoryState(action) {

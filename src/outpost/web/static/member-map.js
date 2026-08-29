@@ -2,10 +2,16 @@ const memberMapPanel = document.createElement("section");
 memberMapPanel.className = "ui-card panel member-map-panel";
 memberMapPanel.innerHTML = `
   <div class="member-map-heading">
-    <div><p class="eyebrow">APPROVED MEMBER POSITIONS</p><h2>Members map</h2></div>
+    <div><p class="eyebrow">RETAINED RADIO POSITIONS</p><h2>Members & discoveries map</h2></div>
     <div class="member-map-filters">
+      <select id="member-map-category" aria-label="Filter member map by identity type">
+        <option value="approved">Approved members</option>
+        <option value="discovered">Discovered radios</option>
+        <option value="all">All positioned radios</option>
+      </select>
       <select id="member-map-trust" aria-label="Filter member map by trust level">
-        <option value="all">All trust levels</option><option value="member">Members</option>
+        <option value="all">All trust levels</option><option value="guest">Guests</option>
+        <option value="blocked">Blocked</option><option value="member">Members</option>
         <option value="trusted">Trusted</option><option value="responder">Responders</option>
         <option value="operator">Operators</option>
       </select>
@@ -16,19 +22,19 @@ memberMapPanel.innerHTML = `
       <button id="member-map-purge-expired" class="member-map-danger" type="button">Purge expired</button>
     </div>
   </div>
-  <p class="member-privacy-notice">Operator view shows full received coordinates for approved members only. Every share has a configured deletion time; expired positions are hidden immediately and physically removed by maintenance. Member-facing POS responses still honor each member’s visibility preference.</p>
+  <p class="member-privacy-notice">Operator view shows retained coordinates for approved members and radios that broadcast a position on the mesh. A discovered location is observational and does not make that radio a member. Expired positions are hidden immediately and physically removed by maintenance; member-facing POS responses still honor each member’s visibility preference.</p>
   <p id="member-position-result" class="member-position-result" aria-live="polite"></p>
-  <div id="member-map" class="outpost-map member-position-map" tabindex="0" aria-label="Interactive members map. Use arrow keys to pan, plus and minus to zoom, and zero to fit visible members.">
+  <div id="member-map" class="outpost-map member-position-map" tabindex="0" aria-label="Interactive radio map. Use arrow keys to pan, plus and minus to zoom, and zero to fit visible radios.">
     <div id="member-map-tiles" class="outpost-map-tiles"></div>
     <div id="member-map-markers" class="outpost-map-markers"></div>
     <div class="ui-map-controls outpost-map-controls">
       <button id="member-map-in" data-map-action="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
       <button id="member-map-out" data-map-action="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
-      <button id="member-map-fit" data-map-action="fit" title="Fit visible members" aria-label="Fit visible members">⌖</button>
+      <button id="member-map-fit" data-map-action="fit" title="Fit visible radios" aria-label="Fit visible radios">⌖</button>
     </div>
     <span id="member-map-coordinates" class="outpost-map-coordinates">—</span>
     <aside id="member-map-detail" class="outpost-map-detail" hidden></aside>
-    <p id="member-map-empty" class="outpost-map-empty">No approved member positions match these filters.</p>
+    <p id="member-map-empty" class="outpost-map-empty">No retained radio positions match these filters.</p>
     <div id="member-map-attribution" class="outpost-map-attribution"></div>
   </div>`;
 document.querySelector("#member-directory").after(memberMapPanel);
@@ -46,12 +52,21 @@ const positionAge = seconds => seconds < 60 ? "just now" :
 let memberMapItems = [];
 
 function visibleMembers() {
+  const category = mm("member-map-category").value;
   const trust = mm("member-map-trust").value;
   const cutoff = Date.now() - Number(mm("member-map-age").value) * 3600000;
   return memberMapItems.filter(value =>
+    (category === "all" || value.category === category) &&
     (trust === "all" || value.trust === trust) &&
     new Date(value.received_at).getTime() >= cutoff
   );
+}
+
+function radioLabel(value) {
+  if (value.handle) return `@${value.handle}`;
+  if (value.long_name) return `${value.long_name} (${value.mesh_id})`;
+  if (value.short_name) return `${value.short_name} (${value.mesh_id})`;
+  return value.mesh_id;
 }
 
 function closeMemberDetail() {
@@ -77,14 +92,16 @@ function showMember(value) {
   const markerId = `member-${value.id}`;
   memberMapController.select(markerId);
   const detail = mm("member-map-detail");
-  const source = value.source === "position_app" ? "Meshtastic position share" : value.source;
+  const discovered = value.category === "discovered";
+  const source = value.source === "position_app" ?
+    `Meshtastic position ${discovered ? "broadcast" : "share"}` : value.source;
   detail.hidden = false;
   detail.innerHTML = `
     <button class="outpost-map-detail-close" aria-label="Close">×</button>
-    <p class="eyebrow">${escapeMap(value.trust.toUpperCase())} MEMBER</p>
-    <h3>${escapeMap(value.handle ? `@${value.handle}` : value.mesh_id)}</h3>
+    <p class="eyebrow">${discovered ? "DISCOVERED RADIO" : `${escapeMap(value.trust.toUpperCase())} MEMBER`}</p>
+    <h3>${escapeMap(radioLabel(value))}</h3>
     <p>${Number(value.lat).toFixed(5)}, ${Number(value.lon).toFixed(5)}</p>
-    <p><b>Shared</b> ${new Date(value.received_at).toLocaleString()} · ${positionAge(value.age_seconds)}</p>
+    <p><b>${discovered ? "Received" : "Shared"}</b> ${new Date(value.received_at).toLocaleString()} · ${positionAge(value.age_seconds)}</p>
     <p><b>Source</b> ${escapeMap(source)}</p>
     <p><b>Visibility</b> ${escapeMap(value.visibility)}</p>
     <p><b>Scheduled deletion</b> ${new Date(value.expires_at).toLocaleString()} · ${Math.max(1, Math.ceil(value.deletes_in_seconds / 3600))}h remaining</p>
@@ -100,9 +117,10 @@ function renderMemberMap() {
     id: `member-${value.id}`,
     lat: value.lat,
     lon: value.lon,
-    className: `shape-circle ${["trusted", "responder", "operator"].includes(value.trust) ? "tone-trusted" : "tone-member"}`,
-    title: value.handle ? `@${value.handle}` : value.mesh_id,
-    label: `Show ${value.handle ? `@${value.handle}` : value.mesh_id} on the members map`,
+    className: value.category === "discovered" ? "shape-diamond tone-discovered" :
+      `shape-circle ${["trusted", "responder", "operator"].includes(value.trust) ? "tone-trusted" : "tone-member"}`,
+    title: radioLabel(value),
+    label: `Show ${radioLabel(value)} on the radio map`,
     data: value,
     onActivate: showMember,
   })));
@@ -116,7 +134,7 @@ function fitMemberMap() {
 }
 
 async function loadMemberMap() {
-  const response = await fetch("/api/v1/members/map");
+  const response = await fetch("/api/v1/members/map?view=all");
   if (!response.ok) return;
   memberMapItems = (await response.json()).items || [];
   fitMemberMap();
@@ -196,9 +214,12 @@ function bindMemberRows() {
     button.textContent = "Map";
     button.setAttribute(
       "aria-label",
-      `Show ${value.handle ? `@${value.handle}` : value.mesh_id} on the members map`,
+      `Show ${radioLabel(value)} on the radio map`,
     );
     button.onclick = () => {
+      mm("member-map-category").value = value.category;
+      mm("member-map-trust").value = "all";
+      renderMemberMap();
       memberMapController.setView({lat: value.lat, lon: value.lon, zoom: 15});
       showMember(value);
       mm("member-map").scrollIntoView({behavior: "smooth", block: "center"});
@@ -207,6 +228,10 @@ function bindMemberRows() {
   });
 }
 
+mm("member-map-category").onchange = () => {
+  mm("member-map-trust").value = "all";
+  fitMemberMap();
+};
 mm("member-map-trust").onchange = fitMemberMap;
 mm("member-map-age").onchange = fitMemberMap;
 mm("member-map-purge-expired").onclick = purgeExpiredPositions;

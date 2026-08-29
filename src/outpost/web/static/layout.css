@@ -81,7 +81,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .application-dialog-card { display: grid; gap: 13px; padding: 26px; background: linear-gradient(145deg, var(--raised), var(--surface)); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 28px 90px rgb(0 0 0 / 58%); }
 .application-dialog-card h2 { margin: 0; }
 .application-dialog-message { color: var(--muted); font-size: .78rem; line-height: 1.55; white-space: pre-line; }
-.application-dialog-card label { display: grid; gap: 7px; color: var(--muted); font-size: .7rem; }
+.application-dialog-card label, .application-dialog-field { display: grid; gap: 7px; color: var(--muted); font-size: .7rem; }
 .application-dialog-card label[hidden], .application-dialog-card [hidden] { display: none; }
 .application-dialog-card input, .application-dialog-card textarea { width: 100%; }
 .application-dialog-card small { color: var(--amber); }

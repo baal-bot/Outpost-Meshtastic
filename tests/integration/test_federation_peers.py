@@ -144,6 +144,37 @@ async def test_peer_api_lists_and_operator_rejects_without_exposing_secret(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_peer_liveness_is_derived_without_revoking_trust(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    service = FederationPeerService(database, clock, "!local", peer_stale_hours=1)
+    peer = await service.discover("!remote", "Remote Outpost", 1, {}, "radio")
+    await database.write("UPDATE fed_peer SET state='active' WHERE id=?", (peer.id,))
+    client = TestClient(
+        create_web_app(lambda: {"radio": "up"}, database=database, federation=service)
+    )
+
+    current = client.get("/api/v1/federation/peers").json()["items"][0]
+    assert current["state"] == "active"
+    assert current["connectivity"] == "online"
+    assert current["sync_paused"] is False
+
+    clock.advance(3_601)
+    offline = client.get("/api/v1/federation/peers").json()["items"][0]
+    assert offline["state"] == "active"
+    assert offline["connectivity"] == "offline"
+    assert offline["sync_paused"] is True
+    assert offline["stale_after_seconds"] == 3_600
+
+    await service.touch("!remote")
+    recovered = client.get("/api/v1/federation/peers").json()["items"][0]
+    assert recovered["connectivity"] == "online"
+    assert recovered["sync_paused"] is False
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_sync_policy_requires_pairing_and_is_bounded(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()

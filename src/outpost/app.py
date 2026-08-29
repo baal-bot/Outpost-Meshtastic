@@ -184,6 +184,7 @@ class OutpostApp:
             self.clock,
             "local",
             self.config.store.retention.member_positions_hours,
+            self.config.store.retention.incident_history_days,
         )
         self.alerts = AlertService(self.database, self.governor, self.clock, self.config)
         self.checkins = CheckinService(self.database, self.governor, self.clock)
@@ -206,7 +207,12 @@ class OutpostApp:
         self.astronomy = AstronomyService(self.clock)
         self.seismic = SeismicService(self.database, self.clock, self.config.env)
         self.waypoints = WaypointService(self.database, self.clock)
-        self.federation = FederationPeerService(self.database, self.clock, "")
+        self.federation = FederationPeerService(
+            self.database,
+            self.clock,
+            "",
+            self.config.fed.peer_stale_hours,
+        )
         self.federation_sync = FederationSyncService(
             self.database, module_enabled=self.config.modules.is_enabled
         )
@@ -662,7 +668,7 @@ class OutpostApp:
                 "uid=excluded.uid,stream=excluded.stream,updated_at=excluded.updated_at",
                 (peer.id, post_id, uid, f"board:{slug}", now, now),
             )
-            if not self.radio.local_node_id:
+            if not self.radio.local_node_id or not self.federation.is_online(peer, now=now):
                 continue
             try:
                 await self._send_federation_value(
@@ -1276,6 +1282,11 @@ class OutpostApp:
             raise ValueError("radio identity is not available")
         self.federation.local_mesh_id = local_id
         self.federation_sync.local_mesh_id = local_id
+        peer = await self.federation.by_mesh_id(peer_id)
+        if not self.federation.is_online(peer):
+            raise ValueError(
+                "peer is offline; federation traffic is paused until inbound activity resumes"
+            )
         value = {**value, "mesh_id": local_id}
         secret = await self.federation.secret(peer_id)
         counter = counter or await self.federation.next_counter(peer_id)
@@ -1343,6 +1354,8 @@ class OutpostApp:
             return
         now = int(self.clock.now().timestamp())
         for peer in await self.federation.list("active"):
+            if not self.federation.is_online(peer, now=now):
+                continue
             if not (peer.boards or peer.sync_incidents or peer.relay_alerts):
                 continue
             rows = await self.database.read(
@@ -1451,6 +1464,8 @@ class OutpostApp:
                     )
                     try:
                         peer = await self.federation.by_mesh_id(str(row["mesh_id"]))
+                        if not self.federation.is_online(peer, now=now):
+                            continue
                         items = await self.federation_sync.export_items(
                             peer, [{"stream": str(row["stream"]), "uid": uid}]
                         )
@@ -1501,6 +1516,12 @@ class OutpostApp:
                 await self.federation_relay.recover_stalled(now=now)
                 for receipt in await self.federation_relay.pending_receipts():
                     try:
+                        receipt_peer = await self.federation.by_mesh_id(receipt["previous_hop"])
+                    except ValueError:
+                        continue
+                    if not self.federation.is_online(receipt_peer, now=now):
+                        continue
+                    try:
                         await self._send_relay_receipt(
                             receipt["previous_hop"], receipt["envelope_id"], "delivered"
                         )
@@ -1516,6 +1537,9 @@ class OutpostApp:
                         if selected is None:
                             continue
                         peer_id = selected["mesh_id"]
+                        peer = await self.federation.by_mesh_id(peer_id)
+                        if not self.federation.is_online(peer, now=now):
+                            continue
                         secret = await self.federation.secret(peer_id)
                         counter = await self.federation.next_counter(peer_id)
                         frames = self.federation_codec.encode(
@@ -1626,6 +1650,8 @@ class OutpostApp:
             target = value.get("target_mesh_id")
             if target is not None and target != self.radio.local_node_id:
                 return
+            if authenticated:
+                await self.federation.touch(sender)
             self.federation.local_mesh_id = self.radio.local_node_id
             self.federation_sync.local_mesh_id = self.radio.local_node_id
             await self.federation_sync.import_approved_replies(

@@ -284,6 +284,7 @@ class MaintenanceService:
         retention = self.config.store.retention
         auth_cutoff = now - retention.authentication_days * DAY
         digest_cutoff = now - retention.digest_days * DAY
+        incident_cutoff = now - retention.incident_history_days * DAY
         watch_cutoff = now - retention.watch_history_days * DAY
         environment_cutoff = now - retention.environment_history_days * DAY
         provider_cutoff = now - retention.provider_cache_days * DAY
@@ -460,7 +461,7 @@ class MaintenanceService:
                 "incident",
                 "status IN ('resolved','false_alarm','expired') "
                 "AND COALESCE(resolved_at,expires_at,updated_at)<?",
-                (watch_cutoff,),
+                (incident_cutoff,),
             ),
             CleanupRule(
                 "cap_alerts",

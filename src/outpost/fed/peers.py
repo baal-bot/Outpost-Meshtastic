@@ -51,8 +51,44 @@ class Peer:
 
 
 class FederationPeerService:
-    def __init__(self, database: Database, clock: Clock, local_mesh_id: str) -> None:
+    def __init__(
+        self,
+        database: Database,
+        clock: Clock,
+        local_mesh_id: str,
+        peer_stale_hours: int = 72,
+    ) -> None:
         self.database, self.clock, self.local_mesh_id = database, clock, local_mesh_id
+        self.peer_stale_seconds = max(1, peer_stale_hours) * 3_600
+
+    def is_online_at(
+        self,
+        state: str,
+        last_seen_at: int | None,
+        *,
+        now: int | None = None,
+    ) -> bool:
+        if state != "active" or last_seen_at is None:
+            return False
+        stamp = int(self.clock.now().timestamp()) if now is None else now
+        return stamp - last_seen_at <= self.peer_stale_seconds
+
+    def is_online(self, peer: Peer, *, now: int | None = None) -> bool:
+        return self.is_online_at(peer.state, peer.last_seen_at, now=now)
+
+    def liveness(self, peer: Peer, *, now: int | None = None) -> dict[str, Any]:
+        online = self.is_online(peer, now=now)
+        paired = peer.state == "active"
+        return {
+            "connectivity": "online" if online else "offline" if paired else None,
+            "sync_paused": paired and not online,
+            "stale_after_seconds": self.peer_stale_seconds,
+            "offline_since_at": (
+                peer.last_seen_at + self.peer_stale_seconds
+                if paired and not online and peer.last_seen_at is not None
+                else None
+            ),
+        }
 
     @staticmethod
     def confirmation_code(secret: bytes, first_id: str, second_id: str) -> str:
@@ -266,6 +302,15 @@ class FederationPeerService:
                 now,
                 now,
             ),
+        )
+        return await self.by_mesh_id(mesh_id)
+
+    async def touch(self, mesh_id: str, *, at: int | None = None) -> Peer:
+        """Record fully validated activity without changing the peer's trust state."""
+        stamp = int(self.clock.now().timestamp()) if at is None else at
+        await self.database.write(
+            "UPDATE fed_peer SET last_seen_at=? WHERE mesh_id=? AND state='active'",
+            (stamp, mesh_id),
         )
         return await self.by_mesh_id(mesh_id)
 

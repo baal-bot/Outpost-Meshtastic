@@ -83,11 +83,18 @@ async def test_operator_position_lifecycle_and_sensitive_export_disclosure(tmp_p
     clock = SystemClock()
     member = await MemberRepo(database, clock).resolve("!00000001")
     member = await MemberRepo(database, clock).claim_handle(member.mesh_id, "dana")
+    discovered = await MemberRepo(database, clock).resolve("!00000002")
     now = int(time.time())
     await database.write(
         "INSERT INTO member_position(member_id,lat,lon,received_at,source,expires_at) "
         "VALUES(?,40.4406,-79.9959,?,'position_app',?)",
         (member.id, now - 60, now + 7_140),
+    )
+    await database.write("UPDATE member SET long_name='Field Radio' WHERE id=?", (discovered.id,))
+    await database.write(
+        "INSERT INTO member_position(member_id,lat,lon,received_at,source,expires_at) "
+        "VALUES(?,40.45,-80.01,?,'position_app',?)",
+        (discovered.id, now - 30, now + 7_170),
     )
     await database.write(
         "INSERT INTO pending_incident_location(member_id,lat,lon,created_at,expires_at) "
@@ -112,11 +119,21 @@ async def test_operator_position_lifecycle_and_sensitive_export_disclosure(tmp_p
     )
 
     item = client.get("/api/v1/members/map").json()["items"][0]
+    assert item["category"] == "approved"
     assert item["source"] == "position_app"
     assert item["age_seconds"] >= 60
     assert item["visibility"] == "operator exact; member coarse"
     assert item["retention_hours"] == 2
     assert item["expires_at"] > item["received_at"]
+    discovered_items = client.get("/api/v1/members/map?view=discovered").json()["items"]
+    assert len(discovered_items) == 1
+    assert discovered_items[0]["mesh_id"] == discovered.mesh_id
+    assert discovered_items[0]["long_name"] == "Field Radio"
+    assert discovered_items[0]["category"] == "discovered"
+    assert "mesh broadcast" in discovered_items[0]["visibility"]
+    all_items = client.get("/api/v1/members/map?view=all").json()["items"]
+    assert {value["category"] for value in all_items} == {"approved", "discovered"}
+    assert client.get("/api/v1/members/map?view=unknown").status_code == 422
     situational = client.get("/api/v1/watch/map").json()
     assert situational["nodes"][0]["mesh_id"] == member.mesh_id
     download = client.get(f"/api/v1/backups/{backup.name}")

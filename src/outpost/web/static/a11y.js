@@ -141,12 +141,12 @@ applicationDialog.innerHTML = `
     <p class="eyebrow" id="application-dialog-eyebrow">OPERATOR CONFIRMATION</p>
     <h2 id="application-dialog-title"></h2>
     <p id="application-dialog-message" class="application-dialog-message"></p>
-    <label id="application-dialog-field" hidden>
-      <span id="application-dialog-label"></span>
+    <div id="application-dialog-field" class="application-dialog-field" hidden>
+      <label id="application-dialog-label"></label>
       <input id="application-dialog-input">
       <textarea id="application-dialog-textarea" rows="5" hidden></textarea>
       <small id="application-dialog-hint"></small>
-    </label>
+    </div>
     <p id="application-dialog-error" class="application-dialog-error" role="alert"></p>
     <footer>
       <button id="application-dialog-cancel" type="button" class="secondary">Cancel</button>
@@ -224,8 +224,9 @@ function openApplicationDialog(options) {
   dialogParts.hint.textContent = options.verification ? `Type exactly: ${options.verification}` : "";
   dialogParts.error.textContent = "";
   const field = options.multiline ? dialogParts.textarea : dialogParts.input;
+  dialogParts.label.htmlFor = field.id;
   field.value = options.defaultValue || "";
-  field.type = options.type || "text";
+  if (!options.multiline) field.type = options.type || "text";
   field.autocomplete = options.autocomplete || "off";
   return new Promise(resolve => {
     dialogState = {...options, resolve};

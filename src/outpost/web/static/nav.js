@@ -82,6 +82,7 @@ if (!document.querySelector('link[rel="icon"]')) {
   document.head.insertAdjacentHTML("beforeend", '<link rel="icon" href="/favicon.svg">');
 }
 const accessibleNames = {
+  "member-map-category": "Filter member map by identity type",
   "member-map-trust": "Filter member map by trust level",
   "member-map-age": "Filter member map by position age",
   "member-view": "Filter member directory",
@@ -480,9 +481,16 @@ async function refreshFederationReviews() {
     const navigationState = await loadNavigationStatus();
     const reviews = navigationState.reviews;
     const counts = {board: reviews.board, incidents: reviews.incidents, alerts: reviews.alerts};
+    const localIncidentReviews = Number(
+      navigationState.watch?.incidents_pending_review || 0,
+    );
     setReviewBadge("/federation.html", reviews.total);
     setReviewBadge("/bbs.html", counts.board);
-    setReviewBadge("/watch.html", counts.incidents + counts.alerts);
+    setReviewBadge(
+      "/watch.html",
+      localIncidentReviews + counts.incidents + counts.alerts,
+      "Watch items pending operator review",
+    );
     setReviewBadge(
       "/operator.html",
       Number(reviews.members || 0),

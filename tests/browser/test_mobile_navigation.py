@@ -93,6 +93,7 @@ def dashboard_poll_body(
     states: dict[str, dict[str, bool]] | None = None,
     reviews: dict[str, int] | None = None,
     actionable: int = 0,
+    watch_reviews: int = 0,
 ) -> str:
     module_states = states or {
         name: {"enabled": True, "restart_required_to_change": True}
@@ -107,6 +108,7 @@ def dashboard_poll_body(
                 "change_policy": "restart_required",
             },
             "reviews": review_counts,
+            "watch": {"incidents_pending_review": watch_reviews},
             "mail": {"actionable": actionable},
         }
     )
@@ -552,6 +554,7 @@ def route_visual_content_api(page: object) -> None:
             ],
         },
     )
+    fulfill("**/api/v1/incidents/history*", {"items": []})
     fulfill("**/api/v1/incidents*", {"items": []})
     fulfill("**/api/v1/alerts*", {"items": []})
     fulfill("**/api/v1/events*", {"current": None})
@@ -1301,6 +1304,7 @@ def test_member_map_marker_filter_and_detail_use_shared_controller(
         "mesh_id": "!00000009",
         "handle": "alice",
         "trust": "trusted",
+        "category": "approved",
         "lat": 40.4406,
         "lon": -79.9959,
         "received_at": "2099-08-26T20:00:00Z",
@@ -1313,27 +1317,50 @@ def test_member_map_marker_filter_and_detail_use_shared_controller(
         "last_heard_snr": 8.5,
         "hops_away": 1,
     }
+    discovered = {
+        **member,
+        "id": 10,
+        "mesh_id": "!00000010",
+        "handle": None,
+        "long_name": "Field Radio",
+        "trust": "guest",
+        "category": "discovered",
+        "lat": 40.46,
+        "lon": -80.01,
+        "visibility": "operator exact; discovered from mesh broadcast",
+    }
+    directory_discovered = {
+        **discovered,
+        "needs_review": False,
+        "category_reason": "Heard on the mesh only; no handle or admitted trust has been granted.",
+        "active_position": True,
+        "position_consent": "coarse",
+        "position_expires_at": discovered["expires_at"],
+        "pki_state": "unknown",
+        "notes": None,
+        "hw_model": "TBEAM",
+    }
 
     def members(route: object) -> None:
         if urlparse(route.request.url).path == "/api/v1/members/map":
-            body = {"items": [member]}
+            body = {"items": [member, discovered]}
         else:
             body = {
-                "items": [],
+                "items": [directory_discovered],
                 "approved_count": 1,
-                "discovered_count": 0,
+                "discovered_count": 1,
                 "review_count": 0,
                 "archived_count": 0,
                 "ignored_count": 0,
                 "trusted_count": 1,
-                "total": 0,
+                "total": 1,
                 "next_cursor": None,
                 "saved_filters": [],
             }
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
 
     page.route("**/api/v1/members*", members)
-    page.route("**/api/v1/members/map", members)
+    page.route("**/api/v1/members/map*", members)
     page.route(
         "**/api/v1/security/safety-floor",
         lambda route: route.fulfill(
@@ -1354,8 +1381,14 @@ def test_member_map_marker_filter_and_detail_use_shared_controller(
     try:
         page.goto(f"{dashboard_url}/operator.html", wait_until="networkidle")
         wait_for_navigation(page)
+        health.assert_clean()
+        discovery_row = page.locator('[data-member-row="10"]')
+        discovery_row.wait_for()
+        discovery_row.get_by_role("button", name="Details").wait_for()
+        assert discovery_row.get_by_role("button", name="Review").count() == 0
         marker = page.locator('[data-marker-id="member-9"]')
         marker.wait_for()
+        assert page.locator('[data-marker-id="member-10"]').count() == 0
         marker.click()
         detail = page.locator("#member-map-detail")
         detail.get_by_role("heading", name="@alice").wait_for()
@@ -1368,6 +1401,14 @@ def test_member_map_marker_filter_and_detail_use_shared_controller(
         assert not detail.is_visible()
         page.locator("#member-map-trust").select_option("all")
         page.locator('[data-marker-id="member-9"]').wait_for()
+        page.locator("#member-map-category").select_option("discovered")
+        discovered_marker = page.locator('[data-marker-id="member-10"]')
+        discovered_marker.wait_for()
+        assert page.locator('[data-marker-id="member-9"]').count() == 0
+        assert "tone-discovered" in (discovered_marker.get_attribute("class") or "")
+        discovered_marker.click()
+        detail.get_by_role("heading", name="Field Radio (!00000010)").wait_for()
+        assert "DISCOVERED RADIO" in detail.text_content()
         health.assert_clean()
     finally:
         page.close()
@@ -1586,7 +1627,7 @@ def test_mobile_menu_has_keyboard_current_page_and_review_states(
                 status=200,
                 content_type="application/json",
                 body=dashboard_poll_body(
-                    reviews={"total": 1, "incidents": 1},
+                    watch_reviews=1,
                 ),
             ),
         )
@@ -2517,7 +2558,7 @@ def route_operator_workspace(page: object, seen_audit_urls: list[str]) -> None:
         )
 
     page.route("**/api/v1/members*", members)
-    page.route("**/api/v1/members/map", members)
+    page.route("**/api/v1/members/map*", members)
     page.route(
         "**/api/v1/security/safety-floor",
         lambda route: route.fulfill(
@@ -2927,12 +2968,16 @@ def test_operations_inbox_conversation_reply_compose_and_responsive_layout(
         page.close()
 
 
-def route_federation_policy_workspace(page: object, applied: list[dict[str, object]]) -> None:
+def route_federation_policy_workspace(
+    page: object, applied: list[dict[str, object]], *, offline: bool = False
+) -> None:
     peer = {
         "id": 1,
         "mesh_id": "!00000002",
         "node_name": "Denver Outpost",
         "state": "active",
+        "connectivity": "offline" if offline else "online",
+        "sync_paused": offline,
         "protocol_version": 1,
         "capabilities": {"weather": True, "alerts": True, "bbs": True},
         "discovery_transports": ["radio", "mqtt"],
@@ -3033,6 +3078,23 @@ def route_federation_policy_workspace(page: object, applied: list[dict[str, obje
             ),
         ),
     )
+
+
+def test_federation_peer_card_distinguishes_offline_from_trust(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 390, dashboard_url, theme="dark")
+    route_federation_policy_workspace(page, [], offline=True)
+    try:
+        page.goto(f"{dashboard_url}/federation.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        card = page.locator(".peer-card.offline")
+        card.wait_for()
+        assert card.locator(".chip.offline").text_content() == "offline"
+        assert "automatic sync paused" in card.text_content()
+        assert "Trust is retained" in card.text_content()
+    finally:
+        page.close()
 
 
 @pytest.mark.parametrize(
@@ -3354,12 +3416,55 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
     page = prepare_page(browser, 1280, dashboard_url, theme="night")
     route_shared_operator_api(page)
     mutations: list[dict[str, object]] = []
+    incident_actions: list[dict[str, object]] = []
     incidents: list[dict[str, object]] = []
 
     def watch_route(route: object) -> None:
         request = route.request
         path = urlparse(request.url).path
-        if path == "/api/v1/incidents" and request.method == "POST":
+        if path == "/api/v1/incidents/7/updates" and request.method == "POST":
+            action = request.post_data_json
+            incident_actions.append(action)
+            if action["kind"] == "ack":
+                incidents[0]["status"] = "monitoring"
+            body = incidents[0]
+        elif path == "/api/v1/incidents/7" and request.method == "PATCH":
+            action = request.post_data_json
+            incident_actions.append(action)
+            incidents[0]["status"] = action["status"]
+            incidents[0]["resolved_at"] = 2_000_000_100
+            incidents[0]["resolved_by"] = "operator"
+            incidents[0]["resolution_note"] = action["resolution"]
+            body = incidents[0]
+        elif path == "/api/v1/incidents/history":
+            body = {
+                "items": [
+                    incident
+                    for incident in incidents
+                    if incident["status"] in {"resolved", "false_alarm", "expired"}
+                ],
+                "retention_days": 30,
+            }
+        elif path == "/api/v1/incidents/7":
+            body = {
+                **incidents[0],
+                "origins": [
+                    {
+                        "original_incident_id": 7,
+                        "origin_uid": "local:incident:7",
+                    }
+                ],
+                "provenance": [
+                    {
+                        "event_kind": "created",
+                        "source_node": "local",
+                        "recorded_at": 2_000_000_000 + index,
+                    }
+                    for index in range(8)
+                ],
+                "match_candidates": [],
+            }
+        elif path == "/api/v1/incidents" and request.method == "POST":
             mutations.append(request.post_data_json)
             incidents.append(
                 {
@@ -3371,12 +3476,16 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
                     "severity": "urgent",
                     "status": "open",
                     "location_text": "Cedar Lane",
+                    "reporter_id": 4,
                     "reporter_label": "operator",
                     "confirm_count": 0,
                     "dispute_count": 0,
                     "flagged_for_review": False,
                     "updated_at": 2_000_000_000,
                     "expires_at": 2_000_100_000,
+                    "resolved_at": None,
+                    "resolved_by": None,
+                    "resolution_note": None,
                     "lat": 40.4406,
                     "lon": -79.9959,
                     "remote": False,
@@ -3384,7 +3493,13 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
             )
             body = {"id": 7, "local_ref": 7}
         elif path == "/api/v1/incidents":
-            body = {"items": incidents}
+            body = {
+                "items": [
+                    incident
+                    for incident in incidents
+                    if incident["status"] in {"open", "monitoring"}
+                ]
+            }
         elif path == "/api/v1/alerts":
             body = {"items": []}
         elif path == "/api/v1/events":
@@ -3436,8 +3551,37 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
         detail = page.locator("#map-detail")
         detail.get_by_role("heading", name="Tree down blocking Cedar Lane").wait_for()
         assert marker.get_attribute("aria-pressed") == "true"
-        detail.get_by_role("button", name="Close").click()
-        assert marker.get_attribute("aria-pressed") == "false"
+        detail.get_by_text("Provenance").wait_for()
+        assert detail.evaluate("element => getComputedStyle(element).overflowY") == "auto"
+
+        detail.get_by_role("button", name="Acknowledge").click()
+        page.get_by_text("Incident acknowledged").wait_for()
+        page.locator(".lifecycle-badge.monitoring").wait_for()
+
+        page.locator('[data-incident-open="7"]').click()
+        detail.get_by_role("button", name="Add update").click()
+        update_dialog = page.get_by_role("dialog", name="Add incident update")
+        update_dialog.get_by_role("textbox", name="Update note").fill("Crew is checking the tree")
+        update_dialog.get_by_role("button", name="Record update").click()
+        page.get_by_text("Incident update recorded.").wait_for()
+
+        page.locator('[data-incident-open="7"]').click()
+        detail.get_by_role("button", name="Resolve").click()
+        resolve_dialog = page.get_by_role("dialog", name="Resolve incident?")
+        resolve_dialog.get_by_role("textbox", name="Resolution note").fill("Tree safely removed")
+        resolve_dialog.get_by_role("button", name="Resolve incident").click()
+        page.get_by_text("Incident resolved and removed").wait_for()
+        page.locator('[data-incident="7"]').wait_for(state="detached")
+        history = page.locator('[data-incident-history="7"]')
+        history.get_by_text("resolved", exact=True).wait_for()
+        assert "Tree safely removed" in history.text_content()
+        assert page.locator("#incident-history-retention").text_content() == "30-day retention"
+
+        assert incident_actions == [
+            {"kind": "ack"},
+            {"kind": "update", "note": "Crew is checking the tree"},
+            {"status": "resolved", "resolution": "Tree safely removed"},
+        ]
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
     finally:

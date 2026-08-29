@@ -1,9 +1,11 @@
 import pytest
+from fastapi.testclient import TestClient
 
 from outpost.clock import VirtualClock
 from outpost.store import Database
 from outpost.store.members import MemberRepo
 from outpost.watch.incidents import IncidentService
+from outpost.web.api import create_web_app
 
 
 @pytest.mark.asyncio
@@ -68,6 +70,40 @@ async def test_operator_acknowledgement_and_update_are_recorded(tmp_path) -> Non
     changes = await service.updates(incident.id, 10)
     assert [change["kind"] for change in changes] == ["update", "ack"]
     assert changes[0]["body"] == "Crew checking bridge"
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_terminal_incidents_are_available_in_the_30_day_history(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    member = await MemberRepo(database, clock).resolve("!00000001")
+    service = IncidentService(database, clock, history_retention_days=30)
+    incident, _ = await service.create("tree blocking road 40.0 -79.0", member)
+    assert incident is not None
+
+    resolved = await service.operator_patch(
+        incident.id,
+        status="resolved",
+        severity=None,
+        resolution="Tree removed and road reopened",
+        actor="operator",
+    )
+    assert resolved.resolved_at == int(clock.now().timestamp())
+    assert resolved.resolution_note == "Tree removed and road reopened"
+
+    client = TestClient(
+        create_web_app(lambda: {"radio": "up"}, database=database, incidents=service)
+    )
+    response = client.get("/api/v1/incidents/history")
+    assert response.status_code == 200
+    assert response.json()["retention_days"] == 30
+    assert [item["id"] for item in response.json()["items"]] == [incident.id]
+
+    clock.advance(30 * 86_400 + 1)
+    assert await service.history() == []
+    assert await service.by_id(incident.id) is not None
     await database.close()
 
 

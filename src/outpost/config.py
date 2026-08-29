@@ -379,6 +379,7 @@ class RetentionConfig(StrictModel):
     message_log_max_rows: int = Field(default=500_000, ge=1_000)
     authentication_days: int = Field(default=30, ge=1, le=365)
     digest_days: int = Field(default=90, ge=1, le=730)
+    incident_history_days: int = Field(default=30, ge=30, le=3_650)
     watch_history_days: int = Field(default=365, ge=30, le=3_650)
     environment_history_days: int = Field(default=30, ge=1, le=365)
     provider_cache_days: int = Field(default=2, ge=1, le=30)

@@ -87,6 +87,27 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
         "fetched_at) VALUES('old-alerts','test',0,0,'empty','[]',?)",
         (old,),
     )
+    await database.write(
+        "INSERT INTO incident(uid,local_ref,type,severity,status,title,reporter_label,"
+        "origin_node,created_at,updated_at,resolved_at,resolution_note) "
+        "VALUES('old-incident',1,'hazard','info','resolved','Old incident','member',"
+        "'local',?,?,?,'Resolved long ago')",
+        (old, old, old),
+    )
+    recent_incident = now - 10 * 86_400
+    await database.write(
+        "INSERT INTO incident(uid,local_ref,type,severity,status,title,reporter_label,"
+        "origin_node,created_at,updated_at,resolved_at,resolution_note) "
+        "VALUES('recent-incident',2,'hazard','info','resolved','Recent incident','member',"
+        "'local',?,?,?,'Recently resolved')",
+        (recent_incident, recent_incident, recent_incident),
+    )
+    await database.write(
+        "INSERT INTO incident(uid,local_ref,type,severity,status,title,reporter_label,"
+        "origin_node,created_at,updated_at) VALUES('active-incident',3,'hazard','info','open',"
+        "'Active incident','member','local',?,?)",
+        (old, old),
+    )
     config = Config.model_validate(
         {"store": {"path": str(tmp_path / "outpost.db"), "maintenance_hour": 3}}
     )
@@ -103,6 +124,7 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
     assert result.federation_service_usage == 1
     assert result.environment_cache == 1
     assert result.alert_point_cache == 1
+    assert result.removed["incidents"] == 1
     assert await database.read("SELECT 1 FROM safety_floor_attempt") == []
     assert await database.read("SELECT 1 FROM member_position") == []
     assert await database.read("SELECT 1 FROM pending_incident_location") == []
@@ -110,6 +132,8 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
     assert await database.read("SELECT 1 FROM fed_service_usage") == []
     assert await database.read("SELECT 1 FROM env_cache") == []
     assert await database.read("SELECT 1 FROM cap_point_cache") == []
+    retained_incidents = await database.read("SELECT uid FROM incident ORDER BY uid")
+    assert [row["uid"] for row in retained_incidents] == ["active-incident", "recent-incident"]
     assert [row["uid"] for row in await database.read("SELECT uid FROM thread")] == ["pinned"]
     assert backups.list()
     assert await service.due() is False

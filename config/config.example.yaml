@@ -182,6 +182,7 @@ store:
     message_log_max_rows: 500000
     authentication_days: 30
     digest_days: 90
+    incident_history_days: 30
     watch_history_days: 365
     environment_history_days: 30
     provider_cache_days: 2

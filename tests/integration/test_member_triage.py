@@ -53,6 +53,18 @@ async def test_member_triage_filters_review_history_and_detail(tmp_path) -> None
         first_seen=now - 86_400,
         last_seen=now - 120,
     )
+    pending_id = await add_member(
+        database,
+        4,
+        handle="river",
+        first_seen=now - 120,
+        last_seen=now - 90,
+    )
+    await database.write(
+        "UPDATE member SET reviewed_at=?,reviewed_by='web:operator' WHERE id=?",
+        (now - 30, pending_id),
+    )
+    await MemberRepo(database, VirtualClock()).claim_handle("!00000004", "river", approve=False)
     await database.write(
         "INSERT INTO member_position(member_id,lat,lon,received_at,source,expires_at) "
         "VALUES(?,40.4406,-79.9959,?,'position_app',?)",
@@ -66,15 +78,23 @@ async def test_member_triage_filters_review_history_and_detail(tmp_path) -> None
     )
 
     listing = await service.list(view="all", saved=None, query="", cursor=0, limit=50)
-    assert listing["approved_count"] == 1
+    assert listing["approved_count"] == 2
     assert listing["discovered_count"] == 2
-    assert listing["review_count"] == 2
+    assert listing["review_count"] == 1
     assert {item["category"] for item in listing["items"]} == {"approved", "discovered"}
+    by_id = {item["id"]: item for item in listing["items"]}
+    assert by_id[discovered_id]["needs_review"] is False
+    assert by_id[stale_id]["needs_review"] is False
+    assert by_id[pending_id]["needs_review"] is True
     filters = {item["key"]: item["count"] for item in listing["saved_filters"]}
-    assert filters["new"] == 1 and filters["stale"] == 1 and filters["review"] == 2
+    assert filters["new"] == 1 and filters["stale"] == 1 and filters["review"] == 1
+    assert filters["member"] == 2
+    review = await service.list(view="all", saved="review", query="", cursor=0, limit=50)
+    assert [item["id"] for item in review["items"]] == [pending_id]
 
     detail = await service.detail(discovered_id)
     assert detail is not None
+    assert detail["member"]["needs_review"] is False
     assert detail["member"]["position_state"] == "active"
     assert detail["member"]["position_lat"] == pytest.approx(40.4406)
     assert detail["recent_activity"][0]["command"] == "PING"

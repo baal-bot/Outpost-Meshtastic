@@ -13,12 +13,27 @@ from outpost.store import Database
 ADMITTED_TRUST = ("member", "trusted", "responder", "operator")
 DISCOVERED_SQL = "handle IS NULL AND trust IN ('guest','blocked')"
 APPROVED_SQL = "(handle IS NOT NULL OR trust IN ('member','trusted','responder','operator'))"
+REVIEW_ELIGIBLE_SQL = """(
+  member.handle IS NOT NULL
+  OR member.trust IN ('member','trusted','responder','operator')
+  OR EXISTS(
+    SELECT 1 FROM member_trust_history review_history
+    WHERE review_history.member_id=member.id
+      AND review_history.to_trust IN ('member','trusted','responder','operator')
+  )
+)"""
+NEEDS_REVIEW_SQL = f"""(
+  {REVIEW_ELIGIBLE_SQL} AND (
+    (member.trust IN ('guest','blocked') AND member.reviewed_at IS NULL)
+    OR member.pki_state IN ('pending','conflict')
+  )
+)"""
 STATE_ACTIONS = {"archive": "archived", "ignore": "ignored", "restore": "active"}
 
 SAVED_FILTERS = (
     (
         "new",
-        "New",
+        "New discoveries",
         "Active discovered radios first heard in the past 24 hours.",
         f"directory_state='active' AND {DISCOVERED_SQL} AND first_seen>=unixepoch()-86400",
     ),
@@ -30,7 +45,7 @@ SAVED_FILTERS = (
     ),
     (
         "stale",
-        "Stale",
+        "Stale discoveries",
         "Unreviewed active radios not heard for 30 days.",
         f"directory_state='active' AND {DISCOVERED_SQL} "
         "AND reviewed_at IS NULL AND last_seen<unixepoch()-2592000",
@@ -38,8 +53,8 @@ SAVED_FILTERS = (
     (
         "member",
         "Members",
-        "Admitted members and trusted members.",
-        "directory_state='active' AND trust IN ('member','trusted')",
+        "All identities with a claimed username or operator-admitted trust.",
+        f"directory_state='active' AND {APPROVED_SQL}",
     ),
     (
         "responder",
@@ -50,9 +65,8 @@ SAVED_FILTERS = (
     (
         "review",
         "Needs review",
-        "Unreviewed discoveries and authenticated radio keys awaiting an operator decision.",
-        f"directory_state='active' AND (({DISCOVERED_SQL} AND reviewed_at IS NULL) "
-        "OR pki_state IN ('pending','conflict'))",
+        "Claimed identities and previously admitted radio keys awaiting an operator decision.",
+        f"member.directory_state='active' AND {NEEDS_REVIEW_SQL}",
     ),
 )
 
@@ -82,6 +96,7 @@ class MemberTriageService:
         item["pki_elevated_eligible"] = bool(
             item.get("pki_state") == "verified" and public_key is not None
         )
+        item["needs_review"] = bool(item.get("needs_review"))
         state = str(item.get("directory_state") or "active")
         trust = str(item.get("trust") or "guest")
         handle = item.get("handle")
@@ -180,6 +195,7 @@ class MemberTriageService:
                    last_heard_snr,hops_away,notes,directory_state,directory_state_at,
                    directory_state_by,reviewed_at,reviewed_by,
                    public_key,pending_public_key,pki_state,pki_verified_at,pki_last_seen_at,
+                   {NEEDS_REVIEW_SQL} needs_review,
                    COALESCE(json_extract(prefs,'$.position'),'coarse') position_consent,
                    EXISTS(SELECT 1 FROM member_position p
                           WHERE p.member_id=member.id AND p.expires_at>unixepoch()) active_position,
@@ -202,36 +218,36 @@ class MemberTriageService:
             tuple(params[:-2]),
         )
         summary = await self.database.read(
-            """SELECT
+            f"""SELECT
               SUM(directory_state='active' AND
                   (handle IS NOT NULL OR
                    trust IN ('member','trusted','responder','operator'))) approved_count,
               SUM(directory_state='active' AND handle IS NULL AND
                   trust IN ('guest','blocked')) discovered_count,
               SUM(directory_state='active' AND
-                  ((handle IS NULL AND trust IN ('guest','blocked') AND reviewed_at IS NULL)
-                   OR pki_state IN ('pending','conflict')))
+                  {NEEDS_REVIEW_SQL})
                 review_count,
               SUM(directory_state='archived') archived_count,
               SUM(directory_state='ignored') ignored_count,
               SUM(directory_state='active' AND trust IN ('trusted','responder','operator'))
                 trusted_count
-            FROM member"""
+            FROM member"""  # noqa: S608 - review expression is a fixed application constant.
         )
         filter_counts = await self.database.read(
-            """SELECT
+            f"""SELECT
               SUM(directory_state='active' AND handle IS NULL AND
                   trust IN ('guest','blocked') AND first_seen>=unixepoch()-86400) new,
               SUM(directory_state='active' AND last_seen>=unixepoch()-86400) recent,
               SUM(directory_state='active' AND handle IS NULL AND
                   trust IN ('guest','blocked') AND reviewed_at IS NULL AND
                   last_seen<unixepoch()-2592000) stale,
-              SUM(directory_state='active' AND trust IN ('member','trusted')) member,
+              SUM(directory_state='active' AND
+                  (handle IS NOT NULL OR
+                   trust IN ('member','trusted','responder','operator'))) member,
               SUM(directory_state='active' AND trust='responder') responder,
               SUM(directory_state='active' AND
-                  ((handle IS NULL AND trust IN ('guest','blocked') AND reviewed_at IS NULL)
-                   OR pki_state IN ('pending','conflict'))) review
-            FROM member"""
+                  {NEEDS_REVIEW_SQL}) review
+            FROM member"""  # noqa: S608 - review expression is a fixed application constant.
         )
         items = [self._classification(dict(row)) for row in rows[:limit]]
         counts = {key: int(value or 0) for key, value in dict(summary[0]).items()}
@@ -253,17 +269,18 @@ class MemberTriageService:
 
     async def detail(self, member_id: int) -> dict[str, Any] | None:
         rows = await self.database.read(
-            """
+            f"""
             SELECT id,mesh_id,mesh_num,handle,long_name,short_name,hw_model,trust,first_seen,
                    last_seen,last_heard_snr,hops_away,notes,directory_state,directory_state_at,
                    directory_state_by,reviewed_at,reviewed_by,
                    public_key,pending_public_key,pki_state,pki_verified_at,pki_last_seen_at,
+                   {NEEDS_REVIEW_SQL} needs_review,
                    COALESCE(json_extract(prefs,'$.position'),'coarse') position_consent,
                    p.lat position_lat,p.lon position_lon,p.received_at position_received_at,
                    p.source position_source,p.expires_at position_expires_at
             FROM member LEFT JOIN member_position p ON p.member_id=member.id
             WHERE member.id=?
-            """,
+            """,  # noqa: S608 - review expression is a fixed application constant.
             (member_id,),
         )
         if not rows:

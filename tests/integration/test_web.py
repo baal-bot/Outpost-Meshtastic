@@ -232,6 +232,16 @@ async def test_dashboard_poll_batches_status_and_revalidates_with_etag(tmp_path)
         "INSERT INTO member(mesh_id,mesh_num,first_seen,last_seen,pending_public_key,pki_state) "
         "VALUES('!00000003',3,1,1,zeroblob(32),'pending')"
     )
+    await database.write(
+        "INSERT INTO member(mesh_id,mesh_num,handle,first_seen,last_seen,pending_public_key,"
+        "pki_state) VALUES('!00000004',4,'river',1,1,zeroblob(32),'pending')"
+    )
+    await database.write(
+        "INSERT INTO incident(uid,local_ref,type,severity,status,title,reporter_id,"
+        "reporter_label,origin_node,created_at,updated_at) "
+        "VALUES('local:review:1',1,'hazard','caution','open','Member report',"
+        "(SELECT id FROM member WHERE mesh_id='!00000004'),'river','local',1,1)"
+    )
 
     client = TestClient(create_web_app(lambda: {"radio": "up"}, database))
     response = client.get("/api/v1/dashboard/poll")
@@ -244,6 +254,7 @@ async def test_dashboard_poll_batches_status_and_revalidates_with_etag(tmp_path)
         "members": 1,
     }
     assert response.json()["mail"] == {"actionable": 1}
+    assert response.json()["watch"] == {"incidents_pending_review": 1}
     assert response.json()["modules"]["items"]["bbs"]["enabled"] is True
     assert response.headers["cache-control"] == "private, max-age=0, must-revalidate"
 
@@ -254,5 +265,13 @@ async def test_dashboard_poll_batches_status_and_revalidates_with_etag(tmp_path)
     assert unchanged.status_code == 304
     assert unchanged.content == b""
     assert unchanged.headers["etag"] == response.headers["etag"]
+
+    await database.write("UPDATE incident SET status='monitoring' WHERE uid='local:review:1'")
+    reviewed = client.get(
+        "/api/v1/dashboard/poll",
+        headers={"if-none-match": response.headers["etag"]},
+    )
+    assert reviewed.status_code == 200
+    assert reviewed.json()["watch"] == {"incidents_pending_review": 0}
 
     await database.close()

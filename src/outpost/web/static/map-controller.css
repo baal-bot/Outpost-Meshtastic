@@ -139,6 +139,7 @@
 .outpost-map-marker.tone-evacuated { --marker-color: #7da9df; }
 .outpost-map-marker.tone-unaccounted { --marker-color: #d2a85b; }
 .outpost-map-marker.tone-member { --marker-color: #397d66; --marker-border: #b9e3d1; }
+.outpost-map-marker.tone-discovered { --marker-color: #5885a1; --marker-border: #b9d8e8; }
 .outpost-map-marker.tone-trusted { --marker-color: #a47c35; --marker-border: #efd08b; }
 .outpost-map-marker.tone-waypoint { --marker-color: #286c55; --marker-border: #9ad4ba; }
 .outpost-map-marker.tone-quake { --marker-color: #8c672b; --marker-border: #f0ca77; }
