@@ -140,6 +140,7 @@ messages accept them without a prefix.
 
 ```text
 ?
+SITREP
 WX TODAY
 WARN
 BOARDS

@@ -11,13 +11,13 @@ Open a direct message to the Outpost node and send `?`:
 ```text
 OUTPOST / HOME
 1 Weather & alerts
-2 Incidents & safety
-3 Community boards
-4 Mail
-5 People & places
-6 Ask Outpost
-7 My account
-8 Command shortcuts
+2 Situation brief
+3 Incidents & safety
+4 Community boards
+5 Mail
+6 People & places
+7 Ask Outpost
+8 My account
 0 Home · ? Menu
 ```
 
@@ -32,7 +32,7 @@ therefore see fewer choices than a named member or responder.
   asks whom to contact and then asks for the message.
 - `0` returns to Home. `?`, `MENU`, and `HOME` rebuild navigation even when a previous response was
   lost.
-- A command such as `WX`, `WARN`, `BOARDS`, `MAIL`, `REPORT`, or `PING` works at any screen and
+- A command such as `SITREP`, `WX`, `WARN`, `BOARDS`, `MAIL`, `REPORT`, or `PING` works at any screen and
   cancels an unfinished prompt. This makes screen state an accelerator, never a prerequisite.
 - Command names are case-insensitive. Common phrases and unambiguous read-only command typos are
   resolved before the local AI is considered. A typo that could change data, send a message, or
@@ -65,6 +65,19 @@ Report a community incident:
 ?  -> Incidents & safety -> Report a problem
 Tree blocks Oak Street near the school.
 ```
+
+Open the local situation brief:
+
+```text
+?  -> Situation brief
+2  -> incidents and active alerts, with source ID and age
+0  -> Home
+```
+
+The SITREP home screen is one deterministic packet. Weather, incident, welfare, community, and
+network details are requested only when needed and use stable, bounded pages. Exact member/check-in
+coordinates, private mail, operator notes, and boards above the member's trust are removed before
+briefing changes or optional AI phrasing are computed.
 
 Reports and welfare check-ins are community coordination records, not emergency calls. Mail is
 hidden from other members but stored plaintext is readable by the Outpost operator.

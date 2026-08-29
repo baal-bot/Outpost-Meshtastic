@@ -41,6 +41,7 @@ from outpost.operator_context import (
     set_current_actor,
 )
 from outpost.radio_operations import RadioOperations
+from outpost.situation import BriefingCapability, SituationBriefingService
 from outpost.store import Database
 from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.store.maintenance import MaintenanceService
@@ -572,6 +573,7 @@ def create_web_app(
     radio_configuration_apply: (
         Callable[[str, str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
     ) = None,
+    situation: SituationBriefingService | None = None,
     web_config: WebConfig | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Outpost API", version=__version__, docs_url="/api/docs")
@@ -725,7 +727,10 @@ def create_web_app(
             return True
         if method == "DELETE" and re.fullmatch(r"/api/v1/auth/sessions/[A-Za-z0-9_-]+", normalized):
             return True
-        return method in {"GET", "HEAD"} and normalized == "/api/v1/wallboard/summary"
+        return method in {"GET", "HEAD"} and normalized in {
+            "/api/v1/wallboard/summary",
+            "/api/v1/sitrep",
+        }
 
     @app.middleware("http")
     async def security_headers(request: Any, call_next: Any) -> Any:
@@ -743,9 +748,10 @@ def create_web_app(
             )
         if request.url.path.endswith((".html", ".js", ".css")) or request.url.path == "/":
             response.headers["Cache-Control"] = "no-cache"
-        if request.url.path.startswith("/api/v1/auth/") or request.url.path == (
-            "/api/v1/wallboard/summary"
-        ):
+        if request.url.path.startswith("/api/v1/auth/") or request.url.path in {
+            "/api/v1/wallboard/summary",
+            "/api/v1/sitrep",
+        }:
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -2007,6 +2013,20 @@ def create_web_app(
     @app.get("/api/v1/status")
     async def status() -> dict[str, Any]:
         return status_provider()
+
+    if situation is not None:
+
+        @app.get("/api/v1/sitrep")
+        async def situation_brief(
+            request: Request, ai: bool = Query(default=False)
+        ) -> dict[str, Any]:
+            session = getattr(request.state, "web_session", None)
+            capability = (
+                BriefingCapability.PUBLIC
+                if session is not None and session.role == "viewer"
+                else BriefingCapability.OPERATOR
+            )
+            return await situation.snapshot(capability, include_ai=ai)
 
     @app.get("/api/v1/web/transport", tags=["web-transport"])
     async def web_transport(request: Request) -> dict[str, object]:

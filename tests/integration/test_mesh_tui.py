@@ -76,7 +76,8 @@ async def test_home_is_capability_and_trust_aware_and_fits_one_packet(tmp_path) 
 
         assert "@dana" in await send(app, 2, "!00000001", "NAME dana")
         member = await send(app, 3, "!00000001", "?")
-        assert "6 Ask Outpost" in member
+        assert "2 Situation brief" in member
+        assert "7 Ask Outpost" in member
         assert chunk_text(member) == [member]
 
         invalid = await send(app, 4, "!00000001", "9")
@@ -93,7 +94,7 @@ async def test_numeric_bbs_journey_and_bare_text_composition(tmp_path) -> None:
         sender = "!00000001"
         assert "@dana" in await send(app, 1, sender, "NAME dana")
         await send(app, 2, sender, "?")
-        community = await send(app, 3, sender, "3")
+        community = await send(app, 3, sender, "4")
         assert community.startswith("OUTPOST / COMMUNITY BOARDS")
         boards = await send(app, 4, sender, "1")
         assert "Roads & Access" in boards
@@ -129,7 +130,7 @@ async def test_guided_mail_and_incident_inputs_need_no_command_syntax(tmp_path) 
         assert "@ray" in await send(app, 2, "!00000002", "NAME ray")
 
         await send(app, 3, "!00000002", "?")
-        await send(app, 4, "!00000002", "4")
+        await send(app, 4, "!00000002", "5")
         compose = await send(app, 5, "!00000002", "2")
         assert "OUTPOST / SEND MAIL TO" in compose
         message = await send(app, 6, "!00000002", "1")
@@ -138,7 +139,7 @@ async def test_guided_mail_and_incident_inputs_need_no_command_syntax(tmp_path) 
         assert "MAIL SENT" in sent and "Sent to @dana" in sent
 
         await send(app, 12, "!00000001", "?")
-        await send(app, 13, "!00000001", "4")
+        await send(app, 13, "!00000001", "5")
         inbox = await send(app, 14, "!00000001", "1")
         assert "OUTPOST / MAIL INBOX" in inbox
         opened = await send(app, 15, "!00000001", "1")
@@ -337,7 +338,7 @@ async def test_global_commands_interrupt_flows_and_home_recovers_after_lost_stat
         assert "@dana" in await send(app, 1, sender, "NAME dana")
 
         await send(app, 2, sender, "?")
-        await send(app, 3, sender, "3")
+        await send(app, 3, sender, "4")
         choose_board = await send(app, 4, sender, "4")
         assert choose_board.startswith("OUTPOST / CHOOSE A BOARD")
 

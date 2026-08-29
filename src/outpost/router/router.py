@@ -268,7 +268,8 @@ class Router:
             await self.rate_limiter.release_safety_floor(
                 member.mesh_id, token, safety_decision.fingerprint
             )
-        response.max_parts = spec.max_parts
+        if response.max_parts is None:
+            response.max_parts = spec.max_parts
         return self.tui.activate(
             response,
             session,

@@ -23,6 +23,12 @@ prefix. `HELP <command>` shows exact syntax.
 | `CHANS` / `CHAN <name>` | List channels or request details by DM. |
 | `WHERE` | Show current navigation context. |
 | `BACK` / `HOME` | Leave one context or clear it. |
+| `SITREP [section]` | Evidence-backed local brief. Alias: `BRIEF`; sections are weather, incidents, welfare, community, and network. |
+
+`SITREP` is member-only and direct-message-only. Its first deterministic screen fits one radio
+packet; numbered section pages carry compact source-ID/age markers. `SITREP AI` optionally asks the
+configured model to phrase the already-selected facts, but facts, ordering, and safety state never
+depend on AI.
 
 ## Bulletin boards
 

@@ -84,20 +84,29 @@ def _input_screen(
 
 
 def _home_screen(ctx: CommandContext) -> Response:
-    return _screen(
-        ctx,
-        "home",
-        "HOME",
+    has_sitrep = _available(ctx, "SITREP")
+    choices = [
+        ("Weather & alerts", "MENU WEATHER", "WX", ("weather", "alerts")),
+    ]
+    if has_sitrep:
+        choices.append(("Situation brief", "SITREP", "SITREP", ("sitrep", "brief")))
+    choices.extend(
         [
-            ("Weather & alerts", "MENU WEATHER", "WX", ("weather", "alerts")),
             ("Incidents & safety", "MENU SAFETY", "INCIDENTS", ("safety", "incidents")),
             ("Community boards", "MENU COMMUNITY", "BOARDS", ("boards", "community")),
             ("Mail", "MENU MAIL", "MAIL", ("messages", "inbox")),
             ("People & places", "MENU PEOPLE", "WHO", ("people", "places")),
             ("Ask Outpost", "MENU ASK", "ASK", ("ask", "ai")),
             ("My account", "MENU ACCOUNT", "WHOAMI", ("account", "me")),
-            ("Command shortcuts", "MENU SHORTCUTS", "HELP", ("commands", "shortcuts")),
-        ],
+        ]
+    )
+    if not has_sitrep:
+        choices.append(("Command shortcuts", "MENU SHORTCUTS", "HELP", ("commands", "shortcuts")))
+    return _screen(
+        ctx,
+        "home",
+        "HOME",
+        choices,
     )
 
 
@@ -459,6 +468,7 @@ def _menu_screen(ctx: CommandContext, topic: str) -> Response:
         )
     if topic == "SHORTCUTS":
         groups = [
+            ("Brief", (("SITREP", "SITREP"),)),
             ("WX", (("WX", "WX"), ("FC", "FC"), ("WARN", "WARN"))),
             (
                 "Safety",

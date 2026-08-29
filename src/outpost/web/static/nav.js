@@ -133,6 +133,7 @@ const links = [
   ["/bbs.html", "◎", "BBS"],
   ["/mail.html", "✉", "Mail"],
   ["/watch.html", "△", "Watch"],
+  ["/sitrep.html", "◈", "Sitrep"],
   ["/environment.html", "☼", "Environment"],
   ["/radio.html", "⌁", "Radio"],
   ["/federation.html", "⤨", "Federation"],

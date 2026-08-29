@@ -37,6 +37,7 @@ DESTINATIONS = (
     ("BBS", "/bbs.html"),
     ("Mail", "/mail.html"),
     ("Watch", "/watch.html"),
+    ("Sitrep", "/sitrep.html"),
     ("Environment", "/environment.html"),
     ("Radio", "/radio.html"),
     ("Federation", "/federation.html"),

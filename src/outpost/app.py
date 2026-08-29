@@ -30,6 +30,7 @@ from outpost.commands.identity import specs as identity_specs
 from outpost.commands.mail import specs as mail_specs
 from outpost.commands.operations import specs as operations_specs
 from outpost.commands.operator import specs as operator_specs
+from outpost.commands.situation import specs as situation_specs
 from outpost.commands.watch import specs as watch_specs
 from outpost.config import Config
 from outpost.env import (
@@ -65,6 +66,7 @@ from outpost.router.models import Line, Response, ResponseKind
 from outpost.router.router import Router
 from outpost.router.session import SessionStore
 from outpost.security.rate_limit import RateLimiter
+from outpost.situation import SituationBriefingService
 from outpost.store import Database
 from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.store.maintenance import MaintenanceService
@@ -224,6 +226,13 @@ class OutpostApp:
             importer=self.import_federation_inbox_as,
             reply_sender=self.reply_operations_conversation,
         )
+        self.situation = SituationBriefingService(
+            self.database,
+            self.clock,
+            self.status,
+            narrator=self.ai_service,
+            modules=self.config.modules.enabled_map,
+        )
         command_groups = (
             (
                 identity_specs(members, mail, self.config.security.require_approval),
@@ -238,6 +247,7 @@ class OutpostApp:
             (ai_specs(self.ai_service), self.config.modules.ai.enabled),
             (operator_specs(bbs), self.config.modules.bbs.enabled),
             (operations_specs(self.operations_center), True),
+            (situation_specs(self.situation), True),
             (watch_specs(self.incidents), self.config.modules.watch.enabled),
             (alert_specs(self.alerts), self.config.modules.watch.enabled),
             (checkin_specs(self.checkins), self.config.modules.watch.enabled),
@@ -311,6 +321,7 @@ class OutpostApp:
             radio_configuration_status=self.radio_configuration_status,
             radio_configuration_preflight=self.preflight_radio_configuration,
             radio_configuration_apply=self.configure_radio,
+            situation=self.situation,
             web_config=self.config.web,
         )
 

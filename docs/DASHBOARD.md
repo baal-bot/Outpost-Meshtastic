@@ -11,6 +11,8 @@ phones and desktops and uses bundled assets so its interface remains available w
   member/system identity, route previews, delivery state, search, unread state, and archiving.
 - **Watch:** incident map/list, monitoring state, alerts, acknowledgements, welfare events, and
   human-reviewed cross-Outpost incident reconciliation with origin/provenance inspection.
+- **Sitrep:** deterministic, role-filtered key facts; source IDs and ages; changes since the prior
+  snapshot; supporting-record links; and optional cached AI phrasing of the authorized facts.
 - **Environment:** separate environmental map, weather/forecast, official alerts, earthquakes,
   astronomy, editable waypoints, and the reviewed RTL-SDR/SAME inbox and receiver health.
 - **Radio:** connection state, firmware/node details, telemetry, durable outbound state and
@@ -91,11 +93,11 @@ remains visible as a warning until it is unlinked or promoted again.
 
 The web console is intended for the local operator; mesh users do not need web accounts. A
 Read-only / wallboard account is optional and should be created only for a shared status display.
-It receives one aggregate contract and cannot browse operator pages or general read APIs. The
-wallboard omits member/radio identifiers, individual activity, message and mail data, coordinates,
-welfare state, notes, configuration, audits, backups, and AI review data. Viewer authorization is
-default-deny, so a newly registered API route is operator-only until deliberately added to the
-wallboard contract.
+It receives two deliberately public-safe contracts—the aggregate wallboard summary and public
+SITREP—and cannot browse operator pages or general read APIs. These contracts omit member/radio
+identifiers, individual activity, message and mail data, coordinates, welfare identities, notes,
+configuration, audits, backups, and AI review data. Viewer authorization is default-deny, so a
+newly registered API route is operator-only until deliberately added to the wallboard contract.
 
 ## Appearance
 
