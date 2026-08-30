@@ -338,7 +338,9 @@ async def test_direct_delivery_is_preferred_and_policy_pause_forces_relay(tmp_pa
     assert await relay.next_hop(envelope_id) == {"mesh_id": C, "path": "direct"}
     await relay.reserve_forward(envelope_id, C, 1.0)
     assert await relay.recover_stalled(now=int(relay.clock.now().timestamp()) + 301) == 1
-    assert (await relay.queue())[0]["state"] == "queued"
+    retried = (await relay.queue())[0]
+    assert retried["state"] == "queued"
+    assert await relay.next_hop(envelope_id) is None
     await relay.set_policy(
         C,
         enabled=True,
@@ -350,10 +352,105 @@ async def test_direct_delivery_is_preferred_and_policy_pause_forces_relay(tmp_pa
         airtime_seconds_per_hour=30,
         actor="operator:test",
     )
-    assert await relay.next_hop(envelope_id) == {"mesh_id": B, "path": "relay"}
+    assert await relay.next_hop(envelope_id, now=retried["next_attempt_at"]) == {
+        "mesh_id": B,
+        "path": "relay",
+    }
     assert await relay.expire(now=int(relay.clock.now().timestamp()) + 86_401) == 1
     expired = (await relay.queue())[0]
     assert expired["state"] == "expired" and expired["payload_bytes"] == 0
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_outbound_saturation_does_not_starve_inbound_and_defers_to_rollover(
+    tmp_path,
+) -> None:
+    a_db, _, a_peers, a_relay = await relay_node(tmp_path, "a", A)
+    b_db, _, b_peers, b_relay = await relay_node(tmp_path, "b", B)
+    await allow_relay(a_db, a_peers, a_relay, B, rate=1)
+    await allow_relay(b_db, b_peers, b_relay, A, rate=1)
+
+    first = await a_relay.create(C, "incident", {"sequence": 1}, idempotency_key="out-one")
+    second = await a_relay.create(C, "incident", {"sequence": 2}, idempotency_key="out-two")
+    now = int(a_relay.clock.now().timestamp())
+    assert await a_relay.reserve_forward(first, B, 1.0, now=now) is True
+    assert await a_relay.reserve_forward(second, B, 1.0, now=now) is False
+    deferred = next(item for item in await a_relay.queue() if item["envelope_id"] == second)
+    assert deferred["state"] == "queued"
+    assert deferred["next_attempt_at"] == now - now % 3600 + 3600
+    assert "rate exhausted" in deferred["last_error"]
+    assert await a_relay.next_hop(second, now=deferred["next_attempt_at"] - 1) is None
+
+    incoming = await b_relay.create(
+        A, "request", {"kind": "status"}, idempotency_key="inbound-survives"
+    )
+    assert (await a_relay.accept(B, await b_relay.wire(incoming)))[1] == "delivered"
+    usage = (await a_db.read("SELECT accepted,forwarded FROM fed_relay_usage"))[0]
+    assert (usage["accepted"], usage["forwarded"]) == (1, 1)
+    assert (
+        await a_relay.reserve_forward(
+            second, B, 1.0, now=deferred["next_attempt_at"]
+        )
+        is True
+    )
+    await a_db.close()
+    await b_db.close()
+
+
+@pytest.mark.asyncio
+async def test_forward_failures_back_off_then_become_operator_visible_terminal_failure(
+    tmp_path,
+) -> None:
+    database, _, peers, relay = await relay_node(tmp_path, "a", A)
+    await allow_relay(database, peers, relay, B)
+    envelope_id = await relay.create(C, "request", {"kind": "status"})
+    stamp = int(relay.clock.now().timestamp())
+    delays = []
+
+    for attempt in range(1, 7):
+        assert await relay.reserve_forward(envelope_id, B, 1.0, now=stamp) is True
+        await relay.mark_failed(envelope_id, "radio delivery failed", now=stamp)
+        item = (await relay.queue())[0]
+        assert item["attempts"] == attempt
+        if attempt < 6:
+            assert item["state"] == "queued"
+            delays.append(item["next_attempt_at"] - stamp)
+            assert await relay.next_hop(envelope_id, now=item["next_attempt_at"] - 1) is None
+            stamp = item["next_attempt_at"]
+        else:
+            assert item["state"] == "rejected"
+            assert item["next_attempt_at"] is None
+            assert item["history"][0]["event_kind"] == "delivery_failed"
+
+    assert delays == sorted(delays)
+    assert len(
+        await database.read(
+            "SELECT 1 FROM mail WHERE conversation_key=?",
+            (f"system:relay-failure:{envelope_id}",),
+        )
+    ) == 1
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_negative_custody_receipt_stops_sender_retries_with_peer_reason(tmp_path) -> None:
+    database, _, peers, relay = await relay_node(tmp_path, "a", A)
+    await allow_relay(database, peers, relay, B)
+    envelope_id = await relay.create(C, "incident", {"status": "open"})
+    await relay.reserve_forward(envelope_id, B, 1.0)
+
+    assert (
+        await relay.acknowledge(
+            B, envelope_id, "rejected", "relay content scope is not allowed for this peer"
+        )
+        is None
+    )
+    item = (await relay.queue())[0]
+    assert item["state"] == "rejected"
+    assert item["last_error"] == "relay content scope is not allowed for this peer"
+    assert await relay.next_hop(envelope_id) is None
+    assert item["history"][0]["event_kind"] == "delivery_failed"
     await database.close()
 
 

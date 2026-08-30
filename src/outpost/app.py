@@ -1562,15 +1562,20 @@ class OutpostApp:
             self._task_progress("federation-delivery")
             await self.clock.sleep(30)
 
-    async def _send_relay_receipt(self, peer_id: str, envelope_id: str, state: str) -> None:
+    async def _send_relay_receipt(
+        self, peer_id: str, envelope_id: str, state: str, reason: str | None = None
+    ) -> None:
+        receipt: dict[str, object] = {
+            "target_mesh_id": peer_id,
+            "envelope_id": envelope_id,
+            "state": state,
+        }
+        if reason:
+            receipt["reason"] = reason[:160]
         await self._send_federation_value(
             peer_id,
             MessageType.RELAY_ACK,
-            {
-                "target_mesh_id": peer_id,
-                "envelope_id": envelope_id,
-                "state": state,
-            },
+            receipt,
         )
 
     async def _federation_relay_loop(self) -> None:
@@ -1625,16 +1630,20 @@ class OutpostApp:
                             )
                             for frame in frames
                         )
-                        await self.federation_relay.reserve_forward(
+                        reserved = await self.federation_relay.reserve_forward(
                             envelope_id,
                             peer_id,
                             airtime,
                             now=now,
                             path=selected["path"],
                         )
+                        if not reserved:
+                            continue
                         await self._queue_trusted_federation_frames(frames)
                     except (FrameError, ValueError) as error:
-                        await self.federation_relay.mark_failed(envelope_id, str(error))
+                        await self.federation_relay.mark_failed(
+                            envelope_id, str(error), now=now
+                        )
             self._task_progress("federation-relay")
             await self.clock.sleep(30)
 
@@ -2019,11 +2028,28 @@ class OutpostApp:
                 envelope = value.get("envelope")
                 if not isinstance(envelope, dict):
                     raise ValueError("invalid relay envelope")
-                envelope_id, state = await self.federation_relay.accept(
-                    sender,
-                    envelope,
-                    transport="mqtt" if getattr(message, "via_mqtt", False) else "radio",
-                )
+                try:
+                    envelope_id, state = await self.federation_relay.accept(
+                        sender,
+                        envelope,
+                        transport=(
+                            "mqtt" if getattr(message, "via_mqtt", False) else "radio"
+                        ),
+                    )
+                except ValueError as error:
+                    rejected_id = envelope.get("envelope_id")
+                    if (
+                        isinstance(rejected_id, str)
+                        and len(rejected_id) == 32
+                        and all(character in "0123456789abcdef" for character in rejected_id)
+                    ):
+                        try:
+                            await self._send_relay_receipt(
+                                sender, rejected_id, "rejected", str(error)
+                            )
+                        except (FrameError, ValueError):
+                            pass
+                    raise
                 try:
                     await self._send_relay_receipt(sender, envelope_id, state)
                 except (FrameError, ValueError):
@@ -2034,7 +2060,12 @@ class OutpostApp:
             elif msg_type is MessageType.RELAY_ACK:
                 envelope_id = str(value.get("envelope_id", ""))
                 state = str(value.get("state", ""))
-                previous = await self.federation_relay.acknowledge(sender, envelope_id, state)
+                reason = value.get("reason")
+                if reason is not None and not isinstance(reason, str):
+                    raise ValueError("invalid relay acknowledgement reason")
+                previous = await self.federation_relay.acknowledge(
+                    sender, envelope_id, state, reason
+                )
                 if previous is not None:
                     try:
                         await self._send_relay_receipt(previous, envelope_id, "delivered")

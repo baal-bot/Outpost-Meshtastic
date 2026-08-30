@@ -691,6 +691,63 @@ async def test_tampered_replayed_and_clock_skewed_frames_fail_without_side_effec
 
 
 @pytest.mark.asyncio
+async def test_relay_admission_refusal_returns_authenticated_negative_receipt(tmp_path) -> None:
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "modules": {"fed": {"enabled": True}},
+        }
+    )
+    app = OutpostApp(config)
+    await app.database.open()
+    local_id = "!aaaaaaaa"
+    remote_id = "!bbbbbbbb"
+    app.radio._local_id = local_id
+    secret = bytes(range(32))
+    await app.federation.discover(remote_id, "Remote", 1, {}, "radio")
+    await app.database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,local_approved=1,remote_approved=1 "
+        "WHERE mesh_id=?",
+        (secret, remote_id),
+    )
+    envelope_id = "a" * 32
+    frame = app.federation_codec.encode(
+        MessageType.RELAY_PUT,
+        {
+            "mesh_id": remote_id,
+            "target_mesh_id": local_id,
+            "envelope": {"envelope_id": envelope_id},
+        },
+        1,
+        secret,
+    )[0]
+    message = InboundMessage(
+        60,
+        remote_id,
+        local_id,
+        0,
+        config.radio.federation_portnum,
+        True,
+        None,
+        frame,
+        datetime.now(UTC),
+    )
+
+    await app._handle_federation_discovery(message)
+
+    receipt = None
+    for queued in app.governor.queued_items():
+        fragment = app.federation_codec.decode_fragment(queued.binary_payload, secret)
+        assert fragment.msg_type is MessageType.RELAY_ACK
+        receipt = app.federation_reassembler.add(local_id, fragment) or receipt
+    assert receipt is not None
+    assert receipt["envelope_id"] == envelope_id
+    assert receipt["state"] == "rejected"
+    assert receipt["reason"] == "relay is not enabled for this peer"
+    await app.database.close()
+
+
+@pytest.mark.asyncio
 async def test_multipart_item_completes_across_retries_and_replays_only_receipt(tmp_path) -> None:
     config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
     app = OutpostApp(config)

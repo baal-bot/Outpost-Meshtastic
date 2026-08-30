@@ -22,6 +22,9 @@ SCOPES = {"incident", "request", "receipt", "opaque"}
 MAX_PAYLOAD_BYTES = 800
 MAX_LIFETIME_SECONDS = 7 * 86_400
 CLOCK_SKEW_SECONDS = 300
+MAX_FORWARD_ATTEMPTS = 6
+RETRY_BASE_SECONDS = 30
+RETRY_MAX_SECONDS = 3_600
 ACTIVE_STATES = ("queued", "quarantined", "paused", "forwarding", "forwarded")
 ROTATION_CONTEXT = b"outpost-relay-origin-key-rotation-v1\x00"
 
@@ -685,11 +688,13 @@ class FederationRelayService:
                     (origin,),
                 )
                 usage = await transaction.read(
-                    "SELECT accepted,forwarded FROM fed_relay_usage WHERE peer_id=? "
+                    "SELECT accepted FROM fed_relay_usage WHERE peer_id=? "
                     "AND window_start=?",
                     (peer.id, stamp - stamp % 3600),
                 )
-                used_rate = int(usage[0]["accepted"] + usage[0]["forwarded"]) if usage else 0
+                # Inbound admission and outbound forwarding are independent budgets. A noisy
+                # local delivery path must never prevent a peer from handing us new custody.
+                used_rate = int(usage[0]["accepted"]) if usage else 0
                 storage = await transaction.read(
                     "SELECT COUNT(*) count,COALESCE(SUM(payload_bytes),0) bytes "
                     "FROM fed_relay_envelope WHERE received_from_peer_id=? "
@@ -897,6 +902,35 @@ class FederationRelayService:
             "ORDER BY e.updated_at DESC,e.envelope_id LIMIT ?",
             (max(1, min(limit, 500)),),
         )
+        envelope_ids = {str(row["envelope_id"]) for row in rows}
+        history: dict[str, list[dict[str, Any]]] = {key: [] for key in envelope_ids}
+        if envelope_ids:
+            events = await self.database.read(
+                "SELECT e.envelope_id,e.event_kind,e.detail_json,e.created_at,e.actor,"
+                "p.mesh_id peer_mesh_id FROM (SELECT envelope_id,peer_id,event_kind,"
+                "detail_json,created_at,actor,id,ROW_NUMBER() OVER (PARTITION BY envelope_id "
+                "ORDER BY created_at DESC,id DESC) rank FROM fed_relay_event "
+                "WHERE envelope_id IN (SELECT value FROM json_each(?))) e LEFT JOIN fed_peer p "
+                "ON p.id=e.peer_id WHERE e.rank<=8 ORDER BY e.created_at DESC,e.id DESC",
+                (json.dumps(sorted(envelope_ids)),),
+            )
+            for event in events:
+                key = str(event["envelope_id"])
+                if key not in history or len(history[key]) >= 8:
+                    continue
+                history[key].append(
+                    {
+                        "event_kind": str(event["event_kind"]),
+                        "detail": json.loads(str(event["detail_json"])),
+                        "created_at": int(event["created_at"]),
+                        "actor": str(event["actor"]),
+                        "peer_mesh_id": (
+                            str(event["peer_mesh_id"])
+                            if event["peer_mesh_id"] is not None
+                            else None
+                        ),
+                    }
+                )
         values: list[dict[str, Any]] = []
         for row in rows:
             value = dict(row)
@@ -906,6 +940,7 @@ class FederationRelayService:
             value.pop("rotation_from_public_key", None)
             value.pop("rotation_signature", None)
             value["route"] = json.loads(str(value.pop("route_json")))
+            value["history"] = history[str(row["envelope_id"])]
             values.append(value)
         return values
 
@@ -1098,7 +1133,8 @@ class FederationRelayService:
         else:
             state = "paused" if action == "pause" else "queued"
             sql = (
-                "UPDATE fed_relay_envelope SET state=?,updated_at=?,last_error=NULL "
+                "UPDATE fed_relay_envelope SET state=?,updated_at=?,last_error=NULL,"
+                "next_attempt_at=NULL "
                 "WHERE envelope_id=?"
             )
             params = (state, now, envelope_id)
@@ -1114,11 +1150,20 @@ class FederationRelayService:
     async def next_hop(self, envelope_id: str, *, now: int | None = None) -> dict[str, str] | None:
         stamp = int(self.clock.now().timestamp()) if now is None else now
         rows = await self.database.read(
-            "SELECT destination_node,scope,route_json,state,expires_at FROM fed_relay_envelope "
+            "SELECT destination_node,scope,route_json,state,expires_at,next_attempt_at "
+            "FROM fed_relay_envelope "
             "WHERE envelope_id=?",
             (envelope_id,),
         )
-        if not rows or str(rows[0]["state"]) != "queued" or int(rows[0]["expires_at"]) <= stamp:
+        if (
+            not rows
+            or str(rows[0]["state"]) != "queued"
+            or int(rows[0]["expires_at"]) <= stamp
+            or (
+                rows[0]["next_attempt_at"] is not None
+                and int(rows[0]["next_attempt_at"]) > stamp
+            )
+        ):
             return None
         route = set(json.loads(str(rows[0]["route_json"])))
         policies = await self.database.read(
@@ -1145,7 +1190,7 @@ class FederationRelayService:
         *,
         now: int | None = None,
         path: str | None = None,
-    ) -> None:
+    ) -> bool:
         stamp = int(self.clock.now().timestamp()) if now is None else now
         policy = await self.policy(next_hop)
         if not policy.enabled or policy.paused:
@@ -1165,16 +1210,39 @@ class FederationRelayService:
             raise ValueError("invalid relay delivery path")
         window = stamp - stamp % 3600
         usage = await self.database.read(
-            "SELECT accepted,forwarded,airtime_seconds FROM fed_relay_usage "
+            "SELECT forwarded,airtime_seconds FROM fed_relay_usage "
             "WHERE peer_id=? AND window_start=?",
             (policy.peer_id, window),
         )
-        used_rate = int(usage[0]["accepted"] + usage[0]["forwarded"]) if usage else 0
+        used_rate = int(usage[0]["forwarded"]) if usage else 0
         used_airtime = float(usage[0]["airtime_seconds"]) if usage else 0.0
+        quota_error = None
         if used_rate >= policy.rate_per_hour:
-            raise ValueError("next-hop relay hourly rate exceeded")
-        if used_airtime + airtime_seconds > policy.airtime_seconds_per_hour:
-            raise ValueError("next-hop relay airtime quota exceeded")
+            quota_error = "next-hop relay hourly rate exhausted"
+        elif used_airtime + airtime_seconds > policy.airtime_seconds_per_hour:
+            quota_error = "next-hop relay airtime quota exhausted"
+        if quota_error is not None:
+            retry_at = window + 3_600
+            async with self.database.transaction() as transaction:
+                await transaction.write(
+                    "UPDATE fed_relay_envelope SET next_attempt_at=?,updated_at=?,last_error=? "
+                    "WHERE envelope_id=? AND state='queued'",
+                    (retry_at, stamp, quota_error, envelope_id),
+                )
+                await self._event(
+                    transaction,
+                    envelope_id,
+                    policy.peer_id,
+                    "quota_deferred",
+                    {
+                        "next_hop": next_hop,
+                        "reason": quota_error,
+                        "retry_at": retry_at,
+                    },
+                    stamp,
+                    "system",
+                )
+            return False
         async with self.database.transaction() as transaction:
             await transaction.write(
                 "INSERT INTO fed_relay_usage(peer_id,window_start,forwarded,airtime_seconds) "
@@ -1184,7 +1252,8 @@ class FederationRelayService:
             )
             await transaction.write(
                 "UPDATE fed_relay_envelope SET state='forwarding',next_hop_mesh_id=?,last_path=?,"
-                "attempts=attempts+1,last_attempt_at=?,updated_at=?,last_error=NULL "
+                "attempts=attempts+1,last_attempt_at=?,next_attempt_at=NULL,updated_at=?,"
+                "last_error=NULL "
                 "WHERE envelope_id=? AND state='queued'",
                 (next_hop, selected_path, stamp, stamp, envelope_id),
             )
@@ -1197,27 +1266,134 @@ class FederationRelayService:
                 stamp,
                 "system",
             )
+        return True
 
-    async def mark_failed(self, envelope_id: str, error: str) -> None:
-        now = int(self.clock.now().timestamp())
-        await self.database.write(
-            "UPDATE fed_relay_envelope SET state='queued',updated_at=?,last_error=? "
-            "WHERE envelope_id=? AND state IN ('queued','forwarding')",
-            (now, error[:160], envelope_id),
+    @staticmethod
+    def _retry_delay(envelope_id: str, attempts: int) -> int:
+        base = min(RETRY_MAX_SECONDS, RETRY_BASE_SECONDS * (2 ** max(0, attempts - 1)))
+        # Stable jitter prevents synchronized retries while keeping restart and test behavior
+        # deterministic. It adds up to 25 percent of the exponential delay.
+        jitter_ceiling = max(1, base // 4)
+        digest = hashlib.sha256(f"{envelope_id}:{attempts}".encode("ascii")).digest()
+        return base + int.from_bytes(digest[:2], "big") % (jitter_ceiling + 1)
+
+    @staticmethod
+    async def _record_terminal_failure(
+        transaction: Transaction,
+        envelope_id: str,
+        next_hop: str | None,
+        reason: str,
+        attempts: int,
+        now: int,
+    ) -> None:
+        detail = {
+            "next_hop": next_hop,
+            "reason": reason,
+            "attempts": attempts,
+            "terminal": True,
+        }
+        await FederationRelayService._event(
+            transaction, envelope_id, None, "delivery_failed", detail, now, "system"
+        )
+        peer_label = next_hop or "an unavailable next hop"
+        await transaction.write(
+            "INSERT OR IGNORE INTO mail(uid,from_label,to_label,subject,body,created_at,state,"
+            "expires_at,conversation_key,message_kind,mail_direction,participant_handle,"
+            "operator_actor) VALUES(?,?,?,?,?,?,'delivered',?,?,'system','local','outpost',"
+            "'system:relay')",
+            (
+                f"relay-delivery-failed:{envelope_id}",
+                "outpost",
+                "operator",
+                "Federation relay delivery failed",
+                f"Envelope {envelope_id} could not transfer custody to {peer_label} after "
+                f"{attempts} attempt(s). Reason: {reason}",
+                now,
+                now + 30 * 86_400,
+                f"system:relay-failure:{envelope_id}",
+            ),
         )
 
-    async def acknowledge(self, sender_mesh_id: str, envelope_id: str, state: str) -> str | None:
-        if state not in {"queued", "quarantined", "forwarded", "delivered"}:
+    async def mark_failed(
+        self, envelope_id: str, error: str, *, now: int | None = None
+    ) -> None:
+        stamp = int(self.clock.now().timestamp()) if now is None else now
+        reason = error[:160] or "relay delivery failed"
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT state,attempts,next_hop_mesh_id FROM fed_relay_envelope "
+                "WHERE envelope_id=?",
+                (envelope_id,),
+            )
+            if not rows or str(rows[0]["state"]) not in {"queued", "forwarding"}:
+                return
+            attempts = int(rows[0]["attempts"])
+            if str(rows[0]["state"]) == "queued":
+                attempts += 1
+            next_hop = (
+                str(rows[0]["next_hop_mesh_id"])
+                if rows[0]["next_hop_mesh_id"] is not None
+                else None
+            )
+            if attempts >= MAX_FORWARD_ATTEMPTS:
+                await transaction.write(
+                    "UPDATE fed_relay_envelope SET state='rejected',attempts=?,"
+                    "next_attempt_at=NULL,updated_at=?,last_error=? WHERE envelope_id=? "
+                    "AND state IN ('queued','forwarding')",
+                    (attempts, stamp, reason, envelope_id),
+                )
+                await self._record_terminal_failure(
+                    transaction, envelope_id, next_hop, reason, attempts, stamp
+                )
+                return
+            retry_at = stamp + self._retry_delay(envelope_id, max(1, attempts))
+            await transaction.write(
+                "UPDATE fed_relay_envelope SET state='queued',attempts=?,next_attempt_at=?,"
+                "updated_at=?,last_error=? WHERE envelope_id=? "
+                "AND state IN ('queued','forwarding')",
+                (attempts, retry_at, stamp, reason, envelope_id),
+            )
+            await self._event(
+                transaction,
+                envelope_id,
+                None,
+                "retry_scheduled",
+                {"attempts": attempts, "reason": reason, "retry_at": retry_at},
+                stamp,
+                "system",
+            )
+
+    async def acknowledge(
+        self, sender_mesh_id: str, envelope_id: str, state: str, reason: str | None = None
+    ) -> str | None:
+        if state not in {"queued", "quarantined", "forwarded", "delivered", "rejected"}:
             raise ValueError("invalid relay acknowledgement state")
         now = int(self.clock.now().timestamp())
         rows = await self.database.read(
-            "SELECT e.received_from_peer_id,e.next_hop_mesh_id,p.mesh_id previous_hop "
+            "SELECT e.received_from_peer_id,e.next_hop_mesh_id,e.attempts,p.mesh_id previous_hop "
             "FROM fed_relay_envelope e LEFT JOIN fed_peer p ON p.id=e.received_from_peer_id "
             "WHERE e.envelope_id=?",
             (envelope_id,),
         )
         if not rows or str(rows[0]["next_hop_mesh_id"] or "") != sender_mesh_id:
             raise ValueError("relay acknowledgement does not match the selected next hop")
+        if state == "rejected":
+            rejection = (reason or "next hop refused relay custody")[:160]
+            async with self.database.transaction() as transaction:
+                await transaction.write(
+                    "UPDATE fed_relay_envelope SET state='rejected',next_attempt_at=NULL,"
+                    "updated_at=?,last_error=? WHERE envelope_id=?",
+                    (now, rejection, envelope_id),
+                )
+                await self._record_terminal_failure(
+                    transaction,
+                    envelope_id,
+                    sender_mesh_id,
+                    rejection,
+                    int(rows[0]["attempts"]),
+                    now,
+                )
+            return None
         local_state = "delivered" if state == "delivered" else "forwarded"
         await self.database.write(
             "UPDATE fed_relay_envelope SET state=?,updated_at=?,last_error=NULL "
@@ -1268,11 +1444,8 @@ class FederationRelayService:
             (stamp - max(30, after), stamp),
         )
         for row in rows:
-            await self.database.write(
-                "UPDATE fed_relay_envelope SET state='queued',updated_at=?,"
-                "last_error='custody acknowledgement timed out' "
-                "WHERE envelope_id=? AND state='forwarding'",
-                (stamp, row["envelope_id"]),
+            await self.mark_failed(
+                str(row["envelope_id"]), "custody acknowledgement timed out", now=stamp
             )
         return len(rows)
 
@@ -1307,8 +1480,9 @@ class FederationRelayService:
             "FROM fed_relay_envelope GROUP BY state"
         )
         events = await self.database.read(
-            "SELECT event_kind,detail_json,created_at,actor FROM fed_relay_event "
-            "ORDER BY created_at DESC,id DESC LIMIT 20"
+            "SELECT e.envelope_id,e.event_kind,e.detail_json,e.created_at,e.actor,"
+            "p.mesh_id peer_mesh_id FROM fed_relay_event e LEFT JOIN fed_peer p "
+            "ON p.id=e.peer_id ORDER BY e.created_at DESC,e.id DESC LIMIT 20"
         )
         return {
             "counts": {str(row["state"]): int(row["count"]) for row in counts},
@@ -1316,6 +1490,8 @@ class FederationRelayService:
             "events": [
                 {
                     "event_kind": row["event_kind"],
+                    "envelope_id": row["envelope_id"],
+                    "peer_mesh_id": row["peer_mesh_id"],
                     "detail": json.loads(str(row["detail_json"])),
                     "created_at": row["created_at"],
                     "actor": row["actor"],
