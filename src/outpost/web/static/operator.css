@@ -11,6 +11,7 @@
 .member-controls label { display: grid; gap: 5px; min-width: 180px; }
 .member-controls label span { color: var(--muted); font: 650 .54rem ui-monospace, monospace; letter-spacing: .05em; text-transform: uppercase; }
 .discovered-note { margin: -4px 0 15px; padding: 10px 12px; color: var(--muted); background: #efbd620d; border: 1px solid #efbd6233; border-radius: 7px; font-size: .7rem; }
+.responder-warning { margin: 0 0 15px; padding: 11px 13px; color: #ffd7a3; background: #301d12; border: 1px solid #d9984655; border-radius: 7px; font-size: .74rem; }
 .saved-filters { display: flex; gap: 7px; margin: 4px 0 13px; padding-bottom: 3px; overflow-x: auto; }
 .filter-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 6px 9px; color: var(--muted); background: var(--raised); border: 1px solid var(--line); border-radius: 999px; font: 650 .62rem Figtree, sans-serif; white-space: nowrap; }
 .filter-chip:hover, .filter-chip.active { color: var(--ink); border-color: color-mix(in srgb, var(--green) 55%, var(--line)); }

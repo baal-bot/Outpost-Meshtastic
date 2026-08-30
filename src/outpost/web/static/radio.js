@@ -392,12 +392,18 @@ async function refresh() {
     queueHistoryExpanded = false;
     queueFilterKey = selectedQueueFilter;
   }
-  const [status, airtime, queue, channelMap] = await Promise.all([
-    api("/api/v1/status").then((response) => response.json()),
-    api("/api/v1/mesh/airtime").then((response) => response.json()),
-    api(`/api/v1/mesh/queue?${queueQuery()}`).then((response) => response.json()),
-    api("/api/v1/radio/channels").then((response) => response.json()),
+  const responses = await Promise.all([
+    api("/api/v1/status"),api("/api/v1/mesh/airtime"),
+    api(`/api/v1/mesh/queue?${queueQuery()}`),api("/api/v1/radio/channels"),
   ]);
+  if(responses.some(response => !response.ok)){
+    const failed=responses.map((response,index)=>({response,index})).filter(value=>!value.response.ok),labels=["Status","Airtime","Queue","Channels"];
+    const state=$("link-state");state.className="ui-pill status down";state.innerHTML="<i></i>Data unavailable";
+    $("inbound-detail").textContent=failed.map(value=>`${labels[value.index]} HTTP ${value.response.status}`).join(" · ");
+    if(failed.some(value=>value.index===2))$("queue-list").innerHTML='<p class="ui-empty empty">Queue data unavailable.</p>';
+    return;
+  }
+  const [status, airtime, queue, channelMap] = await Promise.all(responses.map(response=>response.json()));
   renderChannelMap(channelMap);
   const direction = $("filter-direction").value;
   const channel = $("filter-channel").value;
@@ -408,9 +414,9 @@ async function refresh() {
     messageHistoryExpanded = false;
     messageFilterKey = selectedFilterKey;
   }
-  const messages = await api(`/api/v1/mesh/messages?${messageQuery(0)}`).then((response) =>
-    response.json(),
-  );
+  const messageResponse=await api(`/api/v1/mesh/messages?${messageQuery(0)}`);
+  if(!messageResponse.ok){$("message-rows").innerHTML=`<tr><td colspan="7">Message log unavailable · HTTP ${messageResponse.status}.</td></tr>`;return;}
+  const messages=await messageResponse.json();
   const state = $("link-state");
   state.className = `ui-pill status ${status.radio}`;
   state.innerHTML = `<i></i>${safe(status.radio)}`;

@@ -33,6 +33,8 @@ async function refresh(){
     fetch("/api/v1/environment/same"),
   ]);
   if(responses.some(response=>response.status===401)){location.href="/";return;}
+  const failed=responses.map((response,index)=>({response,index})).filter(value=>!value.response.ok);
+  if(failed.length){const labels=["Weather","Forecast","Astronomy","Provider health","Public alerts","Earthquakes","SAME receiver"],reason=failed.map(value=>`${labels[value.index]} HTTP ${value.response.status}`).join(" · ");$("env-state").className="ui-pill status down";$("env-state").innerHTML="<i></i> Data unavailable";$("env-updated").textContent=reason;if(failed.some(value=>value.index===4))$("env-alert-list").innerHTML=`<p class="ui-empty empty">Public alerts unavailable · ${safe(reason)}.</p>`;if(failed.some(value=>value.index===5))$("env-quake-list").innerHTML=`<p class="ui-empty empty">Earthquakes unavailable · ${safe(reason)}.</p>`;return;}
   const[weather,forecast,astronomy,providers,alerts,quakes,same]=await Promise.all(
     responses.map(response=>response.json()),
   );

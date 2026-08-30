@@ -24,10 +24,12 @@ The checklist covers:
 3. the serial, TCP, or BLE radio connection and a mesh `PING`;
 4. legal radio region, modem preset, channel indices/keys, and MQTT policy confirmed with the
    channel owner;
-5. offline maps and weather, alert, earthquake, SAME, and AI provider choices;
-6. a validated encrypted off-device backup and understood rollback path;
-7. deliberately disabled/deferred or out-of-band-verified federation; and
-8. an optional dedicated read-only wallboard account.
+5. at least one reviewed mesh member promoted to Responder or Operator trust, so `HELPME` and
+   responder-first alert stages have a real audience;
+6. offline maps and weather, alert, earthquake, SAME, and AI provider choices;
+7. a validated encrypted off-device backup and understood rollback path;
+8. deliberately disabled/deferred or out-of-band-verified federation; and
+9. an optional dedicated read-only wallboard account.
 
 ## Local discovery
 

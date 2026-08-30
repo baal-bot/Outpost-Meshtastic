@@ -12,6 +12,8 @@ from outpost.store.members import Member
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.models import Severity, TrafficClass
 
+from .delivery import AudienceDelivery, AudienceNotifier
+
 
 @dataclass(frozen=True)
 class Alert:
@@ -37,6 +39,9 @@ class Alert:
     lat: float | None
     lon: float | None
     radius_m: int | None
+    delivery_state: str
+    last_delivery_count: int
+    delivery_error_at: int | None
 
     def json(self) -> dict[str, Any]:
         value = asdict(self)
@@ -49,6 +54,7 @@ class AlertService:
         self, database: Database, governor: AirtimeGovernor, clock: Clock, config: Config
     ) -> None:
         self.database, self.governor, self.clock, self.config = database, governor, clock, config
+        self.notifier = AudienceNotifier(database, governor, clock)
 
     def _row(self, row: Any) -> Alert:
         return Alert(**{key: row[key] for key in Alert.__dataclass_fields__})
@@ -190,21 +196,6 @@ class AlertService:
         assert alert is not None
         return await self.by_id(alert_id) or alert
 
-    async def _destinations(self, notify: str) -> list[str]:
-        if notify == "all":
-            return ["^all"]
-        roles = (
-            ("responder", "operator")
-            if notify == "responders"
-            else ("trusted", "responder", "operator")
-        )
-        placeholders = ",".join("?" for _ in roles)
-        rows = await self.database.read(
-            f"SELECT mesh_id FROM member WHERE trust IN ({placeholders})",  # noqa: S608
-            roles,
-        )
-        return [str(row["mesh_id"]) for row in rows]
-
     async def _broadcast(
         self,
         alert: Alert,
@@ -212,43 +203,43 @@ class AlertService:
         channels: list[int] | None = None,
         supersedes: str | None = None,
         dedupe_token: str | None = None,
-    ) -> int:
+    ) -> AudienceDelivery:
         text = self.render(alert.severity, alert.headline)
         severity = Severity(alert.severity)
-        admitted = 0
         now = int(self.clock.now().timestamp())
-        destinations = await self._destinations(stage.notify)
-        for destination in destinations:
-            for channel in channels or stage.channels:
-                item_id = await self.governor.admit(
-                    OutboundItem(
-                        text=text,
-                        dest=destination,
-                        channel=int(channel),
-                        traffic_class=TrafficClass.ALERT,
-                        severity=severity,
-                        want_ack=destination != "^all",
-                        queue_key=f"alert:{alert.id}:repeat",
-                        supersedes=supersedes,
-                        dedupe_token=dedupe_token,
-                    )
+        selected_channels = channels or stage.channels
+        delivery = await self.notifier.deliver(
+            purpose="alert_escalation",
+            target=f"alert:{alert.id}:stage:{alert.escalation_stage}",
+            audience=stage.notify,
+            text=text,
+            channels=selected_channels,
+            traffic_class=TrafficClass.ALERT,
+            severity=severity,
+            queue_key=f"alert:{alert.id}:repeat",
+            supersedes=supersedes,
+            dedupe_token=dedupe_token,
+        )
+        if delivery.admitted:
+            pairs = [
+                (destination, int(channel))
+                for destination in delivery.destinations
+                for channel in selected_channels
+            ]
+            for destination, channel in pairs:
+                await self.database.write(
+                    "INSERT INTO alert_audience(alert_id,destination,channel,"
+                    "first_admitted_at,last_admitted_at,admissions) VALUES(?,?,?,?,?,1) "
+                    "ON CONFLICT(alert_id,destination,channel) DO UPDATE SET "
+                    "last_admitted_at=excluded.last_admitted_at,admissions=admissions+1",
+                    (alert.id, destination, channel, now, now),
                 )
-                supersedes = None
-                if item_id is not None:
-                    admitted += 1
-                    await self.database.write(
-                        "INSERT INTO alert_audience(alert_id,destination,channel,"
-                        "first_admitted_at,last_admitted_at,admissions) VALUES(?,?,?,?,?,1) "
-                        "ON CONFLICT(alert_id,destination,channel) DO UPDATE SET "
-                        "last_admitted_at=excluded.last_admitted_at,admissions=admissions+1",
-                        (alert.id, destination, int(channel), now, now),
-                    )
-        if admitted:
             await self.database.write(
-                "UPDATE alert SET broadcast_count=broadcast_count+? WHERE id=?",
-                (admitted, alert.id),
+                "UPDATE alert SET broadcast_count=broadcast_count+?,delivery_state='delivered',"
+                "last_delivery_count=?,delivery_error_at=NULL WHERE id=?",
+                (delivery.admitted, delivery.admitted, alert.id),
             )
-        return admitted
+        return delivery
 
     async def _advance_alert(
         self,
@@ -275,7 +266,7 @@ class AlertService:
         stage = policy.stages[stage_index]
         repeat_count = alert.repeat_count
         delivery_key = f"alert:{alert.id}:stage:{stage_index}:repeat:{repeat_count}"
-        await self._broadcast(
+        delivery = await self._broadcast(
             alert,
             stage,
             override_channels,
@@ -283,6 +274,14 @@ class AlertService:
             delivery_key,
         )
         now = int(self.clock.now().timestamp())
+        if not delivery.admitted:
+            retry_seconds = 300 if delivery.state == "empty_audience" else 60
+            await self.database.write(
+                "UPDATE alert SET delivery_state=?,last_delivery_count=0,delivery_error_at=?,"
+                "next_escalation_at=? WHERE id=?",
+                (delivery.state, now, now + retry_seconds, alert.id),
+            )
+            return False
         if stage.repeat:
             repeat_count += 1
             if repeat_count < self.config.watch.alert_repeat_max:

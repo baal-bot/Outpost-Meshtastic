@@ -21,6 +21,16 @@ SAFETY_FLOOR_ATTEMPTS = Counter(
     "Safety-floor command decisions",
     ("command", "outcome"),
 )
+SAFETY_NOTIFICATION_DELIVERY = Counter(
+    "outpost_safety_notification_delivery_total",
+    "Safety notification admissions by audience and outcome",
+    ("purpose", "audience", "outcome"),
+)
+COMMAND_REPLY_DELIVERY = Counter(
+    "outpost_command_reply_delivery_total",
+    "Command reply admission outcomes",
+    ("outcome",),
+)
 OUTBOUND_ENQUEUED = Counter(
     "outpost_outbound_enqueued_total", "Queued outbound messages", ("class",)
 )

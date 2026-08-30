@@ -230,7 +230,9 @@ class MemberTriageService:
               SUM(directory_state='archived') archived_count,
               SUM(directory_state='ignored') ignored_count,
               SUM(directory_state='active' AND trust IN ('trusted','responder','operator'))
-                trusted_count
+                trusted_count,
+              SUM(directory_state='active' AND trust IN ('responder','operator'))
+                responder_count
             FROM member"""  # noqa: S608 - review expression is a fixed application constant.
         )
         filter_counts = await self.database.read(

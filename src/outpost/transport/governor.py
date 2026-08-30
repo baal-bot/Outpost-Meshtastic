@@ -88,6 +88,18 @@ class GovernorMetrics:
     hard_stops: int = 0
 
 
+@dataclass(frozen=True)
+class AdmissionResult:
+    """The durable outcome of one atomic admission attempt."""
+
+    item_ids: tuple[int, ...] = ()
+    rejection_reason: str | None = None
+
+    @property
+    def admitted(self) -> int:
+        return len(self.item_ids)
+
+
 class AirtimeGovernor:
     """Deterministic sole-egress scheduler with a rolling one-hour budget."""
 
@@ -190,16 +202,27 @@ class AirtimeGovernor:
         transaction: Transaction | None = None,
     ) -> list[int] | None:
         """Persist a complete batch before making any item eligible to transmit."""
+        result = await self.admit_many_result(items, hold=hold, transaction=transaction)
+        return list(result.item_ids) if result.rejection_reason is None else None
+
+    async def admit_many_result(
+        self,
+        items: list[OutboundItem],
+        *,
+        hold: bool = False,
+        transaction: Transaction | None = None,
+    ) -> AdmissionResult:
+        """Persist a batch and retain the reason when queue policy rejects it."""
         if self.outbox is None:
-            return self.enqueue_many(items, hold=hold)
+            return self._enqueue_many_result(items, hold=hold)
         if not items:
-            return []
+            return AdmissionResult()
         oversized = [item for item in items if item.payload_size > MAX_PAYLOAD_BYTES]
         if oversized:
             for item in items:
                 self.metrics.dropped[(item.traffic_class, "payload_too_large")] += 1
                 OUTBOUND_DROPPED.labels(item.traffic_class.value, "payload_too_large").inc()
-            return None
+            return AdmissionResult(rejection_reason="payload_too_large")
         now_mono = self.clock.monotonic()
         now_epoch = self.clock.now().timestamp()
         batch_uid = str(uuid.uuid4()) if len(items) > 1 else None
@@ -245,7 +268,7 @@ class AirtimeGovernor:
             for item in items:
                 self.metrics.dropped[(item.traffic_class, error.reason)] += 1
                 OUTBOUND_DROPPED.labels(item.traffic_class.value, error.reason).inc()
-            return None
+            return AdmissionResult(rejection_reason=error.reason)
 
         superseded = set(result.superseded_ids)
         if superseded:
@@ -258,7 +281,7 @@ class AirtimeGovernor:
             self.metrics.enqueued[item.traffic_class] += 1
             OUTBOUND_ENQUEUED.labels(item.traffic_class.value).inc()
             QUEUE_DEPTH.labels(item.traffic_class.value).set(len(self.queues[item.traffic_class]))
-        return result.ids
+        return AdmissionResult(tuple(result.ids))
 
     async def recover(self) -> int:
         if self.outbox is None:
@@ -311,13 +334,21 @@ class AirtimeGovernor:
 
     def enqueue_many(self, items: list[OutboundItem], *, hold: bool = False) -> list[int] | None:
         """Atomically admit a complete multi-part response (REQ-TRANSPORT-035)."""
+        result = self._enqueue_many_result(items, hold=hold)
+        return list(result.item_ids) if result.rejection_reason is None else None
+
+    def _enqueue_many_result(
+        self, items: list[OutboundItem], *, hold: bool = False
+    ) -> AdmissionResult:
         if self.outbox is not None:
             raise RuntimeError("durable governors require await governor.admit_many()")
+        if not items:
+            return AdmissionResult()
         if any(item.payload_size > MAX_PAYLOAD_BYTES for item in items):
             for item in items:
                 self.metrics.dropped[(item.traffic_class, "payload_too_large")] += 1
                 OUTBOUND_DROPPED.labels(item.traffic_class.value, "payload_too_large").inc()
-            return None
+            return AdmissionResult(rejection_reason="payload_too_large")
         superseded = {item.supersedes for item in items if item.supersedes is not None}
         retained = sum(
             existing.queue_key not in superseded
@@ -328,7 +359,8 @@ class AirtimeGovernor:
         if len(items) > available:
             for item in items:
                 self.metrics.dropped[(item.traffic_class, "queue_full")] += 1
-            return None
+                OUTBOUND_DROPPED.labels(item.traffic_class.value, "queue_full").inc()
+            return AdmissionResult(rejection_reason="queue_full")
         # Preflight duplicate keys so enqueue cannot partially reject the batch.
         now = self.clock.monotonic()
         batch_keys: set[tuple[str, int, str]] = set()
@@ -345,7 +377,10 @@ class AirtimeGovernor:
             if key in batch_keys or (
                 self._recent.get(key, float("-inf")) + self.config.dedupe_window_s > now
             ):
-                return None
+                for rejected in items:
+                    self.metrics.dropped[(rejected.traffic_class, "duplicate")] += 1
+                    OUTBOUND_DROPPED.labels(rejected.traffic_class.value, "duplicate").inc()
+                return AdmissionResult(rejection_reason="duplicate")
             batch_keys.add(key)
         ids = [self.enqueue(item) for item in items]
         if any(item_id is None for item_id in ids):
@@ -353,7 +388,7 @@ class AirtimeGovernor:
         admitted = [item_id for item_id in ids if item_id is not None]
         if hold:
             self._held_ids.update(admitted)
-        return admitted
+        return AdmissionResult(tuple(admitted))
 
     def queued_items(self) -> list[OutboundItem]:
         return sorted(

@@ -24,7 +24,19 @@ def specs(service: CheckinService) -> list[CommandSpec]:
 
     async def helpme(ctx: CommandContext) -> Response:
         result = await service.checkin(ctx.member, "need_help", ctx.args.strip())
-        suffix = " Responders notified." if result["event"] else " Help recorded."
+        admitted = int((result.get("notification") or {}).get("admitted", 0))
+        if not admitted:
+            return Response(
+                ResponseKind.ACK,
+                [
+                    Line(
+                        "⚠ No responder was reached. Contact 911 or emergency services if able. "
+                        "NEED HELP recorded; Outpost is not an emergency service."
+                    )
+                ],
+                airtime_class=TrafficClass.ALERT,
+            )
+        suffix = f" {admitted} responder{'s' if admitted != 1 else ''} notified."
         return Response(
             ResponseKind.ACK,
             [Line(f"✓ NEED HELP recorded.{suffix} Not 911; call emergency services if able.")],

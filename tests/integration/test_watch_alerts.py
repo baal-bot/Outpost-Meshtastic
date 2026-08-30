@@ -144,7 +144,7 @@ async def test_repeat_stage_is_bounded_durable_and_stops_after_ack(tmp_path) -> 
     config = Config.model_validate(
         {
             "store": {"path": str(tmp_path / "outpost.db")},
-            "channels": {3: {"name": "watch"}},
+            "channels": {0: {"name": "public"}, 3: {"name": "watch"}},
             "airtime": {"dedupe_window_s": 300},
             "watch": {
                 "alert_repeat_max": 3,
@@ -309,4 +309,136 @@ async def test_all_clear_reuses_every_distinct_admitted_alert_audience(tmp_path)
         ("^all", 3),
     ]
     assert cancelled.all_clear_queued == 4
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_zero_recipient_alert_stays_at_stage_and_recovers_when_responder_appears(
+    tmp_path,
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock, radio = VirtualClock(), SimulatedRadioLink()
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "channels": {3: {"name": "watch"}},
+            "watch": {
+                "escalation": {
+                    "urgent": {
+                        "stages": [
+                            {"after_minutes": 0, "notify": "responders", "channels": [3]},
+                            {"after_minutes": 20, "notify": "all", "channels": [3]},
+                        ]
+                    }
+                }
+            },
+        }
+    )
+    governor = AirtimeGovernor(radio, config.airtime, clock)
+    service = AlertService(database, governor, clock, config)
+
+    alert = await service.raise_alert("urgent", "Bridge failure", "operator")
+
+    assert alert.escalation_stage == 0
+    assert alert.delivery_state == "empty_audience"
+    assert alert.last_delivery_count == 0
+    assert alert.next_escalation_at == int(clock.now().timestamp()) + 300
+    assert governor.queued_items() == []
+    failure = await database.read(
+        "SELECT state,message_kind,conversation_key FROM mail WHERE state='failed'"
+    )
+    assert [dict(row) for row in failure] == [
+        {
+            "state": "failed",
+            "message_kind": "system",
+            "conversation_key": "system:delivery:alert_escalation:alert:1:stage:0",
+        }
+    ]
+    assert await database.read(
+        "SELECT 1 FROM audit_log WHERE action='safety.delivery.zero' AND target='alert:1:stage:0'"
+    )
+
+    responder = await MemberRepo(database, clock).resolve("!00000002")
+    await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
+    clock.advance(301)
+    assert await service.advance_due() == 1
+    recovered = await service.by_id(alert.id)
+    assert recovered is not None
+    assert recovered.escalation_stage == 1
+    assert recovered.delivery_state == "delivered"
+    assert recovered.last_delivery_count == 1
+    assert (await database.read("SELECT state FROM mail"))[0]["state"] == "delivered"
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_queue_refused_alert_retries_same_stage_after_capacity_returns(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock, radio = VirtualClock(), SimulatedRadioLink()
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "channels": {0: {"name": "public"}, 3: {"name": "watch"}},
+            "airtime": {"queue_max_items": 1},
+        }
+    )
+    governor = AirtimeGovernor(radio, config.airtime, clock)
+    responder = await MemberRepo(database, clock).resolve("!00000002")
+    await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
+    filler = governor.enqueue(OutboundItem("busy", "!peer", 3, TrafficClass.DIGEST))
+    assert filler is not None
+    service = AlertService(database, governor, clock, config)
+
+    alert = await service.raise_alert("urgent", "Road closed", "operator")
+
+    assert alert.delivery_state == "refused"
+    assert alert.escalation_stage == 0
+    assert alert.next_escalation_at == int(clock.now().timestamp()) + 60
+    assert governor.cancel(filler)
+    clock.advance(61)
+    assert await service.advance_due() == 1
+    recovered = await service.by_id(alert.id)
+    assert recovered is not None and recovered.escalation_stage == 1
+    assert recovered.last_delivery_count == 1
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_responder_demotion_pauses_the_next_empty_escalation_stage(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock, radio = VirtualClock(), SimulatedRadioLink()
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "channels": {3: {"name": "watch"}},
+            "watch": {
+                "escalation": {
+                    "urgent": {
+                        "stages": [
+                            {"after_minutes": 0, "notify": "responders", "channels": [3]},
+                            {"after_minutes": 1, "notify": "trusted", "channels": [3]},
+                        ]
+                    }
+                }
+            },
+        }
+    )
+    governor = AirtimeGovernor(radio, config.airtime, clock)
+    responder = await MemberRepo(database, clock).resolve("!00000002")
+    await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
+    service = AlertService(database, governor, clock, config)
+    alert = await service.raise_alert("urgent", "River rising", "operator")
+    assert alert.escalation_stage == 1
+    await database.write("UPDATE member SET trust='member' WHERE id=?", (responder.id,))
+
+    clock.advance(61)
+    assert await service.advance_due() == 0
+    paused = await service.by_id(alert.id)
+    assert paused is not None
+    assert paused.escalation_stage == 1
+    assert paused.delivery_state == "empty_audience"
+    assert paused.next_escalation_at == int(clock.now().timestamp()) + 300
     await database.close()

@@ -236,7 +236,7 @@ async function loadOriginHistory() {
 async function refreshOriginHistory() {
   const target = $("origin-history"); if (!target) return;
   const [originResponse, peerResponse] = await Promise.all([api("/api/v1/federation/origins"), api("/api/v1/federation/peers?state=active")]);
-  if (!originResponse.ok || !peerResponse.ok) return;
+  if (!originResponse.ok || !peerResponse.ok) {target.innerHTML=`<p class="ui-empty empty">Origin history unavailable · HTTP ${!originResponse.ok?originResponse.status:peerResponse.status}.</p>`;return;}
   const origins = (await originResponse.json()).items;
   const peers = (await peerResponse.json()).items;
   target.innerHTML = origins.map(origin => `<article class="sync-row origin-row"><div><strong>${safe(origin.node_name || origin.mesh_id)}</strong><code>${safe(origin.mesh_id)} · ${safe(origin.status)}</code></div><div><b>${origin.thread_count}</b><span>Threads</span></div><div><b>${origin.post_count}</b><span>Posts</span></div>${origin.successor_mesh_id?`<p>Successor: ${safe(origin.successor_name || origin.successor_mesh_id)}<br><code>${safe(origin.successor_mesh_id)}</code></p>`:origin.status==="former"&&peers.length?`<div class="origin-adopt"><select data-origin-peer="${safe(origin.mesh_id)}">${peers.map(peer=>`<option value="${safe(peer.mesh_id)}">${safe(peer.node_name||peer.mesh_id)}</option>`).join("")}</select><button data-adopt-origin="${safe(origin.mesh_id)}">Adopt history</button></div>`:`<p>${origin.status==="former"?"Former peer · retained read-only":"Current peer identity"}</p>`}</article>`).join("") || `<p class="ui-empty empty">No retained remote board history.</p>`;
@@ -245,10 +245,13 @@ async function refreshOriginHistory() {
 async function refresh() {
   const filter = $("peer-filter").value;
   const response = await api(`/api/v1/federation/peers${filter ? `?state=${filter}` : ""}`);
-  if (!response.ok) return;
+  if (!response.ok) {$("fed-state").className="ui-pill status down";$("fed-state").innerHTML=`<i></i>Peer data unavailable · HTTP ${response.status}`;$("peer-list").innerHTML='<p class="ui-empty empty">Federation peers unavailable.</p>';return;}
   const items = (await response.json()).items;
-  const runtime = await api("/api/v1/status").then(result => result.json());
-  const all = filter ? await api("/api/v1/federation/peers").then(r => r.json()).then(v => v.items) : items;
+  const runtimeResponse=await api("/api/v1/status");
+  if(!runtimeResponse.ok){$("fed-state").className="ui-pill status down";$("fed-state").innerHTML=`<i></i>Status unavailable · HTTP ${runtimeResponse.status}`;return;}
+  const runtime=await runtimeResponse.json();
+  let all=items;
+  if(filter){const allResponse=await api("/api/v1/federation/peers");if(!allResponse.ok){$("fed-state").className="ui-pill status down";$("fed-state").innerHTML=`<i></i>Peer totals unavailable · HTTP ${allResponse.status}`;return;}all=(await allResponse.json()).items;}
   $("peer-total").textContent = all.length;
   $("peer-pending").textContent = all.filter(p => p.state === "pending").length;
   $("peer-active").textContent = all.filter(p => p.state === "active").length;

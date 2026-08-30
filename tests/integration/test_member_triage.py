@@ -81,6 +81,7 @@ async def test_member_triage_filters_review_history_and_detail(tmp_path) -> None
     assert listing["approved_count"] == 2
     assert listing["discovered_count"] == 2
     assert listing["review_count"] == 1
+    assert listing["responder_count"] == 0
     assert {item["category"] for item in listing["items"]} == {"approved", "discovered"}
     by_id = {item["id"]: item for item in listing["items"]}
     assert by_id[discovered_id]["needs_review"] is False

@@ -7,7 +7,7 @@ Outpost is pre-release. Maturity records the strongest relevant evidence categor
 not a claim that every lower category is complete. `Production-ready` requires an
 explicit release decision and is never inferred from test count alone.
 
-Evidence snapshot: **2026-08-28**. Verification commit `HEAD` means the exact
+Evidence snapshot: **2026-08-29**. Verification commit `HEAD` means the exact
 revision on which CI runs this manifest check.
 
 ## Maturity states
@@ -32,11 +32,11 @@ revision on which CI runs this manifest check.
 | Airtime and outbound delivery | Durable priority queue, airtime shares, emergency reserve, quiet hours, dedupe, pacing, receipts, and restart recovery. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `3d65058` |
 | Identity and member directory | Handles, social trust, reviewed Meshtastic PKI fingerprints, conflict demotion, explicit key rotation, recently-heard radio discovery, exact-position controls, and operator triage. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `8accdf3` |
 | BBS, mail, and operator inbox | Boards, threads, posts, subscriptions, digests, private mail, moderation, and one replyable operations inbox. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `41a6c85` |
-| Community Watch | Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, responder alerts, bounded repeats, escalation, all-clear, and maps. | Simulated | unreleased @ `HEAD` (2026-08-27); introduced `8323143` |
-| Welfare events and check-ins | Events, reviewed solicitation, roster states, HELP/OK handling, derived unaccounted members, and CSV export. | Simulated | unreleased @ `HEAD` (2026-08-27); introduced `04e74ca` |
+| Community Watch | Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, delivery-accountable responder alerts, retrying zero-recipient escalation, operator conditions, bounded repeats, all-clear, and maps. | Simulated | unreleased @ `HEAD` (2026-08-29); introduced `8323143` |
+| Welfare events and check-ins | Events, reviewed solicitation, roster states, delivery-accountable HELP/OK handling, honest no-responder guidance, derived unaccounted members, and CSV export. | Simulated | unreleased @ `HEAD` (2026-08-29); introduced `04e74ca` |
 | Environmental information | Weather observations/forecasts, CAP alerts, astronomy, earthquakes, caching, provenance, maps, and waypoints. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `72763e5` |
 | NOAA SAME / RTL-SDR | Supervised receive-only rtl_fm/samedec pipeline, county and review gates, CAP dedupe, health, and bounded restart. | Hardware-gated | unreleased @ `HEAD` (2026-08-26); introduced `764516a` |
-| Dashboard and operator access | Responsive module-aware pages/API, named roles, explicit web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, shared map controls, and an offline-capable federation topology view. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `5295868` |
+| Dashboard and operator access | Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, shared map controls, and an offline-capable federation topology view. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `5295868` |
 | Backup, restore, upgrade, and rollback | Online verified backups, rotation, quiesced web restore, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `df0ee14` |
 | Retention and privacy controls | Bounded retention, exact-position expiry/deletion, message limits, maintenance batches, and auditable policy changes. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `4d8af9c` |
 | Outpost federation | Pairing, authenticated framing, policy, board/incident sync, peer services, encrypted mail relay, signed multi-hop custody, privacy-gated topology health, receipts, pagination, and reconciliation. | Two-node field-tested | unreleased @ `HEAD` (2026-08-27); introduced `8f7219e` |
@@ -124,7 +124,7 @@ Evidence:
 
 - Acceptance: [docs/PHASE3-ACCEPTANCE.md](PHASE3-ACCEPTANCE.md) — Automated phase gates and explicitly open tabletop criteria.
 - Automated: [tests/integration/test_safety_commands.py](../tests/integration/test_safety_commands.py) — Member-facing incident, alert, acknowledgement, and trust paths through the mesh router.
-- Automated: [tests/integration/test_watch_alerts.py](../tests/integration/test_watch_alerts.py) — Audience delivery, repeats, acknowledgements, escalation, and all-clear.
+- Automated: [tests/integration/test_watch_alerts.py](../tests/integration/test_watch_alerts.py) — Audience delivery, empty/capacity refusal recovery, repeats, acknowledgements, escalation, and all-clear.
 - Automated: [tests/integration/test_incident_reconciliation.py](../tests/integration/test_incident_reconciliation.py) — Partition, concurrent edit, immutable identity, human merge/unmerge, and resolution-lock behavior.
 
 Known limitations:
@@ -139,7 +139,7 @@ Evidence:
 
 - Acceptance: [docs/PHASE3-ACCEPTANCE.md](PHASE3-ACCEPTANCE.md) — Simulated roster, solicitation, help, and export gates.
 - Automated: [tests/integration/test_safety_commands.py](../tests/integration/test_safety_commands.py) — Member-facing OK, HELPME, roster, and event lifecycle through the mesh router.
-- Automated: [tests/integration/test_watch_checkin.py](../tests/integration/test_watch_checkin.py) — Welfare state transitions and privacy boundaries.
+- Automated: [tests/integration/test_watch_checkin.py](../tests/integration/test_watch_checkin.py) — Welfare state transitions, zero-recipient notification outcomes, and privacy boundaries.
 
 Known limitations:
 
@@ -178,7 +178,7 @@ Maturity: **Automated-tested**.
 
 Evidence:
 
-- Automated: [tests/browser/test_mobile_navigation.py](../tests/browser/test_mobile_navigation.py) — Desktop/mobile, accessibility, role, navigation, and interaction matrix.
+- Automated: [tests/browser/test_mobile_navigation.py](../tests/browser/test_mobile_navigation.py) — Desktop/mobile, accessibility, role, navigation, interaction, and partial API failure matrix.
 - Automated: [tests/integration/test_web_auth.py](../tests/integration/test_web_auth.py) — Authentication, route-registration fail-closed wallboard authorization, redacted data boundaries, recovery, session, and step-up behavior.
 - Automated: [tests/integration/test_web_transport_modes.py](../tests/integration/test_web_transport_modes.py) — Offline HTTP, direct/proxy HTTPS, Secure/HSTS behavior, forwarded-header spoof resistance, and trusted client attribution.
 - Automated: [tests/unit/test_web_transport.py](../tests/unit/test_web_transport.py) — Certificate validity, key pairing, rotation, server options, and certificate-free recovery behavior.

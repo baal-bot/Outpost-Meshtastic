@@ -1353,6 +1353,7 @@ def test_member_map_marker_filter_and_detail_use_shared_controller(
                 "archived_count": 0,
                 "ignored_count": 0,
                 "trusted_count": 1,
+                "responder_count": 1,
                 "total": 1,
                 "next_cursor": None,
                 "saved_filters": [],
@@ -2550,6 +2551,7 @@ def route_operator_workspace(page: object, seen_audit_urls: list[str]) -> None:
                     "archived_count": 0,
                     "ignored_count": 0,
                     "trusted_count": 0,
+                    "responder_count": 0,
                     "total": 0,
                     "next_cursor": None,
                     "saved_filters": [],
@@ -2600,6 +2602,21 @@ def route_operator_workspace(page: object, seen_audit_urls: list[str]) -> None:
         )
 
     page.route("**/api/v1/audit*", audit)
+
+
+def test_member_workspace_warns_when_no_responder_is_configured(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_operator_workspace(page, [])
+    try:
+        page.goto(f"{dashboard_url}/operator.html", wait_until="domcontentloaded")
+        warning = page.locator("#responder-warning")
+        warning.wait_for()
+        assert "HELPME" in warning.text_content()
+        assert "cannot reach another person" in warning.text_content()
+    finally:
+        page.close()
 
 
 @pytest.mark.parametrize("width", (320, 390))
@@ -3584,6 +3601,119 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
         ]
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize(
+    ("failed_path", "expected", "target", "forbidden"),
+    (
+        ("/api/v1/incidents", "Incidents unavailable", "#incident-list", "No active incidents"),
+        ("/api/v1/alerts", "Active alerts unavailable", "#alert-list", "No active alerts"),
+        ("/api/v1/events", "Welfare roster unavailable", "#event-title", "No open watch event"),
+        ("/api/v1/watch/map", "Situational map unavailable", "#map-empty", "No visible positions"),
+        (
+            "/api/v1/radio/channels",
+            "Radio channels unavailable",
+            "#alert-channel-state",
+            "active radio channel",
+        ),
+    ),
+)
+def test_watch_partial_api_failure_is_explicit_and_does_not_claim_empty_state(
+    browser: object,
+    dashboard_url: str,
+    failed_path: str,
+    expected: str,
+    target: str,
+    forbidden: str,
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    page_errors: list[str] = []
+    page.on("pageerror", lambda error: page_errors.append(str(error)))
+
+    def watch_read(route: object) -> None:
+        path = urlparse(route.request.url).path
+        if path == failed_path:
+            route.fulfill(
+                status=503,
+                content_type="application/json",
+                body='{"error":{"message":"database temporarily unavailable"}}',
+            )
+            return
+        bodies = {
+            "/api/v1/incidents/history": {"items": [], "retention_days": 30},
+            "/api/v1/alerts": {"items": []},
+            "/api/v1/events": {"current": None},
+            "/api/v1/watch/map": {"incidents": [], "nodes": [], "alerts": []},
+            "/api/v1/environment/alerts": {
+                "items": [],
+                "health": {"last_error": None, "last_poll_at": None},
+            },
+            "/api/v1/environment/earthquakes": {"items": []},
+            "/api/v1/status": {"alert_delivery": {}},
+            "/api/v1/radio/channels": {
+                "available": True,
+                "stale": False,
+                "items": [
+                    {
+                        "index": 0,
+                        "name": "Primary",
+                        "active": True,
+                        "last_verified_active": True,
+                    }
+                ],
+            },
+        }
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(bodies.get(path, {})),
+        )
+
+    page.route("**/api/v1/incidents**", watch_read)
+    page.route("**/api/v1/alerts**", watch_read)
+    page.route("**/api/v1/events**", watch_read)
+    page.route("**/api/v1/watch/map**", watch_read)
+    page.route("**/api/v1/environment/alerts**", watch_read)
+    page.route("**/api/v1/environment/earthquakes**", watch_read)
+    page.route("**/api/v1/status", watch_read)
+    page.route("**/api/v1/radio/channels", watch_read)
+    try:
+        page.goto(f"{dashboard_url}/watch.html", wait_until="domcontentloaded")
+        page.get_by_text(expected, exact=False).first.wait_for()
+        assert (
+            "database temporarily unavailable"
+            in page.locator("#watch-source-health").text_content()
+        )
+        assert "Watch degraded" in page.locator("#watch-health").text_content()
+        assert forbidden not in page.locator(target).text_content()
+        assert page_errors == []
+    finally:
+        page.close()
+
+
+def test_bbs_read_failure_is_not_rendered_as_an_empty_board_list(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    page_errors: list[str] = []
+    page.on("pageerror", lambda error: page_errors.append(str(error)))
+    page.route(
+        "**/api/v1/boards**",
+        lambda route: route.fulfill(
+            status=503,
+            content_type="application/json",
+            body='{"error":{"message":"store unavailable"}}',
+        ),
+    )
+    try:
+        page.goto(f"{dashboard_url}/bbs.html", wait_until="domcontentloaded")
+        page.get_by_text("Boards unavailable", exact=False).wait_for()
+        assert page.locator("#board-count").text_content() == "—"
+        assert page_errors == []
     finally:
         page.close()
 

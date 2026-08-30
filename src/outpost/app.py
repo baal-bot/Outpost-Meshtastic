@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 from collections import defaultdict, deque
 from collections.abc import Callable, Coroutine
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -82,6 +83,7 @@ from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.inbound import InboundPipeline
 from outpost.transport.metrics import (
     ACK_OUTCOME,
+    COMMAND_REPLY_DELIVERY,
     INBOUND,
     INBOUND_DROPPED,
     INBOUND_HANDLER_FAILURES,
@@ -94,10 +96,13 @@ from outpost.transport.radio_link import MeshtasticRadioLink
 from outpost.transport.supervisor import RadioSupervisor
 from outpost.transport.toa import toa
 from outpost.watch import AlertService, CheckinService, IncidentService
+from outpost.watch.delivery import AudienceDelivery
 from outpost.watch.incidents import Incident
 from outpost.web.api import create_web_app
 from outpost.web.auth import WebAuthService
 from outpost.web.settings import RuntimeSettings
+
+_INBOUND_LOG_ID: ContextVar[int | None] = ContextVar("outpost_inbound_log_id", default=None)
 
 
 @dataclass
@@ -2491,6 +2496,7 @@ class OutpostApp:
 
     async def _handle_inbound_safely(self, message: InboundMessage, log_id: int) -> bool:
         """Contain message-specific faults while leaving infrastructure failures fatal."""
+        token = _INBOUND_LOG_ID.set(log_id)
         try:
             await self._handle_inbound_message(message, ordered=False)
         except asyncio.CancelledError:
@@ -2504,6 +2510,8 @@ class OutpostApp:
             # reach CORE supervision instead of being mistaken for a poison message.
             await self.message_log.mark_inbound_dropped(log_id, reason)
             return False
+        finally:
+            _INBOUND_LOG_ID.reset(token)
         return True
 
     async def _handle_inbound_message(
@@ -2614,38 +2622,57 @@ class OutpostApp:
             else configured_max_parts
         )
         parts = chunk_text(text, max_parts=max_parts)
-        await self.governor.admit_many(
-            [
-                OutboundItem(
-                    text=part,
-                    dest=message.from_id,
-                    channel=message.channel,
-                    traffic_class=response.airtime_class,
-                    want_ack=True,
-                    multipart=len(parts) > 1,
-                )
-                for part in parts
-            ]
-        )
-
-    async def _notify_emergency_responders(self, incident: Incident, sender_mesh_id: str) -> None:
-        rows = await self.database.read(
-            "SELECT mesh_id FROM member WHERE trust IN ('responder','operator') AND mesh_id<>?",
-            (sender_mesh_id,),
-        )
-        for row in rows:
-            await self.governor.admit(
-                OutboundItem(
-                    text=(
-                        f"⚠ Emergency keyword · INC {incident.local_ref} · {incident.title[:80]}"
-                    ),
-                    dest=row["mesh_id"],
-                    channel=0,
-                    traffic_class=TrafficClass.ALERT,
-                    severity=Severity.URGENT,
-                    want_ack=True,
-                )
+        outbound = [
+            OutboundItem(
+                text=part,
+                dest=message.from_id,
+                channel=message.channel,
+                traffic_class=response.airtime_class,
+                want_ack=True,
+                multipart=len(parts) > 1,
             )
+            for part in parts
+        ]
+        admission = await self.governor.admit_many_result(outbound)
+        outcome = admission.rejection_reason or "admitted"
+        COMMAND_REPLY_DELIVERY.labels(outcome).inc()
+        if admission.rejection_reason is not None:
+            command = ((message.text or "").split(maxsplit=1) or [""])[0].upper() or None
+            for part in parts:
+                await self.message_log.record_outbound(
+                    peer_mesh_id=message.from_id,
+                    channel=message.channel,
+                    portnum=1,
+                    packet_id=None,
+                    text=part,
+                    byte_len=len(part.encode()),
+                    toa_ms=round(toa(len(part.encode()), self.governor.preset) * 1_000),
+                    airtime_class=response.airtime_class.value,
+                    outcome="dropped",
+                    is_direct=True,
+                    command=command,
+                    drop_reason=admission.rejection_reason,
+                    in_reply_to_id=_INBOUND_LOG_ID.get(),
+                )
+
+    async def _notify_emergency_responders(
+        self, incident: Incident, sender_mesh_id: str
+    ) -> AudienceDelivery:
+        delivery = await self.alerts.notifier.deliver(
+            purpose="emergency_keyword",
+            target=f"incident:{incident.id}",
+            audience="responders",
+            text=f"⚠ Emergency keyword · INC {incident.local_ref} · {incident.title[:80]}",
+            channels=[0],
+            traffic_class=TrafficClass.ALERT,
+            severity=Severity.URGENT,
+            exclude_mesh_ids=(sender_mesh_id,),
+        )
+        await self.database.write(
+            "UPDATE incident SET notification_state=?,notification_count=? WHERE id=?",
+            (delivery.state, delivery.admitted, incident.id),
+        )
+        return delivery
 
     def status(self) -> dict[str, object]:
         configured = set(self.config.channels)

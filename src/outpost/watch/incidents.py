@@ -68,6 +68,8 @@ class Incident:
     flagged_for_review: int
     merged_into_id: int | None
     reconciliation_review: int
+    notification_state: str | None
+    notification_count: int
 
     def json(self) -> dict[str, Any]:
         return asdict(self)

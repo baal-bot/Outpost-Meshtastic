@@ -12,6 +12,8 @@ from outpost.store.members import Member
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.models import Severity, TrafficClass
 
+from .delivery import AudienceDelivery, AudienceNotifier
+
 
 @dataclass(frozen=True)
 class WatchEvent:
@@ -29,6 +31,7 @@ class WatchEvent:
 class CheckinService:
     def __init__(self, database: Database, governor: AirtimeGovernor, clock: Clock) -> None:
         self.database, self.governor, self.clock = database, governor, clock
+        self.notifier = AudienceNotifier(database, governor, clock)
         self._solicitation_lock = asyncio.Lock()
 
     @staticmethod
@@ -91,7 +94,7 @@ class CheckinService:
         )
         lat = float(position[0]["lat"]) if position else None
         lon = float(position[0]["lon"]) if position else None
-        await self.database.write(
+        checkin_id = await self.database.write(
             "INSERT INTO checkin(member_id,event_id,status,note,lat,lon,created_at) "
             "VALUES(?,?,?,?,?,?,?)",
             (
@@ -104,34 +107,45 @@ class CheckinService:
                 now,
             ),
         )
+        notification: AudienceDelivery | None = None
         if status == "need_help":
-            await self._notify_responders(member, event, note)
+            notification = await self._notify_responders(member, event, note, checkin_id)
+            await self.database.write(
+                "UPDATE checkin SET notification_state=?,notification_count=? WHERE id=?",
+                (notification.state, notification.admitted, checkin_id),
+            )
         roster = await self.roster(event.id) if event else []
         return {
             "event": event.json() if event else None,
             "checked_in": sum(row["status"] != "unaccounted" for row in roster),
             "total": len(roster),
+            "notification": (
+                {
+                    "state": notification.state,
+                    "admitted": notification.admitted,
+                    "reason": notification.failure_reason,
+                }
+                if notification is not None
+                else None
+            ),
         }
 
-    async def _notify_responders(self, member: Member, event: WatchEvent | None, note: str) -> None:
-        responders = await self.database.read(
-            "SELECT mesh_id FROM member WHERE trust IN ('responder','operator') AND id<>?",
-            (member.id,),
-        )
+    async def _notify_responders(
+        self, member: Member, event: WatchEvent | None, note: str, checkin_id: int
+    ) -> AudienceDelivery:
         label = member.handle or member.mesh_id
         event_name = event.name if event else "community"
         text = f"⚠ HELP @{label} · {event_name} · {note[:80] or 'needs assistance'}"
-        for responder in responders:
-            await self.governor.admit(
-                OutboundItem(
-                    text=text,
-                    dest=responder["mesh_id"],
-                    channel=0,
-                    traffic_class=TrafficClass.ALERT,
-                    severity=Severity.URGENT,
-                    want_ack=True,
-                )
-            )
+        return await self.notifier.deliver(
+            purpose="checkin_help",
+            target=f"checkin:{checkin_id}",
+            audience="responders",
+            text=text,
+            channels=[0],
+            traffic_class=TrafficClass.ALERT,
+            severity=Severity.URGENT,
+            exclude_mesh_ids=(member.mesh_id,),
+        )
 
     async def _members_for(self, event: WatchEvent) -> list[Any]:
         if event.roster_policy == "responders":
@@ -156,7 +170,8 @@ class CheckinService:
         result = []
         for member in members:
             rows = await self.database.read(
-                """SELECT status,note,lat,lon,created_at FROM checkin
+                """SELECT status,note,lat,lon,created_at,notification_state,notification_count
+                   FROM checkin
                    WHERE event_id=? AND member_id=? ORDER BY created_at DESC LIMIT 1""",
                 (event.id, member["id"]),
             )
@@ -169,6 +184,8 @@ class CheckinService:
                     "lat": None,
                     "lon": None,
                     "created_at": None,
+                    "notification_state": None,
+                    "notification_count": 0,
                 }
             )
             result.append({**dict(member), **latest})

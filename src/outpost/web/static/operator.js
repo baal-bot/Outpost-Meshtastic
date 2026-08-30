@@ -111,6 +111,7 @@ function renderMembers(result, append) {
   $("review-count").textContent = result.review_count;
   $("inactive-count").textContent = result.archived_count + result.ignored_count;
   $("trusted-count").textContent = result.trusted_count;
+  $("responder-warning").hidden = result.responder_count > 0;
   const labels = {
     approved: "Community members",
     discovered: "Discovered radio triage",

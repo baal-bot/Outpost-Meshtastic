@@ -34,6 +34,7 @@ def test_checklist_is_complete_resumable_and_records_requirements(tmp_path: Path
         "identity_location",
         "radio_connection",
         "region_channel_safety",
+        "community_response",
         "maps_providers",
         "backups",
         "federation",
@@ -83,6 +84,21 @@ def test_completed_operator_credentials_are_detected_without_storing_secrets(
     assert values["operator_credentials"]["status_source"] == "detected"
     assert not (tmp_path / "state.json").exists()
     assert "secret-hash" not in json.dumps(values)
+
+
+def test_community_response_step_detects_a_configured_responder(tmp_path: Path) -> None:
+    config = _config()
+    database = tmp_path / "outpost.db"
+    config.store.path = str(database)
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute("CREATE TABLE member(directory_state TEXT,trust TEXT)")
+        connection.execute("INSERT INTO member VALUES('active','responder')")
+        connection.commit()
+
+    values = {value["id"]: value for value in checklist(config, tmp_path / "state.json")}
+
+    assert values["community_response"]["status"] == "completed"
+    assert values["community_response"]["status_source"] == "detected"
 
 
 def test_onboarding_state_fails_closed_on_unknown_steps(tmp_path: Path) -> None:

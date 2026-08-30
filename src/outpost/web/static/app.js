@@ -85,10 +85,10 @@ async function refresh() {
       ({status, overview, boards, channels} = await response.json());
     } else {
       [status, overview, boards, channels] = await Promise.all([
-        fetch("/api/v1/status").then((r) => r.json()),
-        fetch("/api/v1/dashboard/overview").then((r) => r.json()),
-        fetch("/api/v1/boards").then((r) => r.json()),
-        fetch("/api/v1/channels").then((r) => r.json()),
+        fetchCheckedJson("/api/v1/status", "Status"),
+        fetchCheckedJson("/api/v1/dashboard/overview", "Overview"),
+        fetchCheckedJson("/api/v1/boards", "Boards"),
+        fetchCheckedJson("/api/v1/channels", "Channels"),
       ]);
     }
     $("node-name").textContent = status.node;
@@ -126,9 +126,15 @@ async function refresh() {
     $("channels").innerHTML = channels.items.map((channel) => item(channel.name, channel.description, `slot ${channel.slot}`)).join("") || `<p class="ui-empty empty">No channels.</p>`;
     renderSubsystems(status);
     $("updated").textContent = `Updated ${new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`;
-  } catch (_) {
+  } catch (error) {
     const radio = $("radio-state"); radio.className = "ui-pill status down"; radio.innerHTML = "<i></i>offline";
+    $("updated").textContent = `Dashboard data unavailable · ${error.message}`;
   }
+}
+async function fetchCheckedJson(url, label) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${label} HTTP ${response.status}`);
+  return response.json();
 }
 let csrfToken = "";
 let loginNeedsMfa = false;

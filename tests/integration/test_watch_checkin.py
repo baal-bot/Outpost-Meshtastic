@@ -118,3 +118,30 @@ async def test_solicitation_is_direct_digest_and_only_once_per_member(tmp_path) 
     with pytest.raises(ValueError, match="No unsolicited"):
         await service.solicit(event.id)
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_need_help_reports_zero_when_requester_is_only_responder(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    members = MemberRepo(database, clock)
+    caller = await members.resolve("!00000001")
+    await database.write("UPDATE member SET trust='responder' WHERE id=?", (caller.id,))
+    service = CheckinService(database, governor, clock)
+
+    result = await service.checkin(caller, "need_help", "Trapped")
+
+    assert result["notification"] == {
+        "state": "empty_audience",
+        "admitted": 0,
+        "reason": "empty_audience",
+    }
+    row = (await database.read("SELECT notification_state,notification_count FROM checkin"))[0]
+    assert dict(row) == {"notification_state": "empty_audience", "notification_count": 0}
+    assert governor.queued_items() == []
+    system_mail = (await database.read("SELECT state,body FROM mail"))[0]
+    assert system_mail["state"] == "failed"
+    assert "No recipient was reached" in system_mail["body"]
+    await database.close()

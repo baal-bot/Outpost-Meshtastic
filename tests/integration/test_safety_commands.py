@@ -6,7 +6,8 @@ from outpost.app import OutpostApp
 from outpost.config import Config
 from outpost.render.renderer import render_response
 from outpost.router.models import ResponseKind
-from outpost.transport.models import InboundMessage
+from outpost.transport.governor import OutboundItem
+from outpost.transport.models import InboundMessage, TrafficClass
 
 
 def config(path) -> Config:
@@ -85,7 +86,7 @@ async def test_alert_and_ack_commands_enforce_trust_render_results_and_mutate_st
         raised = await app.router.dispatch(
             inbound(6, "ALERT urgent 1 Barn fire", "!00000002", key=key)
         )
-        assert render_response(raised) == "✓ ALERT 1 queued for INC 1."
+        assert render_response(raised) == ("✓ ALERT 1 recorded for INC 1; 1 transmission queued.")
         assert len(await app.alerts.list()) == 1
 
         ack_usage = await app.router.dispatch(inbound(7, "ACK nope", "!00000004"))
@@ -114,7 +115,7 @@ async def test_welfare_commands_cover_event_lifecycle_rosters_and_member_text(tm
         help_without_event = await app.router.dispatch(
             inbound(11, "HELPME road blocked", second.mesh_id)
         )
-        assert "Help recorded" in render_response(help_without_event)
+        assert "1 responder notified" in render_response(help_without_event)
         no_roster = await app.router.dispatch(inbound(12, "ROSTER", "!00000013"))
         assert render_response(no_roster) == "No open watch event."
         no_names = await app.router.dispatch(inbound(13, "ROSTER?", "!00000010", key=key))
@@ -136,7 +137,7 @@ async def test_welfare_commands_cover_event_lifecycle_rosters_and_member_text(tm
         checked = await app.router.dispatch(inbound(18, "OK warm", first.mesh_id))
         assert "1/3 in." in render_response(checked)
         needs_help = await app.router.dispatch(inbound(19, "HELPME water rising", second.mesh_id))
-        assert "Responders notified" in render_response(needs_help)
+        assert "1 responder notified" in render_response(needs_help)
         roster = await app.router.dispatch(inbound(20, "ROSTER", "!00000015"))
         assert render_response(roster).startswith('Event "Ice storm": 1 ok · 1 help')
         names = await app.router.dispatch(inbound(21, "ROSTER?", "!00000010", key=key))
@@ -228,5 +229,106 @@ async def test_blocked_radio_cannot_invoke_any_safety_command(tmp_path) -> None:
         assert await app.database.read("SELECT id FROM incident") == []
         assert await app.database.read("SELECT id FROM checkin") == []
         assert await app.database.read("SELECT id FROM alert") == []
+    finally:
+        await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_refused_command_reply_is_linked_to_inbound_conversation(tmp_path) -> None:
+    value = config(tmp_path / "outpost.db")
+    value = value.model_copy(
+        update={"airtime": value.airtime.model_copy(update={"queue_max_items": 1})}
+    )
+    app = OutpostApp(value)
+    await app.database.open()
+    try:
+        filler = await app.governor.admit(OutboundItem("busy", "!peer", 0, TrafficClass.DIGEST))
+        assert filler is not None
+        message = inbound(70, "PING", "!00000070")
+        inbound_id = await app.message_log.record_inbound(message)
+
+        assert await app._handle_inbound_safely(message, inbound_id)
+
+        dropped = await app.database.read(
+            "SELECT direction,outcome,drop_reason,in_reply_to_id,command FROM message_log "
+            "WHERE direction='out'"
+        )
+        assert [dict(row) for row in dropped] == [
+            {
+                "direction": "out",
+                "outcome": "dropped",
+                "drop_reason": "queue_full",
+                "in_reply_to_id": inbound_id,
+                "command": "PING",
+            }
+        ]
+    finally:
+        await app.database.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requester_is_responder", [False, True])
+async def test_helpme_plainly_warns_when_no_other_responder_is_reached(
+    tmp_path, requester_is_responder: bool
+) -> None:
+    app = OutpostApp(config(tmp_path / "outpost.db"))
+    await app.database.open()
+    try:
+        member = await app.router.members.resolve("!00000080")
+        if requester_is_responder:
+            await app.database.write("UPDATE member SET trust='responder' WHERE id=?", (member.id,))
+        response = await app.router.dispatch(inbound(80, "HELPME trapped", member.mesh_id))
+        text = render_response(response)
+        assert text.startswith("⚠ No responder was reached. Contact 911")
+        assert "Responders notified" not in text
+    finally:
+        await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_helpme_warns_when_queue_policy_refuses_responder_delivery(tmp_path) -> None:
+    value = config(tmp_path / "outpost.db")
+    value = value.model_copy(
+        update={"airtime": value.airtime.model_copy(update={"queue_max_items": 1})}
+    )
+    app = OutpostApp(value)
+    await app.database.open()
+    try:
+        await responder(app, "!00000081", "responder")
+        filler = await app.governor.admit(OutboundItem("busy", "!peer", 0, TrafficClass.DIGEST))
+        assert filler is not None
+        response = await app.router.dispatch(inbound(81, "HELPME trapped", "!00000082"))
+        assert render_response(response).startswith("⚠ No responder was reached. Contact 911")
+        row = (await app.database.read("SELECT notification_state FROM checkin"))[0]
+        assert row["notification_state"] == "refused"
+    finally:
+        await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_emergency_keyword_zero_delivery_is_visible_on_incident(tmp_path) -> None:
+    value = config(tmp_path / "outpost.db")
+    value = value.model_copy(
+        update={
+            "watch": value.watch.model_copy(
+                update={"emergency_keywords_enabled": True, "emergency_keywords": ["mayday"]}
+            )
+        }
+    )
+    app = OutpostApp(value)
+    await app.database.open()
+    try:
+        await app._handle_inbound_message(inbound(90, "mayday injured on ridge", "!00000090"))
+        incident = (
+            await app.database.read("SELECT notification_state,notification_count FROM incident")
+        )[0]
+        assert dict(incident) == {
+            "notification_state": "empty_audience",
+            "notification_count": 0,
+        }
+        assert await app.database.read(
+            "SELECT 1 FROM audit_log WHERE action='safety.delivery.zero' AND target='incident:1'"
+        )
+        assert (await app.database.read("SELECT state FROM mail"))[0]["state"] == "failed"
     finally:
         await app.database.close()

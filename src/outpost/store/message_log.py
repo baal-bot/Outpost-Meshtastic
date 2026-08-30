@@ -62,13 +62,16 @@ class MessageLogRepo:
         airtime_class: str,
         outcome: str,
         is_direct: bool,
+        command: str | None = None,
+        drop_reason: str | None = None,
+        in_reply_to_id: int | None = None,
     ) -> int:
         return await self.database.write(
             """
             INSERT INTO message_log(
               direction,peer_mesh_id,channel,portnum,is_direct,packet_id,text,byte_len,
-              toa_ms,airtime_class,outcome,transport,created_at
-            ) VALUES('out',?,?,?,?,?,?,?,?,?,?,?,?)
+              toa_ms,airtime_class,command,outcome,drop_reason,transport,in_reply_to_id,created_at
+            ) VALUES('out',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 peer_mesh_id,
@@ -80,8 +83,11 @@ class MessageLogRepo:
                 byte_len,
                 toa_ms,
                 airtime_class,
+                command,
                 outcome,
+                drop_reason,
                 "mesh",
+                in_reply_to_id,
                 int(self.clock.now().timestamp()),
             ),
         )

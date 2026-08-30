@@ -32,7 +32,16 @@ def specs(service: AlertService) -> list[CommandSpec]:
             )
         except ValueError as error:
             return Response(ResponseKind.ERROR, [Line(str(error))])
-        return Response(ResponseKind.ACK, [Line(f"✓ ALERT {value.id} queued for INC {reference}.")])
+        delivery = (
+            f"{value.last_delivery_count} transmission"
+            f"{'s' if value.last_delivery_count != 1 else ''} queued"
+            if value.last_delivery_count
+            else "no recipient reached; operator review required"
+        )
+        return Response(
+            ResponseKind.ACK,
+            [Line(f"✓ ALERT {value.id} recorded for INC {reference}; {delivery}.")],
+        )
 
     async def ack(ctx: CommandContext) -> Response:
         reference, _, note = ctx.args.strip().partition(" ")

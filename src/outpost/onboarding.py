@@ -71,6 +71,15 @@ STEPS = (
         SetupNeeds(False, True, True, True),
     ),
     SetupStep(
+        "community_response",
+        "Community response coverage",
+        "Review at least one known member and promote them to Responder or Operator mesh trust. "
+        "Without one, HELPME and responder-first alert stages reach nobody.",
+        "Members shows no responder warning and a test alert reports at least one admitted "
+        "recipient.",
+        SetupNeeds(False, True, False, True),
+    ),
+    SetupStep(
         "maps_providers",
         "Maps and information providers",
         "Set location and a real provider contact, seed the bounded offline map, and review "
@@ -183,6 +192,23 @@ def _credentials_complete(database_path: Path) -> bool:
         return False
 
 
+def _responders_configured(database_path: Path) -> bool:
+    if not database_path.is_file():
+        return False
+    try:
+        connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True, timeout=2)
+        try:
+            row = connection.execute(
+                "SELECT 1 FROM member WHERE directory_state='active' "
+                "AND trust IN ('responder','operator') LIMIT 1"
+            ).fetchone()
+            return row is not None
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return False
+
+
 def checklist(config: Config, state_path: Path) -> list[dict[str, Any]]:
     state = load_state(state_path)
     stored = state["steps"]
@@ -192,6 +218,8 @@ def checklist(config: Config, state_path: Path) -> list[dict[str, Any]]:
         status = entry.get("status", "pending")
         source = "recorded" if entry else "pending"
         if step.id == "operator_credentials" and _credentials_complete(Path(config.store.path)):
+            status, source = "completed", "detected"
+        if step.id == "community_response" and _responders_configured(Path(config.store.path)):
             status, source = "completed", "detected"
         values.append(
             {
