@@ -49,8 +49,9 @@ recovery code when enabled. The original action is retried only after confirmati
 Sessions have an absolute configured expiry and record creation time, last activity, source, and
 client description. Operators can revoke one session or all sessions from Access. Password reset,
 password change, and disabling an account revoke that account's sessions. State changes use CSRF
-tokens and login failures are limited by source and username. `auth.mode: none` works only on
-loopback and must not be placed behind an unauthenticated public proxy.
+tokens and login failures are limited by source and username. Authentication cannot be disabled
+through YAML, including on loopback; isolate access with the bind address and host firewall while
+retaining named accounts and audit attribution.
 
 `sudo outpost-diagnostics --output /path/to/outpost-diagnostics.zip` creates a mode-0600 support
 bundle containing recent warning/error lines, live health, versions/storage, and a non-secret

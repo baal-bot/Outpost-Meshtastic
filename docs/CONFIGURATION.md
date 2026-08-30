@@ -144,12 +144,12 @@ See [Federation](FEDERATION.md).
 
 ### `web`
 
-Named password authentication is the expected LAN mode; account roles, MFA, and sessions are
+Named-account password authentication is always enabled; account roles, MFA, and sessions are
 managed in the Access workspace rather than YAML. `auth.session_hours` sets the absolute browser
-session lifetime. `auth.mode: none` is valid only on loopback. `transport.mode` explicitly selects
-offline `trusted_http`, Outpost-terminated `direct_https`, or `trusted_proxy`. HTTPS is optional and
-never required for radio/mesh operation. Forwarded client/scheme headers are accepted only from the
-configured proxy networks. See [Web transport and network boundary](WEB-TRANSPORT.md).
+session lifetime. `transport.mode` explicitly selects offline `trusted_http`, Outpost-terminated
+`direct_https`, or `trusted_proxy`. HTTPS is optional and never required for radio/mesh operation.
+Forwarded client/scheme headers are accepted only from configured proxy networks. See
+[Web transport and network boundary](WEB-TRANSPORT.md).
 
 ### `store`
 
@@ -196,6 +196,7 @@ following pre-release keys were removed because they never had a runtime consume
 - `security.handle_change_per_hours`, `security.handle_reserve_days`
 - `mail.notify_window_hours`, `watch.self_resolve_hours`
 - `fed.mqtt.discovery_enabled`, `fed.mqtt.server`, `fed.mqtt.port`, `fed.mqtt.topic_root`
+- `web.auth.mode` (named-account authentication is always enabled)
 
 Remove these keys before upgrading. Position freshness and incident duplicate detection are live
 through `watch.position_max_age_minutes`, `watch.dedupe_radius_m`, and

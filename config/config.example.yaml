@@ -144,7 +144,7 @@ watch:
 web:
   bind: "0.0.0.0"
   port: 8080
-  auth: {mode: password, session_hours: 12}
+  auth: {session_hours: 12}
   # Offline trusted-LAN HTTP is the frictionless field default. For direct TLS or a terminating
   # proxy, see docs/WEB-TRANSPORT.md; forwarded headers are ignored outside trusted_proxy mode.
   transport:

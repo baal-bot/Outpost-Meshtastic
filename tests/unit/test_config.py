@@ -49,11 +49,10 @@ def test_structured_dispatch_config_must_be_complete_and_parseable(
         Config.model_validate(values)
 
 
-def test_unsafe_no_auth_is_rejected() -> None:
-    with pytest.raises(ValidationError, match="loopback"):
-        Config.model_validate(
-            {"web": {"bind": "0.0.0.0", "auth": {"mode": "none"}}}  # noqa: S104
-        )
+@pytest.mark.parametrize("mode", ["password", "users", "none"])
+def test_removed_auth_mode_is_rejected(mode: str) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        Config.model_validate({"web": {"auth": {"mode": mode}}})
 
 
 def test_web_transport_defaults_to_offline_trusted_http() -> None:
@@ -185,6 +184,7 @@ def test_invalid_ai_runtime_policy_is_rejected(ai: dict[str, object]) -> None:
         {"fed": {"mqtt": {"topic_root": "msh"}}},
         {"mail": {"notify_window_hours": 12}},
         {"watch": {"self_resolve_hours": 24}},
+        {"web": {"auth": {"mode": "none"}}},
     ],
 )
 def test_removed_no_effect_settings_are_rejected(values: dict[str, object]) -> None:

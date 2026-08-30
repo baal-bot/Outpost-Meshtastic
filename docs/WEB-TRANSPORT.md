@@ -16,7 +16,7 @@ hotspot, or an encrypted VPN interface whose firewall excludes other interfaces:
 web:
   bind: "0.0.0.0"
   port: 8080
-  auth: {mode: password, session_hours: 12}
+  auth: {session_hours: 12}
   transport:
     mode: trusted_http
     certificate_file: null
@@ -53,7 +53,7 @@ sudo install -m 0640 -o root -g outpost outpost-key.pem /etc/outpost/tls/key.pem
 web:
   bind: "0.0.0.0"
   port: 8443
-  auth: {mode: password, session_hours: 12}
+  auth: {session_hours: 12}
   transport:
     mode: direct_https
     certificate_file: /etc/outpost/tls/fullchain.pem
@@ -93,7 +93,7 @@ certificate. A same-host proxy should keep Outpost on loopback:
 web:
   bind: "127.0.0.1"
   port: 8080
-  auth: {mode: password, session_hours: 12}
+  auth: {session_hours: 12}
   transport:
     mode: trusted_proxy
     certificate_file: null

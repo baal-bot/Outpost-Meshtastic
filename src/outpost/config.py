@@ -329,7 +329,6 @@ class FedConfig(StrictModel):
 
 
 class WebAuth(StrictModel):
-    mode: Literal["password", "users", "none"] = "password"
     session_hours: int = 12
 
 
@@ -499,8 +498,6 @@ class Config(StrictModel):
 
     @model_validator(mode="after")
     def cross_validate(self) -> Config:
-        if self.web.auth.mode == "none" and self.web.bind not in {"127.0.0.1", "::1", "localhost"}:
-            raise ValueError("web.auth.mode none requires a loopback web.bind")
         if self.modules.env.enabled and "CHANGE-ME" in self.env.user_agent:
             raise ValueError("env.user_agent must be configured when the env module is enabled")
         if self.modules.ai.enabled:

@@ -113,13 +113,10 @@ CHECK_DEFINITIONS = (
 CHECK_NAMES = frozenset(check.name for check in CHECK_DEFINITIONS)
 _DEFINITION = {check.name: check for check in CHECK_DEFINITIONS}
 
-# Strict-schema fields tracked by an open defect because they are accepted but
-# have no runtime consumer. The check reports only operator-supplied keys.
-KNOWN_INEFFECTIVE_CONFIG_KEYS = frozenset(
-    {
-        "web.auth.mode",
-    }
-)
+# Temporary denylist for any accepted strict-schema field found to lack a
+# runtime consumer. It should remain empty; the source-reference test prevents
+# newly declared fields from silently reaching a release.
+KNOWN_INEFFECTIVE_CONFIG_KEYS: frozenset[str] = frozenset()
 
 SELF_CHECK_STATE = Gauge(
     "outpost_self_check_state",

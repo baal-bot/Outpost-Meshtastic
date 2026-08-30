@@ -418,7 +418,7 @@ web:
   bind: "0.0.0.0"              # all local interfaces; the installer opens no WAN port.
                                # Set a specific LAN address to restrict further.
   port: 8080
-  auth: { mode: password, session_hours: 12 }
+  auth: { session_hours: 12 }
   tls: { enabled: false, cert: "", key: "" }
 
 store:
@@ -446,7 +446,6 @@ store:
 - channel indices outside 0–7, or a channel index absent from the radio's configuration
 - an AI provider with no reachable base URL when `modules.ai.enabled`
 - `env.user_agent` still containing `CHANGE-ME` when `modules.env.enabled` (REQ-WX-005)
-- `web.auth.mode: none` with a non-loopback `web.bind` (REQ-API-005)
 - any path the process cannot write
 
 **REQ-ARCH-018** — A subset of config (airtime budgets and class shares, channel policy,

@@ -151,7 +151,6 @@ async def test_configuration_and_inventory_checks_report_specific_operator_evide
                 "backup": {"keep": 1},
             },
             "router": {"intents_file": str(intents)},
-            "web": {"bind": "127.0.0.1", "auth": {"mode": "none"}},
         }
     )
     database = Database(config.store.path)
@@ -182,6 +181,7 @@ async def test_configuration_and_inventory_checks_report_specific_operator_evide
     assert report["safety_failures"] == 0
     assert checks["backup_rotation"]["evidence"] == {"file_count": 2, "keep": 1}
     assert checks["intent_map"]["evidence"]["error"].startswith("TypeError:")
-    assert checks["configured_keys_effective"]["evidence"]["ineffective_keys"] == ["web.auth.mode"]
+    assert checks["configured_keys_effective"]["passed"]
+    assert checks["configured_keys_effective"]["evidence"]["ineffective_keys"] == []
     assert checks["timezone"]["evidence"] == {"timezone": "Not/A_Real_Zone"}
     await database.close()
