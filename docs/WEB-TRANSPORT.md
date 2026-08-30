@@ -17,6 +17,7 @@ web:
   bind: "0.0.0.0"
   port: 8080
   auth: {session_hours: 12}
+  metrics_access: authenticated
   transport:
     mode: trusted_http
     certificate_file: null
@@ -54,6 +55,7 @@ web:
   bind: "0.0.0.0"
   port: 8443
   auth: {session_hours: 12}
+  metrics_access: authenticated
   transport:
     mode: direct_https
     certificate_file: /etc/outpost/tls/fullchain.pem
@@ -94,6 +96,7 @@ web:
   bind: "127.0.0.1"
   port: 8080
   auth: {session_hours: 12}
+  metrics_access: authenticated
   transport:
     mode: trusted_proxy
     certificate_file: null

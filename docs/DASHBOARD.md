@@ -3,6 +3,12 @@
 The dashboard is a local operator console served by the Outpost process. It is responsive for
 phones and desktops and uses bundled assets so its interface remains available without WAN access.
 
+The static login shell, offline tiles, minimal health, and captive-portal redirects are public;
+operational API data requires a named session. Interactive OpenAPI, Swagger, and ReDoc pages are
+disabled on the field appliance rather than exposing the route catalogue or depending on CDN
+assets that cannot work offline. See [Security and privacy](SECURITY.md) for the complete public
+endpoint boundary.
+
 ## Sections
 
 - **Overview:** identity, service/radio state, message activity, weather, and operational summary.

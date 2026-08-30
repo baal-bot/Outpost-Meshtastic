@@ -25,9 +25,26 @@ The minimal health endpoint and systemd watchdog reflect core offline progress. 
 and restartable-local failures remain visible in the authenticated dashboard and loopback-only
 diagnostics while the core continues serving mesh traffic.
 
-Prometheus metrics use canonical `/metrics` (HTTP 200); `/metrics/` remains compatible. Restrict
-them to trusted networks because labels and
-traffic characteristics can reveal operational patterns.
+Prometheus metrics use canonical `/metrics`; `/metrics/` and `HEAD` behave consistently. The field
+default, `web.metrics_access: authenticated`, requires an Operator or Administrator browser
+session. For a Prometheus process running on the Outpost itself, select the narrower scrape mode:
+
+```yaml
+web:
+  metrics_access: loopback
+```
+
+```yaml
+scrape_configs:
+  - job_name: outpost
+    static_configs:
+      - targets: ["127.0.0.1:8080"]
+```
+
+Restart Outpost after changing the policy. `disabled` returns 404. Loopback mode trusts the
+effective client address after the configured proxy boundary and rejects non-local clients; never
+forward it through an unauthenticated proxy. Metrics labels and traffic characteristics can reveal
+operational patterns.
 
 ## Operator access and shift changes
 

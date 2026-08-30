@@ -374,6 +374,7 @@ class WebConfig(StrictModel):
     bind: str = "0.0.0.0"  # noqa: S104 - LAN bind is an explicit product requirement.
     port: int = Field(default=8080, ge=1, le=65535)
     auth: WebAuth = Field(default_factory=WebAuth)
+    metrics_access: Literal["authenticated", "loopback", "disabled"] = "authenticated"
     transport: WebTransport = Field(default_factory=WebTransport)
 
 

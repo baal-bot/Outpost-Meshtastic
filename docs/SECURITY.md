@@ -9,7 +9,8 @@ trusted local service, not an anonymous public web application.
 - Complete the short-lived local setup-token flow, set a permanent dashboard password, and create
   a named account for each person who operates the node.
 - Enable TOTP for administrator accounts and store their one-use recovery codes offline.
-- Limit the dashboard and `/metrics` to the operator LAN, VPN, or authenticated TLS proxy.
+- Limit the dashboard to the operator LAN, VPN, or authenticated TLS proxy; keep `/metrics`
+  authenticated, loopback-only, or disabled.
 - Protect `/etc/outpost`, `/var/lib/outpost`, backups, and radio keys.
 - Retain the dedicated non-login service account installed by the project.
 - Keep encrypted off-device backups and test recovery.
@@ -52,6 +53,13 @@ password change, and disabling an account revoke that account's sessions. State 
 tokens and login failures are limited by source and username. Authentication cannot be disabled
 through YAML, including on loopback; isolate access with the bind address and host firewall while
 retaining named accounts and audit attribution.
+
+The unauthenticated HTTP surface is intentionally small: minimal health; loopback-gated diagnostic
+status/readiness; login and initial setup; capability-like restore progress URLs; offline map tiles;
+the static login shell; and captive-portal redirects. Every operational API requires a session.
+OpenAPI/Swagger/ReDoc routes are disabled on the field appliance. Metrics require an Operator or
+Administrator session by default, may be restricted to the effective loopback client address for
+a same-host Prometheus process, or may be disabled. Read-only wallboard sessions cannot read them.
 
 `sudo outpost-diagnostics --output /path/to/outpost-diagnostics.zip` creates a mode-0600 support
 bundle containing recent warning/error lines, live health, versions/storage, and a non-secret

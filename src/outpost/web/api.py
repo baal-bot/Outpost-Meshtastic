@@ -13,7 +13,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest, make_asgi_app
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field, model_validator
 
 from outpost import __version__
@@ -52,6 +52,108 @@ from outpost.web.member_triage import NEEDS_REVIEW_SQL, MemberTriageError, Membe
 from outpost.web.operator_inbox import OperatorInboxService
 from outpost.web.settings import RuntimeSettings
 from outpost.web.transport import WebTransportMiddleware, transport_status
+
+PUBLIC_API_PATHS = frozenset(
+    {
+        "/api/v1/health",
+        "/api/v1/diagnostics/readiness",
+        "/api/v1/diagnostics/status",
+        "/api/v1/auth/login",
+        "/api/v1/auth/setup",
+        "/api/v1/recovery/restores/{job_id}",
+    }
+)
+PUBLIC_API_PREFIXES = ("/api/v1/recovery/restores/",)
+PUBLIC_NON_API_ROUTE_PATHS = frozenset(
+    {
+        "/tiles/manifest.json",
+        "/tiles/{zoom}/{x}/{y}.png",
+        "/favicon.ico",
+        "/connecttest.txt",
+        "/ncsi.txt",
+        "/hotspot-detect.html",
+        "/generate_204",
+    }
+)
+AUTHENTICATED_NON_API_PATHS = frozenset({"/metrics", "/metrics/"})
+API_MODULE_PREFIXES = (
+    ("/api/v1/environment", "env"),
+    ("/api/v1/federation", "fed"),
+    ("/api/v1/incidents", "watch"),
+    ("/api/v1/alerts", "watch"),
+    ("/api/v1/events", "watch"),
+    ("/api/v1/watch", "watch"),
+    ("/api/v1/config/watch", "watch"),
+    ("/api/v1/boards", "bbs"),
+    ("/api/v1/threads", "bbs"),
+    ("/api/v1/posts", "bbs"),
+    ("/api/v1/ai", "ai"),
+)
+STEP_UP_PREFIXES = (
+    "/api/v1/auth/accounts",
+    "/api/v1/auth/mfa",
+    "/api/v1/radio/config",
+    "/api/v1/federation/peers",
+    "/api/v1/federation/mqtt",
+    "/api/v1/federation/origins",
+    "/api/v1/federation/relay/origins",
+    "/api/v1/federation/relay/identity",
+    "/api/v1/config/watch",
+    "/api/v1/ai",
+    "/api/v1/alerts",
+    "/api/v1/environment/alerts",
+    "/api/v1/environment/earthquakes",
+    "/api/v1/environment/same",
+)
+VIEWER_SELF_SERVICE = frozenset(
+    {
+        ("GET", "/api/v1/auth/session"),
+        ("GET", "/api/v1/auth/sessions"),
+        ("POST", "/api/v1/auth/logout"),
+        ("POST", "/api/v1/auth/password"),
+        ("POST", "/api/v1/auth/step-up"),
+        ("POST", "/api/v1/auth/mfa/begin"),
+        ("POST", "/api/v1/auth/mfa/confirm"),
+        ("DELETE", "/api/v1/auth/mfa"),
+        ("DELETE", "/api/v1/auth/sessions"),
+    }
+)
+VIEWER_READ_PATHS = frozenset({"/api/v1/wallboard/summary", "/api/v1/sitrep"})
+
+
+def route_access_policy(path: str) -> Literal["public", "authenticated"] | None:
+    """Return the declared access policy for a registered HTTP route or request path."""
+    if (
+        path in PUBLIC_API_PATHS
+        or path in PUBLIC_NON_API_ROUTE_PATHS
+        or any(path.startswith(prefix) for prefix in PUBLIC_API_PREFIXES)
+    ):
+        return "public"
+    if path.startswith("/api/v1/") or path in AUTHENTICATED_NON_API_PATHS:
+        return "authenticated"
+    return None
+
+
+def api_module(path: str) -> str | None:
+    return next(
+        (
+            module
+            for prefix, module in API_MODULE_PREFIXES
+            if path == prefix or path.startswith(f"{prefix}/")
+        ),
+        None,
+    )
+
+
+def step_up_path(method: str, path: str) -> bool:
+    if method in {"GET", "HEAD", "OPTIONS"}:
+        return False
+    return (
+        any(path.startswith(prefix) for prefix in STEP_UP_PREFIXES)
+        or (path.startswith("/api/v1/backups/") and path.endswith("/restore"))
+        or (path.startswith("/api/v1/members/") and method in {"PATCH", "DELETE"})
+        or (path.startswith("/api/v1/members/") and path.endswith("/pki"))
+    )
 
 
 class LoginBody(BaseModel):
@@ -579,7 +681,13 @@ def create_web_app(
     web_config: WebConfig | None = None,
     self_check: SelfCheckService | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="Outpost API", version=__version__, docs_url="/api/docs")
+    app = FastAPI(
+        title="Outpost API",
+        version=__version__,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     effective_web_config = web_config or WebConfig()
 
     def effective_modules() -> dict[str, bool]:
@@ -667,79 +775,16 @@ def create_web_app(
                 "an active channel."
             )
 
-    def api_module(path: str) -> str | None:
-        routes = (
-            ("/api/v1/environment", "env"),
-            ("/api/v1/federation", "fed"),
-            ("/api/v1/incidents", "watch"),
-            ("/api/v1/alerts", "watch"),
-            ("/api/v1/events", "watch"),
-            ("/api/v1/watch", "watch"),
-            ("/api/v1/config/watch", "watch"),
-            ("/api/v1/boards", "bbs"),
-            ("/api/v1/threads", "bbs"),
-            ("/api/v1/posts", "bbs"),
-            ("/api/v1/ai", "ai"),
-        )
-        return next(
-            (
-                module
-                for prefix, module in routes
-                if path == prefix or path.startswith(f"{prefix}/")
-            ),
-            None,
-        )
-
-    def step_up_path(method: str, path: str) -> bool:
-        if method in {"GET", "HEAD", "OPTIONS"}:
-            return False
-        return (
-            path.startswith("/api/v1/auth/accounts")
-            or path.startswith("/api/v1/auth/mfa")
-            or path.startswith("/api/v1/radio/config")
-            or path.startswith("/api/v1/federation/peers")
-            or path.startswith("/api/v1/federation/mqtt")
-            or path.startswith("/api/v1/federation/origins")
-            or path.startswith("/api/v1/federation/relay/origins")
-            or path.startswith("/api/v1/federation/relay/identity")
-            or path.startswith("/api/v1/config/watch")
-            or path.startswith("/api/v1/ai")
-            or path.startswith("/api/v1/alerts")
-            or path.startswith("/api/v1/environment/cap")
-            or path.startswith("/api/v1/environment/earthquakes")
-            or path.startswith("/api/v1/environment/same")
-            or (path.startswith("/api/v1/backups/") and path.endswith("/restore"))
-            or (path.startswith("/api/v1/members/") and method in {"PATCH", "DELETE"})
-            or (path.startswith("/api/v1/members/") and path.endswith("/pki"))
-        )
-
-    viewer_self_service = {
-        ("GET", "/api/v1/auth/session"),
-        ("GET", "/api/v1/auth/sessions"),
-        ("POST", "/api/v1/auth/logout"),
-        ("POST", "/api/v1/auth/password"),
-        ("POST", "/api/v1/auth/step-up"),
-        ("POST", "/api/v1/auth/mfa/begin"),
-        ("POST", "/api/v1/auth/mfa/confirm"),
-        ("DELETE", "/api/v1/auth/mfa"),
-        ("DELETE", "/api/v1/auth/sessions"),
-    }
-
     def viewer_allowed(method: str, path: str) -> bool:
         """Default-deny API capabilities for an unattended wallboard session."""
         normalized = path.rstrip("/") or "/"
-        if (method, normalized) in viewer_self_service:
+        if (method, normalized) in VIEWER_SELF_SERVICE:
             return True
         if method == "DELETE" and re.fullmatch(r"/api/v1/auth/sessions/[A-Za-z0-9_-]+", normalized):
             return True
-        return method in {"GET", "HEAD"} and normalized in {
-            "/api/v1/wallboard/summary",
-            "/api/v1/sitrep",
-        }
+        return method in {"GET", "HEAD"} and normalized in VIEWER_READ_PATHS
 
-    @app.middleware("http")
-    async def security_headers(request: Any, call_next: Any) -> Any:
-        response = await call_next(request)
+    def apply_security_headers(request: Request, response: Response) -> Response:
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; style-src 'self' 'unsafe-inline'; "
             "img-src 'self' https://tile.openstreetmap.org; object-src 'none'"
@@ -766,14 +811,31 @@ def create_web_app(
     @app.middleware("http")
     async def authentication(request: Request, call_next: Any) -> Response:
         path = request.url.path
-        public = path in {
-            "/api/v1/health",
-            "/api/v1/diagnostics/readiness",
-            "/api/v1/diagnostics/status",
-            "/api/v1/auth/login",
-            "/api/v1/auth/setup",
-        } or path.startswith("/api/v1/recovery/restores/")
-        if auth is not None and path.startswith("/api/v1/") and not public:
+        access = route_access_policy(path)
+        if path in AUTHENTICATED_NON_API_PATHS:
+            if effective_web_config.metrics_access == "disabled":
+                return JSONResponse(
+                    {"error": {"code": "not_found", "message": "Metrics are disabled."}},
+                    status_code=404,
+                )
+            if effective_web_config.metrics_access == "loopback":
+                host = request.client.host if request.client is not None else ""
+                try:
+                    local_metrics = ipaddress.ip_address(host).is_loopback
+                except ValueError:
+                    local_metrics = False
+                if not local_metrics:
+                    return JSONResponse(
+                        {
+                            "error": {
+                                "code": "loopback_required",
+                                "message": "Metrics require local access.",
+                            }
+                        },
+                        status_code=403,
+                    )
+                access = "public"
+        if auth is not None and access == "authenticated":
             session = await auth.session(request.cookies.get("outpost_session"))
             if session is None:
                 return JSONResponse(
@@ -916,6 +978,12 @@ def create_web_app(
             finally:
                 if gated_request:
                     await restore_coordinator.leave_mutation()
+
+    # Registered after all response-generating middleware so denials and
+    # maintenance responses receive the same browser policy as route responses.
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next: Any) -> Response:
+        return apply_security_headers(request, await call_next(request))
 
     tile_root = Path(".data/tiles").resolve()
 
@@ -4237,11 +4305,15 @@ def create_web_app(
             )
             return {"summary": value, "items": items}
 
-    @app.get("/metrics", include_in_schema=False, response_model=None)
+    @app.api_route(
+        "/metrics/", methods=["GET", "HEAD"], include_in_schema=False, response_model=None
+    )
+    @app.api_route(
+        "/metrics", methods=["GET", "HEAD"], include_in_schema=False, response_model=None
+    )
     async def prometheus_metrics() -> Response:
         return Response(generate_latest(), headers={"Content-Type": CONTENT_TYPE_LATEST})
 
-    app.mount("/metrics", make_asgi_app())
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="dashboard")
