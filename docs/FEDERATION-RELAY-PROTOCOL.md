@@ -60,9 +60,11 @@ constraint also prevents a different signed envelope from replacing an existing 
 ## Custody and recovery
 
 An envelope progresses through `queued`, `forwarding`, and `forwarded` custody states before
-`delivered`. `quarantined` waits for origin-key review; `paused` is an operator hold. `expired`,
-`rejected`, and `purged` are terminal. Purge removes payload bytes but retains routing metadata and
-append-only events for accountability.
+`delivered`. At the destination, delivery is not acknowledged until the decoded payload has passed
+through its registered local-domain handler. `quarantined` waits for origin-key review; `paused` is
+an operator hold. `expired` and `purged` are terminal. `rejected` is normally terminal, except when
+the queue identifies a retryable local-dispatch failure. Purge removes payload bytes but retains
+routing metadata and append-only events for accountability.
 
 Expiry removes payload bytes in every state, including delivered or rejected items, while retaining
 the envelope metadata and an expiry event. Until then, every received payload still counts against
@@ -73,6 +75,32 @@ delivery. Final receipts travel back along the retained previous-hop chain. If a
 lost, a forwarding item becomes eligible again after five minutes; the next transfer uses a fresh
 paired-peer replay counter. Receiver idempotency makes duplicate paths and retries safe. Delivery
 receipts that could not be queued are retried by the relay task after restart.
+
+### Local-domain dispatch
+
+Destination dispatch runs inside the same database transaction that records accepted custody. Each
+handler receives the verified origin identity and decoded payload under a five-second bound. A
+handler has its own savepoint: if it raises or times out, its partial writes roll back, the envelope
+is retained as `rejected` with `dispatch_status='failed'`, and the dashboard exposes the error and a
+**Retry local dispatch** action. A successful retry changes the envelope to `delivered` and makes
+the final receipt eligible again. Payloads left at a destination by an older release are recovered
+once after upgrade through this same path.
+
+- `incident` accepts either a normal federation incident item (`stream`, `uid`, `digest`, `payload`)
+  or the incident object directly. Its UID must belong to the signed origin. It enters the existing
+  incident-origin, provenance, merge, stale-update, and resolution-withholding logic.
+- `request` carries `request_id`, `service`, `args`, and optional `expires_at`. Admission uses the
+  immediate paired peer's existing service permissions, hourly request quota, concurrency limit,
+  provider circuit, response-byte ceiling, and response-airtime ceiling. Execution is queued and
+  bounded rather than holding the custody transaction open on a network provider.
+- `receipt` carries the request and request-envelope IDs, service, outcome, result, provenance, and
+  error. The receiver accepts it only when it matches a locally originated request envelope and the
+  signed response origin is that request's destination.
+- `opaque` is intentionally retained without local dispatch. It remains the extension point for a
+  higher-level protocol.
+
+Allowing `request` in a peer policy automatically allows `receipt`; a request without its return
+path would permit work to be performed while making the outcome structurally undeliverable.
 
 The queue records whether the selected next hop was the direct destination or another relay and
 whether an inbound transfer arrived through observed LoRa or MQTT. All frames still pass through
@@ -113,7 +141,8 @@ safe event without retaining the rejected payload.
 
 On **Federation → Signed store-and-forward**:
 
-1. Enable only the necessary scopes for a paired peer and set conservative quotas.
+1. Enable only the necessary scopes for a paired peer and set conservative quotas. Enabling
+   `request` also enables its `receipt` return path.
 2. Create a small test request and inspect its direct/relay selection and custody route.
 3. Verify any observed multi-hop origin fingerprint out of band before choosing **Use candidate**.
 4. Pause a peer policy to stop new transfers through it. Pause an item to hold that one envelope.
@@ -127,7 +156,8 @@ durable metadata remains available for audit and duplicate suppression.
 ## Verification
 
 `tests/integration/test_federation_relay.py` creates independent A, B, and C databases and exercises
-A→B→C partition custody, direct-path preference, forged-pin resistance, identity-regeneration
-recovery, signed successor rotation, propagated receipts, duplicate deliveries, dropped-ACK
-recovery, clock skew, signature tampering, loops, rate limits, pause/resume/purge controls, the
-step-up-protected operator API, and append-only event enforcement.
+A→B→C partition custody, destination incident reconciliation, authorized request/receipt dispatch,
+handler rollback/time bounds/retry, opaque non-dispatch, direct-path preference, forged-pin
+resistance, identity-regeneration recovery, signed successor rotation, propagated receipts,
+duplicate deliveries, dropped-ACK recovery, clock skew, signature tampering, loops, rate limits,
+pause/resume/purge controls, the step-up-protected operator API, and append-only event enforcement.

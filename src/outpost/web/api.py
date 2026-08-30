@@ -549,7 +549,7 @@ class FederationMailBody(BaseModel):
 
 
 def _default_relay_scopes() -> list[Literal["incident", "request", "receipt", "opaque"]]:
-    return ["incident", "request"]
+    return ["incident", "request", "receipt"]
 
 
 class FederationRelayPolicyBody(BaseModel):
@@ -574,7 +574,7 @@ class FederationRelayCreateBody(BaseModel):
 
 
 class FederationRelayActionBody(BaseModel):
-    action: Literal["pause", "resume", "purge"]
+    action: Literal["pause", "resume", "purge", "retry"]
 
 
 class FederationRelayOriginBody(BaseModel):

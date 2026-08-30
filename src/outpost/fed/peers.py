@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from outpost.audit import write_audit
 from outpost.clock import Clock
-from outpost.store import Database
+from outpost.store import Database, Transaction
 
 
 @dataclass(frozen=True)
@@ -630,91 +630,83 @@ class FederationPeerService:
         expires_at: int,
     ) -> tuple[Peer, str, dict[str, Any] | None]:
         """Atomically authorize and account for one inbound peer-service request."""
-        window_start = now - now % 3_600
         async with self.database.transaction() as transaction:
-            peer_rows = await transaction.read(
-                "SELECT * FROM fed_peer WHERE mesh_id=? AND state='active'", (mesh_id,)
+            return await self.admit_service_request_in(
+                transaction,
+                mesh_id,
+                request_id,
+                service,
+                args_json,
+                args_fingerprint,
+                now,
+                expires_at,
             )
-            if not peer_rows:
-                raise ValueError("peer service requires an active peer")
-            peer = self._peer(peer_rows[0])
-            existing = await transaction.read(
-                "SELECT * FROM fed_service_request WHERE request_id=?", (request_id,)
-            )
-            if existing:
-                value = dict(existing[0])
-                if value["peer_mesh_id"] != mesh_id or value["direction"] != "in":
-                    raise ValueError("peer service request id collides with another request")
-                return peer, "replay", value
-            await transaction.write(
-                "INSERT INTO fed_service_usage(peer_id,window_start) VALUES(?,?) "
-                "ON CONFLICT(peer_id,window_start) DO NOTHING",
+
+    async def admit_service_request_in(
+        self,
+        transaction: Transaction,
+        mesh_id: str,
+        request_id: str,
+        service: str,
+        args_json: str,
+        args_fingerprint: str,
+        now: int,
+        expires_at: int,
+    ) -> tuple[Peer, str, dict[str, Any] | None]:
+        """Authorize a peer-service request inside an existing atomic admission."""
+        window_start = now - now % 3_600
+        peer_rows = await transaction.read(
+            "SELECT * FROM fed_peer WHERE mesh_id=? AND state='active'", (mesh_id,)
+        )
+        if not peer_rows:
+            raise ValueError("peer service requires an active peer")
+        peer = self._peer(peer_rows[0])
+        existing = await transaction.read(
+            "SELECT * FROM fed_service_request WHERE request_id=?", (request_id,)
+        )
+        if existing:
+            value = dict(existing[0])
+            if value["peer_mesh_id"] != mesh_id or value["direction"] != "in":
+                raise ValueError("peer service request id collides with another request")
+            return peer, "replay", value
+        await transaction.write(
+            "INSERT INTO fed_service_usage(peer_id,window_start) VALUES(?,?) "
+            "ON CONFLICT(peer_id,window_start) DO NOTHING",
+            (peer.id, window_start),
+        )
+        usage = (
+            await transaction.read(
+                "SELECT * FROM fed_service_usage WHERE peer_id=? AND window_start=?",
                 (peer.id, window_start),
             )
-            usage = (
-                await transaction.read(
-                    "SELECT * FROM fed_service_usage WHERE peer_id=? AND window_start=?",
-                    (peer.id, window_start),
-                )
-            )[0]
-            pending = await transaction.read(
-                "SELECT COUNT(*) count FROM fed_service_request WHERE direction='in' "
-                "AND peer_mesh_id=? AND status='pending' AND expires_at>?",
-                (mesh_id, now),
-            )
-            circuit = await transaction.read(
-                "SELECT open_until FROM fed_service_circuit WHERE peer_id=? AND service=?",
-                (peer.id, service),
-            )
-            outcome = "admitted"
-            if service not in peer.service_permissions:
-                outcome = "permission_denied"
-            elif circuit and int(circuit[0]["open_until"] or 0) > now:
-                outcome = "circuit_open"
-            elif int(usage["requests"]) >= peer.quota_services_per_hour:
-                outcome = "request_quota"
-            elif int(pending[0]["count"]) >= peer.service_concurrency:
-                outcome = "concurrency_quota"
-            if outcome != "admitted":
-                await transaction.write(
-                    "UPDATE fed_service_usage SET denied=denied+1 "
-                    "WHERE peer_id=? AND window_start=?",
-                    (peer.id, window_start),
-                )
-                await transaction.write(
-                    "INSERT INTO fed_service_request(request_id,direction,peer_mesh_id,service,"
-                    "args_json,args_fingerprint,status,created_at,updated_at,expires_at,"
-                    "completed_at,error) VALUES(?,'in',?,?,?,?, 'failed',?,?,?,?,?)",
-                    (
-                        request_id,
-                        mesh_id,
-                        service,
-                        args_json,
-                        args_fingerprint,
-                        now,
-                        now,
-                        expires_at,
-                        now,
-                        outcome,
-                    ),
-                )
-                await transaction.write(
-                    "DELETE FROM fed_service_request WHERE request_id IN ("
-                    "SELECT request_id FROM fed_service_request WHERE peer_mesh_id=? "
-                    "AND direction='in' AND status<>'pending' ORDER BY updated_at DESC "
-                    "LIMIT -1 OFFSET 500)",
-                    (mesh_id,),
-                )
-                return peer, outcome, None
+        )[0]
+        pending = await transaction.read(
+            "SELECT COUNT(*) count FROM fed_service_request WHERE direction='in' "
+            "AND peer_mesh_id=? AND status='pending' AND expires_at>?",
+            (mesh_id, now),
+        )
+        circuit = await transaction.read(
+            "SELECT open_until FROM fed_service_circuit WHERE peer_id=? AND service=?",
+            (peer.id, service),
+        )
+        outcome = "admitted"
+        if service not in peer.service_permissions:
+            outcome = "permission_denied"
+        elif circuit and int(circuit[0]["open_until"] or 0) > now:
+            outcome = "circuit_open"
+        elif int(usage["requests"]) >= peer.quota_services_per_hour:
+            outcome = "request_quota"
+        elif int(pending[0]["count"]) >= peer.service_concurrency:
+            outcome = "concurrency_quota"
+        if outcome != "admitted":
             await transaction.write(
-                "UPDATE fed_service_usage SET requests=requests+1 "
-                "WHERE peer_id=? AND window_start=?",
+                "UPDATE fed_service_usage SET denied=denied+1 WHERE peer_id=? AND window_start=?",
                 (peer.id, window_start),
             )
             await transaction.write(
                 "INSERT INTO fed_service_request(request_id,direction,peer_mesh_id,service,"
-                "args_json,args_fingerprint,status,created_at,updated_at,expires_at) "
-                "VALUES(?,'in',?,?,?,?,'pending',?,?,?)",
+                "args_json,args_fingerprint,status,created_at,updated_at,expires_at,"
+                "completed_at,error) VALUES(?,'in',?,?,?,?, 'failed',?,?,?,?,?)",
                 (
                     request_id,
                     mesh_id,
@@ -724,6 +716,8 @@ class FederationPeerService:
                     now,
                     now,
                     expires_at,
+                    now,
+                    outcome,
                 ),
             )
             await transaction.write(
@@ -733,6 +727,33 @@ class FederationPeerService:
                 "LIMIT -1 OFFSET 500)",
                 (mesh_id,),
             )
+            return peer, outcome, None
+        await transaction.write(
+            "UPDATE fed_service_usage SET requests=requests+1 WHERE peer_id=? AND window_start=?",
+            (peer.id, window_start),
+        )
+        await transaction.write(
+            "INSERT INTO fed_service_request(request_id,direction,peer_mesh_id,service,"
+            "args_json,args_fingerprint,status,created_at,updated_at,expires_at) "
+            "VALUES(?,'in',?,?,?,?,'pending',?,?,?)",
+            (
+                request_id,
+                mesh_id,
+                service,
+                args_json,
+                args_fingerprint,
+                now,
+                now,
+                expires_at,
+            ),
+        )
+        await transaction.write(
+            "DELETE FROM fed_service_request WHERE request_id IN ("
+            "SELECT request_id FROM fed_service_request WHERE peer_mesh_id=? "
+            "AND direction='in' AND status<>'pending' ORDER BY updated_at DESC "
+            "LIMIT -1 OFFSET 500)",
+            (mesh_id,),
+        )
         return peer, "admitted", None
 
     async def record_service_provider_outcome(

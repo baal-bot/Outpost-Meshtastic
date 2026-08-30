@@ -1,11 +1,16 @@
+import asyncio
+import json
 import sqlite3
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+import outpost.fed.relay as relay_module
+from outpost.app import OutpostApp
 from outpost.clock import VirtualClock
-from outpost.fed import FederationPeerService, FederationRelayService
+from outpost.config import Config
+from outpost.fed import FederationPeerService, FederationRelayService, FederationSyncService
 from outpost.store import Database
 from outpost.web.api import create_web_app
 from outpost.web.operator_inbox import OperatorInboxService
@@ -16,12 +21,18 @@ C = "!cccccccc"
 D = "!dddddddd"
 
 
+async def accept_test_payload(_transaction, _context, _payload):
+    return {"test_handler": True}
+
+
 async def relay_node(tmp_path, name: str, mesh_id: str):
     database = Database(tmp_path / f"{name}.db")
     await database.open()
     clock = VirtualClock()
     peers = FederationPeerService(database, clock, mesh_id)
     relay = FederationRelayService(database, peers, clock)
+    for scope in ("incident", "request", "receipt"):
+        relay.register_handler(scope, accept_test_payload)
     await relay.initialize()
     return database, clock, peers, relay
 
@@ -162,6 +173,9 @@ async def test_partition_relay_custody_signature_origin_review_and_receipt(tmp_p
         "operator:c",
         fingerprint=observed["candidates"][0]["fingerprint"],
     )
+    pending = (await c_relay.queue())[0]
+    assert pending["state"] == "rejected" and pending["dispatch_status"] == "pending"
+    assert await c_relay.recover_pending_dispatches() == 1
     assert await c_relay.pending_receipts() == [{"envelope_id": envelope_id, "previous_hop": B}]
     duplicate_id, duplicate_state = await c_relay.accept(B, relayed_wire)
     assert (duplicate_id, duplicate_state) == (envelope_id, "delivered")
@@ -173,6 +187,284 @@ async def test_partition_relay_custody_signature_origin_review_and_receipt(tmp_p
 
     for database in (a_db, b_db, c_db):
         await database.close()
+
+
+@pytest.mark.asyncio
+async def test_destination_dispatches_multihop_incident_into_reconciliation(tmp_path) -> None:
+    a_db, a_clock, a_peers, a_relay = await relay_node(tmp_path, "a-domain", A)
+    b_db, _, b_peers, b_relay = await relay_node(tmp_path, "b-domain", B)
+    c_db, _, c_peers, c_relay = await relay_node(tmp_path, "c-domain", C)
+    await allow_relay(a_db, a_peers, a_relay, B)
+    await allow_relay(b_db, b_peers, b_relay, A)
+    await allow_relay(b_db, b_peers, b_relay, C)
+    await allow_relay(c_db, c_peers, c_relay, B)
+    sync = FederationSyncService(c_db, C)
+
+    async def import_incident(transaction, context, payload):
+        return await sync.import_relay_incident(
+            transaction,
+            payload,
+            origin_node=context.origin_node,
+            received_from_peer_id=context.received_from_peer_id,
+            envelope_id=context.envelope_id,
+            now=context.received_at,
+        )
+
+    c_relay.register_handler("incident", import_incident)
+    now = int(a_clock.now().timestamp())
+    envelope_id = await a_relay.create(
+        C,
+        "incident",
+        {
+            "stream": "incidents",
+            "uid": f"{A}:landslide-1",
+            "digest": "landslide-v1",
+            "payload": {
+                "type": "road",
+                "severity": "urgent",
+                "status": "open",
+                "title": "Landslide blocking valley road",
+                "body": "Both lanes blocked near mile marker 4.",
+                "lat": 40.44,
+                "lon": -79.99,
+                "location_text": "Valley Road mile marker 4",
+                "radius_m": 750,
+                "reporter_label": "Outpost A",
+                "created_at": now,
+                "updated_at": now,
+                "expires_at": now + 3600,
+                "resolved_at": None,
+                "resolution_note": None,
+            },
+        },
+        idempotency_key="landslide-v1",
+    )
+    await b_relay.accept(A, await a_relay.wire(envelope_id))
+    assert (await c_relay.accept(B, await b_relay.wire(envelope_id)))[1] == "quarantined"
+    candidate = (await c_relay.origins())[0]["candidates"][0]
+
+    await c_relay.review_origin(A, "replace", "operator:c", fingerprint=candidate["fingerprint"])
+    assert await c_relay.recover_pending_dispatches() == 1
+
+    item = (await c_relay.queue())[0]
+    assert item["state"] == "delivered"
+    assert item["dispatch_status"] == "dispatched"
+    assert item["dispatch_result"]["incident_uid"] == f"{A}:landslide-1"
+    incident = (await c_db.read("SELECT * FROM incident"))[0]
+    assert incident["title"] == "Landslide blocking valley road"
+    assert incident["flagged_for_review"] == 1
+    origin = (await c_db.read("SELECT * FROM incident_origin"))[0]
+    assert origin["origin_uid"] == f"{A}:landslide-1"
+    assert origin["source_peer_id"] == (await c_peers.by_mesh_id(B)).id
+    provenance = (await c_db.read("SELECT * FROM incident_provenance"))[0]
+    assert provenance["event_kind"] == "federation_imported"
+    assert provenance["source_node"] == A
+    for database in (a_db, b_db, c_db):
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_dispatch_rolls_back_handler_and_is_visible_and_retryable(tmp_path) -> None:
+    a_db, _, a_peers, a_relay = await relay_node(tmp_path, "a-failure", A)
+    b_db, _, b_peers, b_relay = await relay_node(tmp_path, "b-failure", B)
+    await allow_relay(a_db, a_peers, a_relay, B)
+    await allow_relay(b_db, b_peers, b_relay, A)
+
+    async def partial_failure(transaction, context, _payload):
+        await transaction.write(
+            "INSERT INTO fed_relay_event(envelope_id,event_kind,detail_json,created_at,actor) "
+            "VALUES(?,'handler_partial','{}',?,'test')",
+            (context.envelope_id, context.received_at),
+        )
+        raise RuntimeError("domain write failed")
+
+    b_relay.register_handler("incident", partial_failure)
+    envelope_id = await a_relay.create(B, "incident", {"uid": "broken", "status": "open"})
+
+    assert (await b_relay.accept(A, await a_relay.wire(envelope_id)))[1] == "rejected"
+    failed = (await b_relay.queue())[0]
+    assert failed["state"] == "rejected"
+    assert failed["dispatch_status"] == "failed"
+    assert failed["dispatch_error"] == "domain write failed"
+    assert not await b_db.read("SELECT 1 FROM fed_relay_event WHERE event_kind='handler_partial'")
+
+    b_relay.register_handler("incident", accept_test_payload)
+    await b_relay.item_action(envelope_id, "retry", "operator:b")
+    delivered = (await b_relay.queue())[0]
+    assert delivered["state"] == "delivered"
+    assert delivered["dispatch_status"] == "dispatched"
+    assert delivered["dispatch_attempts"] == 2
+    assert await b_relay.pending_receipts() == [{"envelope_id": envelope_id, "previous_hop": A}]
+    assert await b_db.read("SELECT 1 FROM audit_log WHERE action='federation.relay_dispatch_retry'")
+    await a_db.close()
+    await b_db.close()
+
+
+@pytest.mark.asyncio
+async def test_destination_dispatch_timeout_is_bounded(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(relay_module, "DISPATCH_TIMEOUT_SECONDS", 0.01)
+    a_db, _, a_peers, a_relay = await relay_node(tmp_path, "a-timeout", A)
+    b_db, _, b_peers, b_relay = await relay_node(tmp_path, "b-timeout", B)
+    await allow_relay(a_db, a_peers, a_relay, B)
+    await allow_relay(b_db, b_peers, b_relay, A)
+
+    async def never_returns(_transaction, _context, _payload):
+        await asyncio.Event().wait()
+
+    b_relay.register_handler("request", never_returns)
+    envelope_id = await a_relay.create(
+        B, "request", {"request_id": "slow", "service": "weather", "args": {}}
+    )
+
+    assert (await b_relay.accept(A, await a_relay.wire(envelope_id)))[1] == "rejected"
+    failed = (await b_relay.queue())[0]
+    assert failed["dispatch_status"] == "failed"
+    assert "TimeoutError" in failed["dispatch_error"]
+    await a_db.close()
+    await b_db.close()
+
+
+@pytest.mark.asyncio
+async def test_opaque_destination_is_deliberately_not_dispatched(tmp_path) -> None:
+    a_db, _, a_peers, a_relay = await relay_node(tmp_path, "a-opaque", A)
+    b_db, _, b_peers, b_relay = await relay_node(tmp_path, "b-opaque", B)
+    await allow_relay(a_db, a_peers, a_relay, B)
+    await allow_relay(b_db, b_peers, b_relay, A)
+    await a_relay.set_policy(
+        B,
+        enabled=True,
+        paused=False,
+        scopes=["opaque"],
+        max_stored_items=10,
+        max_stored_bytes=16_384,
+        rate_per_hour=20,
+        airtime_seconds_per_hour=30,
+        actor="operator:test",
+    )
+    await b_relay.set_policy(
+        A,
+        enabled=True,
+        paused=False,
+        scopes=["opaque"],
+        max_stored_items=10,
+        max_stored_bytes=16_384,
+        rate_per_hour=20,
+        airtime_seconds_per_hour=30,
+        actor="operator:test",
+    )
+    envelope_id = await a_relay.create(B, "opaque", b"third-party-extension")
+
+    assert (await b_relay.accept(A, await a_relay.wire(envelope_id)))[1] == "delivered"
+    item = (await b_relay.queue())[0]
+    assert item["dispatch_status"] == "ignored"
+    assert "opaque extension" in item["dispatch_result"]["reason"]
+    await a_db.close()
+    await b_db.close()
+
+
+@pytest.mark.asyncio
+async def test_relay_request_uses_peer_policy_and_returns_signed_receipt(tmp_path) -> None:
+    a_app = OutpostApp(
+        Config.model_validate(
+            {
+                "store": {"path": str(tmp_path / "requester.db")},
+                "modules": {"fed": {"enabled": True}},
+            }
+        )
+    )
+    c_app = OutpostApp(
+        Config.model_validate(
+            {
+                "store": {"path": str(tmp_path / "provider.db")},
+                "modules": {"fed": {"enabled": True}},
+            }
+        )
+    )
+    await a_app.database.open()
+    await c_app.database.open()
+    a_app.federation.local_mesh_id = A
+    c_app.federation.local_mesh_id = C
+    c_app.governor.sync_radio_profile("LONG_FAST", "US")
+    await a_app.federation.discover(C, "Provider", 1, {"weather": True}, "radio")
+    await c_app.federation.discover(A, "Requester", 1, {}, "radio")
+    await a_app.database.write("UPDATE fed_peer SET state='active' WHERE mesh_id=?", (C,))
+    await c_app.database.write(
+        "UPDATE fed_peer SET state='active',service_permissions='[\"weather\"]' WHERE mesh_id=?",
+        (A,),
+    )
+    for relay, destination in ((a_app.federation_relay, C), (c_app.federation_relay, A)):
+        await relay.set_policy(
+            destination,
+            enabled=True,
+            paused=False,
+            scopes=["request"],
+            max_stored_items=10,
+            max_stored_bytes=16_384,
+            rate_per_hour=20,
+            airtime_seconds_per_hour=30,
+            actor="operator:test",
+        )
+    request_id = "relayed-weather-1"
+    envelope_id = await a_app.federation_relay.create(
+        C,
+        "request",
+        {
+            "request_id": request_id,
+            "service": "weather",
+            "args": {"lat": 40.44, "lon": -79.99},
+        },
+    )
+
+    accepted = await c_app.federation_relay.accept(
+        A, await a_app.federation_relay.wire(envelope_id)
+    )
+    assert accepted == (envelope_id, "delivered")
+    admitted = (
+        await c_app.database.read(
+            "SELECT * FROM fed_service_request WHERE request_id=?", (request_id,)
+        )
+    )[0]
+    assert admitted["status"] == "pending"
+    assert admitted["relay_origin_node"] == A
+
+    async def weather(_service, _args):
+        return {"temperature_c": 22.5, "wind_kph": 7.0}, {
+            "provider": "test-station",
+            "source_kind": "observation",
+            "valid_at": c_app.clock.now().isoformat(),
+            "cached": False,
+            "fetched_at": int(c_app.clock.now().timestamp()),
+        }
+
+    c_app._execute_peer_service = weather  # type: ignore[method-assign]
+    await c_app._process_relay_service_requests(int(c_app.clock.now().timestamp()))
+    completed = (
+        await c_app.database.read(
+            "SELECT * FROM fed_service_request WHERE request_id=?", (request_id,)
+        )
+    )[0]
+    response_id = str(completed["relay_response_envelope_id"])
+    assert completed["status"] == "complete"
+    assert response_id and response_id != "None"
+
+    received = await a_app.federation_relay.accept(
+        C, await c_app.federation_relay.wire(response_id)
+    )
+    assert received == (response_id, "delivered")
+    result = (
+        await a_app.database.read(
+            "SELECT * FROM fed_service_request WHERE request_id=?", (request_id,)
+        )
+    )[0]
+    assert result["status"] == "complete"
+    assert json.loads(result["result_json"]) == {
+        "temperature_c": 22.5,
+        "wind_kph": 7.0,
+    }
+    assert json.loads(result["provenance_json"])["serving_outpost"] == C
+    assert result["relay_response_envelope_id"] == response_id
+    await a_app.database.close()
+    await c_app.database.close()
 
 
 @pytest.mark.asyncio
@@ -202,6 +494,7 @@ async def test_non_origin_peer_cannot_poison_pin_and_genuine_key_remains_recover
     assert len(origin["candidates"]) == 2
     genuine_fingerprint = c_relay._fingerprint(genuine_wire["origin_public_key"])
     await c_relay.review_origin(A, "replace", "operator:c", fingerprint=genuine_fingerprint)
+    assert await c_relay.recover_pending_dispatches() == 1
     pin = (await c_relay.origins())[0]
     assert pin["fingerprint"] == genuine_fingerprint and pin["state"] == "trusted"
     assert (
@@ -271,6 +564,7 @@ async def test_identity_regeneration_surfaces_candidate_and_operator_can_replace
     assert operator_inbox["items"][0]["subject"] == "Federation origin key needs review"
 
     await b_relay.review_origin(A, "replace", "operator:b", fingerprint=new_fingerprint)
+    assert await b_relay.recover_pending_dispatches() == 1
     assert (await b_relay.origins())[0]["fingerprint"] == new_fingerprint
     assert (
         next(item for item in await b_relay.queue() if item["envelope_id"] == replacement_id)[
@@ -532,7 +826,7 @@ async def test_operator_relay_api_exposes_policy_queue_and_controls(tmp_path) ->
     envelope_id = created.json()["envelope_id"]
     view = client.get("/api/v1/federation/relay").json()
     assert view["queue"][0]["envelope_id"] == envelope_id
-    assert view["policies"][0]["scopes"] == ["incident", "request"]
+    assert view["policies"][0]["scopes"] == ["incident", "receipt", "request"]
     original_fingerprint = view["identity"]["fingerprint"]
     rotated = client.post("/api/v1/federation/relay/identity/rotate")
     assert rotated.status_code == 200

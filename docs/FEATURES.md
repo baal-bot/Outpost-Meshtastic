@@ -7,7 +7,7 @@ Outpost is pre-release. Maturity records the strongest relevant evidence categor
 not a claim that every lower category is complete. `Production-ready` requires an
 explicit release decision and is never inferred from test count alone.
 
-Evidence snapshot: **2026-08-29**. Verification commit `HEAD` means the exact
+Evidence snapshot: **2026-08-30**. Verification commit `HEAD` means the exact
 revision on which CI runs this manifest check.
 
 ## Maturity states
@@ -39,7 +39,7 @@ revision on which CI runs this manifest check.
 | Dashboard and operator access | Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, shared map controls, and an offline-capable federation topology view. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `5295868` |
 | Backup, restore, upgrade, and rollback | Online verified backups, rotation, quiesced web restore, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `df0ee14` |
 | Retention and privacy controls | Bounded retention, foreign-key-safe incident deletion, isolated maintenance failures, atomic rotated snapshots, exact-position expiry/deletion, message limits, and auditable policy changes. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `4d8af9c` |
-| Outpost federation | Pairing, authenticated framing, policy, board/incident sync, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, privacy-gated topology health, receipts, pagination, and reconciliation. | Two-node field-tested | unreleased @ `HEAD` (2026-08-29); introduced `8f7219e` |
+| Outpost federation | Pairing, authenticated framing, policy, board/incident sync, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, transactional destination dispatch, privacy-gated topology health, receipts, pagination, and reconciliation. | Two-node field-tested | unreleased @ `HEAD` (2026-08-30); introduced `8f7219e` |
 | Meshtastic MQTT federation path | Optional radio-firmware MQTT discovery, targeted bootstrap, transport observation, and resilient pairing approvals. | Two-node field-tested | unreleased @ `HEAD` (2026-08-26); introduced `f75f8af` |
 | Local AI assistant | ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, native HailoRT Qwen3-VL provider, bounded device reacquisition, and explicit readiness state. | Hardware-gated | unreleased @ `HEAD` (2026-08-27); introduced `6b3d01a` |
 | Installation and diagnostics | Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, authenticated releases, health-gated Hailo handoff, and hardened service tooling. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `d614d85` |
@@ -228,6 +228,9 @@ Evidence:
 - Automated: [tests/integration/test_federation_sync.py::test_manifest_keyset_pages_recover_long_outage_without_skips](../tests/integration/test_federation_sync.py) — Keyset reconciliation pages recover a long outage without gaps or repeats.
 - Automated: [tests/integration/test_incident_reconciliation.py::test_merged_origin_updates_are_advisory_and_identity_is_exported](../tests/integration/test_incident_reconciliation.py) — Merged-origin updates remain advisory and preserve exported origin identity.
 - Automated: [tests/integration/test_federation_relay.py::test_partition_relay_custody_signature_origin_review_and_receipt](../tests/integration/test_federation_relay.py) — A partitioned three-node relay preserves signed custody, origin review, and receipts.
+- Automated: [tests/integration/test_federation_relay.py::test_destination_dispatches_multihop_incident_into_reconciliation](../tests/integration/test_federation_relay.py) — A signed multi-hop incident enters destination reconciliation only after origin verification.
+- Automated: [tests/integration/test_federation_relay.py::test_failed_dispatch_rolls_back_handler_and_is_visible_and_retryable](../tests/integration/test_federation_relay.py) — Failed destination handlers roll back partial writes and remain visible and retryable.
+- Automated: [tests/integration/test_federation_relay.py::test_relay_request_uses_peer_policy_and_returns_signed_receipt](../tests/integration/test_federation_relay.py) — Relayed read-only requests enforce peer policy and return a signed, correlated receipt.
 - Operations: [docs/FEDERATION-RELAY-PROTOCOL.md](FEDERATION-RELAY-PROTOCOL.md) — Relay threat model, protocol bounds, confidentiality limits, resource policy, and operator runbook.
 - Automated: [tests/integration/test_federation_topology.py::test_topology_health_states_paths_backlog_successor_and_forgotten](../tests/integration/test_federation_topology.py) — Topology health derives path, backlog, successor, stale, and forgotten states.
 - Operations: [docs/FEDERATION-TOPOLOGY.md](FEDERATION-TOPOLOGY.md) — Location privacy boundary, identity states, health derivation, offline behavior, and operator workflow.

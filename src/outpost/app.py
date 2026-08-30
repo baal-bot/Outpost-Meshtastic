@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+import cbor2
+
 from outpost.ai import AIService, create_provider
 from outpost.ai.retrieval import RetrievalEngine
 from outpost.ai.store import AIStore
@@ -60,6 +62,7 @@ from outpost.fed import (
     MessageType,
     Peer,
     Reassembler,
+    RelayDispatchContext,
     wire_bytes,
     wire_int,
 )
@@ -75,7 +78,7 @@ from outpost.router.session import SessionStore
 from outpost.security.rate_limit import RateLimiter
 from outpost.self_check import SelfCheckService
 from outpost.situation import SituationBriefingService
-from outpost.store import Database
+from outpost.store import Database, Transaction
 from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.store.maintenance import MaintenanceService
 from outpost.store.members import Member, MemberRepo
@@ -263,6 +266,9 @@ class OutpostApp:
         )
         self.federation_mail = FederationMailService(self.database, self.federation, self.clock)
         self.federation_relay = FederationRelayService(self.database, self.federation, self.clock)
+        self.federation_relay.register_handler("incident", self._dispatch_relay_incident)
+        self.federation_relay.register_handler("request", self._dispatch_relay_request)
+        self.federation_relay.register_handler("receipt", self._dispatch_relay_receipt)
         self.federation_topology = FederationTopologyService(
             self.database, self.federation, self.clock
         )
@@ -628,6 +634,163 @@ class OutpostApp:
         return await self.federation_sync.import_inbox(
             item_id, actor, int(self.clock.now().timestamp())
         )
+
+    async def _dispatch_relay_incident(
+        self,
+        transaction: Transaction,
+        context: RelayDispatchContext,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return await self.federation_sync.import_relay_incident(
+            transaction,
+            payload,
+            origin_node=context.origin_node,
+            received_from_peer_id=context.received_from_peer_id,
+            envelope_id=context.envelope_id,
+            now=context.received_at,
+        )
+
+    async def _dispatch_relay_request(
+        self,
+        transaction: Transaction,
+        context: RelayDispatchContext,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        service = str(payload.get("service") or "")
+        request_id = str(payload.get("request_id") or context.envelope_id)
+        args = payload.get("args", {})
+        if not request_id or len(request_id) > 64:
+            raise ValueError("invalid relayed service request id")
+        if service not in {"weather", "alerts", "knowledge"} or not isinstance(args, dict):
+            raise ValueError("invalid relayed service request")
+        expires_at = context.expires_at
+        if payload.get("expires_at") is not None:
+            expires_at = min(
+                expires_at,
+                wire_int(payload["expires_at"], "expires_at"),
+            )
+        if expires_at <= context.received_at:
+            raise ValueError("relayed service request has expired")
+        normalized_args, fingerprint = self._normalized_service_args(service, args)
+        args_json = json.dumps(normalized_args, separators=(",", ":"), sort_keys=True)
+        _, outcome, existing = await self.federation.admit_service_request_in(
+            transaction,
+            context.received_from_mesh_id,
+            request_id,
+            service,
+            args_json,
+            fingerprint,
+            context.received_at,
+            expires_at,
+        )
+        if outcome == "replay":
+            if existing is None or existing.get("relay_envelope_id") != context.envelope_id:
+                raise ValueError("relayed service request id collides with an existing request")
+            return {"request_id": request_id, "outcome": "already_queued"}
+        await transaction.write(
+            "UPDATE fed_service_request SET relay_envelope_id=?,relay_origin_node=? "
+            "WHERE request_id=?",
+            (context.envelope_id, context.origin_node, request_id),
+        )
+        return {"request_id": request_id, "service": service, "outcome": outcome}
+
+    async def _dispatch_relay_receipt(
+        self,
+        transaction: Transaction,
+        context: RelayDispatchContext,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        request_id = str(payload.get("request_id") or "")
+        request_envelope_id = str(payload.get("request_envelope_id") or "")
+        service = str(payload.get("service") or "")
+        result = payload.get("result", {})
+        provenance = payload.get("provenance", {})
+        if not request_id or len(request_id) > 64:
+            raise ValueError("invalid relayed service receipt id")
+        if len(request_envelope_id) != 32 or any(
+            character not in "0123456789abcdef" for character in request_envelope_id
+        ):
+            raise ValueError("invalid relayed service request envelope id")
+        if service not in {"weather", "alerts", "knowledge"}:
+            raise ValueError("invalid relayed service receipt")
+        if not isinstance(result, dict) or not isinstance(provenance, dict):
+            raise ValueError("relayed service receipt data must be objects")
+        origin_rows = await transaction.read(
+            "SELECT payload_cbor,created_at,expires_at FROM fed_relay_envelope "
+            "WHERE envelope_id=? AND direction='origin' AND destination_node=? "
+            "AND scope='request'",
+            (request_envelope_id, context.origin_node),
+        )
+        if not origin_rows or origin_rows[0]["payload_cbor"] is None:
+            raise ValueError("relayed service receipt has no matching local request")
+        original_payload = cbor2.loads(bytes(origin_rows[0]["payload_cbor"]))
+        if not isinstance(original_payload, dict):
+            raise ValueError("local relayed service request payload is invalid")
+        original_request_id = str(original_payload.get("request_id") or request_envelope_id)
+        if (
+            original_request_id != request_id
+            or str(original_payload.get("service") or "") != service
+        ):
+            raise ValueError("relayed service receipt does not match its local request")
+        rows = await transaction.read(
+            "SELECT * FROM fed_service_request WHERE request_id=?", (request_id,)
+        )
+        if rows:
+            existing = rows[0]
+            if str(existing["direction"]) != "out":
+                raise ValueError("relayed service receipt collides with an inbound request")
+            if existing["relay_response_envelope_id"] == context.envelope_id:
+                return {"request_id": request_id, "outcome": "already_recorded"}
+            if str(existing["status"]) != "pending":
+                raise ValueError("relayed service request already has a terminal response")
+            if str(existing["peer_mesh_id"]) != context.origin_node:
+                raise ValueError("relayed service receipt origin does not match its request")
+        ok = payload.get("ok") is True
+        decoded_result = self._service_result_from_wire(service, result)
+        decoded_provenance = self._service_provenance_from_wire(
+            service, provenance, context.received_at, context.origin_node
+        )
+        error = str(payload.get("error") or "")[:160] or None
+        if rows:
+            await transaction.write(
+                "UPDATE fed_service_request SET status=?,result_json=?,provenance_json=?,"
+                "error=?,completed_at=?,updated_at=?,relay_response_envelope_id=? "
+                "WHERE request_id=?",
+                (
+                    "complete" if ok else "failed",
+                    json.dumps(decoded_result, separators=(",", ":")),
+                    json.dumps(decoded_provenance, separators=(",", ":")),
+                    error,
+                    context.received_at,
+                    context.received_at,
+                    context.envelope_id,
+                    request_id,
+                ),
+            )
+        else:
+            await transaction.write(
+                "INSERT INTO fed_service_request(request_id,direction,peer_mesh_id,service,"
+                "args_json,result_json,provenance_json,status,created_at,updated_at,expires_at,"
+                "completed_at,error,relay_response_envelope_id,relay_origin_node) "
+                "VALUES(?,'out',?,?,?, ?,?,?,?,?,?,?,?,?,?)",
+                (
+                    request_id,
+                    context.origin_node,
+                    service,
+                    json.dumps(original_payload.get("args", {}), separators=(",", ":")),
+                    json.dumps(decoded_result, separators=(",", ":")),
+                    json.dumps(decoded_provenance, separators=(",", ":")),
+                    "complete" if ok else "failed",
+                    int(origin_rows[0]["created_at"]),
+                    context.received_at,
+                    int(origin_rows[0]["expires_at"]),
+                    context.received_at,
+                    error,
+                    context.envelope_id,
+                    context.origin_node,
+                ),
+            )
+        return {"request_id": request_id, "service": service, "ok": ok}
 
     async def reply_operations_conversation(
         self, route: dict[str, str], body: str, actor: str
@@ -1315,6 +1478,201 @@ class OutpostApp:
             "serving_outpost": sender,
         }
 
+    async def _queue_relay_service_response(
+        self,
+        row: Any,
+        peer: Peer,
+        ok: bool,
+        result: dict[str, object],
+        provenance: dict[str, object],
+        error: str | None,
+        now: int,
+    ) -> None:
+        service = str(row["service"])
+
+        def response_payload(
+            response_ok: bool,
+            response_result: dict[str, object],
+            response_provenance: dict[str, object],
+            response_error: str | None,
+        ) -> dict[str, object]:
+            return {
+                "request_id": str(row["request_id"]),
+                "request_envelope_id": str(row["relay_envelope_id"]),
+                "service": service,
+                "ok": response_ok,
+                "result": self._service_result_to_wire(service, response_result),
+                "provenance": self._service_provenance_to_wire(service, response_provenance),
+                "error": response_error,
+            }
+
+        payload = response_payload(ok, result, provenance, error)
+        try:
+            encoded = self.federation_relay._payload_bytes("receipt", payload)
+        except ValueError:
+            ok = False
+            result = {}
+            provenance = {"serving_outpost": self.federation.local_mesh_id}
+            error = "peer service response exceeds relay payload limit"
+            payload = response_payload(ok, result, provenance, error)
+            encoded = self.federation_relay._payload_bytes("receipt", payload)
+        response_bytes = len(encoded)
+        airtime_seconds = self.governor.estimate_toa(
+            response_bytes, portnum=self.config.radio.federation_portnum
+        )
+        denied = await self.federation.reserve_service_response(
+            peer, response_bytes, airtime_seconds, now
+        )
+        if denied is not None:
+            ok = False
+            result = {}
+            provenance = {"serving_outpost": self.federation.local_mesh_id}
+            error = (
+                "peer service response exceeds byte policy"
+                if denied == "response_byte_quota"
+                else "peer service airtime quota exceeded"
+            )
+            payload = response_payload(ok, result, provenance, error)
+            encoded = self.federation_relay._payload_bytes("receipt", payload)
+            response_bytes = len(encoded)
+            airtime_seconds = self.governor.estimate_toa(
+                response_bytes, portnum=self.config.radio.federation_portnum
+            )
+            denied = await self.federation.reserve_service_response(
+                peer, response_bytes, airtime_seconds, now
+            )
+        if denied is not None:
+            await self.database.write(
+                "UPDATE fed_service_request SET relay_response_attempts="
+                "relay_response_attempts+1,relay_response_error=?,updated_at=? "
+                "WHERE request_id=?",
+                (error, now, row["request_id"]),
+            )
+            return
+        try:
+            envelope_id = await self.federation_relay.create(
+                str(row["relay_origin_node"]),
+                "receipt",
+                payload,
+                expires_in=86_400,
+                hop_limit=3,
+                idempotency_key=(
+                    "service-response:"
+                    + hashlib.sha256(str(row["request_id"]).encode()).hexdigest()[:32]
+                ),
+                actor="system:relay-service",
+            )
+        except ValueError as caught:
+            await self.database.write(
+                "UPDATE fed_service_request SET relay_response_attempts="
+                "relay_response_attempts+1,relay_response_error=?,updated_at=? "
+                "WHERE request_id=?",
+                (str(caught)[:160], now, row["request_id"]),
+            )
+            return
+        await self.database.write(
+            "UPDATE fed_service_request SET relay_response_envelope_id=?,"
+            "relay_response_attempts=relay_response_attempts+1,relay_response_error=NULL,"
+            "response_bytes=response_bytes+?,response_airtime_seconds="
+            "response_airtime_seconds+?,response_count=response_count+1,updated_at=? "
+            "WHERE request_id=?",
+            (envelope_id, response_bytes, airtime_seconds, now, row["request_id"]),
+        )
+
+    async def _process_relay_service_requests(self, now: int) -> None:
+        rows = await self.database.read(
+            "SELECT * FROM fed_service_request WHERE direction='in' "
+            "AND relay_envelope_id IS NOT NULL AND relay_response_envelope_id IS NULL "
+            "AND (relay_response_attempts=0 OR updated_at<=?) "
+            "ORDER BY created_at,request_id LIMIT 4",
+            (now - 60,),
+        )
+        denied_errors = {
+            "permission_denied": "peer service is not permitted by operator policy",
+            "request_quota": "peer service request quota exceeded",
+            "concurrency_quota": "peer service concurrency quota exceeded",
+            "circuit_open": "peer service provider circuit is temporarily open",
+        }
+        for stored in rows:
+            row = dict(stored)
+            try:
+                peer = await self.federation.by_mesh_id(str(row["peer_mesh_id"]))
+            except ValueError:
+                await self.database.write(
+                    "UPDATE fed_service_request SET relay_response_attempts="
+                    "relay_response_attempts+1,relay_response_error=?,updated_at=? "
+                    "WHERE request_id=?",
+                    (
+                        "responsible relay peer is no longer available",
+                        now,
+                        row["request_id"],
+                    ),
+                )
+                continue
+            status = str(row["status"])
+            if status == "pending":
+                ok = True
+                result: dict[str, object] = {}
+                provenance: dict[str, object] = {}
+                error: str | None = None
+                provider_failed = False
+                if now >= int(row["expires_at"]):
+                    ok = False
+                    error = "relayed peer service request expired before execution"
+                else:
+                    try:
+                        async with asyncio.timeout(30):
+                            result, provenance = await self._execute_peer_service(
+                                str(row["service"]), json.loads(row["args_json"])
+                            )
+                        if (
+                            row["service"] == "alerts"
+                            and result.get("status") == "provider_failure"
+                        ):
+                            ok = False
+                            provider_failed = True
+                            error = str(result.get("error") or "public alert provider failed")[:160]
+                    except (OSError, RuntimeError, ValueError) as caught:
+                        ok, provider_failed, error = False, True, str(caught)[:160]
+                    await self.federation.record_service_provider_outcome(
+                        peer, str(row["service"]), provider_failed, now
+                    )
+                status = "complete" if ok else "failed"
+                await self.database.write(
+                    "UPDATE fed_service_request SET status=?,result_json=?,provenance_json=?,"
+                    "error=?,completed_at=?,updated_at=? WHERE request_id=?",
+                    (
+                        status,
+                        json.dumps(result, separators=(",", ":")),
+                        json.dumps(provenance, separators=(",", ":")),
+                        error,
+                        now,
+                        now,
+                        row["request_id"],
+                    ),
+                )
+                row.update(
+                    {
+                        "status": status,
+                        "result_json": json.dumps(result, separators=(",", ":")),
+                        "provenance_json": json.dumps(provenance, separators=(",", ":")),
+                        "error": error,
+                    }
+                )
+            else:
+                result = json.loads(row["result_json"] or "{}")
+                provenance = json.loads(row["provenance_json"] or "{}")
+                error = denied_errors.get(str(row["error"]), row["error"])
+            await self._queue_relay_service_response(
+                row,
+                peer,
+                status == "complete",
+                result,
+                provenance,
+                str(error)[:160] if error else None,
+                now,
+            )
+
     async def _federation_service_loop(self) -> None:
         while True:
             if not self.config.modules.fed.enabled:
@@ -1322,6 +1680,7 @@ class OutpostApp:
                 await self.clock.sleep(15)
                 continue
             now = int(self.clock.now().timestamp())
+            await self._process_relay_service_requests(now)
             rows = await self.database.read(
                 "SELECT * FROM fed_service_request WHERE direction='out' AND status='pending'"
             )
@@ -1897,6 +2256,7 @@ class OutpostApp:
                 now = int(self.clock.now().timestamp())
                 await self.federation_relay.expire(now=now)
                 await self.federation_relay.recover_stalled(now=now)
+                await self.federation_relay.recover_pending_dispatches()
                 for receipt in await self.federation_relay.pending_receipts():
                     try:
                         receipt_peer = await self.federation.by_mesh_id(receipt["previous_hop"])

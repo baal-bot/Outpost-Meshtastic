@@ -235,6 +235,31 @@ def prepare_page(
             body='{"items":[],"count":0}',
         ),
     )
+    # The initial dashboard navigation begins background requests before a test can
+    # register its page-specific routes. Keep these shared calls deterministic from
+    # the first byte so a late 404 cannot race route_shared_operator_api().
+    page.route(
+        "**/api/v1/dashboard/overview",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "traffic_24h": {"inbound": {"count": 0}, "outbound": {"count": 0}},
+                    "members": {"heard_24h": 0, "heard_7d": 0, "members_total": 0},
+                    "activity": [],
+                }
+            ),
+        ),
+    )
+    page.route(
+        "**/api/v1/channels*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"items":[],"next_cursor":null}',
+        ),
+    )
     page.goto(dashboard_url, wait_until="domcontentloaded")
     wait_for_navigation(page)
     return page
@@ -1426,7 +1451,22 @@ def test_federation_origin_key_recovery_and_rotation_controls(
                 body=json.dumps(
                     {
                         "summary": {"counts": {"quarantined": 1}, "stored_bytes": 64},
-                        "queue": [],
+                        "queue": [
+                            {
+                                "envelope_id": "e" * 32,
+                                "scope": "incident",
+                                "state": "rejected",
+                                "dispatch_status": "failed",
+                                "dispatch_attempts": 1,
+                                "dispatch_error": "incident import failed",
+                                "origin_node": "!aaaaaaaa",
+                                "destination_node": "!bbbbbbbb",
+                                "route": ["!aaaaaaaa", "!bbbbbbbb"],
+                                "attempts": 0,
+                                "expires_at": 2_000_000_000,
+                                "history": [],
+                            }
+                        ],
                         "policies": [],
                         "identity": {"fingerprint": "a" * 64},
                         "origins": [
@@ -1458,6 +1498,13 @@ def test_federation_origin_key_recovery_and_rotation_controls(
                 content_type="application/json",
                 body=json.dumps({"fingerprint": "d" * 64, "rotation_from_fingerprint": "a" * 64}),
             )
+        elif path.endswith("/" + "e" * 32):
+            mutations.append(("queue", request.post_data_json))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"envelope_id": "e" * 32, "state": "retry"}),
+            )
         else:
             mutations.append(("origin", request.post_data_json))
             route.fulfill(
@@ -1482,6 +1529,13 @@ def test_federation_origin_key_recovery_and_rotation_controls(
             dialog.get_by_role("button", name="Use candidate").click()
         page.wait_for_function("() => !document.querySelector('dialog[open]')")
         assert ("origin", {"state": "replace", "fingerprint": candidate}) in mutations
+
+        assert "local dispatch failed" in page.locator("#relay-queue").text_content()
+        with page.expect_request(
+            lambda request: request.method == "PATCH" and request.url.endswith("/" + "e" * 32)
+        ):
+            page.get_by_role("button", name="Retry local dispatch").click()
+        assert ("queue", {"action": "retry"}) in mutations
 
         page.get_by_role("button", name="Rotate local key").click()
         with page.expect_request(

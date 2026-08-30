@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 import secrets
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -26,6 +28,7 @@ CLOCK_SKEW_SECONDS = 300
 MAX_FORWARD_ATTEMPTS = 6
 RETRY_BASE_SECONDS = 30
 RETRY_MAX_SECONDS = 3_600
+DISPATCH_TIMEOUT_SECONDS = 5.0
 ACTIVE_STATES = ("queued", "quarantined", "paused", "forwarding", "forwarded")
 ROTATION_CONTEXT = b"outpost-relay-origin-key-rotation-v1\x00"
 
@@ -48,6 +51,23 @@ class RelayPolicy:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class RelayDispatchContext:
+    envelope_id: str
+    origin_node: str
+    destination_node: str
+    received_from_peer_id: int
+    received_from_mesh_id: str
+    created_at: int
+    expires_at: int
+    received_at: int
+
+
+RelayDispatchHandler = Callable[
+    [Transaction, RelayDispatchContext, dict[str, Any]], Awaitable[dict[str, Any] | None]
+]
+
+
 class FederationRelayService:
     """Signed, bounded custody transfer between explicitly trusted federation peers."""
 
@@ -66,6 +86,12 @@ class FederationRelayService:
 
     def __init__(self, database: Database, peers: FederationPeerService, clock: Clock) -> None:
         self.database, self.peers, self.clock = database, peers, clock
+        self._dispatch_handlers: dict[str, RelayDispatchHandler] = {}
+
+    def register_handler(self, scope: str, handler: RelayDispatchHandler) -> None:
+        if scope not in SCOPES - {"opaque"}:
+            raise ValueError("unsupported relay dispatch scope")
+        self._dispatch_handlers[scope] = handler
 
     @staticmethod
     def _private_bytes(key: Ed25519PrivateKey) -> bytes:
@@ -278,6 +304,11 @@ class FederationRelayService:
         cleaned = sorted(set(scopes))
         if not cleaned or any(scope not in SCOPES for scope in cleaned):
             raise ValueError("relay policy needs one or more supported content scopes")
+        # A request grant includes its signed return path. Without receipt custody the
+        # destination could perform work while the requester never receives the result.
+        if "request" in cleaned and "receipt" not in cleaned:
+            cleaned.append("receipt")
+            cleaned.sort()
         if not 1 <= max_stored_items <= 500:
             raise ValueError("relay item quota must be 1-500")
         if not 1_024 <= max_stored_bytes <= 1_048_576:
@@ -556,11 +587,21 @@ class FederationRelayService:
         self, transaction: Transaction, origin: str, public_key: bytes, now: int
     ) -> None:
         await transaction.write(
-            "UPDATE fed_relay_envelope SET state=CASE WHEN destination_node=? "
-            "THEN 'delivered' ELSE 'queued' END,updated_at=?,last_error=NULL "
+            "UPDATE fed_relay_envelope SET state='queued',updated_at=?,last_error=NULL "
             "WHERE origin_node=? AND origin_public_key=? AND state='quarantined' "
-            "AND expires_at>?",
-            (self._local_id(), now, origin, public_key, now),
+            "AND destination_node<>? AND expires_at>?",
+            (now, origin, public_key, self._local_id(), now),
+        )
+        # Origin review may release hundreds of retained envelopes. Mark destination
+        # items for the bounded recovery worker instead of holding this trust-decision
+        # transaction across one timeout window per payload.
+        await transaction.write(
+            "UPDATE fed_relay_envelope SET state='rejected',dispatch_status='pending',"
+            "dispatch_error='Local dispatch pending after origin verification',"
+            "last_error='Local dispatch pending after origin verification',updated_at=? "
+            "WHERE origin_node=? AND origin_public_key=? AND state='quarantined' "
+            "AND destination_node=? AND expires_at>?",
+            (now, origin, public_key, self._local_id(), now),
         )
         await transaction.write(
             "UPDATE fed_relay_origin_candidate SET state='trusted',"
@@ -578,6 +619,118 @@ class FederationRelayService:
                 f"system:relay-origin-key:{origin}:{self._fingerprint(public_key)}",
             ),
         )
+
+    @staticmethod
+    def _dispatch_detail(result: dict[str, Any] | None) -> dict[str, Any]:
+        if not result:
+            return {}
+        try:
+            encoded = json.dumps(result, separators=(",", ":"), sort_keys=True)
+        except (TypeError, ValueError):
+            return {"result": "handler returned non-serializable metadata"}
+        if len(encoded.encode()) > 1_024:
+            return {"result": "handler metadata exceeded 1024 bytes"}
+        return result
+
+    async def _dispatch_destination(self, transaction: Transaction, row: Any, now: int) -> str:
+        envelope_id = str(row["envelope_id"])
+        scope = str(row["scope"])
+        peer_id = int(row["received_from_peer_id"])
+        if scope == "opaque":
+            detail = {"reason": "opaque extension payload retained without local dispatch"}
+            await transaction.write(
+                "UPDATE fed_relay_envelope SET state='delivered',dispatch_status='ignored',"
+                "dispatched_at=?,dispatch_error=NULL,dispatch_result_json=?,last_error=NULL,"
+                "updated_at=? WHERE envelope_id=?",
+                (
+                    now,
+                    json.dumps(detail, separators=(",", ":"), sort_keys=True),
+                    now,
+                    envelope_id,
+                ),
+            )
+            await self._event(
+                transaction, envelope_id, peer_id, "dispatch_ignored", detail, now, "federation"
+            )
+            return "delivered"
+
+        handler = self._dispatch_handlers.get(scope)
+        error: Exception | None = None
+        payload: dict[str, Any] | None = None
+        if handler is None:
+            error = ValueError(f"no local handler is registered for relay scope {scope}")
+        else:
+            try:
+                decoded = cbor2.loads(bytes(row["payload_cbor"]))
+                if not isinstance(decoded, dict):
+                    raise ValueError("relay domain payload must decode to an object")
+                payload = decoded
+            except (TypeError, ValueError, cbor2.CBORDecodeError) as caught:
+                error = caught
+
+        result: dict[str, Any] | None = None
+        if error is None and handler is not None and payload is not None:
+            context = RelayDispatchContext(
+                envelope_id=envelope_id,
+                origin_node=str(row["origin_node"]),
+                destination_node=str(row["destination_node"]),
+                received_from_peer_id=peer_id,
+                received_from_mesh_id=str(row["received_from"]),
+                created_at=int(row["created_at"]),
+                expires_at=int(row["expires_at"]),
+                received_at=now,
+            )
+            await transaction.write("SAVEPOINT relay_domain_dispatch")
+            try:
+                async with asyncio.timeout(DISPATCH_TIMEOUT_SECONDS):
+                    result = await handler(transaction, context, payload)
+            except Exception as caught:
+                error = caught
+                await transaction.write("ROLLBACK TO relay_domain_dispatch")
+            finally:
+                await transaction.write("RELEASE relay_domain_dispatch")
+
+        if error is not None:
+            reason = (str(error).strip() or type(error).__name__)[:160]
+            await transaction.write(
+                "UPDATE fed_relay_envelope SET state='rejected',dispatch_status='failed',"
+                "dispatch_attempts=dispatch_attempts+1,dispatched_at=NULL,dispatch_error=?,"
+                "dispatch_result_json=NULL,last_error=?,updated_at=? WHERE envelope_id=?",
+                (reason, reason, now, envelope_id),
+            )
+            await self._event(
+                transaction,
+                envelope_id,
+                peer_id,
+                "dispatch_failed",
+                {"scope": scope, "reason": reason},
+                now,
+                "federation",
+            )
+            return "rejected"
+
+        detail = self._dispatch_detail(result)
+        await transaction.write(
+            "UPDATE fed_relay_envelope SET state='delivered',dispatch_status='dispatched',"
+            "dispatch_attempts=dispatch_attempts+1,dispatched_at=?,dispatch_error=NULL,"
+            "dispatch_result_json=?,last_error=NULL,updated_at=? WHERE envelope_id=?",
+            (
+                now,
+                json.dumps(detail, separators=(",", ":"), sort_keys=True),
+                now,
+                envelope_id,
+            ),
+        )
+        await self._event(
+            transaction,
+            envelope_id,
+            peer_id,
+            "dispatch_succeeded",
+            {"scope": scope, **detail},
+            now,
+            "federation",
+        )
+        return "delivered"
 
     async def accept(
         self,
@@ -872,6 +1025,22 @@ class FederationRelayService:
                         stamp,
                         "federation",
                     )
+                    if state == "delivered":
+                        state = await self._dispatch_destination(
+                            transaction,
+                            {
+                                "envelope_id": envelope_id,
+                                "origin_node": origin,
+                                "destination_node": destination,
+                                "scope": scope,
+                                "payload_cbor": payload,
+                                "created_at": created_at,
+                                "expires_at": expires_at,
+                                "received_from_peer_id": peer.id,
+                                "received_from": sender_mesh_id.lower(),
+                            },
+                            stamp,
+                        )
                 else:
                     await transaction.write(
                         "INSERT INTO fed_relay_usage(peer_id,window_start,denied) VALUES(?,?,1) "
@@ -938,6 +1107,10 @@ class FederationRelayService:
             value.pop("rotation_from_public_key", None)
             value.pop("rotation_signature", None)
             value["route"] = json.loads(str(value.pop("route_json")))
+            dispatch_result = value.pop("dispatch_result_json", None)
+            value["dispatch_result"] = (
+                json.loads(str(dispatch_result)) if dispatch_result is not None else None
+            )
             value["history"] = history[str(row["envelope_id"])]
             values.append(value)
         return values
@@ -1106,9 +1279,74 @@ class FederationRelayService:
                 created_at=now,
             )
 
+    async def _retry_dispatch(
+        self, envelope_id: str, actor: str, *, pending_only: bool = False
+    ) -> str:
+        now = int(self.clock.now().timestamp())
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT e.envelope_id,e.origin_node,e.destination_node,e.scope,e.payload_cbor,"
+                "e.created_at,e.expires_at,e.received_from_peer_id,e.dispatch_status,"
+                "p.mesh_id received_from FROM fed_relay_envelope e "
+                "JOIN fed_peer p ON p.id=e.received_from_peer_id WHERE e.envelope_id=?",
+                (envelope_id,),
+            )
+            if not rows:
+                raise ValueError("relay envelope not found")
+            row = rows[0]
+            allowed = {"pending"} if pending_only else {"pending", "failed"}
+            if str(row["dispatch_status"] or "") not in allowed:
+                raise ValueError("relay envelope has no retryable local dispatch")
+            if int(row["expires_at"]) <= now:
+                raise ValueError("expired relay envelope cannot be dispatched")
+            if row["payload_cbor"] is None:
+                raise ValueError("purged relay payload cannot be dispatched")
+            state = await self._dispatch_destination(transaction, row, now)
+            await self._event(
+                transaction,
+                envelope_id,
+                int(row["received_from_peer_id"]),
+                "dispatch_retried",
+                {"state": state},
+                now,
+                actor,
+            )
+            if actor != "system":
+                await write_audit(
+                    transaction,
+                    actor_kind="web",
+                    actor_ref=actor,
+                    action="federation.relay_dispatch_retry",
+                    target=envelope_id,
+                    detail={"state": state},
+                    created_at=now,
+                )
+        return state
+
+    async def recover_pending_dispatches(self, limit: int = 4) -> int:
+        rows = await self.database.read(
+            "SELECT envelope_id FROM fed_relay_envelope WHERE direction='destination' "
+            "AND dispatch_status='pending' AND payload_cbor IS NOT NULL AND expires_at>? "
+            "ORDER BY updated_at,envelope_id LIMIT ?",
+            (int(self.clock.now().timestamp()), max(1, min(limit, 100))),
+        )
+        recovered = 0
+        for row in rows:
+            try:
+                state = await self._retry_dispatch(
+                    str(row["envelope_id"]), "system", pending_only=True
+                )
+            except ValueError:
+                continue
+            recovered += int(state == "delivered")
+        return recovered
+
     async def item_action(self, envelope_id: str, action: str, actor: str) -> None:
-        if action not in {"pause", "resume", "purge"}:
+        if action not in {"pause", "resume", "purge", "retry"}:
             raise ValueError("unsupported relay queue action")
+        if action == "retry":
+            await self._retry_dispatch(envelope_id, actor)
+            return
         now = int(self.clock.now().timestamp())
         rows = await self.database.read(
             "SELECT state,expires_at FROM fed_relay_envelope WHERE envelope_id=?", (envelope_id,)

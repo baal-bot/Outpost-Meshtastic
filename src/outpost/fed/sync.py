@@ -753,6 +753,62 @@ class FederationSyncService:
             actor=operator,
         )
 
+    async def import_relay_incident(
+        self,
+        transaction: Transaction,
+        payload: dict[str, Any],
+        *,
+        origin_node: str,
+        received_from_peer_id: int,
+        envelope_id: str,
+        now: int,
+    ) -> dict[str, Any]:
+        """Import a signed relay incident through the normal reconciliation path."""
+        if not self.module_enabled("watch"):
+            raise ValueError("watch module is disabled")
+        wrapped = payload.get("payload")
+        if wrapped is not None:
+            if payload.get("stream", "incidents") != "incidents" or not isinstance(wrapped, dict):
+                raise ValueError("relay incident wrapper is invalid")
+            incident = wrapped
+            uid_value = payload.get("uid") or incident.get("uid")
+            digest = str(payload.get("digest") or "")[:64]
+        else:
+            incident = payload
+            uid_value = incident.get("uid") or incident.get("origin_uid")
+            digest = str(incident.get("digest") or "")[:64]
+        uid = str(uid_value or "").strip()
+        if not uid or len(uid) > 160:
+            raise ValueError("relay incident uid is required")
+        if not uid.startswith("!"):
+            uid = f"{origin_node}:{uid}"
+        origin_prefix = f"{origin_node}:"
+        if not uid.startswith(origin_prefix) or not uid.removeprefix(origin_prefix):
+            raise ValueError("relay incident uid does not match its verified origin")
+        if not digest:
+            encoded = json.dumps(incident, separators=(",", ":"), sort_keys=True)
+            digest = self._payload_digest(encoded)
+        inbox = {
+            "mesh_id": origin_node,
+            "peer_id": received_from_peer_id,
+            "digest": digest,
+        }
+        await self._import_incident(
+            transaction,
+            inbox,
+            uid,
+            incident,
+            f"federation:relay:{envelope_id}",
+            now,
+        )
+        stored_uid = self._stored_origin_uid(uid)
+        rows = await transaction.read(
+            "SELECT incident_id FROM incident_origin WHERE origin_uid=?", (stored_uid,)
+        )
+        if not rows:
+            raise ValueError("relay incident import did not create an origin record")
+        return {"incident_id": int(rows[0]["incident_id"]), "incident_uid": stored_uid}
+
     async def import_inbox(self, item_id: int, operator: str, now: int) -> str:
         async with self.database.transaction() as transaction:
             rows = await transaction.read(

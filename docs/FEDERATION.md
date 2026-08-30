@@ -51,9 +51,11 @@ the feature remains experimental until the complete acceptance backlog is run.
   incident that this Outpost is monitoring. See [incident reconciliation](INCIDENT-RECONCILIATION.md).
 - Signed store-and-forward can move bounded envelopes through explicitly authorized paired peers.
   Direct destinations are preferred, each peer has separate scope/storage/rate/airtime policy, and
-  relay-origin keys learned indirectly require operator review. Ordinary relay payloads and routing
-  metadata are visible to custodians; only the `opaque` scope is suitable for ciphertext. See the
-  [relay protocol and threat model](FEDERATION-RELAY-PROTOCOL.md).
+  relay-origin keys learned indirectly require operator review. At the destination, incidents enter
+  normal reconciliation, authorized read-only service requests return signed receipts, and failed
+  local dispatch remains visible and retryable. Ordinary relay payloads and routing metadata are
+  visible to custodians; only the `opaque` scope is suitable for ciphertext. See the [relay protocol
+  and threat model](FEDERATION-RELAY-PROTOCOL.md).
 - The topology health view maps only active peers that explicitly sent an authenticated coarse
   location. Unsigned discovery, incident-sharing coordinates, and names never imply map consent.
   List-only identity states, transport health, backlog, policy/audit context, optional incident

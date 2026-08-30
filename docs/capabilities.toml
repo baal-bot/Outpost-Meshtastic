@@ -1,5 +1,5 @@
 schema_version = 1
-as_of = "2026-08-29"
+as_of = "2026-08-30"
 
 [states.designed]
 label = "Designed"
@@ -351,7 +351,7 @@ description = "Operator position lifecycle tests exact-location disclosure, expi
 [[capabilities]]
 id = "federation"
 area = "Outpost federation"
-present = "Pairing, authenticated framing, policy, board/incident sync, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, privacy-gated topology health, receipts, pagination, and reconciliation."
+present = "Pairing, authenticated framing, policy, board/incident sync, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, transactional destination dispatch, privacy-gated topology health, receipts, pagination, and reconciliation."
 maturity = "two_node_field_tested"
 introduced_commit = "8f7219e"
 limitations = [
@@ -364,7 +364,7 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-29"
+date = "2026-08-30"
 [[capabilities.evidence]]
 kind = "field"
 path = "docs/FEDERATION-ACCEPTANCE-BACKLOG.md"
@@ -381,6 +381,18 @@ description = "Merged-origin updates remain advisory and preserve exported origi
 kind = "automated"
 path = "tests/integration/test_federation_relay.py::test_partition_relay_custody_signature_origin_review_and_receipt"
 description = "A partitioned three-node relay preserves signed custody, origin review, and receipts."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_federation_relay.py::test_destination_dispatches_multihop_incident_into_reconciliation"
+description = "A signed multi-hop incident enters destination reconciliation only after origin verification."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_federation_relay.py::test_failed_dispatch_rolls_back_handler_and_is_visible_and_retryable"
+description = "Failed destination handlers roll back partial writes and remain visible and retryable."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_federation_relay.py::test_relay_request_uses_peer_policy_and_returns_signed_receipt"
+description = "Relayed read-only requests enforce peer policy and return a signed, correlated receipt."
 [[capabilities.evidence]]
 kind = "operations"
 path = "docs/FEDERATION-RELAY-PROTOCOL.md"
