@@ -38,6 +38,7 @@ class Peer:
     relay_alerts: bool
     relay_mail: bool
     quota_mail_per_hour: int
+    quota_mail_per_recipient_per_hour: int
     quota_items_per_hour: int
     policy_configured: bool
     policy_applied_by: str | None
@@ -123,6 +124,9 @@ class FederationPeerService:
             relay_alerts=bool(row["relay_alerts"]),
             relay_mail=bool(row["relay_mail"]),
             quota_mail_per_hour=int(row["quota_mail_per_hour"]),
+            quota_mail_per_recipient_per_hour=int(
+                row["quota_mail_per_recipient_per_hour"]
+            ),
             quota_items_per_hour=int(row["quota_items_per_hour"]),
             policy_configured=bool(row["policy_configured"]),
             policy_applied_by=row["policy_applied_by"],
@@ -397,6 +401,7 @@ class FederationPeerService:
         incident_radius_km: float = 25,
         relay_mail: bool = False,
         quota_mail_per_hour: int = 20,
+        quota_mail_per_recipient_per_hour: int | None = None,
         service_permissions: list[str] | None = None,
         quota_services_per_hour: int | None = None,
         service_concurrency: int | None = None,
@@ -417,6 +422,13 @@ class FederationPeerService:
             raise ValueError("item quota must be 1-500 per hour")
         if not 1 <= quota_mail_per_hour <= 100:
             raise ValueError("mail quota must be 1-100 per hour")
+        recipient_mail_quota = (
+            peer.quota_mail_per_recipient_per_hour
+            if quota_mail_per_recipient_per_hour is None
+            else quota_mail_per_recipient_per_hour
+        )
+        if not 1 <= recipient_mail_quota <= 100:
+            raise ValueError("per-recipient mail quota must be 1-100 per hour")
         permissions = sorted(
             set(peer.service_permissions if service_permissions is None else service_permissions)
         )
@@ -495,6 +507,7 @@ class FederationPeerService:
             "relay_mail": peer.relay_mail,
             "quota_items_per_hour": peer.quota_items_per_hour,
             "quota_mail_per_hour": peer.quota_mail_per_hour,
+            "quota_mail_per_recipient_per_hour": peer.quota_mail_per_recipient_per_hour,
             "service_permissions": peer.service_permissions,
             "quota_services_per_hour": peer.quota_services_per_hour,
             "service_concurrency": peer.service_concurrency,
@@ -512,6 +525,7 @@ class FederationPeerService:
             "relay_mail": relay_mail,
             "quota_items_per_hour": quota_items_per_hour,
             "quota_mail_per_hour": quota_mail_per_hour,
+            "quota_mail_per_recipient_per_hour": recipient_mail_quota,
             "service_permissions": permissions,
             "quota_services_per_hour": service_quota,
             "service_concurrency": concurrency,
@@ -529,7 +543,8 @@ class FederationPeerService:
             await transaction.write(
                 "UPDATE fed_peer SET boards=?,sync_incidents=?,incident_lat=?,incident_lon=?,"
                 "incident_radius_km=?,relay_alerts=?,"
-                "quota_items_per_hour=?,relay_mail=?,quota_mail_per_hour=?,last_sync_at=NULL,"
+                "quota_items_per_hour=?,relay_mail=?,quota_mail_per_hour=?,"
+                "quota_mail_per_recipient_per_hour=?,last_sync_at=NULL,"
                 "service_permissions=?,quota_services_per_hour=?,service_concurrency=?,"
                 "service_max_response_bytes=?,service_airtime_seconds_per_hour=?,"
                 "policy_configured=1,policy_applied_by=?,policy_applied_at=?,policy_review_at=? "
@@ -544,6 +559,7 @@ class FederationPeerService:
                     quota_items_per_hour,
                     int(relay_mail),
                     quota_mail_per_hour,
+                    recipient_mail_quota,
                     json.dumps(permissions, separators=(",", ":")),
                     service_quota,
                     concurrency,

@@ -135,6 +135,13 @@ TABLE_POLICIES = (
         "fed_service_request", "federation", "retain", "Service request/result retention.", True
     ),
     TablePolicy("fed_service_usage", "federation", "retain", "Short rolling quota windows."),
+    TablePolicy("fed_mail_usage", "federation", "retain", "Short inbound mail quota windows."),
+    TablePolicy(
+        "fed_mail_recipient_usage",
+        "federation",
+        "retain",
+        "Short per-recipient inbound mail quota windows.",
+    ),
     TablePolicy(
         "fed_inbox_item", "federation", "retain", "Reviewed records; approval queue protected."
     ),
@@ -416,6 +423,22 @@ class MaintenanceService:
                 "Elapsed peer quota windows",
                 "federation",
                 "fed_service_usage",
+                "window_start<?",
+                (provider_cutoff,),
+            ),
+            CleanupRule(
+                "federation_mail_usage",
+                "Elapsed inbound mail quota windows",
+                "federation",
+                "fed_mail_usage",
+                "window_start<?",
+                (provider_cutoff,),
+            ),
+            CleanupRule(
+                "federation_mail_recipient_usage",
+                "Elapsed recipient mail quota windows",
+                "federation",
+                "fed_mail_recipient_usage",
                 "window_start<?",
                 (provider_cutoff,),
             ),

@@ -107,6 +107,7 @@ from outpost.web.auth import WebAuthService
 from outpost.web.settings import RuntimeSettings
 
 _INBOUND_LOG_ID: ContextVar[int | None] = ContextVar("outpost_inbound_log_id", default=None)
+_MAX_RECONCILIATION_ROUNDS = 16
 
 
 @dataclass
@@ -1018,6 +1019,8 @@ class OutpostApp:
             return "identity mismatch"
         if "outside peer" in reason or "outside peer sync policy" in reason:
             return "policy denied"
+        if "reconciliation" in reason:
+            return "reconciliation protocol violation"
         return "invalid federation frame"
 
     async def initiate_federation_pairing(self, mesh_id: str) -> object:
@@ -1416,6 +1419,255 @@ class OutpostApp:
             )
             return True
 
+    @staticmethod
+    def _reconciliation_cursor(value: object, field: str) -> list[object] | None:
+        if value is None:
+            return None
+        if not isinstance(value, list) or len(value) != 3:
+            raise ValueError(f"invalid federation {field} cursor")
+        version = wire_int(value[0], f"{field} version")
+        stream, uid = value[1], value[2]
+        if (
+            not isinstance(stream, str)
+            or not stream
+            or len(stream) > 80
+            or not isinstance(uid, str)
+            or not uid
+            or len(uid) > 160
+        ):
+            raise ValueError(f"invalid federation {field} cursor")
+        return [version, stream, uid]
+
+    async def _store_reconciliation_checkpoint(
+        self, peer_id: int, checkpoint: dict[str, object], now: int
+    ) -> None:
+        await self.database.write(
+            "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
+            "VALUES(?,'_reconcile','recv',?,?) "
+            "ON CONFLICT(peer_id,stream,direction) DO UPDATE SET "
+            "cursor=excluded.cursor,updated_at=excluded.updated_at",
+            (peer_id, json.dumps(checkpoint, separators=(",", ":")), now),
+        )
+
+    async def _stop_reconciliation(
+        self,
+        peer_id: int,
+        checkpoint: dict[str, object],
+        *,
+        status: str,
+        reason: str,
+        before: list[object] | None,
+        now: int,
+    ) -> None:
+        stopped = {
+            **checkpoint,
+            "before": before,
+            "pending": False,
+            "status": status,
+            "reason": reason,
+            "stopped_at": now,
+            "resume_after": now + self.config.fed.sync_interval_minutes * 60,
+        }
+        await self._store_reconciliation_checkpoint(peer_id, stopped, now)
+
+    async def _handle_sync_manifest(
+        self, sender: str, value: dict[str, object]
+    ) -> None:
+        manifest = value.get("items", [])
+        if not isinstance(manifest, list):
+            raise ValueError("invalid sync manifest")
+        peer = await self.federation.by_mesh_id(sender)
+        rows = await self.database.read(
+            "SELECT cursor FROM fed_cursor WHERE peer_id=? AND stream='_reconcile' "
+            "AND direction='recv'",
+            (peer.id,),
+        )
+        if not rows:
+            raise ValueError("unexpected federation reconciliation manifest")
+        try:
+            checkpoint = json.loads(str(rows[0]["cursor"]))
+        except (TypeError, ValueError) as error:
+            raise ValueError("invalid local federation reconciliation checkpoint") from error
+        if not isinstance(checkpoint, dict):
+            raise ValueError("invalid local federation reconciliation checkpoint")
+        if checkpoint.get("status") not in {None, "active"}:
+            raise ValueError("unexpected federation reconciliation manifest after cycle stopped")
+        now = int(self.clock.now().timestamp())
+        configured_budget = self.config.fed.max_items_per_cycle
+        try:
+            cycle_budget = min(configured_budget, int(checkpoint.get("budget", configured_budget)))
+            used = max(0, int(checkpoint.get("used", 0)))
+            rounds = max(0, int(checkpoint.get("rounds", 0)))
+        except (TypeError, ValueError) as error:
+            raise ValueError("invalid local federation reconciliation checkpoint") from error
+        if cycle_budget < 1 or used > cycle_budget or rounds >= _MAX_RECONCILIATION_ROUNDS:
+            raise ValueError("invalid local federation reconciliation checkpoint")
+        snapshot = wire_int(checkpoint.get("snapshot"), "reconciliation snapshot")
+        if wire_int(value.get("snapshot", snapshot), "snapshot") != snapshot:
+            await self._stop_reconciliation(
+                peer.id,
+                checkpoint,
+                status="aborted",
+                reason="peer changed the reconciliation snapshot",
+                before=self._reconciliation_cursor(checkpoint.get("before"), "prior"),
+                now=now,
+            )
+            raise ValueError("peer changed the federation reconciliation snapshot")
+        # The peer's remaining field is protocol metadata only. Validate it, but never use it
+        # to expand the locally persisted cycle budget.
+        wire_int(value.get("remaining", 0), "remaining", minimum=0, maximum=100)
+        previous = self._reconciliation_cursor(checkpoint.get("before"), "prior")
+        raw_next = self._reconciliation_cursor(value.get("next_before"), "continuation")
+        local_remaining = cycle_budget - used
+        if len(manifest) > min(8, local_remaining):
+            reason = "peer exceeded the local reconciliation page budget"
+            await self._stop_reconciliation(
+                peer.id,
+                checkpoint,
+                status="aborted",
+                reason=reason,
+                before=previous,
+                now=now,
+            )
+            raise ValueError(reason)
+        page_cursors: list[list[object]] = []
+        try:
+            for item in manifest:
+                if not isinstance(item, dict):
+                    raise ValueError("peer supplied an invalid reconciliation page item")
+                page_cursors.append(
+                    self._reconciliation_cursor(
+                        [
+                            item.get("version", item.get("v")),
+                            item.get("stream", item.get("s")),
+                            item.get("uid", item.get("u")),
+                        ],
+                        "page",
+                    )
+                )
+        except ValueError as error:
+            reason = str(error)
+            await self._stop_reconciliation(
+                peer.id,
+                checkpoint,
+                status="aborted",
+                reason=reason,
+                before=previous,
+                now=now,
+            )
+            raise
+        if any(int(cursor[0]) > snapshot for cursor in page_cursors) or any(
+            tuple(current) >= tuple(prior)
+            for prior, current in zip(page_cursors, page_cursors[1:], strict=False)
+        ):
+            reason = "peer reconciliation page is not strictly descending within the snapshot"
+            await self._stop_reconciliation(
+                peer.id,
+                checkpoint,
+                status="aborted",
+                reason=reason,
+                before=previous,
+                now=now,
+            )
+            raise ValueError(reason)
+        if previous is not None and any(
+            tuple(cursor) >= tuple(previous) for cursor in page_cursors
+        ):
+            reason = "peer reconciliation cursor did not advance"
+            await self._stop_reconciliation(
+                peer.id,
+                checkpoint,
+                status="aborted",
+                reason=reason,
+                before=previous,
+                now=now,
+            )
+            raise ValueError(reason)
+        if raw_next is not None:
+            if not manifest:
+                reason = "peer supplied a continuation cursor without page items"
+            else:
+                reason = (
+                    "peer continuation cursor does not match the page boundary"
+                    if raw_next != page_cursors[-1]
+                    else ""
+                )
+            if not reason and previous is not None and tuple(raw_next) >= tuple(previous):
+                reason = "peer reconciliation cursor did not advance"
+            if reason:
+                await self._stop_reconciliation(
+                    peer.id,
+                    checkpoint,
+                    status="aborted",
+                    reason=reason,
+                    before=previous,
+                    now=now,
+                )
+                raise ValueError(reason)
+        used += len(manifest)
+        rounds += 1
+        checkpoint = {
+            **checkpoint,
+            "before": raw_next,
+            "snapshot": snapshot,
+            "pending": False,
+            "status": "active",
+            "reason": None,
+            "budget": cycle_budget,
+            "used": used,
+            "rounds": rounds,
+            "resume_after": None,
+        }
+        await self._store_reconciliation_checkpoint(peer.id, checkpoint, now)
+        missing = await self.federation_sync.missing(manifest)
+        if missing:
+            await self._queue_federation_control(
+                sender,
+                MessageType.ITEM_REQ,
+                {"mesh_id": self.federation.local_mesh_id, "items": missing[:8]},
+            )
+        else:
+            await self._queue_federation_control(
+                sender,
+                MessageType.SYNC_DONE,
+                {"mesh_id": self.federation.local_mesh_id, "received": 0},
+            )
+        remaining = cycle_budget - used
+        if raw_next is not None and remaining > 0 and rounds < _MAX_RECONCILIATION_ROUNDS:
+            queued = await self._queue_federation_control(
+                sender,
+                MessageType.SYNC_REQ,
+                {
+                    "limit": min(8, remaining),
+                    "budget": remaining,
+                    "snapshot": snapshot,
+                    "before": raw_next,
+                },
+            )
+            if queued:
+                checkpoint["pending"] = True
+                await self._store_reconciliation_checkpoint(peer.id, checkpoint, now)
+        elif raw_next is not None:
+            reason = (
+                "local reconciliation item budget exhausted"
+                if remaining <= 0
+                else "local reconciliation continuation round limit reached"
+            )
+            await self._stop_reconciliation(
+                peer.id,
+                checkpoint,
+                status="truncated",
+                reason=reason,
+                before=raw_next,
+                now=now,
+            )
+        else:
+            checkpoint["status"] = "complete"
+            await self._store_reconciliation_checkpoint(peer.id, checkpoint, now)
+            await self.database.write(
+                "UPDATE fed_peer SET last_sync_at=? WHERE id=?", (now, peer.id)
+            )
+
     async def _federation_sync_once(self) -> None:
         if not self.config.modules.fed.enabled or not self.radio.local_node_id:
             return
@@ -1441,6 +1693,7 @@ class OutpostApp:
             cursor = checkpoint.get("before")
             pending = bool(checkpoint.get("pending"))
             continuing = isinstance(cursor, list) and len(cursor) == 3
+            stopped = checkpoint.get("status") in {"aborted", "truncated"}
             peer_row = (
                 await self.database.read("SELECT last_sync_at FROM fed_peer WHERE id=?", (peer.id,))
             )[0]
@@ -1449,38 +1702,74 @@ class OutpostApp:
                 peer_row["last_sync_at"] is None or now - int(peer_row["last_sync_at"]) >= interval
             )
             retry_due = pending and now - updated_at >= self.config.fed.sync_retry_minutes * 60
-            continuation_due = continuing and not pending and now - updated_at >= 30
-            if not retry_due and not continuation_due and (pending or not periodic_due):
+            continuation_due = continuing and not pending and not stopped and now - updated_at >= 30
+            if stopped:
+                try:
+                    resume_after = int(checkpoint.get("resume_after") or updated_at + interval)
+                except (TypeError, ValueError):
+                    resume_after = updated_at + interval
+                if now < resume_after:
+                    continue
+            elif pending:
+                if not retry_due:
+                    continue
+            elif continuing:
+                if not continuation_due:
+                    continue
+            elif not periodic_due:
                 continue
             snapshot = int(checkpoint.get("snapshot") or now)
             if not continuing:
                 cursor = None
                 snapshot = now
+            new_cycle = stopped or not continuing
+            try:
+                used = 0 if new_cycle else max(0, int(checkpoint.get("used", 0)))
+                rounds = 0 if new_cycle else max(0, int(checkpoint.get("rounds", 0)))
+            except (TypeError, ValueError):
+                used, rounds = 0, 0
+            budget = self.config.fed.max_items_per_cycle
+            if not new_cycle and (used >= budget or rounds >= _MAX_RECONCILIATION_ROUNDS):
+                reason = (
+                    "local reconciliation item budget exhausted"
+                    if used >= budget
+                    else "local reconciliation continuation round limit reached"
+                )
+                await self._stop_reconciliation(
+                    peer.id,
+                    checkpoint,
+                    status="truncated",
+                    reason=reason,
+                    before=self._reconciliation_cursor(cursor, "prior"),
+                    now=now,
+                )
+                continue
+            remaining = max(1, budget - used)
             next_checkpoint = {
                 "before": cursor,
                 "snapshot": snapshot,
                 "pending": True,
+                "status": "active",
+                "reason": None,
+                "budget": budget,
+                "used": used,
+                "rounds": rounds,
+                "resume_after": None,
             }
             try:
                 queued = await self._queue_federation_control(
                     peer.mesh_id,
                     MessageType.SYNC_REQ,
                     {
-                        "limit": 8,
-                        "budget": self.config.fed.max_items_per_cycle,
+                        "limit": min(8, remaining),
+                        "budget": remaining,
                         "snapshot": snapshot,
                         "before": cursor,
                     },
                 )
                 if not queued:
                     continue
-                await self.database.write(
-                    "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
-                    "VALUES(?,'_reconcile','recv',?,?) "
-                    "ON CONFLICT(peer_id,stream,direction) DO UPDATE SET "
-                    "cursor=excluded.cursor,updated_at=excluded.updated_at",
-                    (peer.id, json.dumps(next_checkpoint), now),
-                )
+                await self._store_reconciliation_checkpoint(peer.id, next_checkpoint, now)
             except (FrameError, ValueError):
                 continue
 
@@ -1842,63 +2131,7 @@ class OutpostApp:
                     raise ValueError("federation change notification is outside peer policy")
                 await self._queue_federation_control(sender, MessageType.SYNC_REQ, {"limit": 8})
             elif msg_type is MessageType.SYNC_MANIFEST:
-                manifest = value.get("items", [])
-                if not isinstance(manifest, list):
-                    raise ValueError("invalid sync manifest")
-                peer = await self.federation.by_mesh_id(sender)
-                raw_next = value.get("next_before")
-                if raw_next is not None and (not isinstance(raw_next, list) or len(raw_next) != 3):
-                    raise ValueError("invalid federation reconciliation cursor")
-                remaining = wire_int(value.get("remaining", 0), "remaining", minimum=0, maximum=100)
-                checkpoint = {
-                    "before": raw_next,
-                    "snapshot": wire_int(
-                        value.get("snapshot", int(self.clock.now().timestamp())), "snapshot"
-                    ),
-                    "pending": False,
-                }
-                await self.database.write(
-                    "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
-                    "VALUES(?,'_reconcile','recv',?,unixepoch()) "
-                    "ON CONFLICT(peer_id,stream,direction) DO UPDATE SET "
-                    "cursor=excluded.cursor,updated_at=excluded.updated_at",
-                    (peer.id, json.dumps(checkpoint)),
-                )
-                missing = await self.federation_sync.missing(manifest)
-                if missing:
-                    await self._queue_federation_control(
-                        sender,
-                        MessageType.ITEM_REQ,
-                        {"mesh_id": self.federation.local_mesh_id, "items": missing[:8]},
-                    )
-                else:
-                    await self._queue_federation_control(
-                        sender,
-                        MessageType.SYNC_DONE,
-                        {"mesh_id": self.federation.local_mesh_id, "received": 0},
-                    )
-                if raw_next is not None and remaining > 0:
-                    queued = await self._queue_federation_control(
-                        sender,
-                        MessageType.SYNC_REQ,
-                        {
-                            "limit": 8,
-                            "budget": remaining,
-                            "snapshot": checkpoint["snapshot"],
-                            "before": raw_next,
-                        },
-                    )
-                    if queued:
-                        checkpoint["pending"] = True
-                        await self.database.write(
-                            "UPDATE fed_cursor SET cursor=?,updated_at=unixepoch() "
-                            "WHERE peer_id=? AND stream='_reconcile' AND direction='recv'",
-                            (json.dumps(checkpoint), peer.id),
-                        )
-                elif raw_next is None:
-                    await self.database.write(
-                        "UPDATE fed_peer SET last_sync_at=unixepoch() WHERE id=?", (peer.id,)
-                    )
+                await self._handle_sync_manifest(sender, value)
             elif msg_type is MessageType.ITEM_REQ:
                 requests = value.get("items", [])
                 if not isinstance(requests, list):

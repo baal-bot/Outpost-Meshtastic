@@ -513,6 +513,7 @@ class FederationSyncPolicyBody(BaseModel):
     quota_items_per_hour: int = Field(default=20, ge=1, le=500)
     relay_mail: bool = False
     quota_mail_per_hour: int = Field(default=20, ge=1, le=100)
+    quota_mail_per_recipient_per_hour: int = Field(default=5, ge=1, le=100)
     service_permissions: list[Literal["weather", "alerts", "knowledge"]] = Field(
         default_factory=list, max_length=3
     )
@@ -1570,7 +1571,38 @@ def create_web_app(
                     "SELECT d.*,p.mesh_id,p.node_name FROM fed_mail_delivery d "
                     "JOIN fed_peer p ON p.id=d.peer_id ORDER BY d.created_at DESC LIMIT 100"
                 )
-                return {"items": [dict(row) for row in rows]}
+                usage_rows = await database.read(
+                    "SELECT p.id,p.mesh_id,p.node_name,p.quota_mail_per_hour,"
+                    "p.quota_mail_per_recipient_per_hour,COALESCE(u.inbound_accepted,0) "
+                    "inbound_accepted,COALESCE(u.inbound_rejected,0) inbound_rejected "
+                    "FROM fed_peer p LEFT JOIN fed_mail_usage u ON u.peer_id=p.id "
+                    "AND u.window_start=unixepoch()-unixepoch()%3600 "
+                    "WHERE p.state IN ('active','paused') AND p.relay_mail=1 ORDER BY p.mesh_id"
+                )
+                recipient_rows = await database.read(
+                    "SELECT r.peer_id,r.recipient_handle,r.inbound_accepted "
+                    "FROM fed_mail_recipient_usage r JOIN fed_peer p ON p.id=r.peer_id "
+                    "WHERE r.window_start=unixepoch()-unixepoch()%3600 AND p.relay_mail=1 "
+                    "ORDER BY r.peer_id,r.inbound_accepted DESC,r.recipient_handle"
+                )
+                recipients: dict[int, list[dict[str, Any]]] = {}
+                for recipient in recipient_rows:
+                    recipients.setdefault(int(recipient["peer_id"]), []).append(
+                        {
+                            "recipient_handle": recipient["recipient_handle"],
+                            "inbound_accepted": int(recipient["inbound_accepted"]),
+                        }
+                    )
+                return {
+                    "items": [dict(row) for row in rows],
+                    "usage": [
+                        {
+                            **dict(row),
+                            "recipients": recipients.get(int(row["id"]), []),
+                        }
+                        for row in usage_rows
+                    ],
+                }
 
             @app.post("/api/v1/federation/mail", response_model=None)
             async def federation_mail_send_route(
@@ -1812,9 +1844,17 @@ def create_web_app(
                         except (TypeError, ValueError):
                             checkpoint = {}
                         before = checkpoint.get("before")
+                        checkpoint_status = str(checkpoint.get("status") or "active")
                         catchup_map[int(cursor["peer_id"])] = {
-                            "active": bool(checkpoint.get("pending")) or bool(before),
+                            "active": checkpoint_status == "active"
+                            and (bool(checkpoint.get("pending")) or bool(before)),
                             "waiting": bool(checkpoint.get("pending")),
+                            "status": checkpoint_status,
+                            "reason": checkpoint.get("reason"),
+                            "used": checkpoint.get("used", 0),
+                            "budget": checkpoint.get("budget"),
+                            "rounds": checkpoint.get("rounds", 0),
+                            "resume_after": checkpoint.get("resume_after"),
                             "snapshot": checkpoint.get("snapshot"),
                             "updated_at": cursor["updated_at"],
                         }
@@ -1905,6 +1945,12 @@ def create_web_app(
                             {
                                 "active": False,
                                 "waiting": False,
+                                "status": None,
+                                "reason": None,
+                                "used": 0,
+                                "budget": None,
+                                "rounds": 0,
+                                "resume_after": None,
                                 "snapshot": None,
                                 "updated_at": None,
                             },
@@ -3352,6 +3398,9 @@ def create_web_app(
                         quota_items_per_hour=peer.quota_items_per_hour,
                         relay_mail=peer.relay_mail,
                         quota_mail_per_hour=peer.quota_mail_per_hour,
+                        quota_mail_per_recipient_per_hour=(
+                            peer.quota_mail_per_recipient_per_hour
+                        ),
                         service_permissions=peer.service_permissions,
                         quota_services_per_hour=peer.quota_services_per_hour,
                         service_concurrency=peer.service_concurrency,

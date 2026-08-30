@@ -1341,6 +1341,102 @@ def test_federation_origin_key_recovery_and_rotation_controls(
         page.close()
 
 
+def test_federation_resource_limits_surface_mail_rejections_and_stopped_reconciliation(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    stopped = {
+        "mesh_id": "!bbbbbbbb",
+        "node_name": "Relay B",
+        "last_sync_at": None,
+        "tx_counter": 4,
+        "rx_counter": 5,
+        "cursors": [{"updated_at": 2_000_000_000}],
+        "sync_paused": False,
+        "transfers": {
+            "paths": {
+                "radio": {"count_24h": 1, "last_at": 2_000_000_000},
+                "mqtt": {"count_24h": 0, "last_at": None},
+            },
+            "deliveries": {
+                "delivered": 0,
+                "pending": 0,
+                "retries": 0,
+                "recovered": 0,
+                "errors": 0,
+                "last_delivered_at": None,
+            },
+            "security": {"rejected_24h": 0, "recent": []},
+            "catch_up": {
+                "active": False,
+                "waiting": False,
+                "status": "aborted",
+                "reason": "peer reconciliation cursor did not advance",
+                "used": 8,
+                "budget": 20,
+                "rounds": 2,
+                "resume_after": 2_000_000_600,
+                "snapshot": 2_000_000_000,
+            },
+            "services": {
+                "permissions": [],
+                "request_limit": 6,
+                "airtime_limit_seconds": 15,
+                "usage": {},
+                "circuits": [],
+            },
+        },
+    }
+    page.route(
+        "**/api/v1/federation/sync-status",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {"items": [stopped], "outbound": {"frames_24h": 0, "last_at": None}}
+            ),
+        ),
+    )
+    page.route(
+        "**/api/v1/federation/mail",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": [],
+                    "usage": [
+                        {
+                            "mesh_id": "!bbbbbbbb",
+                            "node_name": "Relay B",
+                            "quota_mail_per_hour": 20,
+                            "quota_mail_per_recipient_per_hour": 5,
+                            "inbound_accepted": 20,
+                            "inbound_rejected": 3,
+                            "recipients": [],
+                        }
+                    ],
+                }
+            ),
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/federation.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        transfer = page.locator(".transfer-card.attention")
+        assert "peer reconciliation cursor did not advance" in transfer.text_content()
+        assert "8 / 20 items · 2 rounds" in transfer.text_content()
+        budget = page.locator(".relay-mail-budget.warn")
+        assert "Inbound 20 / 20 this hour · 3 rejected" in budget.text_content()
+        assert "separate 20 / hour allowance" in budget.text_content()
+        health.assert_clean()
+    finally:
+        page.close()
+
+
 def test_map_targets_and_list_alternatives_are_keyboard_ready(
     browser: object, dashboard_url: str
 ) -> None:
@@ -3325,6 +3421,7 @@ def route_federation_policy_workspace(
         "relay_mail": False,
         "quota_items_per_hour": 37,
         "quota_mail_per_hour": 11,
+        "quota_mail_per_recipient_per_hour": 4,
         "policy_configured": True,
         "policy_applied_by": "web:operator",
         "policy_applied_at": 2_000_000_000,
@@ -3451,7 +3548,7 @@ def test_federation_policy_wizard_presets_diff_and_global_board_confirmation(
         dialog.locator("#wizard-review-date").fill("2030-06-01")
         dialog.get_by_role("button", name="Review sharing").click()
 
-        assert dialog.locator(".wizard-diff-row").count() == 9
+        assert dialog.locator(".wizard-diff-row").count() == 10
         assert "2 board stream(s)" in dialog.locator("#wizard-sharing-summary").text_content()
         confirmation = dialog.locator("#wizard-board-confirmation")
         assert confirmation.is_visible()
@@ -3482,6 +3579,7 @@ def test_federation_policy_wizard_presets_diff_and_global_board_confirmation(
         assert applied[0]["service_permissions"] == ["alerts", "knowledge", "weather"]
         assert applied[0]["quota_items_per_hour"] == 37
         assert applied[0]["quota_mail_per_hour"] == 11
+        assert applied[0]["quota_mail_per_recipient_per_hour"] == 4
         assert applied[0]["policy_review_at"] == "2030-06-01T23:59:59Z"
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     finally:

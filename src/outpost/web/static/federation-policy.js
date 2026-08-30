@@ -26,7 +26,8 @@ const policyLabels = {
   mail: "Encrypted mail relay",
   services: "Peer services",
   itemQuota: "Content item quota",
-  mailQuota: "Mail quota",
+  mailQuota: "Mail quota (each direction)",
+  recipientMailQuota: "Inbound quota per recipient",
   serviceLimits: "Service limits",
   review: "Policy review date",
 };
@@ -53,7 +54,8 @@ function comparablePolicy(peer) {
     mail: Boolean(peer.relay_mail),
     services: peer.service_permissions || [],
     itemQuota: `${peer.quota_items_per_hour || 200} / hour`,
-    mailQuota: `${peer.quota_mail_per_hour || 20} / hour`,
+    mailQuota: `${peer.quota_mail_per_hour || 20} / hour in each direction`,
+    recipientMailQuota: `${peer.quota_mail_per_recipient_per_hour || 5} / hour`,
     serviceLimits: `${peer.quota_services_per_hour || 6} requests · ` +
       `${peer.service_concurrency || 1} concurrent · ` +
       `${peer.service_max_response_bytes || 1200} bytes · ` +
@@ -81,7 +83,9 @@ function candidatePolicy(dialog, peer, boards) {
     relay_alerts: dialog.querySelector("#wizard-alerts").checked,
     relay_mail: dialog.querySelector("#wizard-mail").checked,
     quota_items_per_hour: peer.quota_items_per_hour || 200,
-    quota_mail_per_hour: peer.quota_mail_per_hour || 20,
+    quota_mail_per_hour: Number(dialog.querySelector("#wizard-mail-quota").value) || 20,
+    quota_mail_per_recipient_per_hour:
+      Number(dialog.querySelector("#wizard-mail-recipient-quota").value) || 5,
     service_permissions: [...dialog.querySelectorAll(".wizard-service-choices input:checked")]
       .map(input => input.value).sort(),
     quota_services_per_hour: Number(dialog.querySelector("#wizard-service-quota").value) || 6,
@@ -106,7 +110,8 @@ function candidatePolicy(dialog, peer, boards) {
       mail: policy.relay_mail,
       services: policy.service_permissions,
       itemQuota: `${policy.quota_items_per_hour} / hour`,
-      mailQuota: `${policy.quota_mail_per_hour} / hour`,
+      mailQuota: `${policy.quota_mail_per_hour} / hour in each direction`,
+      recipientMailQuota: `${policy.quota_mail_per_recipient_per_hour} / hour`,
       serviceLimits: `${policy.quota_services_per_hour} requests · ` +
         `${policy.service_concurrency} concurrent · ` +
         `${policy.service_max_response_bytes} bytes · ` +
@@ -149,6 +154,11 @@ function updateOptionState(dialog) {
   dialog.querySelector(".wizard-boundary").classList.toggle("disabled", !incidents);
   dialog.querySelectorAll(".wizard-boundary input").forEach(input => {
     input.disabled = !incidents;
+  });
+  const mail = dialog.querySelector("#wizard-mail").checked;
+  dialog.querySelector(".wizard-mail-limits").classList.toggle("disabled", !mail);
+  dialog.querySelectorAll(".wizard-mail-limits input").forEach(input => {
+    input.disabled = !mail;
   });
 }
 
@@ -232,7 +242,14 @@ export async function openPolicyWizard({peer, api, refresh}) {
     `<small>Relay eligible alerts; imported alerts are never auto-broadcast.</small></span></label>` +
     `<label class="sharing-option"><input id="wizard-mail" type="checkbox" ` +
     `${peer.relay_mail ? "checked" : ""}><span><b>Encrypted mail</b>` +
-    `<small>Allow operator and member mail through this peer.</small></span></label>` +
+    `<small>Allow operator and member mail through this peer. The peer limit is enforced ` +
+    `independently for inbound and outbound messages.</small></span></label>` +
+    `<div class="wizard-mail-limits"><label><span>Messages / hour / direction</span>` +
+    `<input id="wizard-mail-quota" type="number" min="1" max="100" ` +
+    `value="${safe(peer.quota_mail_per_hour || 20)}"></label>` +
+    `<label><span>Inbound / recipient / hour</span>` +
+    `<input id="wizard-mail-recipient-quota" type="number" min="1" max="100" ` +
+    `value="${safe(peer.quota_mail_per_recipient_per_hour || 5)}"></label></div>` +
     `<div class="wizard-service-policy"><div><b>Peer information services</b>` +
     `<small>Allow this peer to use specific internet-backed services. Denied by default.</small></div>` +
     `<div class="wizard-service-choices">${["weather", "alerts", "knowledge"].map(service =>
@@ -280,6 +297,9 @@ export async function openPolicyWizard({peer, api, refresh}) {
   });
   dialog.querySelector("#wizard-bbs").addEventListener("change", () => updateOptionState(dialog));
   dialog.querySelector("#wizard-incidents").addEventListener(
+    "change", () => updateOptionState(dialog),
+  );
+  dialog.querySelector("#wizard-mail").addEventListener(
     "change", () => updateOptionState(dialog),
   );
   dialog.querySelector("form").addEventListener("submit", event => {

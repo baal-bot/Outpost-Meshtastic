@@ -1,8 +1,10 @@
 import pytest
+from fastapi.testclient import TestClient
 
-from outpost.clock import VirtualClock
+from outpost.clock import SystemClock, VirtualClock
 from outpost.fed import FederationMailService, FederationPeerService
 from outpost.store import Database
+from outpost.web.api import create_web_app
 
 
 @pytest.mark.asyncio
@@ -40,6 +42,74 @@ async def test_encrypted_mail_relay_delivers_to_local_member_once(tmp_path) -> N
     assert dict(mail[0]) == {"subject": "Check in", "body": "We are safe.", "state": "delivered"}
     await first_db.close()
     await second_db.close()
+
+
+@pytest.mark.asyncio
+async def test_inbound_mail_enforces_peer_and_recipient_quotas_without_spending_outbound(
+    tmp_path,
+) -> None:
+    sender_db, receiver_db = Database(tmp_path / "sender.db"), Database(
+        tmp_path / "receiver.db"
+    )
+    await sender_db.open()
+    await receiver_db.open()
+    sender_peers = FederationPeerService(sender_db, VirtualClock(), "!aaaaaaaa")
+    receiver_peers = FederationPeerService(receiver_db, VirtualClock(), "!bbbbbbbb")
+    secret = bytes(range(32))
+    for database, peers, remote in (
+        (sender_db, sender_peers, "!bbbbbbbb"),
+        (receiver_db, receiver_peers, "!aaaaaaaa"),
+    ):
+        await peers.discover(remote, "Peer", 1, {}, "radio")
+        await database.write(
+            "UPDATE fed_peer SET state='active',shared_secret=?,relay_mail=1 WHERE mesh_id=?",
+            (secret, remote),
+        )
+    await receiver_db.write(
+        "UPDATE fed_peer SET quota_mail_per_hour=2,"
+        "quota_mail_per_recipient_per_hour=1 WHERE mesh_id='!aaaaaaaa'"
+    )
+    await receiver_db.write(
+        "INSERT INTO member(mesh_id,mesh_num,handle,trust,first_seen,last_seen) VALUES"
+        "('!00000001',1,'alex','member',1,1),"
+        "('!00000002',2,'pat','member',1,1)"
+    )
+    sender = FederationMailService(sender_db, sender_peers, SystemClock())
+    receiver = FederationMailService(receiver_db, receiver_peers, SystemClock())
+
+    first = await sender.seal("!bbbbbbbb", "alex", "sam@Alpha", "One", "Body")
+    assert (await receiver.open("!aaaaaaaa", first))[1] == "delivered"
+    repeated = await sender.seal("!bbbbbbbb", "alex", "sam@Alpha", "Two", "Body")
+    with pytest.raises(ValueError, match="recipient @alex"):
+        await receiver.open("!aaaaaaaa", repeated)
+    boundary = await sender.seal("!bbbbbbbb", "pat", "sam@Alpha", "Three", "Body")
+    assert (await receiver.open("!aaaaaaaa", boundary))[1] == "delivered"
+    exceeded = await sender.seal("!bbbbbbbb", "operator", "sam@Alpha", "Four", "Body")
+    with pytest.raises(ValueError, match="peer inbound mail quota"):
+        await receiver.open("!aaaaaaaa", exceeded)
+
+    usage = (await receiver_db.read("SELECT * FROM fed_mail_usage"))[0]
+    assert (usage["inbound_accepted"], usage["inbound_rejected"]) == (2, 2)
+    assert len(await receiver_db.read("SELECT 1 FROM mail")) == 2
+    assert len(await sender_db.read("SELECT 1 FROM fed_mail_delivery WHERE direction='out'")) == 4
+
+    async def unused_send(*args, **kwargs):
+        raise AssertionError("mail send callback should not be called")
+
+    client = TestClient(
+        create_web_app(
+            lambda: {"radio": "up"},
+            database=receiver_db,
+            federation=receiver_peers,
+            federation_mail_send=unused_send,
+        )
+    )
+    dashboard_usage = client.get("/api/v1/federation/mail").json()["usage"][0]
+    assert dashboard_usage["inbound_accepted"] == 2
+    assert dashboard_usage["inbound_rejected"] == 2
+    assert dashboard_usage["quota_mail_per_recipient_per_hour"] == 1
+    await sender_db.close()
+    await receiver_db.close()
 
 
 @pytest.mark.asyncio

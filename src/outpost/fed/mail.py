@@ -191,50 +191,95 @@ class FederationMailService:
                 raise ValueError("local federation mail recipient was not found")
             recipient_id = members[0]["id"]
             recipient_label = members[0]["handle"]
+        window = now - now % 3_600
+        denial: str | None = None
         async with self.database.transaction() as transaction:
             concurrent = await transaction.read(
                 "SELECT state FROM fed_mail_delivery WHERE relay_id=?", (relay_id,)
             )
             if concurrent:
                 return relay_id, str(concurrent[0]["state"])
-            mail_id = await transaction.write(
-                "INSERT INTO mail(uid,from_label,to_id,to_label,subject,body,created_at,"
-                "delivered_at,state,expires_at,reply_peer_mesh_id,conversation_key,"
-                "federation_conversation_id,message_kind,mail_direction,source_peer_mesh_id,"
-                "reply_recipient_handle,participant_handle,operator_actor) "
-                "VALUES(?,?,?,?,?,?,?,?,'delivered',?,?,?,?,?,'in',?,?,?,?)",
-                (
-                    f"fed:{relay_id}",
-                    str(message["from"]),
-                    recipient_id,
-                    recipient_label,
-                    str(message.get("subject") or "")[:120],
-                    str(message["body"]),
-                    now,
-                    now,
-                    now + 180 * 86400,
-                    peer_id,
-                    f"fed:{peer_id}:{conversation_id}",
-                    conversation_id,
-                    message_kind,
-                    peer_id,
-                    reply_recipient[:40],
-                    participant[:40],
-                    str(message.get("operator_actor") or "")[:120] or None,
-                ),
+            usage = await transaction.read(
+                "SELECT inbound_accepted FROM fed_mail_usage "
+                "WHERE peer_id=? AND window_start=?",
+                (peer.id, window),
             )
-            await transaction.write(
-                "INSERT INTO fed_mail_delivery(relay_id,peer_id,direction,mail_id,"
-                "recipient_handle,state,created_at,updated_at,expires_at) "
-                "VALUES(?,?,'in',?,?,'delivered',?,?,?)",
-                (
-                    relay_id,
-                    peer.id,
-                    mail_id,
-                    recipient,
-                    now,
-                    now,
-                    int(envelope["expires_at"]),
-                ),
+            recipient_usage = await transaction.read(
+                "SELECT inbound_accepted FROM fed_mail_recipient_usage "
+                "WHERE peer_id=? AND recipient_handle=? AND window_start=?",
+                (peer.id, recipient, window),
             )
+            accepted = int(usage[0]["inbound_accepted"]) if usage else 0
+            recipient_accepted = (
+                int(recipient_usage[0]["inbound_accepted"]) if recipient_usage else 0
+            )
+            if accepted >= peer.quota_mail_per_hour:
+                denial = "peer inbound mail quota exceeded"
+            elif recipient_accepted >= min(
+                peer.quota_mail_per_hour, peer.quota_mail_per_recipient_per_hour
+            ):
+                denial = f"inbound mail quota exceeded for recipient @{recipient}"
+            if denial is not None:
+                await transaction.write(
+                    "INSERT INTO fed_mail_usage(peer_id,window_start,inbound_rejected) "
+                    "VALUES(?,?,1) ON CONFLICT(peer_id,window_start) DO UPDATE SET "
+                    "inbound_rejected=inbound_rejected+1",
+                    (peer.id, window),
+                )
+            else:
+                mail_id = await transaction.write(
+                    "INSERT INTO mail(uid,from_label,to_id,to_label,subject,body,created_at,"
+                    "delivered_at,state,expires_at,reply_peer_mesh_id,conversation_key,"
+                    "federation_conversation_id,message_kind,mail_direction,source_peer_mesh_id,"
+                    "reply_recipient_handle,participant_handle,operator_actor) "
+                    "VALUES(?,?,?,?,?,?,?,?,'delivered',?,?,?,?,?,'in',?,?,?,?)",
+                    (
+                        f"fed:{relay_id}",
+                        str(message["from"]),
+                        recipient_id,
+                        recipient_label,
+                        str(message.get("subject") or "")[:120],
+                        str(message["body"]),
+                        now,
+                        now,
+                        now + 180 * 86400,
+                        peer_id,
+                        f"fed:{peer_id}:{conversation_id}",
+                        conversation_id,
+                        message_kind,
+                        peer_id,
+                        reply_recipient[:40],
+                        participant[:40],
+                        str(message.get("operator_actor") or "")[:120] or None,
+                    ),
+                )
+                await transaction.write(
+                    "INSERT INTO fed_mail_delivery(relay_id,peer_id,direction,mail_id,"
+                    "recipient_handle,state,created_at,updated_at,expires_at) "
+                    "VALUES(?,?,'in',?,?,'delivered',?,?,?)",
+                    (
+                        relay_id,
+                        peer.id,
+                        mail_id,
+                        recipient,
+                        now,
+                        now,
+                        int(envelope["expires_at"]),
+                    ),
+                )
+                await transaction.write(
+                    "INSERT INTO fed_mail_usage(peer_id,window_start,inbound_accepted) "
+                    "VALUES(?,?,1) ON CONFLICT(peer_id,window_start) DO UPDATE SET "
+                    "inbound_accepted=inbound_accepted+1",
+                    (peer.id, window),
+                )
+                await transaction.write(
+                    "INSERT INTO fed_mail_recipient_usage(peer_id,recipient_handle,"
+                    "window_start,inbound_accepted) VALUES(?,?,?,1) "
+                    "ON CONFLICT(peer_id,recipient_handle,window_start) DO UPDATE SET "
+                    "inbound_accepted=inbound_accepted+1",
+                    (peer.id, recipient, window),
+                )
+        if denial is not None:
+            raise ValueError(denial)
         return relay_id, "delivered"

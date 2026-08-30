@@ -13,6 +13,40 @@ from outpost.fed import MessageType
 from outpost.transport.models import InboundMessage
 
 
+async def reconciliation_app(tmp_path, *, budget: int = 20):
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "modules": {"fed": {"enabled": True}},
+            "fed": {"max_items_per_cycle": budget},
+        }
+    )
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    app.federation.local_mesh_id = "!local"
+    app.federation_sync.local_mesh_id = "!local"
+    peer = await app.federation.discover("!remote", "Remote", 1, {}, "radio")
+    await app.database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,boards='[\"gen\"]',"
+        "local_approved=1,remote_approved=1 WHERE id=?",
+        (bytes(range(32)), peer.id),
+    )
+    return app, peer
+
+
+def manifest_page(*versions: int) -> list[dict[str, object]]:
+    return [
+        {
+            "version": version,
+            "stream": "board:gen",
+            "uid": f"!remote:post-{version}",
+            "digest": f"digest-{version}",
+        }
+        for version in versions
+    ]
+
+
 @pytest.mark.asyncio
 async def test_radio_hello_creates_pending_peer(tmp_path) -> None:
     config = Config.model_validate(
@@ -242,6 +276,229 @@ async def test_sync_retry_is_single_flight_and_recognizes_legacy_work(tmp_path) 
     )
     await app._federation_sync_once()
     assert [item.item_id for item in app.governor.queued_items()] == [retried[0].item_id]
+    await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_rejects_nonadvancing_peer_cursor_and_records_reason(
+    tmp_path,
+) -> None:
+    app, peer = await reconciliation_app(tmp_path)
+    now = int(app.clock.now().timestamp())
+    checkpoint = {
+        "before": [100, "board:gen", "!remote:post-100"],
+        "snapshot": 200,
+        "pending": True,
+        "status": "active",
+        "budget": 20,
+        "used": 8,
+        "rounds": 1,
+    }
+    await app._store_reconciliation_checkpoint(peer.id, checkpoint, now)
+
+    with pytest.raises(ValueError, match="cursor did not advance"):
+        await app._handle_sync_manifest(
+            "!remote",
+            {
+                "items": manifest_page(100),
+                "snapshot": 200,
+                "next_before": [100, "board:gen", "!remote:post-100"],
+                "remaining": 100,
+            },
+        )
+
+    stored = json.loads(
+        str(
+            (
+                await app.database.read(
+                    "SELECT cursor FROM fed_cursor WHERE peer_id=? AND stream='_reconcile'",
+                    (peer.id,),
+                )
+            )[0]["cursor"]
+        )
+    )
+    assert stored["status"] == "aborted"
+    assert stored["reason"] == "peer reconciliation cursor did not advance"
+    assert stored["pending"] is False and stored["resume_after"] > now
+    await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_ignores_peer_remaining_and_stops_at_local_cycle_budget(
+    tmp_path,
+) -> None:
+    app, peer = await reconciliation_app(tmp_path, budget=10)
+    now = int(app.clock.now().timestamp())
+    await app._store_reconciliation_checkpoint(
+        peer.id,
+        {
+            "before": None,
+            "snapshot": 200,
+            "pending": True,
+            "status": "active",
+            "budget": 10,
+            "used": 0,
+            "rounds": 0,
+        },
+        now,
+    )
+    queued: list[tuple[MessageType, dict[str, object]]] = []
+
+    async def capture_control(
+        peer_id: str, msg_type: MessageType, value: dict[str, object]
+    ) -> bool:
+        assert peer_id == "!remote"
+        queued.append((msg_type, value))
+        return True
+
+    app._queue_federation_control = capture_control  # type: ignore[method-assign]
+    first = manifest_page(100, 99, 98, 97, 96, 95, 94, 93)
+    await app._handle_sync_manifest(
+        "!remote",
+        {
+            "items": first,
+            "snapshot": 200,
+            "next_before": [93, "board:gen", "!remote:post-93"],
+            "remaining": 100,
+        },
+    )
+    continuation = next(value for kind, value in queued if kind is MessageType.SYNC_REQ)
+    assert continuation["budget"] == 2 and continuation["limit"] == 2
+
+    await app._handle_sync_manifest(
+        "!remote",
+        {
+            "items": manifest_page(92, 91),
+            "snapshot": 200,
+            "next_before": [91, "board:gen", "!remote:post-91"],
+            "remaining": 100,
+        },
+    )
+    stored = json.loads(
+        str(
+            (
+                await app.database.read(
+                    "SELECT cursor FROM fed_cursor WHERE peer_id=? AND stream='_reconcile'",
+                    (peer.id,),
+                )
+            )[0]["cursor"]
+        )
+    )
+    assert stored["status"] == "truncated"
+    assert stored["reason"] == "local reconciliation item budget exhausted"
+    assert stored["used"] == 10 and stored["rounds"] == 2
+    assert len([kind for kind, _ in queued if kind is MessageType.SYNC_REQ]) == 1
+    await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_legitimate_reconciliation_walk_completes_within_local_budget(tmp_path) -> None:
+    app, peer = await reconciliation_app(tmp_path, budget=20)
+    now = int(app.clock.now().timestamp())
+    await app._store_reconciliation_checkpoint(
+        peer.id,
+        {
+            "before": None,
+            "snapshot": 200,
+            "pending": True,
+            "status": "active",
+            "budget": 20,
+            "used": 0,
+            "rounds": 0,
+        },
+        now,
+    )
+
+    async def accept_control(
+        peer_id: str, msg_type: MessageType, value: dict[str, object]
+    ) -> bool:
+        return True
+
+    app._queue_federation_control = accept_control  # type: ignore[method-assign]
+    await app._handle_sync_manifest(
+        "!remote",
+        {
+            "items": manifest_page(100, 99, 98),
+            "snapshot": 200,
+            "next_before": [98, "board:gen", "!remote:post-98"],
+            "remaining": 100,
+        },
+    )
+    await app._handle_sync_manifest(
+        "!remote",
+        {
+            "items": manifest_page(97, 96),
+            "snapshot": 200,
+            "next_before": None,
+            "remaining": 100,
+        },
+    )
+    stored = json.loads(
+        str(
+            (
+                await app.database.read(
+                    "SELECT cursor FROM fed_cursor WHERE peer_id=? AND stream='_reconcile'",
+                    (peer.id,),
+                )
+            )[0]["cursor"]
+        )
+    )
+    assert stored["status"] == "complete"
+    assert stored["used"] == 5 and stored["rounds"] == 2
+    assert (
+        await app.database.read("SELECT last_sync_at FROM fed_peer WHERE id=?", (peer.id,))
+    )[0]["last_sync_at"] == now
+    await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_round_ceiling_is_local_and_independent_of_peer_budget(
+    tmp_path,
+) -> None:
+    app, peer = await reconciliation_app(tmp_path, budget=100)
+    now = int(app.clock.now().timestamp())
+    await app._store_reconciliation_checkpoint(
+        peer.id,
+        {
+            "before": [90, "board:gen", "!remote:post-90"],
+            "snapshot": 200,
+            "pending": True,
+            "status": "active",
+            "budget": 100,
+            "used": 15,
+            "rounds": 15,
+        },
+        now,
+    )
+
+    async def accept_control(
+        peer_id: str, msg_type: MessageType, value: dict[str, object]
+    ) -> bool:
+        return True
+
+    app._queue_federation_control = accept_control  # type: ignore[method-assign]
+    await app._handle_sync_manifest(
+        "!remote",
+        {
+            "items": manifest_page(89),
+            "snapshot": 200,
+            "next_before": [89, "board:gen", "!remote:post-89"],
+            "remaining": 100,
+        },
+    )
+    stored = json.loads(
+        str(
+            (
+                await app.database.read(
+                    "SELECT cursor FROM fed_cursor WHERE peer_id=? AND stream='_reconcile'",
+                    (peer.id,),
+                )
+            )[0]["cursor"]
+        )
+    )
+    assert stored["status"] == "truncated"
+    assert stored["reason"] == "local reconciliation continuation round limit reached"
+    assert stored["rounds"] == 16
     await app.database.close()
 
 
@@ -744,6 +1001,75 @@ async def test_relay_admission_refusal_returns_authenticated_negative_receipt(tm
     assert receipt["envelope_id"] == envelope_id
     assert receipt["state"] == "rejected"
     assert receipt["reason"] == "relay is not enabled for this peer"
+    await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_inbound_mail_quota_refusal_sends_one_terminal_receipt(tmp_path) -> None:
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "modules": {"fed": {"enabled": True}},
+        }
+    )
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    secret = bytes(range(32))
+    await app.federation.discover("!remote", "Remote", 1, {}, "radio")
+    await app.database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,local_approved=1,remote_approved=1 "
+        "WHERE mesh_id='!remote'",
+        (secret,),
+    )
+    receipts: list[tuple[str, MessageType, dict[str, object]]] = []
+
+    async def reject_mail(peer_id: str, envelope: dict[str, object]):
+        raise ValueError("peer inbound mail quota exceeded")
+
+    async def capture_receipt(
+        peer_id: str,
+        msg_type: MessageType,
+        value: dict[str, object],
+        **kwargs,
+    ) -> int:
+        receipts.append((peer_id, msg_type, value))
+        return 1
+
+    app.federation_mail.open = reject_mail  # type: ignore[method-assign]
+    app._send_federation_value = capture_receipt  # type: ignore[method-assign]
+    frame = app.federation_codec.encode(
+        MessageType.MAIL_RELAY,
+        {"mesh_id": "!remote", "target_mesh_id": "!local", "relay_id": "mail-1"},
+        1,
+        secret,
+    )[0]
+    await app._handle_federation_discovery(
+        InboundMessage(
+            61,
+            "!remote",
+            "!local",
+            0,
+            config.radio.federation_portnum,
+            True,
+            None,
+            frame,
+            datetime.now(UTC),
+        )
+    )
+
+    assert receipts == [
+        (
+            "!remote",
+            MessageType.MAIL_RECEIPT,
+            {
+                "mesh_id": "!local",
+                "relay_id": "mail-1",
+                "state": "failed",
+                "error": "peer inbound mail quota exceeded",
+            },
+        )
+    ]
     await app.database.close()
 
 
