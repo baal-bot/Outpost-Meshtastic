@@ -89,7 +89,11 @@ class AlertService:
                 "stage_total": len(policy.stages),
                 "next_action": next_stage.model_dump() if next_stage else None,
                 "repeat_max": self.config.watch.alert_repeat_max,
-                "repeat_remaining": max(0, self.config.watch.alert_repeat_max - alert.repeat_count),
+                "repeat_remaining": (
+                    max(0, self.config.watch.alert_repeat_max - alert.repeat_count)
+                    if next_stage is not None and next_stage.repeat
+                    else 0
+                ),
                 "acknowledgements": [dict(row) for row in rows],
                 "audiences": [dict(row) for row in audiences],
             }
@@ -289,6 +293,7 @@ class AlertService:
                 next_at = now + self.config.watch.alert_repeat_interval_minutes * 60
             else:
                 next_stage = stage_index + 1
+                repeat_count = 0
                 next_at = (
                     max(now, alert.raised_at + policy.stages[next_stage].after_minutes * 60)
                     if next_stage < len(policy.stages)
@@ -296,6 +301,7 @@ class AlertService:
                 )
         else:
             next_stage = stage_index + 1
+            repeat_count = 0
             next_at = (
                 alert.raised_at + policy.stages[next_stage].after_minutes * 60
                 if next_stage < len(policy.stages)

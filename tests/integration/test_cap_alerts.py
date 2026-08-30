@@ -208,6 +208,7 @@ async def test_cap_update_supersedes_and_cancel_issues_all_clear(tmp_path, monke
     await cap.poll(40.4406, -79.9959)
     original_cap = (await cap.list())[0]
     original = await cap.approve(original_cap["id"], alerts)
+    assert original["expires_at"] == 1_767_229_200
 
     update = feature("cap-update")
     update["properties"]["messageType"] = "Update"
@@ -219,6 +220,7 @@ async def test_cap_update_supersedes_and_cancel_issues_all_clear(tmp_path, monke
     await cap.poll(40.4406, -79.9959)
     update_cap = next(item for item in await cap.list() if item["identifier"] == "cap-update")
     replacement = await cap.approve(update_cap["id"], alerts)
+    assert replacement["expires_at"] == 1_767_229_200
     assert (await alerts.by_id(original["id"])).cancelled_at is not None
     assert replacement["id"] != original["id"]
     assert all(
@@ -234,6 +236,94 @@ async def test_cap_update_supersedes_and_cancel_issues_all_clear(tmp_path, monke
     await cap.approve(cancel_cap["id"], alerts)
     assert (await alerts.by_id(replacement["id"])).cancelled_at is not None
     assert any(item.text.startswith("ALL CLEAR") for item in governor.queued_items())
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_cap_approval_preserves_short_and_long_warning_expiry(tmp_path, monkeypatch) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    short = feature("cap-short")
+    short["properties"]["expires"] = "2026-01-01T00:30:00Z"
+    long = feature("cap-long")
+    long["properties"]["expires"] = "2026-01-04T00:00:00Z"
+    payload = {"features": [short, long]}
+
+    async def request(*args, **kwargs):
+        return payload
+
+    monkeypatch.setattr("outpost.env.cap._request_json", request)
+    config = Config.model_validate({"channels": {0: {"name": "public"}, 3: {"name": "watch"}}})
+    alerts = AlertService(
+        database, AirtimeGovernor(SimulatedRadioLink(), config.airtime, clock), clock, config
+    )
+    cap = CapAlertService(database, clock, EnvConfig())
+
+    await cap.poll(40.4406, -79.9959)
+    inbox = {item["identifier"]: item for item in await cap.list()}
+    short_alert = await cap.approve(inbox["cap-short"]["id"], alerts)
+    long_alert = await cap.approve(inbox["cap-long"]["id"], alerts)
+
+    assert short_alert["expires_at"] == 1_767_227_400
+    assert long_alert["expires_at"] == 1_767_484_800
+    assert "until 00:30" in short_alert["headline"]
+    assert "until 00:00" in long_alert["headline"]
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_cap_missing_expiry_uses_visible_six_hour_fallback(tmp_path, monkeypatch) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    item = feature("cap-missing")
+    item["properties"].pop("expires")
+
+    async def request(*args, **kwargs):
+        return {"features": [item]}
+
+    monkeypatch.setattr("outpost.env.cap._request_json", request)
+    config = Config.model_validate({"channels": {0: {"name": "public"}, 3: {"name": "watch"}}})
+    alerts = AlertService(
+        database, AirtimeGovernor(SimulatedRadioLink(), config.airtime, clock), clock, config
+    )
+    cap = CapAlertService(database, clock, EnvConfig())
+
+    await cap.poll(40.4406, -79.9959)
+    stored = (await cap.list())[0]
+    assert stored["decision"] == "accepted" and stored["review_state"] == "pending"
+    assert stored["expires_epoch"] == int(clock.now().timestamp()) + 6 * 3_600
+    assert stored["gate_reasons"] == ["expiry missing; using the documented 6-hour fallback"]
+    alert = await cap.approve(stored["id"], alerts)
+    assert alert["expires_at"] == stored["expires_epoch"]
+    assert "until 06:00" in alert["headline"]
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_cap_approval_clearly_refuses_an_expired_warning(tmp_path, monkeypatch) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    item = feature("cap-past")
+    item["properties"]["expires"] = "2025-12-31T23:59:00Z"
+
+    async def request(*args, **kwargs):
+        return {"features": [item]}
+
+    monkeypatch.setattr("outpost.env.cap._request_json", request)
+    config = Config.model_validate({"channels": {0: {"name": "public"}, 3: {"name": "watch"}}})
+    alerts = AlertService(
+        database, AirtimeGovernor(SimulatedRadioLink(), config.airtime, clock), clock, config
+    )
+    cap = CapAlertService(database, clock, EnvConfig())
+
+    await cap.poll(40.4406, -79.9959)
+    stored = (await cap.list(include_expired=True))[0]
+    with pytest.raises(ValueError, match="expired at .* cannot be approved"):
+        await cap.approve(stored["id"], alerts)
+    assert await alerts.list() == []
     await database.close()
 
 

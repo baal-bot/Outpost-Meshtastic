@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import time
 from ipaddress import ip_network
 from pathlib import Path
 from typing import Annotated, Literal
@@ -10,6 +11,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 TRAFFIC_CLASSES = {"alert", "reply", "ai", "bulletin", "digest", "federation"}
+PAGE_SCOPES = {"boards", "threads", "posts", "mail", "incidents", "members"}
 
 
 class StrictModel(BaseModel):
@@ -74,6 +76,24 @@ class QuietHours(StrictModel):
     end: str = "06:00"
     classes: list[str] = Field(default_factory=lambda: ["digest", "bulletin", "federation"])
 
+    @model_validator(mode="after")
+    def validate_window(self) -> QuietHours:
+        for field_name in ("start", "end"):
+            try:
+                parsed = time.fromisoformat(getattr(self, field_name))
+            except ValueError as error:
+                raise ValueError(
+                    f"airtime.quiet_hours.{field_name} must be an ISO local time such as 22:00"
+                ) from error
+            if parsed.tzinfo is not None:
+                raise ValueError(
+                    f"airtime.quiet_hours.{field_name} must be a local time without an offset"
+                )
+        unknown = set(self.classes) - TRAFFIC_CLASSES
+        if unknown:
+            raise ValueError(f"airtime.quiet_hours.classes has unknown classes: {sorted(unknown)}")
+        return self
+
 
 class AirtimeConfig(StrictModel):
     budget_percent: float = Field(default=8.0, gt=0)
@@ -103,6 +123,7 @@ class AirtimeConfig(StrictModel):
             "digest": 4,
             "alert": 2,
             "bulletin": 2,
+            "federation": 1,
         }
     )
 
@@ -111,6 +132,19 @@ class AirtimeConfig(StrictModel):
         unknown = set(self.class_shares) - TRAFFIC_CLASSES
         if unknown:
             raise ValueError(f"airtime.class_shares has unknown classes: {sorted(unknown)}")
+        missing = TRAFFIC_CLASSES - set(self.class_shares)
+        if missing:
+            raise ValueError(f"airtime.class_shares is missing classes: {sorted(missing)}")
+        if any(value < 0 or value > 1 for value in self.class_shares.values()):
+            raise ValueError("airtime.class_shares values must be between 0 and 1")
+        unknown_parts = set(self.max_parts) - TRAFFIC_CLASSES
+        if unknown_parts:
+            raise ValueError(f"airtime.max_parts has unknown classes: {sorted(unknown_parts)}")
+        missing_parts = TRAFFIC_CLASSES - set(self.max_parts)
+        if missing_parts:
+            raise ValueError(f"airtime.max_parts is missing classes: {sorted(missing_parts)}")
+        if any(value < 1 for value in self.max_parts.values()):
+            raise ValueError("airtime.max_parts values must be at least 1")
         if sum(self.class_shares.values()) > 1.0 + 1e-9:
             raise ValueError("airtime.class_shares must sum to <= 1.0")
         total = self.budget_percent + self.emergency_reserve_percent
@@ -147,6 +181,18 @@ class RouterConfig(StrictModel):
         }
     )
     intents_file: str = "config/intents.yaml"
+
+    @model_validator(mode="after")
+    def validate_page_sizes(self) -> RouterConfig:
+        unknown = set(self.page_sizes) - PAGE_SCOPES
+        missing = PAGE_SCOPES - set(self.page_sizes)
+        if unknown:
+            raise ValueError(f"router.page_sizes has unknown scopes: {sorted(unknown)}")
+        if missing:
+            raise ValueError(f"router.page_sizes is missing scopes: {sorted(missing)}")
+        if any(value < 1 for value in self.page_sizes.values()):
+            raise ValueError("router.page_sizes values must be at least 1")
+        return self
 
 
 class Enabled(StrictModel):

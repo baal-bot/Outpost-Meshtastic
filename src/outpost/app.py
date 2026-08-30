@@ -79,7 +79,11 @@ from outpost.store.message_log import MessageLogRepo
 from outpost.store.outbox import OutboxStore
 from outpost.task_supervision import TaskFailureDomain, restart_delay
 from outpost.transport.chunker import chunk_text
-from outpost.transport.governor import AirtimeGovernor, OutboundItem
+from outpost.transport.governor import (
+    AirtimeGovernor,
+    GovernorConfigurationError,
+    OutboundItem,
+)
 from outpost.transport.inbound import InboundPipeline
 from outpost.transport.metrics import (
     ACK_OUTCOME,
@@ -357,6 +361,7 @@ class OutpostApp:
             "stopped_at": None,
             "error": None,
             "degraded_reason": None,
+            "degradation_count": 0,
             "failure_count": 0,
             "consecutive_failures": 0,
             "restart_count": 0,
@@ -440,6 +445,23 @@ class OutpostApp:
         )
         return health
 
+    def _record_task_degradation(self, name: str, error: BaseException) -> None:
+        health = self._task_health.get(name)
+        if health is None:
+            return
+        now = int(self.clock.now().timestamp())
+        detail = " ".join(f"{type(error).__name__}: {error}".split())[:240]
+        health.update(
+            {
+                "state": "degraded",
+                "error": detail,
+                "degraded_reason": detail,
+                "degradation_count": int(health["degradation_count"]) + 1,
+                "last_error": detail,
+                "last_error_at": now,
+            }
+        )
+
     async def test_ai(self, question: str) -> dict[str, object]:
         member = MemberRepo(self.database, self.clock)
         rows = await self.database.read(
@@ -462,7 +484,7 @@ class OutpostApp:
 
     def _task_progress(self, name: str) -> None:
         health = self._task_health.get(name)
-        if health is not None and health["state"] in {"running", "restarting"}:
+        if health is not None and health["state"] in {"running", "restarting", "degraded"}:
             health.update(
                 {
                     "state": "running",
@@ -1066,7 +1088,7 @@ class OutpostApp:
         if service in {"weather", "alerts"}:
             try:
                 lat, lon = round(float(args["lat"]), 4), round(float(args["lon"]), 4)
-            except (KeyError, TypeError, ValueError) as error:
+            except GovernorConfigurationError as error:
                 raise ValueError(f"{service} coordinates are required") from error
             if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                 raise ValueError(f"invalid {service} coordinates")
@@ -2343,7 +2365,7 @@ class OutpostApp:
                 for delivery in await self.digests.due():
                     parts = chunk_text(
                         delivery.text,
-                        max_parts=self.config.airtime.max_parts.get("digest", 4),
+                        max_parts=self.config.airtime.max_parts["digest"],
                     )
                     scheduled = await self.governor.admit_many(
                         [
@@ -2398,7 +2420,15 @@ class OutpostApp:
 
     async def _governor_loop(self) -> None:
         while True:
-            item = await self.governor.tick()
+            try:
+                item = await self.governor.tick()
+            except (KeyError, TypeError, ValueError) as error:
+                # Strict startup validation prevents known configuration faults. Keep this
+                # boundary so an unexpected runtime mutation is visible without terminating
+                # the sole egress loop; alert traffic gets first priority on the next tick.
+                self._record_task_degradation("airtime-governor", error)
+                await self.clock.sleep(0.25)
+                continue
             if item is not None and not self.governor.durable:
                 result = item.send_result
                 await self.message_log.record_outbound(
@@ -2615,7 +2645,7 @@ class OutpostApp:
         if response.kind == ResponseKind.NONE:
             return
         text = render_response(response)
-        configured_max_parts = self.config.airtime.max_parts.get(response.airtime_class.value, 1)
+        configured_max_parts = self.config.airtime.max_parts[response.airtime_class.value]
         max_parts = (
             min(response.max_parts, configured_max_parts)
             if response.max_parts is not None

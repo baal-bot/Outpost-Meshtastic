@@ -29,12 +29,12 @@ revision on which CI runs this manifest check.
 | --- | --- | --- | --- |
 | Meshtastic transport | Serial, TCP, and BLE links; reconnect, liveness supervision, inbound backpressure, and radio status. | Single-node field-tested | unreleased @ `HEAD` (2026-08-27); introduced `04e74ca` |
 | Command routing | Guided capability-aware DM screens, mutation-safe tolerant commands, globally reserved disabled-feature vocabulary, contextual composition, recovery, channel parsing, paging, trust/module gates, PKI-bound elevated actions, and bounded inbound workers. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `04e74ca` |
-| Airtime and outbound delivery | Durable priority queue, airtime shares, emergency reserve, quiet hours, dedupe, pacing, receipts, and restart recovery. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `3d65058` |
+| Airtime and outbound delivery | Durable priority queue, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, and restart recovery. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `3d65058` |
 | Identity and member directory | Handles, social trust, reviewed Meshtastic PKI fingerprints, conflict demotion, explicit key rotation, recently-heard radio discovery, exact-position controls, and operator triage. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `8accdf3` |
 | BBS, mail, and operator inbox | Boards, threads, posts, subscriptions, digests, private mail, moderation, and one replyable operations inbox. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `41a6c85` |
-| Community Watch | Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, delivery-accountable responder alerts, retrying zero-recipient escalation, operator conditions, bounded repeats, all-clear, and maps. | Simulated | unreleased @ `HEAD` (2026-08-29); introduced `8323143` |
+| Community Watch | Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, delivery-accountable responder alerts, retrying zero-recipient escalation, per-stage bounded repeats, all-clear, and maps. | Simulated | unreleased @ `HEAD` (2026-08-29); introduced `8323143` |
 | Welfare events and check-ins | Events, reviewed solicitation, roster states, delivery-accountable HELP/OK handling, honest no-responder guidance, derived unaccounted members, and CSV export. | Simulated | unreleased @ `HEAD` (2026-08-29); introduced `04e74ca` |
-| Environmental information | Weather observations/forecasts, offset-safe CAP alert expiry, astronomy, earthquakes, caching, provenance, maps, and waypoints. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `72763e5` |
+| Environmental information | Weather observations/forecasts, source-preserving CAP alert expiry with a visible missing-expiry fallback, astronomy, earthquakes, caching, provenance, maps, and waypoints. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `72763e5` |
 | NOAA SAME / RTL-SDR | Supervised receive-only rtl_fm/samedec pipeline, county and review gates, CAP dedupe, health, and bounded restart. | Hardware-gated | unreleased @ `HEAD` (2026-08-26); introduced `764516a` |
 | Dashboard and operator access | Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, shared map controls, and an offline-capable federation topology view. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `5295868` |
 | Backup, restore, upgrade, and rollback | Online verified backups, rotation, quiesced web restore, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `df0ee14` |
@@ -82,7 +82,9 @@ Maturity: **Automated-tested**.
 Evidence:
 
 - Automated: [tests/integration/test_durable_outbox.py](../tests/integration/test_durable_outbox.py) — Admitted work survives restart and delivery state is idempotent.
-- Automated: [tests/unit/test_governor.py](../tests/unit/test_governor.py) — Priority, budget, reserve, pacing, and failure-path policy.
+- Automated: [tests/unit/test_governor.py](../tests/unit/test_governor.py) — Priority, budget, reserve, pacing, invalid-runtime-config containment, and critical-path policy.
+- Automated: [tests/unit/test_config.py](../tests/unit/test_config.py) — Startup rejection of incomplete airtime maps, invalid quiet hours, and incomplete page-size policy.
+- Automated: [tests/unit/test_background_tasks.py](../tests/unit/test_background_tasks.py) — Dispatch-time configuration faults are surfaced as degraded without terminating the core governor loop.
 
 Known limitations:
 
@@ -124,7 +126,7 @@ Evidence:
 
 - Acceptance: [docs/PHASE3-ACCEPTANCE.md](PHASE3-ACCEPTANCE.md) — Automated phase gates and explicitly open tabletop criteria.
 - Automated: [tests/integration/test_safety_commands.py](../tests/integration/test_safety_commands.py) — Member-facing incident, alert, acknowledgement, and trust paths through the mesh router.
-- Automated: [tests/integration/test_watch_alerts.py](../tests/integration/test_watch_alerts.py) — Audience delivery, empty/capacity refusal recovery, repeats, acknowledgements, escalation, and all-clear.
+- Automated: [tests/integration/test_watch_alerts.py](../tests/integration/test_watch_alerts.py) — Audience delivery, empty/capacity refusal recovery, per-stage repeat budgets, acknowledgements, escalation, and all-clear.
 - Automated: [tests/integration/test_incident_reconciliation.py](../tests/integration/test_incident_reconciliation.py) — Partition, concurrent edit, immutable identity, human merge/unmerge, and resolution-lock behavior.
 
 Known limitations:
@@ -153,7 +155,7 @@ Evidence:
 
 - Acceptance: [docs/PHASE4-ACCEPTANCE.md](PHASE4-ACCEPTANCE.md) — Provider, cache, CAP lifecycle, geometry, and provenance gates.
 - Automated: [tests/integration/test_weather.py](../tests/integration/test_weather.py) — Weather caching, expiry, observation/forecast labels, and safe failure.
-- Automated: [tests/integration/test_cap_alerts.py](../tests/integration/test_cap_alerts.py) — CAP lifecycle, instant-safe expiry across ISO offset forms, migration repair, and re-poll recovery.
+- Automated: [tests/integration/test_cap_alerts.py](../tests/integration/test_cap_alerts.py) — CAP lifecycle, source expiry propagation, visible six-hour fallback, past-expiry refusal, offset-safe migration repair, and re-poll recovery.
 
 Known limitations:
 

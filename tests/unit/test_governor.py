@@ -116,6 +116,24 @@ async def test_critical_may_use_reserve_but_urgent_may_not() -> None:
 
 
 @pytest.mark.asyncio
+async def test_post_startup_config_mutation_cannot_crash_dispatch() -> None:
+    clock, link = VirtualClock(), SimulatedRadioLink()
+    await link.connect()
+    config = AirtimeConfig(min_gap_s=0)
+    config.class_shares.pop("reply")
+    config.quiet_hours.start = "10pm"
+    config.quiet_hours.classes = ["reply"]
+    governor = AirtimeGovernor(link, config, clock)
+    governor.enqueue(OutboundItem("reply", "!peer", 0, TrafficClass.REPLY))
+    governor.enqueue(OutboundItem("critical", "^all", 3, TrafficClass.ALERT, Severity.CRITICAL))
+
+    sent = await governor.tick()
+    assert sent is not None and sent.traffic_class == TrafficClass.ALERT
+    assert await governor.tick() is None
+    assert governor.queue_depths()["reply"] == 1
+
+
+@pytest.mark.asyncio
 async def test_three_alert_storm_is_bounded_and_critical_reaches_reserve() -> None:
     clock, link = VirtualClock(), SimulatedRadioLink()
     await link.connect()

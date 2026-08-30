@@ -44,6 +44,10 @@ ALERT_SEVERITY_ORDER = (
 )
 
 
+class GovernorConfigurationError(ValueError):
+    """A runtime configuration fault that the egress loop may safely contain."""
+
+
 @dataclass
 class OutboundItem:
     text: str
@@ -519,8 +523,13 @@ class AirtimeGovernor:
         if cls.value not in self.config.quiet_hours.classes or cls == TrafficClass.ALERT:
             return False
         current = self.clock.now().time().replace(tzinfo=None)
-        start = time.fromisoformat(self.config.quiet_hours.start)
-        end = time.fromisoformat(self.config.quiet_hours.end)
+        # QuietHours validates these before startup; retaining a safe fallback here keeps a
+        # post-startup mutation from taking down the dispatch loop.
+        try:
+            start = time.fromisoformat(self.config.quiet_hours.start)
+            end = time.fromisoformat(self.config.quiet_hours.end)
+        except ValueError:
+            return False
         return start <= current < end if start < end else current >= start or current < end
 
     def _available(self, item: OutboundItem, now: float) -> bool:
@@ -625,7 +634,7 @@ class AirtimeGovernor:
             queue.appendleft(item)
             self.metrics.throttled[cls] += 1
             return None
-        class_ceiling = budget_s * self.config.class_shares[cls.value]
+        class_ceiling = budget_s * self.config.class_shares.get(cls.value, 0.0)
         if not critical and self.class_airtime(cls) + cost > class_ceiling:
             queue.appendleft(item)
             self.metrics.throttled[cls] += 1

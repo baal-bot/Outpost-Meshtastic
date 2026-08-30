@@ -24,6 +24,27 @@ def test_invalid_airtime_config_is_rejected(airtime: dict[str, object]) -> None:
         Config.model_validate({"airtime": airtime})
 
 
+@pytest.mark.parametrize(
+    ("values", "message"),
+    [
+        ({"airtime": {"class_shares": {"alert": 0.5}}}, "class_shares is missing"),
+        ({"airtime": {"max_parts": {"reply": 3}}}, "max_parts is missing"),
+        ({"airtime": {"quiet_hours": {"start": "10pm"}}}, "quiet_hours.start"),
+        ({"airtime": {"quiet_hours": {"start": "22:00-04:00"}}}, "without an offset"),
+        (
+            {"airtime": {"quiet_hours": {"classes": ["alerts", "bulletins"]}}},
+            "quiet_hours.classes has unknown",
+        ),
+        ({"router": {"page_sizes": {"boards": 6}}}, "page_sizes is missing"),
+    ],
+)
+def test_structured_dispatch_config_must_be_complete_and_parseable(
+    values: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        Config.model_validate(values)
+
+
 def test_unsafe_no_auth_is_rejected() -> None:
     with pytest.raises(ValidationError, match="loopback"):
         Config.model_validate(

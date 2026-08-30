@@ -9,7 +9,7 @@ RTL-SDR/SAME hardware validated on 2026-08-26 with a Nooelec NESDR SMArt v5 on a
 | 1 | `WX`, `FC`, `SUN`, `WARN`, `QUAKE` use one radio part | Pass | `test_environment_gate_commands_are_single_part`; UTF-8 output is capped at 200 bytes |
 | 2 | WAN-down weather serves cached data with age | Pass | `test_weather_cache_age_labels_and_safe_wan_failure` |
 | 3 | Weather refuses beyond `max_age` | Pass | `test_weather_cache_age_labels_and_safe_wan_failure` |
-| 4 | Expired CAP alerts never transmit | Pass | `test_cap_gate_rejects_expired_test_and_unlikely`; approval requires accepted/pending state |
+| 4 | CAP approval preserves expiry and expired alerts never transmit | Pass | Source expiry is copied to the alert and headline; missing expiry uses a visible six-hour fallback; past expiry is refused |
 | 5 | Point query and polygon relevance | Pass | CAP poll constructs `point=`; `test_cap_polygon_must_contain_outpost` |
 | 6 | CAP Update supersedes; Cancel issues all-clear | Pass | `test_cap_update_supersedes_and_cancel_issues_all_clear` |
 | 7 | User-Agent, conditional requests, and 304 reuse | Pass | `_request_json`; `test_provider_conditional_request_reuses_body_on_304` |

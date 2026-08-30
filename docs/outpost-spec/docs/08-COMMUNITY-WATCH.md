@@ -206,8 +206,9 @@ classes (doc 03 §4.2), and **MUST NOT** be suppressed by quiet hours or by a me
 unless the operator has explicitly enabled alert opt-out.
 
 **REQ-WATCH-028** — Repeat broadcast of the same alert **MUST** be limited to
-`watch.alert_repeat_max` (default 3) at `watch.alert_repeat_interval_minutes` (default 20),
-and **MUST** stop early once the acknowledgement threshold (§6) is met.
+`watch.alert_repeat_max` (default 3) at `watch.alert_repeat_interval_minutes` (default 20)
+for each repeating escalation stage. Advancing to a new stage resets that stage's repeat
+budget. Repeats **MUST** stop early once the acknowledgement threshold (§6) is met.
 
 **REQ-WATCH-029** — Cancelling or updating an alert **MUST** use the Governor's supersession
 mechanism (REQ-TRANSPORT-027) so a queued stale repeat is removed rather than transmitted

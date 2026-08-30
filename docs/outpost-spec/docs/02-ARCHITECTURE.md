@@ -310,7 +310,7 @@ airtime:
     bulletin: 0.05
     digest: 0.10
     federation: 0.10
-  max_parts: { reply: 3, ai: 2, digest: 4, alert: 2, bulletin: 2 }
+  max_parts: { reply: 3, ai: 2, digest: 4, alert: 2, bulletin: 2, federation: 1 }
 
 channels:
   # index → policy. Index 0 is the primary/public channel.
@@ -450,8 +450,11 @@ store:
 **REQ-ARCH-017** — Config validation **MUST** reject at startup:
 
 - `airtime.class_shares` summing above 1.0, or naming a class outside the closed set
+- an incomplete `airtime.class_shares` or `airtime.max_parts` map
 - `airtime.budget_percent + airtime.emergency_reserve_percent > 20.0`
 - `airtime.budget_percent + airtime.emergency_reserve_percent >= airtime.utilisation_ceiling`
+- invalid `airtime.quiet_hours` times or class names
+- an incomplete or non-positive `router.page_sizes` map
 - channel indices outside 0–7, or a channel index absent from the radio's configuration
 - an AI provider with no reachable base URL when `modules.ai.enabled`
 - `env.user_agent` still containing `CHANGE-ME` when `modules.env.enabled` (REQ-WX-005)

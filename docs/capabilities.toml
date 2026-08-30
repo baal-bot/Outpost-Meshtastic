@@ -89,7 +89,7 @@ description = "Direct authenticated command gates, downgrade denial, key conflic
 [[capabilities]]
 id = "airtime_delivery"
 area = "Airtime and outbound delivery"
-present = "Durable priority queue, airtime shares, emergency reserve, quiet hours, dedupe, pacing, receipts, and restart recovery."
+present = "Durable priority queue, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, and restart recovery."
 maturity = "automated_tested"
 introduced_commit = "3d65058"
 limitations = [
@@ -99,7 +99,7 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-27"
+date = "2026-08-29"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_durable_outbox.py"
@@ -107,7 +107,15 @@ description = "Admitted work survives restart and delivery state is idempotent."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/unit/test_governor.py"
-description = "Priority, budget, reserve, pacing, and failure-path policy."
+description = "Priority, budget, reserve, pacing, invalid-runtime-config containment, and critical-path policy."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/unit/test_config.py"
+description = "Startup rejection of incomplete airtime maps, invalid quiet hours, and incomplete page-size policy."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/unit/test_background_tasks.py"
+description = "Dispatch-time configuration faults are surfaced as degraded without terminating the core governor loop."
 
 [[capabilities]]
 id = "identity_directory"
@@ -161,7 +169,7 @@ description = "Unified reply routing and audited operator workflow."
 [[capabilities]]
 id = "community_watch"
 area = "Community Watch"
-present = "Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, delivery-accountable responder alerts, retrying zero-recipient escalation, operator conditions, bounded repeats, all-clear, and maps."
+present = "Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, delivery-accountable responder alerts, retrying zero-recipient escalation, per-stage bounded repeats, all-clear, and maps."
 maturity = "simulated"
 introduced_commit = "8323143"
 limitations = ["The six-participant real-radio tabletop and receipt-latency gate remain open."]
@@ -181,7 +189,7 @@ description = "Member-facing incident, alert, acknowledgement, and trust paths t
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_watch_alerts.py"
-description = "Audience delivery, empty/capacity refusal recovery, repeats, acknowledgements, escalation, and all-clear."
+description = "Audience delivery, empty/capacity refusal recovery, per-stage repeat budgets, acknowledgements, escalation, and all-clear."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_incident_reconciliation.py"
@@ -215,7 +223,7 @@ description = "Welfare state transitions, zero-recipient notification outcomes, 
 [[capabilities]]
 id = "environment"
 area = "Environmental information"
-present = "Weather observations/forecasts, offset-safe CAP alert expiry, astronomy, earthquakes, caching, provenance, maps, and waypoints."
+present = "Weather observations/forecasts, source-preserving CAP alert expiry with a visible missing-expiry fallback, astronomy, earthquakes, caching, provenance, maps, and waypoints."
 maturity = "automated_tested"
 introduced_commit = "72763e5"
 limitations = [
@@ -238,7 +246,7 @@ description = "Weather caching, expiry, observation/forecast labels, and safe fa
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_cap_alerts.py"
-description = "CAP lifecycle, instant-safe expiry across ISO offset forms, migration repair, and re-poll recovery."
+description = "CAP lifecycle, source expiry propagation, visible six-hour fallback, past-expiry refusal, offset-safe migration repair, and re-poll recovery."
 
 [[capabilities]]
 id = "same_receiver"

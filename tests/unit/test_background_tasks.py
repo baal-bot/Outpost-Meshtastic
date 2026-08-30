@@ -9,6 +9,7 @@ from outpost.app import OutpostApp
 from outpost.clock import VirtualClock
 from outpost.config import Config
 from outpost.task_supervision import TaskFailureDomain
+from outpost.transport.governor import GovernorConfigurationError
 
 
 class RetryClock(VirtualClock):
@@ -68,6 +69,43 @@ async def test_expected_background_task_cancellation_is_not_fatal(tmp_path) -> N
     assert health["state"] == "stopped"
     assert health["last_ok_at"] is not None
     assert app._task_failure.is_set() is False
+
+
+@pytest.mark.asyncio
+async def test_governor_config_error_is_degraded_without_stopping_loop(tmp_path) -> None:
+    app = OutpostApp(Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}}))
+    clock = RetryClock()
+    app.clock = clock
+    attempts = 0
+    recovered = asyncio.Event()
+
+    async def tick():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise GovernorConfigurationError("invalid runtime airtime setting")
+        recovered.set()
+        return None
+
+    app.governor.tick = tick  # type: ignore[method-assign]
+    task = app._start_background_task("airtime-governor", app._governor_loop)
+
+    assert await asyncio.wait_for(clock.sleeps.get(), timeout=1) == 0.25
+    health = app.status()["tasks"]["airtime-governor"]
+    assert health["state"] == "degraded"
+    assert health["degraded_reason"] == (
+        "GovernorConfigurationError: invalid runtime airtime setting"
+    )
+    assert health["degradation_count"] == 1
+    assert app._task_failure.is_set() is False
+
+    clock.resume.put_nowait(None)
+    await asyncio.wait_for(recovered.wait(), timeout=1)
+    assert await asyncio.wait_for(clock.sleeps.get(), timeout=1) == 0.25
+    assert app.status()["tasks"]["airtime-governor"]["state"] == "running"
+    task.cancel()
+    clock.resume.put_nowait(None)
+    await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio

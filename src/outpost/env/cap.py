@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.parse
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from outpost.clock import Clock
@@ -16,6 +16,7 @@ from outpost.watch import AlertService
 CAP_POINT_FRESH_SECONDS = 300
 CAP_POINT_STALE_SECONDS = 1_800
 CAP_POINT_CACHE_MAX = 1_000
+CAP_DEFAULT_EXPIRY_SECONDS = 6 * 3_600
 
 
 class CapAlertService:
@@ -52,26 +53,32 @@ class CapAlertService:
         point: tuple[float, float] | None = None,
     ) -> tuple[str, list[str]]:
         reasons: list[str] = []
+        blocking: list[str] = []
         if properties.get("status") != "Actual":
-            reasons.append("status is not Actual")
+            blocking.append("status is not Actual")
         if properties.get("severity") not in {"Extreme", "Severe"}:
-            reasons.append("severity is below Severe")
+            blocking.append("severity is below Severe")
         if properties.get("urgency") not in {"Immediate", "Expected"}:
-            reasons.append("urgency is not Immediate or Expected")
+            blocking.append("urgency is not Immediate or Expected")
         if properties.get("certainty") == "Unlikely":
-            reasons.append("certainty is Unlikely")
-        try:
-            expires = cls._instant(properties["expires"])
-            if expires <= now.astimezone(UTC):
-                reasons.append("alert is expired")
-        except (KeyError, TypeError, ValueError):
-            reasons.append("expiry is missing or invalid")
+            blocking.append("certainty is Unlikely")
+        raw_expiry = properties.get("expires")
+        if raw_expiry is None or not str(raw_expiry).strip():
+            reasons.append("expiry missing; using the documented 6-hour fallback")
+        else:
+            try:
+                expires = cls._instant(raw_expiry)
+                if expires <= now.astimezone(UTC):
+                    blocking.append("alert is expired")
+            except (TypeError, ValueError):
+                blocking.append("expiry is invalid")
         msg_type = str(properties.get("messageType") or properties.get("msgType") or "Alert")
         if msg_type not in {"Alert", "Update", "Cancel"}:
-            reasons.append(f"message type {msg_type} is log-only")
+            blocking.append(f"message type {msg_type} is log-only")
         if geometry and point and not cls._geometry_contains(geometry, point[0], point[1]):
-            reasons.append("alert polygon does not contain the Outpost")
-        return ("withheld" if reasons else "accepted", reasons)
+            blocking.append("alert polygon does not contain the Outpost")
+        reasons.extend(blocking)
+        return ("withheld" if blocking else "accepted", reasons)
 
     @staticmethod
     def _timestamp(value: object) -> datetime:
@@ -339,7 +346,11 @@ class CapAlertService:
                 continue
             decision, reasons = self._gate(properties, now_dt, feature.get("geometry"), (lat, lon))
             msg_type = str(properties.get("messageType") or properties.get("msgType") or "Alert")
-            expires_at = str(properties.get("expires") or now_dt.isoformat())
+            raw_expiry = properties.get("expires")
+            if raw_expiry is None or not str(raw_expiry).strip():
+                expires_at = (now_dt + timedelta(seconds=CAP_DEFAULT_EXPIRY_SECONDS)).isoformat()
+            else:
+                expires_at = str(raw_expiry)
             try:
                 expires_epoch = int(self._instant(expires_at).timestamp())
             except (TypeError, ValueError):
@@ -426,13 +437,17 @@ class CapAlertService:
         )
 
     async def approve(self, cap_id: int, alerts: AlertService) -> dict[str, Any]:
-        rows = await self.database.read(
-            "SELECT * FROM cap_alert WHERE id=? AND decision='accepted' AND review_state='pending'",
-            (cap_id,),
-        )
+        rows = await self.database.read("SELECT * FROM cap_alert WHERE id=?", (cap_id,))
         if not rows:
-            raise ValueError("CAP alert is not eligible for approval.")
+            raise ValueError("CAP alert was not found.")
         item = rows[0]
+        expiry_epoch = int(item["expires_epoch"] or self._instant(item["expires_at"]).timestamp())
+        if item["review_state"] == "expired" or expiry_epoch <= int(self.clock.now().timestamp()):
+            raise ValueError(f"CAP alert expired at {item['expires_at']} and cannot be approved.")
+        if item["decision"] != "accepted":
+            raise ValueError("CAP alert was withheld by the safety gate and cannot be approved.")
+        if item["review_state"] != "pending":
+            raise ValueError(f"CAP alert is already {item['review_state']}.")
         previous = await self._referenced_approved(str(item["references_text"] or ""))
         if item["msg_type"] in {"Update", "Cancel"} and previous is None:
             raise ValueError("No approved referenced alert was found.")
@@ -460,6 +475,7 @@ class CapAlertService:
             headline,
             current_actor(),
             source="cap",
+            expires_at=expiry_epoch,
             supersedes_alert_id=(
                 int(previous["linked_alert_id"])
                 if item["msg_type"] == "Update" and previous is not None

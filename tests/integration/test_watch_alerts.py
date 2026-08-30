@@ -243,11 +243,74 @@ async def test_repeat_stage_stops_at_configured_maximum(tmp_path) -> None:
     assert await service.advance_due() == 1
     finished = await service.by_id(alert.id)
     assert finished is not None
-    assert finished.repeat_count == 2
+    assert finished.repeat_count == 0
     assert finished.escalation_stage == 2
     assert finished.next_escalation_at is None
     clock.advance(600)
     assert await service.advance_due() == 0
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_repeat_budget_resets_for_each_repeating_escalation_stage(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock, radio = VirtualClock(), SimulatedRadioLink()
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "channels": {3: {"name": "watch"}},
+            "watch": {
+                "alert_repeat_max": 3,
+                "alert_repeat_interval_minutes": 1,
+                "escalation": {
+                    "critical": {
+                        "stages": [
+                            {
+                                "after_minutes": 0,
+                                "notify": "responders",
+                                "channels": [3],
+                                "repeat": True,
+                            },
+                            {
+                                "after_minutes": 0,
+                                "notify": "all",
+                                "channels": [3],
+                                "repeat": True,
+                            },
+                        ]
+                    }
+                },
+            },
+        }
+    )
+    responder = await MemberRepo(database, clock).resolve("!00000002")
+    await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
+    service = AlertService(database, AirtimeGovernor(radio, config.airtime, clock), clock, config)
+
+    alert = await service.raise_alert("critical", "Evacuate now", "operator")
+    assert alert.escalation_stage == 0 and alert.repeat_count == 1
+    assert (await service.operational_json(alert))["repeat_remaining"] == 2
+
+    for _ in range(2):
+        clock.advance(60)
+        assert await service.advance_due() == 1
+    second_stage = await service.by_id(alert.id)
+    assert second_stage is not None
+    assert second_stage.escalation_stage == 1 and second_stage.repeat_count == 0
+    assert second_stage.broadcast_count == 3
+    assert (await service.operational_json(second_stage))["repeat_remaining"] == 3
+
+    for index in range(3):
+        if index:
+            clock.advance(60)
+        assert await service.advance_due() == 1
+    finished = await service.by_id(alert.id)
+    assert finished is not None
+    assert finished.escalation_stage == 2 and finished.repeat_count == 0
+    assert finished.broadcast_count == 6
+    assert finished.next_escalation_at is None
+    assert (await service.operational_json(finished))["repeat_remaining"] == 0
     await database.close()
 
 

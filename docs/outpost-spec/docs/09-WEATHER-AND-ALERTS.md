@@ -182,6 +182,11 @@ alert's `geocode` block. Polygon warnings **MUST** take precedence.
 | `Cancel` | Cancel; broadcast an all-clear if the original was broadcast |
 | `Ack` / `Error` | Log only |
 
+An operator-approved CAP alert and its Watch headline **MUST** retain the source CAP
+`expires` instant. Approval **MUST** refuse an alert whose expiry is already past. When a
+provider omits `expires`, the inbox **MUST** identify that omission and show the documented
+six-hour fallback used for both records; an invalid supplied expiry remains ineligible.
+
 **REQ-WX-024** — CAP `description` **MUST NOT** be broadcast by default. It expands to 4–8
 packets. The broadcast carries `event` + `areaDesc` + expiry; the description is available on
 request (`WARN <n>`) and on the dashboard.

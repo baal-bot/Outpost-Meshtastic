@@ -28,7 +28,7 @@ airtime:
   broadcast_max_per_hour: 6
   quiet_hours: {start: "22:00", end: "06:00", classes: [digest, bulletin, federation]}
   class_shares: {alert: 0.30, reply: 0.30, ai: 0.15, bulletin: 0.05, digest: 0.10, federation: 0.10}
-  max_parts: {reply: 3, ai: 2, digest: 4, alert: 2, bulletin: 2}
+  max_parts: {reply: 3, ai: 2, digest: 4, alert: 2, bulletin: 2, federation: 1}
 channels:
   # Unlisted broadcast slots reject commands. DM use follows module and trust policy.
   # alerts controls WARN/incident views and responder alert/event operations.
