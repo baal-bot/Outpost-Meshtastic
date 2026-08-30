@@ -356,6 +356,22 @@ class FedConfig(StrictModel):
 
 class WebAuth(StrictModel):
     session_hours: int = 12
+    failure_window_seconds: int = Field(default=900, ge=60, le=86_400)
+    source_failure_limit: int = Field(default=5, ge=1, le=100)
+    account_failure_limit: int = Field(default=10, ge=2, le=200)
+    global_failure_limit: int = Field(default=50, ge=5, le=1_000)
+    throttle_base_seconds: int = Field(default=1, ge=1, le=30)
+    throttle_max_seconds: int = Field(default=16, ge=1, le=300)
+
+    @model_validator(mode="after")
+    def validate_throttling(self) -> WebAuth:
+        if self.account_failure_limit < self.source_failure_limit:
+            raise ValueError("web.auth account_failure_limit must cover source_failure_limit")
+        if self.global_failure_limit < self.account_failure_limit:
+            raise ValueError("web.auth global_failure_limit must cover account_failure_limit")
+        if self.throttle_max_seconds < self.throttle_base_seconds:
+            raise ValueError("web.auth throttle_max_seconds must cover throttle_base_seconds")
+        return self
 
 
 class WebTransport(StrictModel):

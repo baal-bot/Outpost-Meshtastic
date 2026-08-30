@@ -155,7 +155,10 @@ See [Federation](FEDERATION.md).
 
 Named-account password authentication is always enabled; account roles, MFA, and sessions are
 managed in the Access workspace rather than YAML. `auth.session_hours` sets the absolute browser
-session lifetime. `metrics_access` defaults to `authenticated`; `loopback` supports a local
+session lifetime. The remaining `auth` keys bound failed sign-ins by source, account name, and
+global rate within `failure_window_seconds`; delays grow from `throttle_base_seconds` to
+`throttle_max_seconds`, while correct credentials remain usable to prevent hostile account
+lockout. `metrics_access` defaults to `authenticated`; `loopback` supports a local
 Prometheus process, while `disabled` returns 404. `transport.mode` explicitly selects offline
 `trusted_http`, Outpost-terminated `direct_https`, or `trusted_proxy`. HTTPS is optional and never
 required for radio/mesh operation. Forwarded client/scheme headers are accepted only from

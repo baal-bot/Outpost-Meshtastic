@@ -35,7 +35,17 @@ async def _run(action: str, config_path: Path) -> int:
         return 1
     database = Database(database_path)
     await database.open()
-    auth = WebAuthService(database, config.web.auth.session_hours)
+    auth_config = config.web.auth
+    auth = WebAuthService(
+        database,
+        auth_config.session_hours,
+        failure_window_seconds=auth_config.failure_window_seconds,
+        source_failure_limit=auth_config.source_failure_limit,
+        account_failure_limit=auth_config.account_failure_limit,
+        global_failure_limit=auth_config.global_failure_limit,
+        throttle_base_seconds=auth_config.throttle_base_seconds,
+        throttle_max_seconds=auth_config.throttle_max_seconds,
+    )
     try:
         if action == "reset":
             setup = await auth.issue_setup_secret()

@@ -76,9 +76,12 @@ function accountCard(account) {
       <button type="button" data-reset-password>Reset password</button>
       <button type="button" data-toggle-account class="${account.enabled ? "danger-button" : "primary-button"}">${account.enabled ? "Disable" : "Enable"}</button>
     </div>`;
-  return `<article class="account-row ${account.enabled ? "" : "disabled"}" data-account-id="${account.id}">
+  const loginRisk = account.failed_attempts_recent
+    ? `<small class="login-risk ${account.login_throttled ? "throttled" : ""}">${safe(account.failed_attempts_recent)} failed sign-in ${account.failed_attempts_recent === 1 ? "attempt" : "attempts"} from ${safe(account.failed_attempt_sources)} source ${account.failed_attempt_sources === 1 ? "address" : "addresses"}${account.login_throttled ? ` · throttled until ${safe(timeLabel(account.login_throttled_until))}` : ""}</small>`
+    : "";
+  return `<article class="account-row ${account.enabled ? "" : "disabled"} ${account.login_throttled ? "login-throttled" : ""}" data-account-id="${account.id}">
     <div class="account-avatar">${safe(account.display_name.slice(0, 1).toUpperCase())}</div>
-    <div class="account-copy"><div><strong>${safe(account.display_name)}</strong>${current ? "<span>CURRENT</span>" : ""}${account.mfa_enabled ? "<span>MFA</span>" : ""}</div><p>@${safe(account.username)} · ${safe(roleLabel(account.role))}</p><small>${account.enabled ? `Last sign-in ${safe(timeLabel(account.last_login_at))}` : "Account disabled"}${account.must_change ? " · password change required" : ""}</small>${radioControl}</div>
+    <div class="account-copy"><div><strong>${safe(account.display_name)}</strong>${current ? "<span>CURRENT</span>" : ""}${account.mfa_enabled ? "<span>MFA</span>" : ""}${account.login_throttled ? "<span class=\"warning\">THROTTLED</span>" : ""}</div><p>@${safe(account.username)} · ${safe(roleLabel(account.role))}</p><small>${account.enabled ? `Last sign-in ${safe(timeLabel(account.last_login_at))}` : "Account disabled"}${account.must_change ? " · password change required" : ""}</small>${loginRisk}${radioControl}</div>
     ${actions}
   </article>`;
 }
@@ -102,6 +105,13 @@ async function loadAccounts() {
   if (session.role !== "administrator") return;
   const body = await api("/api/v1/auth/accounts");
   operatorRadios = body.operator_radios || [];
+  const security = body.login_security || {};
+  const minutes = Math.max(1, Math.round(Number(security.window_seconds || 900) / 60));
+  $("login-security").hidden = Number(security.total_failures || 0) === 0;
+  $("login-security").classList.toggle("throttled", Boolean(security.global_throttled));
+  $("login-security").innerHTML = security.global_throttled
+    ? `<b>GLOBAL SIGN-IN THROTTLE ACTIVE</b><span>${safe(security.total_failures)} failures in ${safe(minutes)} minutes · delayed until at least ${safe(timeLabel(security.global_throttled_until))}. The operator inbox contains an audit notice.</span>`
+    : `<b>SIGN-IN MONITOR</b><span>${safe(security.total_failures || 0)} failed ${Number(security.total_failures || 0) === 1 ? "attempt" : "attempts"} across all account names in the last ${safe(minutes)} minutes.</span>`;
   $("account-list").innerHTML = body.items.map(accountCard).join("");
   $("operator-radio-list").innerHTML = operatorRadios.map(operatorRadioCard).join("")
     || '<p class="ui-empty empty">No radios have mesh Operator trust yet. Promote a reviewed radio from Members and it will appear here automatically.</p>';

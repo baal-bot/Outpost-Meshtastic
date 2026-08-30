@@ -1083,13 +1083,15 @@ def create_web_app(
 
         @app.get("/api/v1/auth/accounts")
         async def auth_accounts() -> dict[str, Any]:
-            items = await auth.accounts()
+            login_security = await auth.login_security_status()
+            items = await auth.accounts(login_security)
             radios = await auth.operator_radios()
             return {
                 "items": items,
                 "count": len(items),
                 "operator_radios": radios,
                 "operator_radio_count": len(radios),
+                "login_security": login_security,
             }
 
         @app.post("/api/v1/auth/accounts", response_model=None)

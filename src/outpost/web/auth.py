@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -10,6 +11,8 @@ import secrets
 import string
 import struct
 import time
+import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -66,6 +69,15 @@ class WebSession:
     role: str
     mfa_enabled: bool
     step_up_until: int | None
+    recent_failed_attempts: int = 0
+
+
+@dataclass(frozen=True)
+class LoginAttemptState:
+    source_failures: int
+    account_failures: int
+    global_failures: int
+    delay_seconds: int
 
 
 @dataclass(frozen=True)
@@ -88,11 +100,26 @@ class WebAuthService:
         *,
         setup_path: str | Path | None = None,
         setup_ttl_seconds: int = SETUP_SECRET_TTL_SECONDS,
+        failure_window_seconds: int = 900,
+        source_failure_limit: int = 5,
+        account_failure_limit: int = 10,
+        global_failure_limit: int = 50,
+        throttle_base_seconds: int = 1,
+        throttle_max_seconds: int = 16,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self.database = database
         self.session_seconds = session_hours * 3_600
         self.setup_ttl_seconds = setup_ttl_seconds
         self.setup_path = Path(setup_path or database.path.parent / SETUP_FILE_NAME)
+        self.failure_window_seconds = failure_window_seconds
+        self.source_failure_limit = source_failure_limit
+        self.account_failure_limit = account_failure_limit
+        self.global_failure_limit = global_failure_limit
+        self.throttle_base_seconds = throttle_base_seconds
+        self.throttle_max_seconds = throttle_max_seconds
+        self._sleep = sleep or asyncio.sleep
+        self._throttle_lock = asyncio.Lock()
         self.hasher = PasswordHasher()
         self._dummy_hash = self.hasher.hash(secrets.token_urlsafe(24))
 
@@ -127,6 +154,116 @@ class WebAuthService:
             "VALUES('web',?,?,?,?,unixepoch())",
             (actor, action, target, encoded),
         )
+
+    def _delay_for(self, source: int, account: int, global_count: int) -> int:
+        overages = [
+            count - limit
+            for count, limit in (
+                (source, self.source_failure_limit),
+                (account, self.account_failure_limit),
+                (global_count, self.global_failure_limit),
+            )
+            if count >= limit
+        ]
+        if not overages:
+            return 0
+        return min(
+            self.throttle_max_seconds, self.throttle_base_seconds * 2 ** min(8, max(overages))
+        )
+
+    async def _record_login_attempt(
+        self, *, source: str, username: str, successful: bool, now: int
+    ) -> LoginAttemptState:
+        cutoff = now - self.failure_window_seconds
+        async with self.database.transaction() as transaction:
+            await transaction.write(
+                "INSERT INTO web_login_attempt(source,successful,created_at,username) "
+                "VALUES(?,?,?,?)",
+                (source, int(successful), now, username),
+            )
+            rows = await transaction.read(
+                "SELECT COALESCE(SUM(source=? AND username=?),0) source_failures,"
+                "COALESCE(SUM(username=?),0) account_failures,COUNT(*) global_failures "
+                "FROM web_login_attempt WHERE successful=0 AND created_at>?",
+                (source, username, username, cutoff),
+            )
+            counts = rows[0]
+            state = LoginAttemptState(
+                int(counts["source_failures"]),
+                int(counts["account_failures"]),
+                int(counts["global_failures"]),
+                0,
+            )
+            if successful:
+                return state
+            alerts: list[tuple[str, str, int]] = []
+            if state.account_failures == self.account_failure_limit:
+                alerts.append(
+                    (f"account:{username}", f"account:{username}", state.account_failures)
+                )
+            if state.global_failures == self.global_failure_limit:
+                alerts.append(("global", "global", state.global_failures))
+            for scope, target, count in alerts:
+                detail = {
+                    "scope": scope,
+                    "username": username,
+                    "source": source[:128],
+                    "failures": count,
+                    "window_seconds": self.failure_window_seconds,
+                }
+                encoded = json.dumps(detail, separators=(",", ":"))
+                await transaction.write(
+                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                    "VALUES('system','authentication','auth.login_throttled',?,?,?)",
+                    (target, encoded, now),
+                )
+                conversation_key = f"system:auth-throttle:{scope}"
+                title = (
+                    f"Login attempts throttled for @{username}"
+                    if scope != "global"
+                    else "Login attempts throttled globally"
+                )
+                body = (
+                    f"Outpost observed {count} failed sign-in attempts within "
+                    f"{self.failure_window_seconds // 60} minutes. Failed attempts are now "
+                    "delayed; valid credentials remain usable to prevent hostile account "
+                    "lockout. Review Access and the audit log."
+                )
+                existing = await transaction.read(
+                    "SELECT id FROM mail WHERE conversation_key=? LIMIT 1", (conversation_key,)
+                )
+                if existing:
+                    await transaction.write(
+                        "UPDATE mail SET subject=?,body=?,created_at=?,state='failed',"
+                        "delivered_at=NULL,operator_read_at=NULL,archived_at=NULL,expires_at=? "
+                        "WHERE id=?",
+                        (title, body, now, now + 30 * 86_400, existing[0]["id"]),
+                    )
+                else:
+                    await transaction.write(
+                        "INSERT INTO mail(uid,from_label,to_label,subject,body,created_at,state,"
+                        "expires_at,conversation_key,message_kind,mail_direction,"
+                        "participant_handle,operator_actor) VALUES(?,?,?,?,?,?,'failed',?,?,"
+                        "'system','local','outpost','system:authentication')",
+                        (
+                            str(uuid.uuid4()),
+                            "outpost",
+                            "operator",
+                            title,
+                            body,
+                            now,
+                            now + 30 * 86_400,
+                            conversation_key,
+                        ),
+                    )
+            return LoginAttemptState(
+                state.source_failures,
+                state.account_failures,
+                state.global_failures,
+                self._delay_for(
+                    state.source_failures, state.account_failures, state.global_failures
+                ),
+            )
 
     async def issue_setup_secret(self) -> SetupSecret:
         token = secrets.token_urlsafe(24)
@@ -265,15 +402,9 @@ class WebAuthService:
         try:
             clean_username = _normalize_username(username)
         except ValueError:
-            clean_username = username.strip().lower()[:32]
+            digest = hashlib.sha256(username.strip().lower().encode()).hexdigest()[:16]
+            clean_username = f"invalid-{digest}"
         now = int(time.time())
-        failures = await self.database.read(
-            "SELECT COUNT(*) AS count FROM web_login_attempt "
-            "WHERE source=? AND username=? AND successful=0 AND created_at>?",
-            (source, clean_username, now - 900),
-        )
-        if int(failures[0]["count"]) >= 5:
-            return None
         rows = await self.database.read(
             "SELECT * FROM web_account WHERE username=? COLLATE NOCASE", (clean_username,)
         )
@@ -301,11 +432,25 @@ class WebAuthService:
             if not code:
                 return MfaChallenge(str(account["username"]))
             valid = await self._mfa_valid(account, code, now)
-        await self.database.write(
-            "INSERT INTO web_login_attempt(source,successful,created_at,username) VALUES(?,?,?,?)",
-            (source, int(valid), now, clean_username),
+        recent_failures = 0
+        if valid and account is not None:
+            attempts = await self.database.read(
+                "SELECT COUNT(*) count FROM web_login_attempt WHERE username=? "
+                "AND successful=0 AND id>COALESCE((SELECT MAX(id) FROM web_login_attempt "
+                "WHERE username=? AND successful=1),0)",
+                (clean_username, clean_username),
+            )
+            recent_failures = int(attempts[0]["count"])
+        attempt = await self._record_login_attempt(
+            source=source,
+            username=clean_username,
+            successful=valid,
+            now=now,
         )
         if not valid or account is None:
+            if attempt.delay_seconds:
+                async with self._throttle_lock:
+                    await self._sleep(attempt.delay_seconds)
             return None
         token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
         placeholder_hash = self.hasher.hash(_initial_password()) if bootstrap else None
@@ -362,6 +507,7 @@ class WebAuthService:
             str(account["role"]),
             bool(account["totp_secret"]),
             now + STEP_UP_SECONDS,
+            recent_failures,
         )
 
     async def session(self, token: str | None) -> WebSession | None:
@@ -438,7 +584,83 @@ class WebAuthService:
         )
         return True
 
-    async def accounts(self) -> list[dict[str, object]]:
+    async def login_security_status(self) -> dict[str, object]:
+        now = int(time.time())
+        rows = await self.database.read(
+            "SELECT l.username,l.source,l.created_at,a.id account_id "
+            "FROM web_login_attempt l LEFT JOIN web_account a "
+            "ON a.username=l.username COLLATE NOCASE "
+            "WHERE l.successful=0 AND l.created_at>? "
+            "ORDER BY l.created_at,l.id",
+            (now - self.failure_window_seconds,),
+        )
+        grouped: dict[str, dict[str, object]] = {}
+        global_times: list[int] = []
+        for row in rows:
+            username = str(row["username"])
+            entry = grouped.setdefault(
+                username,
+                {
+                    "username": username,
+                    "known_account": row["account_id"] is not None,
+                    "times": [],
+                    "sources": set(),
+                },
+            )
+            timestamp = int(row["created_at"])
+            times = entry["times"]
+            sources = entry["sources"]
+            assert isinstance(times, list)
+            assert isinstance(sources, set)
+            times.append(timestamp)
+            sources.add(str(row["source"]))
+            global_times.append(timestamp)
+
+        identities: list[dict[str, object]] = []
+        for entry in grouped.values():
+            times = entry.pop("times")
+            sources = entry.pop("sources")
+            assert isinstance(times, list)
+            assert isinstance(sources, set)
+            throttled = len(times) >= self.account_failure_limit
+            identities.append(
+                {
+                    **entry,
+                    "failures": len(times),
+                    "source_count": len(sources),
+                    "last_failure_at": times[-1],
+                    "throttled": throttled,
+                    "throttled_until": (
+                        times[-self.account_failure_limit] + self.failure_window_seconds
+                        if throttled
+                        else None
+                    ),
+                }
+            )
+        identities.sort(key=lambda item: (-int(item["failures"]), str(item["username"])))
+        globally_throttled = len(global_times) >= self.global_failure_limit
+        return {
+            "window_seconds": self.failure_window_seconds,
+            "total_failures": len(global_times),
+            "global_failure_limit": self.global_failure_limit,
+            "global_throttled": globally_throttled,
+            "global_throttled_until": (
+                global_times[-self.global_failure_limit] + self.failure_window_seconds
+                if globally_throttled
+                else None
+            ),
+            "identities": identities,
+        }
+
+    async def accounts(
+        self, login_security: dict[str, object] | None = None
+    ) -> list[dict[str, object]]:
+        security = login_security or await self.login_security_status()
+        identity_security = {
+            str(item["username"]).casefold(): item
+            for item in security.get("identities", [])
+            if isinstance(item, dict)
+        }
         rows = await self.database.read(
             "SELECT a.id,a.username,a.display_name,a.role,a.must_change,a.enabled,"
             "a.totp_confirmed_at,a.created_at,a.changed_at,a.last_login_at,a.created_by,"
@@ -448,37 +670,45 @@ class WebAuthService:
             "FROM web_account a LEFT JOIN member m ON m.id=a.radio_member_id "
             "ORDER BY a.username"
         )
-        return [
-            {
-                "id": row["id"],
-                "username": row["username"],
-                "display_name": row["display_name"],
-                "role": row["role"],
-                "must_change": bool(row["must_change"]),
-                "enabled": bool(row["enabled"]),
-                "mfa_enabled": row["totp_confirmed_at"] is not None,
-                "created_at": row["created_at"],
-                "changed_at": row["changed_at"],
-                "last_login_at": row["last_login_at"],
-                "created_by": row["created_by"],
-                "operator_radio": (
-                    {
-                        "id": row["radio_id"],
-                        "mesh_id": row["radio_mesh_id"],
-                        "handle": row["radio_handle"],
-                        "long_name": row["radio_long_name"],
-                        "short_name": row["radio_short_name"],
-                        "trust": row["radio_trust"],
-                        "pki_state": row["radio_pki_state"],
-                        "linked_at": row["radio_linked_at"],
-                        "linked_by": row["radio_linked_by"],
-                    }
-                    if row["radio_id"] is not None
-                    else None
-                ),
-            }
-            for row in rows
-        ]
+        items: list[dict[str, object]] = []
+        for row in rows:
+            attempt_state = identity_security.get(str(row["username"]).casefold(), {})
+            items.append(
+                {
+                    "id": row["id"],
+                    "username": row["username"],
+                    "display_name": row["display_name"],
+                    "role": row["role"],
+                    "must_change": bool(row["must_change"]),
+                    "enabled": bool(row["enabled"]),
+                    "mfa_enabled": row["totp_confirmed_at"] is not None,
+                    "created_at": row["created_at"],
+                    "changed_at": row["changed_at"],
+                    "last_login_at": row["last_login_at"],
+                    "created_by": row["created_by"],
+                    "failed_attempts_recent": int(attempt_state.get("failures", 0)),
+                    "failed_attempt_sources": int(attempt_state.get("source_count", 0)),
+                    "last_failed_attempt_at": attempt_state.get("last_failure_at"),
+                    "login_throttled": bool(attempt_state.get("throttled", False)),
+                    "login_throttled_until": attempt_state.get("throttled_until"),
+                    "operator_radio": (
+                        {
+                            "id": row["radio_id"],
+                            "mesh_id": row["radio_mesh_id"],
+                            "handle": row["radio_handle"],
+                            "long_name": row["radio_long_name"],
+                            "short_name": row["radio_short_name"],
+                            "trust": row["radio_trust"],
+                            "pki_state": row["radio_pki_state"],
+                            "linked_at": row["radio_linked_at"],
+                            "linked_by": row["radio_linked_by"],
+                        }
+                        if row["radio_id"] is not None
+                        else None
+                    ),
+                }
+            )
+        return items
 
     async def operator_radios(self) -> list[dict[str, object]]:
         """Return mesh operators plus any linked radio whose trust later changed."""

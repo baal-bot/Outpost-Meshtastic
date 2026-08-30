@@ -434,11 +434,12 @@ def test_release_update_verifies_artifacts_before_checkout_and_install() -> None
     workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "ci.yml").read_text()
     expected_scope = (
         "src tests tools/build_release_metadata.py tools/check_capabilities.py "
-        "tools/check_ci_evidence.py tools/verify_release.py deploy/configure.py "
-        "deploy/render_avahi.py"
+        "tools/check_ci_evidence.py tools/check_static_markup.py tools/verify_release.py "
+        "deploy/configure.py deploy/render_avahi.py"
     )
     assert expected_scope in " ".join(pre_push.replace("\\\n", "").split())
     assert " ".join(workflow.split()).count(expected_scope) == 2
+    assert "python tools/check_static_markup.py" in pre_push
 
 
 def test_setup_hotspot_applies_network_isolation_before_activation(

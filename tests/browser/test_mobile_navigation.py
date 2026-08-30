@@ -1794,6 +1794,7 @@ def test_named_login_prompts_for_second_factor_only_after_password(
                         "role": "operator",
                         "mfa_enabled": True,
                         "step_up_until": 2_000_000_600,
+                        "recent_failed_attempts": 3,
                     }
                 ),
             )
@@ -1810,6 +1811,9 @@ def test_named_login_prompts_for_second_factor_only_after_password(
         page.get_by_label("Verification or recovery code").fill("123456")
         page.get_by_role("button", name="Verify and sign in").click()
         page.locator("#login-screen").wait_for(state="hidden")
+        security_notice = page.get_by_role("dialog", name="Recent failed sign-in attempts")
+        security_notice.get_by_text("3 failed sign-in attempts").wait_for()
+        security_notice.get_by_role("button", name="Close").click()
         assert submissions == [
             {"username": "alice", "password": "alice-password-42", "code": None},
             {"username": "alice", "password": "alice-password-42", "code": "123456"},
@@ -4320,6 +4324,11 @@ def test_access_workspace_enrolls_mfa_and_creates_named_account(
             "changed_at": None,
             "last_login_at": 2_000_000_000,
             "created_by": "local-setup",
+            "failed_attempts_recent": 6,
+            "failed_attempt_sources": 3,
+            "last_failed_attempt_at": 2_000_000_000,
+            "login_throttled": True,
+            "login_throttled_until": 2_000_000_600,
             "operator_radio": None,
         }
     ]
@@ -4412,6 +4421,13 @@ def test_access_workspace_enrolls_mfa_and_creates_named_account(
                 "count": len(accounts),
                 "operator_radios": operator_radios,
                 "operator_radio_count": len(operator_radios),
+                "login_security": {
+                    "window_seconds": 900,
+                    "total_failures": 6,
+                    "global_failure_limit": 50,
+                    "global_throttled": False,
+                    "global_throttled_until": None,
+                },
             }
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
 
@@ -4484,6 +4500,9 @@ def test_access_workspace_enrolls_mfa_and_creates_named_account(
         page.goto(f"{dashboard_url}/access.html", wait_until="domcontentloaded")
         wait_for_navigation(page)
         page.locator("#welcome-name").filter(has_text="Pittsburgh Operator").wait_for()
+        page.get_by_text("6 failed attempts across all account names").wait_for()
+        page.get_by_text("6 failed sign-in attempts from 3 source addresses").wait_for()
+        page.get_by_text("THROTTLED", exact=True).wait_for()
         page.get_by_text("This session", exact=True).wait_for()
         page.get_by_role("button", name="Set up authenticator").click()
         page.get_by_text("JBSWY3DPEHPK3PXP", exact=True).wait_for()

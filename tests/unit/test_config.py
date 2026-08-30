@@ -79,6 +79,39 @@ def test_removed_auth_mode_is_rejected(mode: str) -> None:
         Config.model_validate({"web": {"auth": {"mode": mode}}})
 
 
+def test_web_auth_throttle_policy_is_configurable_and_consistent() -> None:
+    config = Config.model_validate(
+        {
+            "web": {
+                "auth": {
+                    "failure_window_seconds": 600,
+                    "source_failure_limit": 4,
+                    "account_failure_limit": 8,
+                    "global_failure_limit": 40,
+                    "throttle_base_seconds": 2,
+                    "throttle_max_seconds": 20,
+                }
+            }
+        }
+    )
+    assert config.web.auth.failure_window_seconds == 600
+    assert config.web.auth.account_failure_limit == 8
+    assert config.web.auth.global_failure_limit == 40
+
+
+@pytest.mark.parametrize(
+    "auth",
+    [
+        {"source_failure_limit": 6, "account_failure_limit": 5},
+        {"account_failure_limit": 12, "global_failure_limit": 10},
+        {"throttle_base_seconds": 10, "throttle_max_seconds": 5},
+    ],
+)
+def test_web_auth_throttle_policy_rejects_inverted_limits(auth: dict[str, int]) -> None:
+    with pytest.raises(ValidationError, match="must cover"):
+        Config.model_validate({"web": {"auth": auth}})
+
+
 def test_web_transport_defaults_to_offline_trusted_http() -> None:
     config = Config()
 

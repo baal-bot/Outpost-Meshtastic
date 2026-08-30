@@ -253,6 +253,14 @@ $("login-form").addEventListener("submit", async (event) => {
     window.dispatchEvent(new Event("outpost:authenticated"));
     await refresh();
     startRefreshSchedulers();
+    const failedAttempts = Number(session.recent_failed_attempts || 0);
+    if (failedAttempts) {
+      await window.OutpostUI.alert({
+        eyebrow: "ACCOUNT SECURITY",
+        title: "Recent failed sign-in attempts",
+        message: `${failedAttempts} failed sign-in ${failedAttempts === 1 ? "attempt was" : "attempts were"} recorded for this account since its previous successful sign-in. Review Access and the operator inbox.`,
+      });
+    }
   }
   $("password").value = "";
   $("login-code").value = "";

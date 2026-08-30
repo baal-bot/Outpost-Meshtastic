@@ -245,6 +245,117 @@ async def _permanent_operator(auth: WebAuthService, client: TestClient, password
 
 
 @pytest.mark.asyncio
+async def test_login_throttle_spans_sources_but_valid_credentials_bypass_hostile_lockout(
+    tmp_path: Path,
+) -> None:
+    delays: list[float] = []
+
+    async def record_delay(seconds: float) -> None:
+        delays.append(seconds)
+
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    auth = WebAuthService(
+        database,
+        12,
+        source_failure_limit=5,
+        account_failure_limit=2,
+        global_failure_limit=20,
+        throttle_base_seconds=2,
+        throttle_max_seconds=8,
+        sleep=record_delay,
+    )
+    client = TestClient(create_web_app(lambda: {"radio": "up"}, database, auth))
+    password = "operator-password-42"  # noqa: S105 - isolated test credential
+    await _permanent_operator(auth, client, password)
+
+    for username in ("operator", "unknown-user"):
+        assert await auth.login("wrong-password", f"source-{username}-a", username=username) is None
+        assert await auth.login("wrong-password", f"source-{username}-b", username=username) is None
+    assert delays == [2, 2]
+
+    known = client.post(
+        "/api/v1/auth/login", json={"username": "operator", "password": "wrong-password"}
+    )
+    unknown = client.post(
+        "/api/v1/auth/login", json={"username": "unknown-user", "password": "wrong-password"}
+    )
+    assert known.status_code == unknown.status_code == 401
+    assert (
+        known.json()
+        == unknown.json()
+        == {"error": {"code": "invalid_login", "message": "Invalid credentials."}}
+    )
+    assert delays[-2:] == [4, 4]
+
+    legitimate = client.post(
+        "/api/v1/auth/login", json={"username": "operator", "password": password}
+    )
+    assert legitimate.status_code == 200
+    assert legitimate.json()["recent_failed_attempts"] == 3
+    security = await auth.login_security_status()
+    operator = next(
+        item
+        for item in security["identities"]
+        if item["username"] == "operator"  # type: ignore[index]
+    )
+    assert operator["throttled"] is True
+    assert operator["source_count"] == 3
+    inventory = await auth.accounts(security)
+    assert inventory[0]["login_throttled"] is True
+    assert inventory[0]["failed_attempts_recent"] == 3
+    assert (
+        len(await database.read("SELECT 1 FROM audit_log WHERE action='auth.login_throttled'")) == 2
+    )
+    notices = await database.read(
+        "SELECT state,operator_read_at FROM mail "
+        "WHERE conversation_key LIKE 'system:auth-throttle:account:%'"
+    )
+    assert len(notices) == 2
+    assert all(row["state"] == "failed" and row["operator_read_at"] is None for row in notices)
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_global_login_failure_cap_throttles_attempts_spread_across_names(
+    tmp_path: Path,
+) -> None:
+    delays: list[float] = []
+
+    async def record_delay(seconds: float) -> None:
+        delays.append(seconds)
+
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    auth = WebAuthService(
+        database,
+        12,
+        source_failure_limit=5,
+        account_failure_limit=5,
+        global_failure_limit=5,
+        throttle_base_seconds=3,
+        throttle_max_seconds=12,
+        sleep=record_delay,
+    )
+    for index in range(5):
+        assert (
+            await auth.login("wrong-password", f"source-{index}", username=f"unknown-{index}")
+            is None
+        )
+    assert delays == [3]
+    security = await auth.login_security_status()
+    assert security["total_failures"] == 5
+    assert security["global_throttled"] is True
+    assert len(await database.read("SELECT 1 FROM audit_log WHERE target='global'")) == 1
+    notices = await database.read(
+        "SELECT subject,state FROM mail WHERE conversation_key='system:auth-throttle:global'"
+    )
+    assert len(notices) == 1
+    assert notices[0]["state"] == "failed"
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_named_roles_sessions_and_last_administrator_guard(tmp_path: Path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()
