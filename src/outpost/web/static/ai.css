@@ -22,6 +22,7 @@
 .ai-test-result.ready { color: var(--ui-text); }
 .refusal-list { display: grid; gap: 7px; margin-top: 17px; }
 .refusal-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 11px; background: var(--ui-surface-subtle); border: 1px solid var(--ui-border); border-radius: 7px; }
+.refusal-copy { display: grid; gap: 3px; }
 .refusal-row strong { overflow-wrap: anywhere; font-size: .69rem; }
 .refusal-row span { color: var(--ui-text-muted); font-size: .6rem; }
 .knowledge-panel, .review-panel { margin-top: 16px; }

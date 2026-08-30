@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 import uuid
 from dataclasses import dataclass
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.store import Database
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
@@ -134,10 +134,15 @@ class AudienceNotifier:
             "destinations": len(result.destinations),
             "channels": list(result.channels),
         }
-        await self.database.write(
-            "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-            "VALUES('system','delivery','safety.delivery.zero',?,?,?)",
-            (target, json.dumps(detail, separators=(",", ":")), now),
+        await write_audit(
+            self.database,
+            actor_kind="system",
+            actor_ref="delivery",
+            action="safety.delivery.zero",
+            target=target,
+            detail=detail,
+            created_at=now,
+            outcome="failure",
         )
         existing = await self.database.read(
             "SELECT id FROM mail WHERE conversation_key=? AND state='failed' LIMIT 1",

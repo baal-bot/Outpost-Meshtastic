@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 
 from .database import Database
@@ -156,18 +157,15 @@ class MemberRepo:
                             now,
                         ),
                     )
-                await transaction.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at,"
-                    "outcome) VALUES('mesh',?,'member.pki.conflict',?,?,?,'denied')",
-                    (
-                        mesh_id,
-                        mesh_id,
-                        json.dumps(
-                            {"fingerprint": fingerprint, "prior_fingerprint": prior},
-                            separators=(",", ":"),
-                        ),
-                        now,
-                    ),
+                await write_audit(
+                    transaction,
+                    actor_kind="mesh",
+                    actor_ref=mesh_id,
+                    action="member.pki.conflict",
+                    target=mesh_id,
+                    detail={"fingerprint": fingerprint, "prior_fingerprint": prior},
+                    created_at=now,
+                    outcome="denied",
                 )
 
     async def authorize_elevated(
@@ -223,15 +221,15 @@ class MemberRepo:
                     now,
                 ),
             )
-            await transaction.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at,"
-                "outcome) VALUES('mesh',?,'mesh.elevated_auth',?,?,?,'denied')",
-                (
-                    member.mesh_id,
-                    command.upper(),
-                    json.dumps({"reason": reason}, separators=(",", ":")),
-                    now,
-                ),
+            await write_audit(
+                transaction,
+                actor_kind="mesh",
+                actor_ref=member.mesh_id,
+                action="mesh.elevated_auth",
+                target=command.upper(),
+                detail={"reason": reason},
+                created_at=now,
+                outcome="denied",
             )
         return False, reason
 

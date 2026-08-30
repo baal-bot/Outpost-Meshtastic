@@ -4,6 +4,7 @@ import json
 import time
 from typing import Any
 
+from outpost.audit import write_audit
 from outpost.config import Config
 from outpost.operator_context import current_actor_ref
 from outpost.store import Database
@@ -92,12 +93,14 @@ class RuntimeSettings:
                 (f"node.{key}", json.dumps(value), now),
             )
         self.config.node = validated
-        await self.database.write(
-            """
-            INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-            VALUES('web',?,'config.update','node',?,?)
-            """,
-            (current_actor_ref(), json.dumps(sorted(values)), now),
+        await write_audit(
+            self.database,
+            actor_kind="web",
+            actor_ref=current_actor_ref(),
+            action="config.update",
+            target="node",
+            detail=sorted(values),
+            created_at=now,
         )
         node = self.redacted()["node"]
         assert isinstance(node, dict)
@@ -133,12 +136,14 @@ class RuntimeSettings:
                 (f"watch.{key}", json.dumps(value), now),
             )
         self.config.watch = validated
-        await self.database.write(
-            """
-            INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-            VALUES('web',?,'config.update','watch',?,?)
-            """,
-            (current_actor_ref(), json.dumps(sorted(values)), now),
+        await write_audit(
+            self.database,
+            actor_kind="web",
+            actor_ref=current_actor_ref(),
+            action="config.update",
+            target="watch",
+            detail=sorted(values),
+            created_at=now,
         )
         watch = self.redacted()["watch"]
         assert isinstance(watch, dict)

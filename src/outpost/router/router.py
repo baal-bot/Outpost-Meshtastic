@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 import unicodedata
 from collections import defaultdict
 
 from outpost import __version__
+from outpost.audit import write_audit
 from outpost.commands.core import specs as core_specs
 from outpost.config import Config
 from outpost.render.catalogue import message
@@ -201,15 +201,15 @@ class Router:
                 str(inbound.channel), spec.channel_use.value, channel_decision.reason
             ).inc()
             try:
-                await self.members.database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at,"
-                    "outcome) VALUES('mesh',?,'command.channel_policy_rejected',?,?,?,'denied')",
-                    (
-                        member.mesh_id,
-                        f"channel/{inbound.channel}/{spec.channel_use.value}",
-                        json.dumps({"reason": channel_decision.reason}, separators=(",", ":")),
-                        int(self.members.clock.now().timestamp()),
-                    ),
+                await write_audit(
+                    self.members.database,
+                    actor_kind="mesh",
+                    actor_ref=member.mesh_id,
+                    action="command.channel_policy_rejected",
+                    target=f"channel/{inbound.channel}/{spec.channel_use.value}",
+                    detail={"reason": channel_decision.reason},
+                    created_at=int(self.members.clock.now().timestamp()),
+                    outcome="denied",
                 )
             except Exception as error:
                 print(

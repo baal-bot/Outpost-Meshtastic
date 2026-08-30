@@ -21,6 +21,7 @@ from urllib.parse import quote
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
+from outpost.audit import write_audit
 from outpost.store import Database
 
 
@@ -148,11 +149,13 @@ class WebAuthService:
     async def _audit(
         self, actor: str, action: str, target: str | None, detail: object = None
     ) -> None:
-        encoded = None if detail is None else json.dumps(detail, separators=(",", ":"))
-        await self.database.write(
-            "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-            "VALUES('web',?,?,?,?,unixepoch())",
-            (actor, action, target, encoded),
+        await write_audit(
+            self.database,
+            actor_kind="web",
+            actor_ref=actor,
+            action=action,
+            target=target,
+            detail=detail,
         )
 
     def _delay_for(self, source: int, account: int, global_count: int) -> int:
@@ -212,11 +215,15 @@ class WebAuthService:
                     "failures": count,
                     "window_seconds": self.failure_window_seconds,
                 }
-                encoded = json.dumps(detail, separators=(",", ":"))
-                await transaction.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('system','authentication','auth.login_throttled',?,?,?)",
-                    (target, encoded, now),
+                await write_audit(
+                    transaction,
+                    actor_kind="system",
+                    actor_ref="authentication",
+                    action="auth.login_throttled",
+                    target=target,
+                    detail=detail,
+                    created_at=now,
+                    outcome="denied",
                 )
                 conversation_key = f"system:auth-throttle:{scope}"
                 title = (

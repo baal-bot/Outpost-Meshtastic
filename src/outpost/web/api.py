@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, model_validator
 from outpost import __version__
 from outpost.ai import AIService
 from outpost.ai.store import AIStore
+from outpost.audit import display_audit_detail, write_audit
 from outpost.bbs.admin import BBSAdmin
 from outpost.config import WebConfig
 from outpost.env import (
@@ -589,41 +590,6 @@ class MailConversationReplyBody(BaseModel):
 
 def _timestamp(value: int) -> str:
     return datetime.fromtimestamp(value, UTC).isoformat().replace("+00:00", "Z")
-
-
-_AUDIT_SECRET_KEY = re.compile(
-    r"password|passphrase|secret|token|api[_-]?key|private[_-]?key|psk|credential|"
-    r"authorization|cookie",
-    re.IGNORECASE,
-)
-_AUDIT_SECRET_ASSIGNMENT = re.compile(
-    r"(?i)\b(password|passphrase|secret|token|api[_-]?key|private[_-]?key|psk|credential|"
-    r"authorization|cookie)(\s*[:=]\s*)([^,;\s}]+)"
-)
-
-
-def _redact_audit_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            str(key): "[REDACTED]"
-            if _AUDIT_SECRET_KEY.search(str(key))
-            else _redact_audit_value(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_redact_audit_value(item) for item in value]
-    return value
-
-
-def _audit_detail(value: object) -> tuple[str | None, str | None]:
-    if value is None:
-        return None, None
-    text = str(value)
-    try:
-        structured = _redact_audit_value(json.loads(text))
-    except (json.JSONDecodeError, TypeError):
-        return _AUDIT_SECRET_ASSIGNMENT.sub(r"\1\2[REDACTED]", text), "text"
-    return json.dumps(structured, indent=2, sort_keys=True, ensure_ascii=False), "json"
 
 
 def create_web_app(
@@ -1647,10 +1613,13 @@ def create_web_app(
                     status_code=400,
                 )
             if database is not None:
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'federation.peer_state',?,?,unixepoch())",
-                    (current_actor_ref(), f"fed_peer:{peer.id}", body.state),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="federation.peer_state",
+                    target=f"fed_peer:{peer.id}",
+                    detail=body.state,
                 )
             return peer.__dict__
 
@@ -1665,10 +1634,13 @@ def create_web_app(
                     status_code=409,
                 )
             if database is not None:
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'federation.peer_forget',?,?,unixepoch())",
-                    (current_actor_ref(), f"fed_peer:{peer.mesh_id}", peer.node_name),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="federation.peer_forget",
+                    target=f"fed_peer:{peer.mesh_id}",
+                    detail=peer.node_name,
                 )
             return {"ok": True}
 
@@ -1772,10 +1744,13 @@ def create_web_app(
                     "adopted_at=excluded.adopted_at,adopted_by=excluded.adopted_by",
                     (body.old_mesh_id.lower(), peer.id, body.old_node_name, current_actor()),
                 )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'federation.origin_adopt',?,?,unixepoch())",
-                    (current_actor_ref(), f"fed_peer:{peer.id}", body.old_mesh_id.lower()),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="federation.origin_adopt",
+                    target=f"fed_peer:{peer.id}",
+                    detail=body.old_mesh_id.lower(),
                 )
                 return {
                     "ok": True,
@@ -2200,12 +2175,13 @@ def create_web_app(
                 detail: dict[str, Any] = {"fields": changed_fields}
                 if section == "channel":
                     detail["channel"] = int(values["index"])
-                await database.write(
-                    """
-                    INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                    VALUES('web',?,'radio.config_update',?,?,unixepoch())
-                    """,
-                    (current_actor_ref(), f"radio/{section}", json.dumps(detail)),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="radio.config_update",
+                    target=f"radio/{section}",
+                    detail=detail,
                 )
             return result
 
@@ -2324,7 +2300,9 @@ def create_web_app(
             @app.post("/api/v1/ai/kb", response_model=None)
             async def ai_kb_create(body: KBDocumentBody) -> dict[str, Any] | Response:
                 try:
-                    result = await ai_store.save_document(**body.model_dump())
+                    result = await ai_store.save_document(
+                        **body.model_dump(), actor=current_actor_ref()
+                    )
                 except ValueError as error:
                     return JSONResponse(
                         {"error": {"code": "invalid_kb", "message": str(error)}},
@@ -2338,7 +2316,9 @@ def create_web_app(
             ) -> dict[str, Any] | Response:
                 try:
                     result = await ai_store.save_document(
-                        **body.model_dump(), document_id=document_id
+                        **body.model_dump(),
+                        document_id=document_id,
+                        actor=current_actor_ref(),
                     )
                 except ValueError as error:
                     return JSONResponse(
@@ -2349,7 +2329,7 @@ def create_web_app(
 
             @app.delete("/api/v1/ai/kb/{document_id}", response_model=None)
             async def ai_kb_delete(document_id: int) -> dict[str, Any] | Response:
-                if not await ai_store.delete_document(document_id):
+                if not await ai_store.delete_document(document_id, current_actor_ref()):
                     return JSONResponse(
                         {"error": {"code": "not_found", "message": "Document not found."}},
                         status_code=404,
@@ -2375,7 +2355,9 @@ def create_web_app(
                 interaction_id: int, body: AIPromoteBody
             ) -> dict[str, Any] | Response:
                 try:
-                    result = await ai_store.promote_interaction(interaction_id, body.title)
+                    result = await ai_store.promote_interaction(
+                        interaction_id, body.title, current_actor_ref()
+                    )
                 except ValueError as error:
                     return JSONResponse(
                         {"error": {"code": "invalid_promotion", "message": str(error)}},
@@ -2391,7 +2373,7 @@ def create_web_app(
             async def ai_add_refusal(body: AIRefusalBody) -> dict[str, Any] | Response:
                 try:
                     rule_id = await ai_store.add_refusal_rule(
-                        body.phrase, body.reason, current_actor()
+                        body.phrase, body.reason, current_actor_ref()
                     )
                 except ValueError as error:
                     return JSONResponse(
@@ -2399,6 +2381,15 @@ def create_web_app(
                         status_code=422,
                     )
                 return {"id": rule_id}
+
+            @app.delete("/api/v1/ai/refusal-rules/{rule_id}", response_model=None)
+            async def ai_delete_refusal(rule_id: int) -> dict[str, bool] | Response:
+                if not await ai_store.delete_refusal_rule(rule_id, current_actor_ref()):
+                    return JSONResponse(
+                        {"error": {"code": "not_found", "message": "Rule not found."}},
+                        status_code=404,
+                    )
+                return {"deleted": True}
 
             if ai_test is not None:
 
@@ -2602,7 +2593,12 @@ def create_web_app(
                     ) -> dict[str, Any] | Response:
                         try:
                             return await waypoints.create(
-                                body.name, body.latitude, body.longitude, body.category, body.notes
+                                body.name,
+                                body.latitude,
+                                body.longitude,
+                                body.category,
+                                body.notes,
+                                current_actor_ref(),
                             )
                         except ValueError as error:
                             return JSONResponse(
@@ -2616,7 +2612,9 @@ def create_web_app(
                     ) -> dict[str, Any] | Response:
                         try:
                             return await waypoints.update(
-                                waypoint_id, body.model_dump(exclude_none=True)
+                                waypoint_id,
+                                body.model_dump(exclude_none=True),
+                                current_actor_ref(),
                             )
                         except ValueError as error:
                             return JSONResponse(
@@ -2629,7 +2627,7 @@ def create_web_app(
                         waypoint_id: int,
                     ) -> dict[str, str] | Response:
                         try:
-                            await waypoints.delete(waypoint_id)
+                            await waypoints.delete(waypoint_id, current_actor_ref())
                         except ValueError as error:
                             return JSONResponse(
                                 {"error": {"code": "not_found", "message": str(error)}},
@@ -2642,12 +2640,12 @@ def create_web_app(
             @app.post("/api/v1/radio/reconnect")
             async def radio_reconnect() -> dict[str, str]:
                 await reconnect_radio()
-                await database.write(
-                    """
-                    INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                    VALUES('web',?,'radio.reconnect','radio',NULL,unixepoch())
-                    """,
-                    (current_actor_ref(),),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="radio.reconnect",
+                    target="radio",
                 )
                 return {"status": "reconnecting"}
 
@@ -2660,12 +2658,12 @@ def create_web_app(
             @app.post("/api/v1/backups")
             async def backup_create() -> dict[str, Any]:
                 path = await backups.create()
-                await database.write(
-                    """
-                    INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                    VALUES('web',?,'backup.create',?,NULL,unixepoch())
-                    """,
-                    (current_actor_ref(), path.name),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="backup.create",
+                    target=path.name,
                 )
                 return {"backup": backups.list()[0]}
 
@@ -2893,10 +2891,13 @@ def create_web_app(
                 if similar:
                     return JSONResponse({"similar": similar.json()}, status_code=409)
                 assert created is not None
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'incident.create',?,?,unixepoch())",
-                    (current_actor_ref(), f"incident:{created.id}", created.title),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="incident.create",
+                    target=f"incident:{created.id}",
+                    detail=created.title,
                 )
                 return created.json()
 
@@ -2944,10 +2945,13 @@ def create_web_app(
                         {"error": {"code": "invalid_update", "message": str(error)}},
                         status_code=422,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'incident.update',?,?,unixepoch())",
-                    (current_actor_ref(), f"incident:{incident_id}", ",".join(changes)),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="incident.update",
+                    target=f"incident:{incident_id}",
+                    detail=",".join(changes),
                 )
                 return updated.json()
 
@@ -2962,14 +2966,13 @@ def create_web_app(
                         {"error": {"code": "invalid_merge", "message": str(error)}},
                         status_code=422,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'incident.merge',?,?,unixepoch())",
-                    (
-                        current_actor_ref(),
-                        f"incident:{source_id}",
-                        f"canonical incident:{body.target_id}",
-                    ),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="incident.merge",
+                    target=f"incident:{source_id}",
+                    detail=f"canonical incident:{body.target_id}",
                 )
                 return value.json()
 
@@ -2982,10 +2985,13 @@ def create_web_app(
                         {"error": {"code": "invalid_unmerge", "message": str(error)}},
                         status_code=422,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'incident.unmerge',?,?,unixepoch())",
-                    (current_actor_ref(), f"incident:{source_id}", "identity restored"),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="incident.unmerge",
+                    target=f"incident:{source_id}",
+                    detail="identity restored",
                 )
                 return value.json()
 
@@ -3000,14 +3006,13 @@ def create_web_app(
                         {"error": {"code": "invalid_match", "message": str(error)}},
                         status_code=422,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'incident.match_reject',?,?,unixepoch())",
-                    (
-                        current_actor_ref(),
-                        f"incident:{source_id}",
-                        f"candidate incident:{body.target_id}",
-                    ),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="incident.match_reject",
+                    target=f"incident:{source_id}",
+                    detail=f"candidate incident:{body.target_id}",
                 )
                 return {"ok": True}
 
@@ -3024,15 +3029,13 @@ def create_web_app(
                         {"error": {"code": "invalid_update", "message": str(error)}},
                         status_code=422,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,?,?, ?,unixepoch())",
-                    (
-                        current_actor_ref(),
-                        f"incident.{body.kind}",
-                        f"incident:{incident_id}",
-                        body.note[:500] or None,
-                    ),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action=f"incident.{body.kind}",
+                    target=f"incident:{incident_id}",
+                    detail=body.note[:500] or None,
                 )
                 return value.json()
 
@@ -3066,15 +3069,13 @@ def create_web_app(
                         {"error": {"code": "invalid_alert", "message": str(error)}},
                         status_code=422,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,?,?,?,unixepoch())",
-                    (
-                        current_actor_ref(),
-                        "alert.raise_coalesced" if value.coalesced else "alert.raise",
-                        f"alert:{value.id}",
-                        value.headline,
-                    ),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="alert.raise_coalesced" if value.coalesced else "alert.raise",
+                    target=f"alert:{value.id}",
+                    detail=value.headline,
                 )
                 return value.json()
 
@@ -3089,10 +3090,13 @@ def create_web_app(
                         {"error": {"code": "invalid_alert", "message": str(error)}},
                         status_code=422,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'alert.cancel',?,?,unixepoch())",
-                    (current_actor_ref(), f"alert:{value.id}", body.resolution[:160]),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="alert.cancel",
+                    target=f"alert:{value.id}",
+                    detail=body.resolution[:160],
                 )
                 return await alerts.operational_json(value)
 
@@ -3105,10 +3109,12 @@ def create_web_app(
                         {"error": {"code": "invalid_alert", "message": str(error)}},
                         status_code=422,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,created_at) "
-                    "VALUES('web',?,'alert.escalation_halt',?,unixepoch())",
-                    (current_actor_ref(), f"alert:{value.id}"),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="alert.escalation_halt",
+                    target=f"alert:{value.id}",
                 )
                 return await alerts.operational_json(value)
 
@@ -3171,17 +3177,19 @@ def create_web_app(
                             {"error": {"code": "not_eligible", "message": str(error)}},
                             status_code=422,
                         )
-                    await database.write(
-                        "INSERT INTO audit_log(actor_kind,actor_ref,action,target,created_at) "
-                        "VALUES('web',?,'cap.approve',?,unixepoch())",
-                        (current_actor_ref(), f"cap:{cap_id}"),
+                    await write_audit(
+                        database,
+                        actor_kind="web",
+                        actor_ref=current_actor_ref(),
+                        action="cap.approve",
+                        target=f"cap:{cap_id}",
                     )
                     return value
 
                 @app.post("/api/v1/environment/alerts/{cap_id}/dismiss", response_model=None)
                 async def environment_alert_dismiss(cap_id: int) -> dict[str, str] | Response:
                     try:
-                        await cap_alerts.dismiss(cap_id)
+                        await cap_alerts.dismiss(cap_id, current_actor_ref())
                     except ValueError as error:
                         return JSONResponse(
                             {"error": {"code": "not_pending", "message": str(error)}},
@@ -3212,10 +3220,12 @@ def create_web_app(
                             {"error": {"code": "not_eligible", "message": str(error)}},
                             status_code=422,
                         )
-                    await database.write(
-                        "INSERT INTO audit_log(actor_kind,actor_ref,action,target,created_at) "
-                        "VALUES('web',?,'same.approve',?,unixepoch())",
-                        (current_actor_ref(), f"same:{same_id}"),
+                    await write_audit(
+                        database,
+                        actor_kind="web",
+                        actor_ref=current_actor_ref(),
+                        action="same.approve",
+                        target=f"same:{same_id}",
                     )
                     return value
 
@@ -3228,10 +3238,12 @@ def create_web_app(
                             {"error": {"code": "not_pending", "message": str(error)}},
                             status_code=422,
                         )
-                    await database.write(
-                        "INSERT INTO audit_log(actor_kind,actor_ref,action,target,created_at) "
-                        "VALUES('web',?,'same.dismiss',?,unixepoch())",
-                        (current_actor_ref(), f"same:{same_id}"),
+                    await write_audit(
+                        database,
+                        actor_kind="web",
+                        actor_ref=current_actor_ref(),
+                        action="same.dismiss",
+                        target=f"same:{same_id}",
                     )
                     return {"status": "dismissed"}
 
@@ -3257,10 +3269,13 @@ def create_web_app(
                         {"error": {"code": "invalid_event", "message": str(error)}},
                         status_code=422,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'event.open',?,?,unixepoch())",
-                    (current_actor_ref(), f"event:{value.id}", value.name),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="event.open",
+                    target=f"event:{value.id}",
+                    detail=value.name,
                 )
                 return value.json()
 
@@ -3273,10 +3288,13 @@ def create_web_app(
                         {"error": {"code": "invalid_event", "message": str(error)}},
                         status_code=422,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'event.close',?,?,unixepoch())",
-                    (current_actor_ref(), f"event:{value.id}", value.name),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="event.close",
+                    target=f"event:{value.id}",
+                    detail=value.name,
                 )
                 return value.json()
 
@@ -3353,14 +3371,13 @@ def create_web_app(
                         {"error": {"code": "solicitation_rejected", "message": str(error)}},
                         status_code=422,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'event.solicit',?,?,unixepoch())",
-                    (
-                        current_actor_ref(),
-                        f"event:{event_id}",
-                        f"recipients:{result['recipient_count']}",
-                    ),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="event.solicit",
+                    target=f"event:{event_id}",
+                    detail=f"recipients:{result['recipient_count']}",
                 )
                 return result
 
@@ -3418,14 +3435,13 @@ def create_web_app(
                         service_max_response_bytes=peer.service_max_response_bytes,
                         service_airtime_seconds_per_hour=peer.service_airtime_seconds_per_hour,
                     )
-                await database.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'federation.board_policy',?,?,unixepoch())",
-                    (
-                        current_actor_ref(),
-                        f"board:{board_id}",
-                        json.dumps({"slug": slug, "enabled": enabled}),
-                    ),
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="federation.board_policy",
+                    target=f"board:{board_id}",
+                    detail={"slug": slug, "enabled": enabled},
                 )
 
             @app.post("/api/v1/boards", response_model=None)
@@ -3840,10 +3856,13 @@ def create_web_app(
                 await transaction.write(
                     "DELETE FROM member_position WHERE member_id=?", (member_id,)
                 )
-                await transaction.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'member.position_delete',?,?,unixepoch())",
-                    (current_actor_ref(), row["mesh_id"], detail),
+                await write_audit(
+                    transaction,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="member.position_delete",
+                    target=str(row["mesh_id"]),
+                    detail=detail,
                 )
             return {"deleted": True}
 
@@ -3876,15 +3895,18 @@ def create_web_app(
                     "DELETE FROM pending_incident_location WHERE expires_at<=?", (now,)
                 )
                 await transaction.write("DELETE FROM member_position WHERE expires_at<=?", (now,))
-                await transaction.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'member.position_purge','member_position',?,?)",
-                    (
-                        current_actor_ref(),
-                        f"deleted={count};pending_deleted={pending_count};"
-                        f"expired_at_or_before={now}",
-                        now,
-                    ),
+                await write_audit(
+                    transaction,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="member.position_purge",
+                    target="member_position",
+                    detail={
+                        "deleted": count,
+                        "pending_deleted": pending_count,
+                        "expired_at_or_before": now,
+                    },
+                    created_at=now,
                 )
             return {"deleted": count, "pending_deleted": pending_count}
 
@@ -4158,20 +4180,16 @@ def create_web_app(
                     {"error": {"code": "mail_reply_failed", "message": str(error)}},
                     status_code=409,
                 )
-            await database.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web',?,'mail.conversation.reply',?,?,unixepoch())",
-                (
-                    current_actor_ref(),
-                    f"conversation:{conversation_key}",
-                    json.dumps(
-                        {
-                            "peer_mesh_id": route["source_peer_mesh_id"],
-                            "recipient": route["reply_recipient_handle"],
-                        },
-                        separators=(",", ":"),
-                    ),
-                ),
+            await write_audit(
+                database,
+                actor_kind="web",
+                actor_ref=current_actor_ref(),
+                action="mail.conversation.reply",
+                target=f"conversation:{conversation_key}",
+                detail={
+                    "peer_mesh_id": route["source_peer_mesh_id"],
+                    "recipient": route["reply_recipient_handle"],
+                },
             )
             return result
 
@@ -4193,12 +4211,12 @@ def create_web_app(
             for key in ("created_at", "delivered_at", "read_at", "expires_at"):
                 if item[key] is not None:
                     item[key] = _timestamp(item[key])
-            await database.write(
-                """
-                INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web',?,'mail.view',?,NULL,unixepoch())
-                """,
-                (current_actor_ref(), f"mail:{mail_id}"),
+            await write_audit(
+                database,
+                actor_kind="web",
+                actor_ref=current_actor_ref(),
+                action="mail.view",
+                target=f"mail:{mail_id}",
             )
             return JSONResponse(item)
 
@@ -4285,17 +4303,13 @@ def create_web_app(
                     "UPDATE thread SET hidden=? WHERE id=?",
                     (int(body.hidden), row["thread_id"]),
                 )
-            await database.write(
-                """
-                INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web',?,?,?, ?,unixepoch())
-                """,
-                (
-                    current_actor_ref(),
-                    "bbs.hide" if body.hidden else "bbs.unhide",
-                    f"post:{post_id}",
-                    body.reason[:160],
-                ),
+            await write_audit(
+                database,
+                actor_kind="web",
+                actor_ref=current_actor_ref(),
+                action="bbs.hide" if body.hidden else "bbs.unhide",
+                target=f"post:{post_id}",
+                detail=body.reason[:160],
             )
             return JSONResponse({"ok": True})
 
@@ -4349,7 +4363,7 @@ def create_web_app(
             items = [dict(row) for row in rows[:limit]]
             for item in items:
                 item["created_at"] = _timestamp(item["created_at"])
-                item["detail"], item["detail_format"] = _audit_detail(item["detail"])
+                item["detail"], item["detail_format"] = display_audit_detail(item["detail"])
             return {
                 "items": items,
                 "total": total,

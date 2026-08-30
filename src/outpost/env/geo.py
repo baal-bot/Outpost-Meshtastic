@@ -5,6 +5,7 @@ import math
 import re
 from typing import Any
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.env.seismic import SeismicService
 from outpost.store import Database
@@ -33,7 +34,13 @@ class WaypointService:
         return dict(rows[0]) if rows else None
 
     async def create(
-        self, name: str, latitude: float, longitude: float, category: str, notes: str
+        self,
+        name: str,
+        latitude: float,
+        longitude: float,
+        category: str,
+        notes: str,
+        actor: str = "system",
     ) -> dict[str, Any]:
         self._validate(latitude, longitude)
         clean_name = name.strip()[:80]
@@ -41,20 +48,30 @@ class WaypointService:
             raise ValueError("Waypoint name is required.")
         now = int(self.clock.now().timestamp())
         try:
-            waypoint_id = await self.database.write(
-                "INSERT INTO waypoint(name,slug,latitude,longitude,category,notes,"
-                "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-                (
-                    clean_name,
-                    self.slug(clean_name),
-                    latitude,
-                    longitude,
-                    category[:32] or "general",
-                    notes.strip()[:500] or None,
-                    now,
-                    now,
-                ),
-            )
+            async with self.database.transaction() as transaction:
+                waypoint_id = await transaction.write(
+                    "INSERT INTO waypoint(name,slug,latitude,longitude,category,notes,"
+                    "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (
+                        clean_name,
+                        self.slug(clean_name),
+                        latitude,
+                        longitude,
+                        category[:32] or "general",
+                        notes.strip()[:500] or None,
+                        now,
+                        now,
+                    ),
+                )
+                await write_audit(
+                    transaction,
+                    actor_kind="web" if actor != "system" else "system",
+                    actor_ref=actor,
+                    action="waypoint.create",
+                    target=f"waypoint:{waypoint_id}",
+                    detail={"name": clean_name, "latitude": latitude, "longitude": longitude},
+                    created_at=now,
+                )
         except Exception as error:
             if "UNIQUE" in str(error):
                 raise ValueError("A waypoint with that name already exists.") from error
@@ -67,7 +84,9 @@ class WaypointService:
             raise ValueError("Waypoint not found.")
         return dict(rows[0])
 
-    async def update(self, waypoint_id: int, values: dict[str, Any]) -> dict[str, Any]:
+    async def update(
+        self, waypoint_id: int, values: dict[str, Any], actor: str = "system"
+    ) -> dict[str, Any]:
         current = await self.get(waypoint_id)
         latitude = float(values.get("latitude", current["latitude"]))
         longitude = float(values.get("longitude", current["longitude"]))
@@ -75,25 +94,54 @@ class WaypointService:
         name = str(values.get("name", current["name"])).strip()[:80]
         if not name:
             raise ValueError("Waypoint name is required.")
-        await self.database.write(
-            "UPDATE waypoint SET name=?,slug=?,latitude=?,longitude=?,category=?,"
-            "notes=?,updated_at=? WHERE id=?",
-            (
-                name,
-                self.slug(name),
-                latitude,
-                longitude,
-                str(values.get("category", current["category"]))[:32] or "general",
-                str(values.get("notes", current["notes"] or "")).strip()[:500] or None,
-                int(self.clock.now().timestamp()),
-                waypoint_id,
-            ),
-        )
+        now = int(self.clock.now().timestamp())
+        async with self.database.transaction() as transaction:
+            await transaction.write(
+                "UPDATE waypoint SET name=?,slug=?,latitude=?,longitude=?,category=?,"
+                "notes=?,updated_at=? WHERE id=?",
+                (
+                    name,
+                    self.slug(name),
+                    latitude,
+                    longitude,
+                    str(values.get("category", current["category"]))[:32] or "general",
+                    str(values.get("notes", current["notes"] or "")).strip()[:500] or None,
+                    now,
+                    waypoint_id,
+                ),
+            )
+            await write_audit(
+                transaction,
+                actor_kind="web" if actor != "system" else "system",
+                actor_ref=actor,
+                action="waypoint.update",
+                target=f"waypoint:{waypoint_id}",
+                detail={
+                    "before": {
+                        "name": current["name"],
+                        "latitude": current["latitude"],
+                        "longitude": current["longitude"],
+                    },
+                    "after": {"name": name, "latitude": latitude, "longitude": longitude},
+                },
+                created_at=now,
+            )
         return await self.get(waypoint_id)
 
-    async def delete(self, waypoint_id: int) -> None:
-        await self.get(waypoint_id)
-        await self.database.write("DELETE FROM waypoint WHERE id=?", (waypoint_id,))
+    async def delete(self, waypoint_id: int, actor: str = "system") -> None:
+        current = await self.get(waypoint_id)
+        now = int(self.clock.now().timestamp())
+        async with self.database.transaction() as transaction:
+            await transaction.write("DELETE FROM waypoint WHERE id=?", (waypoint_id,))
+            await write_audit(
+                transaction,
+                actor_kind="web" if actor != "system" else "system",
+                actor_ref=actor,
+                action="waypoint.delete",
+                target=f"waypoint:{waypoint_id}",
+                detail={"name": current["name"], "slug": current["slug"]},
+                created_at=now,
+            )
 
     async def member_position(
         self, member_id: int | None = None, handle: str | None = None

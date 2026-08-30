@@ -6,6 +6,7 @@ import urllib.parse
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.config import EnvConfig
 from outpost.env.weather import NWS_HOST, _request_json
@@ -424,17 +425,27 @@ class CapAlertService:
             values.append(value)
         return values
 
-    async def dismiss(self, cap_id: int) -> None:
-        rows = await self.database.read(
-            "SELECT id FROM cap_alert WHERE id=? AND review_state='pending'", (cap_id,)
-        )
-        if not rows:
-            raise ValueError("CAP alert is not pending review.")
-        await self.database.write(
-            "UPDATE cap_alert SET review_state='dismissed',updated_at=unixepoch() "
-            "WHERE id=? AND review_state='pending'",
-            (cap_id,),
-        )
+    async def dismiss(self, cap_id: int, actor: str = "system") -> None:
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT id,event,area_desc FROM cap_alert WHERE id=? AND review_state='pending'",
+                (cap_id,),
+            )
+            if not rows:
+                raise ValueError("CAP alert is not pending review.")
+            await transaction.write(
+                "UPDATE cap_alert SET review_state='dismissed',updated_at=unixepoch() "
+                "WHERE id=? AND review_state='pending'",
+                (cap_id,),
+            )
+            await write_audit(
+                transaction,
+                actor_kind="web" if actor != "system" else "system",
+                actor_ref=actor,
+                action="cap.dismiss",
+                target=f"cap:{cap_id}",
+                detail={"event": rows[0]["event"], "area": rows[0]["area_desc"]},
+            )
 
     async def approve(self, cap_id: int, alerts: AlertService) -> dict[str, Any]:
         rows = await self.database.read("SELECT * FROM cap_alert WHERE id=?", (cap_id,))

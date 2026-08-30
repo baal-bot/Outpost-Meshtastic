@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.radio_operations import RadioOperations
 from outpost.store import Database
@@ -259,15 +259,14 @@ class MeshOperationsCenter:
     async def _audit(
         self, actor_ref: str, action: str, target: str, detail: object | None = None
     ) -> None:
-        encoded = (
-            json.dumps(detail, separators=(",", ":"), sort_keys=True)
-            if detail is not None
-            else None
-        )
-        await self.database.write(
-            "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-            "VALUES('mesh',?,?,?,?,?)",
-            (actor_ref, action, target, encoded, int(self.clock.now().timestamp())),
+        await write_audit(
+            self.database,
+            actor_kind="mesh",
+            actor_ref=actor_ref,
+            action=action,
+            target=target,
+            detail=detail,
+            created_at=int(self.clock.now().timestamp()),
         )
 
     async def resolve_incident(self, incident_id: int, resolution: str, actor_ref: str) -> str:

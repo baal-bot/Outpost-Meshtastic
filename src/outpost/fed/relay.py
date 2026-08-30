@@ -12,6 +12,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.fed.framing import wire_bytes, wire_int
 from outpost.fed.peers import FederationPeerService
@@ -186,15 +187,14 @@ class FederationRelayService:
             await self._event(
                 transaction, None, None, "local_origin_key_rotated", detail, now, actor
             )
-            await transaction.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web',?,'federation.relay_origin_rotate',?,?,?)",
-                (
-                    actor[:160],
-                    origin,
-                    json.dumps(detail, separators=(",", ":"), sort_keys=True),
-                    now,
-                ),
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=actor,
+                action="federation.relay_origin_rotate",
+                target=origin,
+                detail=detail,
+                created_at=now,
             )
         return await self.identity_status()
 
@@ -320,15 +320,14 @@ class FederationRelayService:
                 ),
             )
             await self._event(transaction, None, peer.id, "policy_updated", detail, now, actor)
-            await transaction.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web',?,'federation.relay_policy',?,?,?)",
-                (
-                    actor[:160],
-                    mesh_id,
-                    json.dumps(detail, separators=(",", ":"), sort_keys=True),
-                    now,
-                ),
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=actor,
+                action="federation.relay_policy",
+                target=mesh_id,
+                detail=detail,
+                created_at=now,
             )
         return await self.policy(mesh_id)
 
@@ -1097,15 +1096,14 @@ class FederationRelayService:
                 now,
                 actor,
             )
-            await transaction.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web',?,'federation.relay_origin_review',?,?,?)",
-                (
-                    actor[:160],
-                    origin_node,
-                    json.dumps(detail, separators=(",", ":"), sort_keys=True),
-                    now,
-                ),
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=actor,
+                action="federation.relay_origin_review",
+                target=origin_node,
+                detail=detail,
+                created_at=now,
             )
 
     async def item_action(self, envelope_id: str, action: str, actor: str) -> None:
@@ -1140,10 +1138,14 @@ class FederationRelayService:
         async with self.database.transaction() as transaction:
             await transaction.write(sql, params)
             await self._event(transaction, envelope_id, None, action, {}, now, actor)
-            await transaction.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web',?,'federation.relay_queue',?,?,?)",
-                (actor[:160], envelope_id, action, now),
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=actor,
+                action="federation.relay_queue",
+                target=envelope_id,
+                detail=action,
+                created_at=now,
             )
 
     async def next_hop(self, envelope_id: str, *, now: int | None = None) -> dict[str, str] | None:

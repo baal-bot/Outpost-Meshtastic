@@ -8,6 +8,7 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
+from outpost.audit import write_audit
 from outpost.csv_safety import csv_safe_row
 from outpost.store import Database
 
@@ -400,8 +401,13 @@ class MemberTriageService:
                     """,
                     (member_id, before["trust"], trust, actor, now_reason, now),
                 )
-            detail = json.dumps(
-                {
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=actor.removeprefix("web:"),
+                action="member.update",
+                target=before["mesh_id"],
+                detail={
                     "fields": [
                         *(["trust"] if trust is not None else []),
                         *(["notes"] if notes_supplied else []),
@@ -410,14 +416,7 @@ class MemberTriageService:
                     "trust_after": trust if trust is not None else before["trust"],
                     "reason": now_reason or None,
                 },
-                separators=(",", ":"),
-            )
-            await transaction.write(
-                """
-                INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web',?,'member.update',?,?,?)
-                """,
-                (actor.removeprefix("web:"), before["mesh_id"], detail, now),
+                created_at=now,
             )
         return {"ok": True}
 
@@ -480,23 +479,18 @@ class MemberTriageService:
                     now,
                 ),
             )
-            await transaction.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web',?,?,?,?,?)",
-                (
-                    actor.removeprefix("web:"),
-                    f"member.pki.{action}",
-                    row["mesh_id"],
-                    json.dumps(
-                        {
-                            "fingerprint": pending_fingerprint,
-                            "prior_fingerprint": current_fingerprint,
-                            "reason": clean_reason,
-                        },
-                        separators=(",", ":"),
-                    ),
-                    now,
-                ),
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=actor.removeprefix("web:"),
+                action=f"member.pki.{action}",
+                target=row["mesh_id"],
+                detail={
+                    "fingerprint": pending_fingerprint,
+                    "prior_fingerprint": current_fingerprint,
+                    "reason": clean_reason,
+                },
+                created_at=now,
             )
         return {"ok": True, "state": state, "fingerprint": pending_fingerprint}
 
@@ -534,21 +528,14 @@ class MemberTriageService:
                 "reviewed_at=?,reviewed_by=? WHERE id=?",
                 (state, now, actor, now, actor, member_id),
             )
-            await transaction.write(
-                """
-                INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web',?,?,?,?,?)
-                """,
-                (
-                    actor.removeprefix("web:"),
-                    f"member.{action}",
-                    row["mesh_id"],
-                    json.dumps(
-                        {"from": row["directory_state"], "to": state, "reason": clean_reason},
-                        separators=(",", ":"),
-                    ),
-                    now,
-                ),
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=actor.removeprefix("web:"),
+                action=f"member.{action}",
+                target=row["mesh_id"],
+                detail={"from": row["directory_state"], "to": state, "reason": clean_reason},
+                created_at=now,
             )
         return {"ok": True, "state": state}
 
@@ -592,26 +579,20 @@ class MemberTriageService:
                     f"WHERE id IN ({eligible_placeholders})",
                     (state, now, actor, now, actor, *eligible_ids),
                 )
-            await transaction.write(
-                """
-                INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web',?,?,'member:bulk',?,?)
-                """,
-                (
-                    actor.removeprefix("web:"),
-                    f"member.bulk_{action}",
-                    json.dumps(
-                        {
-                            "selected": len(ids),
-                            "changed": len(eligible_ids),
-                            "skipped": len(ids) - len(eligible_ids),
-                            "mesh_ids": [row["mesh_id"] for row in eligible],
-                            "reason": clean_reason,
-                        },
-                        separators=(",", ":"),
-                    ),
-                    now,
-                ),
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=actor.removeprefix("web:"),
+                action=f"member.bulk_{action}",
+                target="member:bulk",
+                detail={
+                    "selected": len(ids),
+                    "changed": len(eligible_ids),
+                    "skipped": len(ids) - len(eligible_ids),
+                    "mesh_ids": [row["mesh_id"] for row in eligible],
+                    "reason": clean_reason,
+                },
+                created_at=now,
             )
         return {
             "ok": True,
@@ -654,14 +635,12 @@ class MemberTriageService:
         writer.writeheader()
         for row in rows:
             writer.writerow(csv_safe_row({key: row[key] for key in fields}))
-        await self.database.write(
-            """
-            INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-            VALUES('web',?,'member.export','member:bulk',?,unixepoch())
-            """,
-            (
-                actor.removeprefix("web:"),
-                json.dumps({"count": len(rows), "ids": list(ids)}, separators=(",", ":")),
-            ),
+        await write_audit(
+            self.database,
+            actor_kind="web",
+            actor_ref=actor.removeprefix("web:"),
+            action="member.export",
+            target="member:bulk",
+            detail={"count": len(rows), "ids": list(ids)},
         )
         return output.getvalue(), len(rows)

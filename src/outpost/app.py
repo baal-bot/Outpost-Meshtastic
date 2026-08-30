@@ -17,6 +17,7 @@ from typing import Any
 from outpost.ai import AIService, create_provider
 from outpost.ai.retrieval import RetrievalEngine
 from outpost.ai.store import AIStore
+from outpost.audit import write_audit
 from outpost.bbs.admin import BBSAdmin
 from outpost.bbs.channels import ChannelDirectory
 from outpost.bbs.digests import DigestService
@@ -603,15 +604,14 @@ class OutpostApp:
     async def import_federation_inbox(self, item_id: int) -> str:
         actor = current_actor()
         stream = await self.import_federation_inbox_as(item_id, actor)
-        await self.database.write(
-            "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-            "VALUES('web',?,'federation.inbox.import',?,?,?)",
-            (
-                actor.removeprefix("web:"),
-                f"federation-inbox:{item_id}",
-                json.dumps({"stream": stream}, separators=(",", ":"), sort_keys=True),
-                int(self.clock.now().timestamp()),
-            ),
+        await write_audit(
+            self.database,
+            actor_kind="web",
+            actor_ref=actor.removeprefix("web:"),
+            action="federation.inbox.import",
+            target=f"federation-inbox:{item_id}",
+            detail={"stream": stream},
+            created_at=int(self.clock.now().timestamp()),
         )
         return stream
 

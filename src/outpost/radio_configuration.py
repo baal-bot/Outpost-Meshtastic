@@ -8,8 +8,9 @@ import hmac
 import json
 import secrets
 from copy import deepcopy
-from typing import Any, cast
+from typing import Any, Literal, cast
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.config import Config
 from outpost.operator_context import current_actor_ref
@@ -238,7 +239,12 @@ class RadioConfigurationManager:
         self._operation.update({"state": state, "updated_at": self._now(), **fields})
         await self._save(self._operation)
 
-    async def _audit(self, action: str, outcome: str, operation: dict[str, Any]) -> None:
+    async def _audit(
+        self,
+        action: str,
+        outcome: Literal["success", "denied", "failure"],
+        operation: dict[str, Any],
+    ) -> None:
         detail = {
             "operation_id": operation["id"],
             "section": operation["section"],
@@ -247,20 +253,15 @@ class RadioConfigurationManager:
             "rollback": operation.get("rollback"),
             "mismatches": operation.get("mismatches", []),
         }
-        await self.database.write(
-            """
-            INSERT INTO audit_log(
-                actor_kind,actor_ref,action,target,detail,created_at,outcome
-            ) VALUES('web',?,?,?,?,?,?)
-            """,
-            (
-                current_actor_ref(),
-                action,
-                f"radio/{operation['section']}",
-                json.dumps(detail, sort_keys=True),
-                self._now(),
-                outcome,
-            ),
+        await write_audit(
+            self.database,
+            actor_kind="web",
+            actor_ref=current_actor_ref(),
+            action=action,
+            target=f"radio/{operation['section']}",
+            detail=detail,
+            created_at=self._now(),
+            outcome=outcome,
         )
 
     def operation(self) -> dict[str, Any] | None:

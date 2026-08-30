@@ -4,6 +4,7 @@ import json
 import time
 from typing import Any, Literal
 
+from outpost.audit import write_audit
 from outpost.operator_context import current_actor_ref
 from outpost.store import Database
 
@@ -164,15 +165,14 @@ class OperatorInboxService:
                 "AND mail_direction<>'out'",
                 (now, conversation_key),
             )
-            await transaction.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web',?,'mail.conversation.view',?,?,?)",
-                (
-                    current_actor_ref(),
-                    f"conversation:{conversation_key}",
-                    json.dumps({"message_count": len(values)}, separators=(",", ":")),
-                    now,
-                ),
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=current_actor_ref(),
+                action="mail.conversation.view",
+                target=f"conversation:{conversation_key}",
+                detail={"message_count": len(values)},
+                created_at=now,
             )
         summary = self._summary(list(reversed(values)))
         summary["unread_count"] = 0
@@ -213,16 +213,13 @@ class OperatorInboxService:
                 "AND (? <> 'unread' OR mail_direction <> 'out')",
                 (*params, state),
             )
-            await transaction.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES(?,?,?,?,NULL,?)",
-                (
-                    actor_kind,
-                    actor_ref or current_actor_ref(),
-                    f"mail.conversation.{state}",
-                    f"conversation:{conversation_key}",
-                    now,
-                ),
+            await write_audit(
+                transaction,
+                actor_kind=actor_kind,
+                actor_ref=actor_ref or current_actor_ref(),
+                action=f"mail.conversation.{state}",
+                target=f"conversation:{conversation_key}",
+                created_at=now,
             )
         return True
 

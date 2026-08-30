@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -11,6 +12,7 @@ from outpost.ai.budget import (
     SEARCH_KB_RESULT_TOKENS,
     conservative_tokens,
 )
+from outpost.audit import write_audit
 from outpost.config import AIBudgetConfig
 from outpost.store import Database
 
@@ -250,10 +252,13 @@ class AIStore:
             )
             count = int(rows[0]["count"])
             await transaction.write("DELETE FROM ai_interaction WHERE member_id=?", (member_id,))
-            await transaction.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web',?,'ai.member_history_delete',?,?,unixepoch())",
-                (actor, f"member:{member_id}", json.dumps({"deleted": count})),
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=actor,
+                action="ai.member_history_delete",
+                target=f"member:{member_id}",
+                detail={"deleted": count},
             )
         return count
 
@@ -291,6 +296,8 @@ class AIStore:
         slug: str | None = None,
         source: str = "operator",
         document_id: int | None = None,
+        actor: str = "system",
+        audit_action: str | None = None,
     ) -> KBDocumentSaveResult:
         title = title.strip()
         body = body.strip()
@@ -302,26 +309,31 @@ class AIStore:
         chunks, token_limit, warning = chunk_knowledge_document(title, body, self.evidence_tokens)
         try:
             async with self.database.transaction() as transaction:
+                before: dict[str, Any] | None = None
                 if document_id is None:
                     document_id = await transaction.write(
                         """
-                        INSERT INTO kb_document(slug,title,body,source,created_at,updated_at)
-                        VALUES(?,?,?,?,unixepoch(),unixepoch())
+                        INSERT INTO kb_document(
+                          slug,title,body,source,created_by,updated_by,created_at,updated_at
+                        ) VALUES(?,?,?,?,?,?,unixepoch(),unixepoch())
                         """,
-                        (document_slug, title, body, source),
+                        (document_slug, title, body, source, actor, actor),
                     )
                 else:
                     rows = await transaction.read(
-                        "SELECT id FROM kb_document WHERE id=?", (document_id,)
+                        "SELECT id,slug,title,body,source FROM kb_document WHERE id=?",
+                        (document_id,),
                     )
                     if not rows:
                         raise ValueError("knowledge-base document not found")
+                    before = dict(rows[0])
                     await transaction.write(
                         """
-                        UPDATE kb_document SET slug=?,title=?,body=?,source=?,updated_at=unixepoch()
+                        UPDATE kb_document SET slug=?,title=?,body=?,source=?,updated_by=?,
+                        updated_at=unixepoch()
                         WHERE id=?
                         """,
-                        (document_slug, title, body, source, document_id),
+                        (document_slug, title, body, source, actor, document_id),
                     )
                     await transaction.write(
                         "DELETE FROM kb_chunk WHERE document_id=?", (document_id,)
@@ -334,6 +346,24 @@ class AIStore:
                 await transaction.write(
                     "UPDATE kb_document SET chunk_token_limit=?,chunk_overlap_tokens=? WHERE id=?",
                     (token_limit, _chunk_overlap_tokens(title, token_limit), document_id),
+                )
+                await write_audit(
+                    transaction,
+                    actor_kind="web" if actor != "system" else "system",
+                    actor_ref=actor,
+                    action=audit_action
+                    or ("ai.kb.update" if before is not None else "ai.kb.create"),
+                    target=f"kb_document:{document_id}",
+                    detail={
+                        "title": title,
+                        "slug": document_slug,
+                        "before_digest": (
+                            hashlib.sha256(str(before["body"]).encode()).hexdigest()
+                            if before is not None
+                            else None
+                        ),
+                        "after_digest": hashlib.sha256(body.encode()).hexdigest(),
+                    },
                 )
         except sqlite3.IntegrityError as error:
             if "kb_document.slug" in str(error):
@@ -377,14 +407,48 @@ class AIStore:
                 )
         return len(stale)
 
-    async def delete_document(self, document_id: int) -> bool:
-        rows = await self.database.read("SELECT id FROM kb_document WHERE id=?", (document_id,))
-        if not rows:
-            return False
-        await self.database.write("DELETE FROM kb_document WHERE id=?", (document_id,))
+    async def delete_document(self, document_id: int, actor: str = "system") -> bool:
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT id,slug,title,body,source,created_by,updated_by,created_at,updated_at "
+                "FROM kb_document WHERE id=?",
+                (document_id,),
+            )
+            if not rows:
+                return False
+            value = rows[0]
+            digest = hashlib.sha256(str(value["body"]).encode()).hexdigest()
+            await transaction.write(
+                "INSERT INTO kb_document_tombstone(document_id,slug,title,source,content_digest,"
+                "created_by,updated_by,deleted_by,created_at,updated_at,deleted_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,unixepoch())",
+                (
+                    document_id,
+                    value["slug"],
+                    value["title"],
+                    value["source"],
+                    digest,
+                    value["created_by"],
+                    value["updated_by"],
+                    actor,
+                    value["created_at"],
+                    value["updated_at"],
+                ),
+            )
+            await transaction.write("DELETE FROM kb_document WHERE id=?", (document_id,))
+            await write_audit(
+                transaction,
+                actor_kind="web" if actor != "system" else "system",
+                actor_ref=actor,
+                action="ai.kb.delete",
+                target=f"kb_document:{document_id}",
+                detail={"title": value["title"], "slug": value["slug"], "digest": digest},
+            )
         return True
 
-    async def promote_interaction(self, interaction_id: int, title: str) -> KBDocumentSaveResult:
+    async def promote_interaction(
+        self, interaction_id: int, title: str, actor: str = "system"
+    ) -> KBDocumentSaveResult:
         rows = await self.database.read(
             "SELECT answer FROM ai_interaction WHERE id=?", (interaction_id,)
         )
@@ -393,7 +457,11 @@ class AIStore:
         answer = re.sub(r"^\[AI\??\]\s*", "", str(rows[0]["answer"]))
         answer = re.sub(r"\s+src:\s*\S+\s*$", "", answer).strip()
         return await self.save_document(
-            title=title, body=answer, source=f"interaction:{interaction_id}"
+            title=title,
+            body=answer,
+            source=f"interaction:{interaction_id}",
+            actor=actor,
+            audit_action="ai.kb.promote",
         )
 
     async def refusal_rules(self) -> list[dict[str, Any]]:
@@ -405,17 +473,43 @@ class AIStore:
         if len(phrase) < 3 or len(phrase) > 120 or not reason or len(reason) > 120:
             raise ValueError("refusal phrase or reason has an invalid length")
         try:
-            return await self.database.write(
-                """
-                INSERT INTO ai_refusal_rule(phrase,reason,created_by,created_at)
-                VALUES(?,?,?,unixepoch())
-                """,
-                (phrase, reason, actor),
-            )
+            async with self.database.transaction() as transaction:
+                rule_id = await transaction.write(
+                    "INSERT INTO ai_refusal_rule(phrase,reason,created_by,created_at) "
+                    "VALUES(?,?,?,unixepoch())",
+                    (phrase, reason, actor),
+                )
+                await write_audit(
+                    transaction,
+                    actor_kind="web",
+                    actor_ref=actor,
+                    action="ai.refusal_rule.create",
+                    target=f"ai_refusal_rule:{rule_id}",
+                    detail={"phrase": phrase, "reason": reason},
+                )
+                return rule_id
         except sqlite3.IntegrityError as error:
             if "ai_refusal_rule.phrase" in str(error):
                 raise ValueError("refusal phrase already exists") from error
             raise
+
+    async def delete_refusal_rule(self, rule_id: int, actor: str) -> bool:
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT phrase,reason FROM ai_refusal_rule WHERE id=?", (rule_id,)
+            )
+            if not rows:
+                return False
+            await transaction.write("DELETE FROM ai_refusal_rule WHERE id=?", (rule_id,))
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=actor,
+                action="ai.refusal_rule.delete",
+                target=f"ai_refusal_rule:{rule_id}",
+                detail=dict(rows[0]),
+            )
+        return True
 
     async def matching_rule(self, question: str) -> str | None:
         rows = await self.database.read("SELECT phrase,reason FROM ai_refusal_rule WHERE enabled=1")

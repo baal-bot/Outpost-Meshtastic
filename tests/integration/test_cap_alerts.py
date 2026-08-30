@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import urllib.error
 from datetime import UTC, datetime, timedelta, timezone
@@ -59,11 +60,21 @@ async def test_cap_gate_dedupe_and_review_inbox(tmp_path, monkeypatch) -> None:
     withheld = next(item for item in items if item["decision"] == "withheld")
     assert "severity is below Severe" in withheld["gate_reasons"]
 
-    await service.dismiss(withheld["id"])
+    await service.dismiss(withheld["id"], "weather-operator")
     assert (
         next(item for item in await service.list() if item["id"] == withheld["id"])["review_state"]
         == "dismissed"
     )
+    audit = await database.read(
+        "SELECT actor_kind,actor_ref,target,detail FROM audit_log WHERE action='cap.dismiss'"
+    )
+    assert len(audit) == 1
+    assert (audit[0]["actor_kind"], audit[0]["actor_ref"]) == ("web", "weather-operator")
+    assert audit[0]["target"] == f"cap:{withheld['id']}"
+    assert json.loads(audit[0]["detail"]) == {
+        "area": "Allegheny County",
+        "event": "Tornado Warning",
+    }
     await database.close()
 
 

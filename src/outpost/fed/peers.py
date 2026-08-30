@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.store import Database
 
@@ -575,22 +576,18 @@ class FederationPeerService:
                 "AND direction='recv'",
                 (peer.id,),
             )
-            await transaction.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web',?,'federation.policy_update',?,?,?)",
-                (
-                    applied_by[:120],
-                    peer.mesh_id,
-                    json.dumps(
-                        {
-                            "before": before,
-                            "after": after,
-                            "globally_enabled_boards": boards_to_enable,
-                        },
-                        separators=(",", ":"),
-                    ),
-                    now,
-                ),
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=applied_by,
+                action="federation.policy_update",
+                target=peer.mesh_id,
+                detail={
+                    "before": before,
+                    "after": after,
+                    "globally_enabled_boards": boards_to_enable,
+                },
+                created_at=now,
             )
         return await self.by_mesh_id(mesh_id)
 

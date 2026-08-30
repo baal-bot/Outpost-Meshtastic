@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from outpost.audit import write_audit
 from outpost.operator_context import current_actor_ref
 
 from .database import Database
@@ -100,12 +101,13 @@ class BackupService:
             restored = await self.database.validate_current()
             if restored["schema_version"] != candidate["schema_version"]:
                 raise RuntimeError("Restored database schema does not match the candidate.")
-            await self.database.write(
-                """
-                INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES('web',?,'backup.restore',?,?,unixepoch())
-                """,
-                (current_actor_ref(), name, f"pre_restore={safety.name}"),
+            await write_audit(
+                self.database,
+                actor_kind="web",
+                actor_ref=current_actor_ref(),
+                action="backup.restore",
+                target=name,
+                detail={"pre_restore": safety.name},
             )
             restored = await self.database.validate_current()
         except BaseException as error:

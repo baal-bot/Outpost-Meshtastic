@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.config import Config
 
@@ -127,6 +128,13 @@ TABLE_POLICIES = (
     TablePolicy("same_event", "environment", "retain", "SAME event history retention."),
     TablePolicy("waypoint", "environment", "preserve", "Operator-managed reference data."),
     TablePolicy("kb_document", "ai", "preserve", "Operator-managed verified knowledge."),
+    TablePolicy(
+        "kb_document_tombstone",
+        "ai",
+        "preserve",
+        "Deleted knowledge attribution and content digest evidence.",
+        True,
+    ),
     TablePolicy("kb_chunk", "ai", "cascade", "Follows its knowledge document."),
     TablePolicy("kb_fts*", "ai", "compact", "Search index follows knowledge chunks."),
     TablePolicy(
@@ -1047,24 +1055,25 @@ class MaintenanceService:
                 (json.dumps(health, separators=(",", ":")), now),
             )
             for key, detail in failures.items():
-                await self.database.write(
-                    """
-                    INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                    VALUES(?,?,'maintenance.rule_failed',?,?,?)
-                    """,
-                    (actor_kind, actor_ref, key, detail, now),
+                await write_audit(
+                    self.database,
+                    actor_kind=actor_kind,
+                    actor_ref=actor_ref,
+                    action="maintenance.rule_failed",
+                    target=key,
+                    detail=detail,
+                    created_at=now,
+                    outcome="failure",
                 )
-            await self.database.write(
-                """
-                INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-                VALUES(?,?,'maintenance.run','database',?,?)
-                """,
-                (
-                    actor_kind,
-                    actor_ref,
-                    json.dumps(result.as_dict(), separators=(",", ":")),
-                    now,
-                ),
+            await write_audit(
+                self.database,
+                actor_kind=actor_kind,
+                actor_ref=actor_ref,
+                action="maintenance.run",
+                target="database",
+                detail=result.as_dict(),
+                created_at=now,
+                outcome="failure" if failures else "success",
             )
             await self._save_storage_snapshot(await self.storage_report(), now)
             return result

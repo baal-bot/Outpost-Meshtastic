@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.router.models import TrustLevel
 from outpost.store.database import Database, Transaction
@@ -365,17 +366,14 @@ class BBSService:
         )
         if seq == 1:
             await self.database.write("UPDATE thread SET hidden=1 WHERE id=?", (thread_id,))
-        await self.database.write(
-            """
-            INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-            VALUES('member',?,'bbs.remove',?,?,?)
-            """,
-            (
-                actor.mesh_id,
-                f"thread:{thread_id}:post:{seq}",
-                reason,
-                int(self.clock.now().timestamp()),
-            ),
+        await write_audit(
+            self.database,
+            actor_kind="member",
+            actor_ref=actor.mesh_id,
+            action="bbs.remove",
+            target=f"thread:{thread_id}:post:{seq}",
+            detail=reason,
+            created_at=int(self.clock.now().timestamp()),
         )
         return True
 

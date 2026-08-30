@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.operator_context import current_actor_ref
 from outpost.store import Database
@@ -228,18 +229,12 @@ class RadioOperations:
         }
 
     async def _audit(self, action: str, target: str, detail: object) -> None:
-        import json
-
-        await self.database.write(
-            """
-            INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
-            VALUES('web',?,?,?,?,?)
-            """,
-            (
-                current_actor_ref(),
-                action,
-                target,
-                json.dumps(detail),
-                int(self.clock.now().timestamp()),
-            ),
+        await write_audit(
+            self.database,
+            actor_kind="web",
+            actor_ref=current_actor_ref(),
+            action=action,
+            target=target,
+            detail=detail,
+            created_at=int(self.clock.now().timestamp()),
         )

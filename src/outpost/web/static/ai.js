@@ -132,9 +132,27 @@ function renderRules(items) {
   }
   for (const item of items) {
     const row = element("div", "refusal-row");
-    row.append(element("strong", "", item.phrase), element("span", "", item.reason));
+    const copy = element("div", "refusal-copy");
+    copy.append(element("strong", "", item.phrase), element("span", "", item.reason));
+    const remove = element("button", "danger", "Delete");
+    remove.type = "button";
+    remove.addEventListener("click", () => void removeRule(item));
+    row.append(copy, remove);
     list.append(row);
   }
+}
+
+async function removeRule(item) {
+  const confirmed = await window.OutpostUI?.confirm({
+    eyebrow: "AI SAFETY POLICY",
+    title: `Delete refusal rule “${item.phrase}”?`,
+    message: "The assistant will no longer refuse questions because of this operator rule.",
+    confirmLabel: "Delete rule",
+    danger: true,
+  });
+  if (!confirmed) return;
+  await body(await mutation(`/api/v1/ai/refusal-rules/${item.id}`, {method: "DELETE"}));
+  await loadRules();
 }
 
 async function loadRules() {

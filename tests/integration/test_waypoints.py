@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from outpost.clock import VirtualClock
@@ -11,7 +13,14 @@ async def test_waypoint_crud_slug_and_distance(tmp_path) -> None:
     await database.open()
     service = WaypointService(database, VirtualClock())
 
-    created = await service.create("Shelter Alpha", 40.4500, -80.0100, "shelter", "West entrance")
+    created = await service.create(
+        "Shelter Alpha",
+        40.4500,
+        -80.0100,
+        "shelter",
+        "West entrance",
+        "field-operator",
+    )
     assert created["slug"] == "shelter-alpha"
     assert (await service.by_token("shelter-alpha"))["id"] == created["id"]
     assert (await service.by_token(str(created["id"])))["name"] == "Shelter Alpha"
@@ -20,12 +29,30 @@ async def test_waypoint_crud_slug_and_distance(tmp_path) -> None:
     assert 1 < distance < 2
     assert 270 <= bearing <= 360
 
-    updated = await service.update(created["id"], {"name": "Shelter Bravo", "notes": "Main doors"})
+    updated = await service.update(
+        created["id"],
+        {"name": "Shelter Bravo", "notes": "Main doors"},
+        "field-operator",
+    )
     assert updated["slug"] == "shelter-bravo"
     assert updated["notes"] == "Main doors"
 
-    await service.delete(created["id"])
+    await service.delete(created["id"], "field-operator")
     assert await service.list() == []
+    audit = await database.read(
+        "SELECT actor_kind,actor_ref,action,target,detail FROM audit_log "
+        "WHERE target=? ORDER BY id",
+        (f"waypoint:{created['id']}",),
+    )
+    assert [row["action"] for row in audit] == [
+        "waypoint.create",
+        "waypoint.update",
+        "waypoint.delete",
+    ]
+    assert {(row["actor_kind"], row["actor_ref"]) for row in audit} == {("web", "field-operator")}
+    update_detail = json.loads(audit[1]["detail"])
+    assert update_detail["before"]["name"] == "Shelter Alpha"
+    assert update_detail["after"]["name"] == "Shelter Bravo"
     with pytest.raises(ValueError, match="not found"):
         await service.get(created["id"])
     await database.close()

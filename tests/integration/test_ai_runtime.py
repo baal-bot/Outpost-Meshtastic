@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -392,18 +393,27 @@ async def test_operator_api_exposes_status_knowledge_review_and_dry_run(ai_runti
     assert created.json()["chunk_count"] == 1
     assert created.json()["retrievable"] is True
     assert created.json()["warning"] is None
+    updated = client.patch(
+        f"/api/v1/ai/kb/{document_id}",
+        json={
+            "title": "Charging station",
+            "body": "Charging is available at the library until 20:00.",
+        },
+    )
+    assert updated.status_code == 200
     documents = client.get("/api/v1/ai/kb").json()["items"]
     created_document = next(item for item in documents if item["id"] == document_id)
     assert created_document["chunk_count"] == 1
     assert created_document["retrievable"] is True
     assert "max_chunk_tokens" not in created_document
-    assert (
-        client.post(
-            "/api/v1/ai/refusal-rules",
-            json={"phrase": "secret route", "reason": "operator policy"},
-        ).status_code
-        == 200
+    assert created_document["created_by"] == "operator"
+    assert created_document["updated_by"] == "operator"
+    refusal = client.post(
+        "/api/v1/ai/refusal-rules",
+        json={"phrase": "secret route", "reason": "operator policy"},
     )
+    assert refusal.status_code == 200
+    refusal_id = refusal.json()["id"]
     assert client.post("/api/v1/ai/test", json={"question": "hello"}).json()["outcome"] == "test"
     assert client.get("/api/v1/ai/interactions").status_code == 200
     await store.database.write(
@@ -436,6 +446,56 @@ async def test_operator_api_exposes_status_knowledge_review_and_dry_run(ai_runti
     )
     assert duplicate_rule.status_code == 422
     assert duplicate_rule.json()["error"]["code"] == "invalid_rule"
+
+    interaction_id = await store.database.write(
+        "INSERT INTO ai_interaction(channel,question,question_class,provider,model,answer,outcome,"
+        "created_at) VALUES(-1,'where to charge','general','test','test',"
+        "'[AI] Use the civic center. src: kb:charging','grounded',unixepoch())"
+    )
+    promoted = client.post(
+        f"/api/v1/ai/interactions/{interaction_id}/promote",
+        json={"title": "Civic center charging"},
+    )
+    assert promoted.status_code == 200
+    promoted_id = promoted.json()["document_id"]
+    assert client.delete(f"/api/v1/ai/kb/{document_id}").status_code == 200
+    assert client.delete(f"/api/v1/ai/refusal-rules/{refusal_id}").status_code == 200
+
+    tombstone = await store.database.read(
+        "SELECT slug,title,deleted_by,content_digest FROM kb_document_tombstone "
+        "WHERE document_id=?",
+        (document_id,),
+    )
+    assert len(tombstone) == 1
+    assert tombstone[0]["slug"] == "charging-station"
+    assert tombstone[0]["title"] == "Charging station"
+    assert tombstone[0]["deleted_by"] == "operator"
+    assert len(tombstone[0]["content_digest"]) == 64
+
+    rows = await store.database.read(
+        "SELECT actor_kind,actor_ref,action,target,detail FROM audit_log "
+        "WHERE action LIKE 'ai.kb.%' OR action LIKE 'ai.refusal_rule.%' ORDER BY id"
+    )
+    actions = {row["action"] for row in rows}
+    assert actions == {
+        "ai.kb.create",
+        "ai.kb.update",
+        "ai.kb.promote",
+        "ai.kb.delete",
+        "ai.refusal_rule.create",
+        "ai.refusal_rule.delete",
+    }
+    assert {(row["actor_kind"], row["actor_ref"]) for row in rows} == {("web", "operator")}
+    update_audit = next(row for row in rows if row["action"] == "ai.kb.update")
+    update_detail = json.loads(update_audit["detail"])
+    assert update_audit["target"] == f"kb_document:{document_id}"
+    assert update_detail["title"] == "Charging station"
+    assert update_detail["slug"] == "charging-station"
+    assert update_detail["before_digest"] != update_detail["after_digest"]
+    assert any(
+        row["action"] == "ai.kb.promote" and row["target"] == f"kb_document:{promoted_id}"
+        for row in rows
+    )
 
 
 @pytest.mark.asyncio

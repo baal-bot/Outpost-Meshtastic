@@ -5,6 +5,7 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.fed.peers import FederationPeerService
 from outpost.store import Database
@@ -106,15 +107,14 @@ class FederationTopologyService:
                     actor[:160],
                 ),
             )
-            await transaction.write(
-                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                "VALUES('web',?,'federation.topology_policy',?,?,?)",
-                (
-                    actor[:160],
-                    mesh_id,
-                    json.dumps(detail, separators=(",", ":"), sort_keys=True),
-                    now,
-                ),
+            await write_audit(
+                transaction,
+                actor_kind="web",
+                actor_ref=actor,
+                action="federation.topology_policy",
+                target=mesh_id,
+                detail=detail,
+                created_at=now,
             )
         return await self.policy(mesh_id)
 
