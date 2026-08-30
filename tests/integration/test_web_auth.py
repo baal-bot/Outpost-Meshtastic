@@ -440,6 +440,7 @@ async def test_named_roles_sessions_and_last_administrator_guard(tmp_path: Path)
     assert viewer.get("/api/v1/auth/accounts").status_code == 403
     public_or_self_service = {
         "/api/v1/health",
+        "/api/v1/runtime",
         "/api/v1/diagnostics/status",
         "/api/v1/auth/setup",
         "/api/v1/auth/session",

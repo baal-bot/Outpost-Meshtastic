@@ -102,7 +102,7 @@ class SimulatedRadioLink:
             raise ConnectionError("simulated radio is down")
         self._touch()
         self.sent.append(SentPacket(text, None, dest, channel, want_ack))
-        return SendResult(len(self.sent), "pending" if want_ack else "not_requested")
+        return SendResult(len(self.sent))
 
     async def _send_data(
         self, payload: bytes, *, dest: str, channel: int, portnum: int, want_ack: bool
@@ -111,7 +111,7 @@ class SimulatedRadioLink:
             raise ConnectionError("simulated radio is down")
         self._touch()
         self.sent.append(SentPacket(None, payload, dest, channel, want_ack))
-        return SendResult(len(self.sent), "pending" if want_ack else "not_requested")
+        return SendResult(len(self.sent))
 
     async def local_telemetry(self) -> LocalTelemetry:
         return self.telemetry
