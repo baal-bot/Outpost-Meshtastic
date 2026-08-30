@@ -31,6 +31,7 @@ policy; Outpost never silently replaces audit detail with a summary.
 | `federation_service_days` | 7 days | Completed, failed, or expired peer-service requests/results. |
 | `federation_history_days` | 30 days | Reviewed inbox items, receipts, replay state, and terminal deliveries. |
 | `outbound_history_days` | 30 days | Terminal durable outbound work and its attempts. |
+| `radio_power_days` | 30 days | Sampled connected-radio battery history used for trend and threshold evidence. |
 
 The safety-floor replay window separately uses
 `security.safety_attempt_retention_hours` (72 hours by default).
@@ -51,6 +52,7 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | System/security | `message_log` | Compact by age and absolute row ceiling. |
 | System/security | `outbound_work` | Retain terminal states; pending, held, sending, and acknowledgement work is protected. |
 | System/security | `outbound_attempt` | Cascade with `outbound_work`. |
+| System/security | `radio_power_sample` | Retain for `radio_power_days`; external-power/no-report samples are explicit nulls. |
 | System/security | `safety_floor_attempt` | Retain for the configured safety replay window. |
 | System/security | `kv` | Expire only keys whose stored deadline elapsed. |
 | System/security | `audit_log` | Preserve forever and protect. |

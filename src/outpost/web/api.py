@@ -4290,6 +4290,10 @@ def create_web_app(
             async def mesh_airtime() -> dict[str, Any]:
                 return radio_operations.airtime()
 
+            @app.get("/api/v1/mesh/power")
+            async def mesh_power() -> dict[str, Any]:
+                return await radio_operations.power()
+
             @app.post("/api/v1/mesh/send", response_model=None)
             async def mesh_send(body: MeshSendBody) -> dict[str, int] | Response:
                 try:

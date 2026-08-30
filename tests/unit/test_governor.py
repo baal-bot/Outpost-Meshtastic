@@ -5,9 +5,10 @@ from datetime import UTC, datetime
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from prometheus_client import generate_latest
 
 from outpost.clock import VirtualClock
-from outpost.config import AirtimeConfig
+from outpost.config import AirtimeConfig, RadioPowerConfig
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.models import LocalTelemetry, Severity, TrafficClass
 from outpost.transport.simulated import SimulatedRadioLink
@@ -152,6 +153,73 @@ async def test_high_utilisation_only_allows_alerts() -> None:
     assert await governor.tick() is None
     governor.enqueue(OutboundItem("alert", "!peer", 0, TrafficClass.ALERT, Severity.URGENT))
     assert (await governor.tick()).traffic_class == TrafficClass.ALERT
+
+
+@pytest.mark.asyncio
+async def test_low_power_shedding_is_explicit_and_never_sheds_alerts_or_replies() -> None:
+    clock, link = VirtualClock(), SimulatedRadioLink()
+    await link.connect()
+    link.telemetry = LocalTelemetry(battery_level=10)
+    power = RadioPowerConfig(shed_discretionary=True, shed_below_percent=15)
+    governor = AirtimeGovernor(link, AirtimeConfig(min_gap_s=0), clock, power_config=power)
+    digest = OutboundItem("digest", "!peer", 0, TrafficClass.DIGEST)
+    reply = OutboundItem("reply", "!peer", 0, TrafficClass.REPLY)
+    alert = OutboundItem("alert", "^all", 0, TrafficClass.ALERT, Severity.URGENT)
+    governor.enqueue(digest)
+    governor.enqueue(reply)
+    governor.enqueue(alert)
+
+    assert await governor.tick() is alert
+    clock.advance(60)
+    assert await governor.tick() is reply
+    clock.advance(60)
+    assert await governor.tick() is None
+    assert digest in governor.queued_items()
+    assert governor.metrics.throttled["low_power"] == 1
+
+
+@pytest.mark.asyncio
+async def test_low_power_shedding_defaults_off_and_critical_alert_keeps_reserve() -> None:
+    clock = VirtualClock(epoch=datetime(2026, 1, 1, 12, tzinfo=UTC))
+    link = SimulatedRadioLink()
+    await link.connect()
+    link.telemetry = LocalTelemetry(battery_level=5)
+    normal = AirtimeGovernor(link, AirtimeConfig(min_gap_s=0), clock)
+    bulletin = OutboundItem("bulletin", "^all", 0, TrafficClass.BULLETIN)
+    normal.enqueue(bulletin)
+    assert await normal.tick() is bulletin
+
+    config = AirtimeConfig(budget_percent=0.01, emergency_reserve_percent=0.01, min_gap_s=0)
+    shedding = AirtimeGovernor(
+        link,
+        config,
+        clock,
+        preset="SHORT_FAST",
+        power_config=RadioPowerConfig(shed_discretionary=True, shed_below_percent=15),
+    )
+    shedding.history.append((clock.monotonic(), 0.36, TrafficClass.REPLY, Severity.INFO))
+    critical = OutboundItem("critical", "^all", 0, TrafficClass.ALERT, Severity.CRITICAL)
+    shedding.enqueue(critical)
+    assert await shedding.tick() is critical
+
+
+@pytest.mark.asyncio
+async def test_governor_exports_battery_metrics_and_no_battery_as_nan() -> None:
+    clock, link = VirtualClock(), SimulatedRadioLink()
+    await link.connect()
+    link.telemetry = LocalTelemetry(battery_level=47)
+    governor = AirtimeGovernor(link, AirtimeConfig(), clock)
+
+    await governor.tick()
+    metrics = generate_latest().decode()
+    assert "outpost_radio_battery_level_percent 47.0" in metrics
+    assert "outpost_radio_battery_reported 1.0" in metrics
+
+    link.telemetry = LocalTelemetry(battery_level=None)
+    await governor.tick()
+    metrics = generate_latest().decode()
+    assert "outpost_radio_battery_level_percent NaN" in metrics
+    assert "outpost_radio_battery_reported 0.0" in metrics
 
 
 @pytest.mark.asyncio

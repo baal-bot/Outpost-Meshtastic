@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from outpost.clock import Clock
 from outpost.config import Config
+from outpost.radio_power import normalize_battery_level, power_condition
 from outpost.store import Database
 
 
@@ -80,6 +81,13 @@ CHECK_DEFINITIONS = (
         "Backup rotation is within policy",
         "Unbounded snapshots can exhaust appliance storage.",
         "Run maintenance, then inspect backup rotation errors and filesystem permissions.",
+    ),
+    CheckDefinition(
+        "radio_power",
+        "operations",
+        "Connected-radio power is above its warning threshold",
+        "The connected mesh radio may stop before operators expect it to.",
+        "Restore charging or external power and verify the trend on the Radio page.",
     ),
     CheckDefinition(
         "alert_delivery_history",
@@ -323,6 +331,37 @@ class SelfCheckService:
             },
         )
 
+    async def _radio_power(self) -> CheckResult:
+        rows = await self.database.read(
+            "SELECT captured_at,battery_level FROM radio_power_sample "
+            "ORDER BY captured_at DESC,id DESC LIMIT 1"
+        )
+        level = normalize_battery_level(rows[0]["battery_level"]) if rows else None
+        condition = power_condition(level, self.config.radio.power)
+        passed = condition in {"normal", "not_reported"}
+        if not rows:
+            detail = "No connected-radio power sample has been recorded yet."
+        elif level is None:
+            detail = "The connected radio reports no battery (external power or unsupported)."
+        elif condition == "critical":
+            detail = f"Radio battery is critical at {level}%."
+        elif condition == "warning":
+            detail = f"Radio battery is low at {level}%."
+        else:
+            detail = f"Radio battery is {level}%."
+        return self._result(
+            "radio_power",
+            passed,
+            detail,
+            {
+                "battery_level": level,
+                "condition": condition if rows else "no_data",
+                "captured_at": int(rows[0]["captured_at"]) if rows else None,
+                "warning_percent": self.config.radio.power.warning_percent,
+                "critical_percent": self.config.radio.power.critical_percent,
+            },
+        )
+
     async def _alert_delivery_history(self, now: int) -> CheckResult:
         cutoff = now - self.history_days * 86_400
         rows = await self.database.read(
@@ -448,6 +487,7 @@ class SelfCheckService:
                 await self._escalation_audiences(),
                 await self._maintenance_freshness(now),
                 self._backup_rotation(),
+                await self._radio_power(),
                 await self._alert_delivery_history(now),
                 self._intent_map(),
                 self._configured_keys_effective(),

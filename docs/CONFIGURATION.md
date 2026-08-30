@@ -37,6 +37,13 @@ Select `serial`, `tcp`, or `ble` and configure the matching subsection. Serial i
 fixed node. `federation_portnum` is a private Meshtastic application port from 256–511. Only
 explicitly trusted bridge node IDs belong in `bridge_node_ids`.
 
+`radio.power` turns the connected node's battery report into an operator condition. Warning and
+critical percentages must be ordered, `sample_interval_s` and `trend_hours` bound the retained
+trend, and a missing report is labelled external/unsupported power rather than treated as 0%.
+`shed_discretionary` defaults to false. When explicitly enabled, battery at or below
+`shed_below_percent` pauses only AI, bulletins, and digests until power recovers; replies, alerts,
+and the critical-alert emergency reserve remain available.
+
 ### `channels`
 
 Keys are Meshtastic channel indices 0–7. Each controls display name, AI access, BBS policy (`none`,
@@ -193,7 +200,8 @@ the expiry migration are expired on upgrade and require a fresh member share to 
 
 The remaining retention keys govern BBS/mail, authentication, digests, terminal watch history,
 provider history/cache, completed federation service/delivery history, and terminal durable
-outbound work. Active incidents/events, pending federation approvals, live deliveries, identity,
+outbound work. `radio_power_days` retains bounded connected-radio trend samples (30 days by
+default). Active incidents/events, pending federation approvals, live deliveries, identity,
 configuration, and audit evidence are not age-deleted. See
 [Data retention and storage](RETENTION.md) for the table-by-table contract and capacity estimates.
 

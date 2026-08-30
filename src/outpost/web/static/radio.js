@@ -357,6 +357,17 @@ function installInboundHealthCard() {
   );
 }
 
+function installPowerCard() {
+  const nodeCard = $("radio-node").closest("article");
+  nodeCard.insertAdjacentHTML(
+    "beforebegin",
+    '<article id="radio-power-card"><small>RADIO POWER</small>' +
+      '<strong id="radio-power-level">—</strong>' +
+      '<div id="radio-power-trace" class="power-trace" role="img" aria-label="No battery trend yet"></div>' +
+      '<p id="radio-power-detail">loading battery telemetry</p></article>',
+  );
+}
+
 async function initialize() {
   const response = await fetch("/api/v1/auth/session");
   if (!response.ok) {
@@ -381,16 +392,17 @@ async function refresh() {
   }
   const responses = await Promise.all([
     api("/api/v1/status"),api("/api/v1/mesh/airtime"),
-    api(`/api/v1/mesh/queue?${queueQuery()}`),api("/api/v1/radio/channels"),
+    api("/api/v1/mesh/power"),api(`/api/v1/mesh/queue?${queueQuery()}`),
+    api("/api/v1/radio/channels"),
   ]);
   if(responses.some(response => !response.ok)){
-    const failed=responses.map((response,index)=>({response,index})).filter(value=>!value.response.ok),labels=["Status","Airtime","Queue","Channels"];
+    const failed=responses.map((response,index)=>({response,index})).filter(value=>!value.response.ok),labels=["Status","Airtime","Power","Queue","Channels"];
     const state=$("link-state");state.className="ui-pill status down";state.innerHTML="<i></i>Data unavailable";
     $("inbound-detail").textContent=failed.map(value=>`${labels[value.index]} HTTP ${value.response.status}`).join(" · ");
-    if(failed.some(value=>value.index===2))$("queue-list").innerHTML='<p class="ui-empty empty">Queue data unavailable.</p>';
+    if(failed.some(value=>value.index===3))$("queue-list").innerHTML='<p class="ui-empty empty">Queue data unavailable.</p>';
     return;
   }
-  const [status, airtime, queue, channelMap] = await Promise.all(responses.map(response=>response.json()));
+  const [status, airtime, power, queue, channelMap] = await Promise.all(responses.map(response=>response.json()));
   renderChannelMap(channelMap);
   const direction = $("filter-direction").value;
   const channel = $("filter-channel").value;
@@ -410,6 +422,35 @@ async function refresh() {
   $("radio-node").textContent = status.radio_config.node_id || "—";
   $("radio-preset").textContent =
     `${status.radio_config.region} · ${status.radio_config.preset}`;
+  const powerCard = $("radio-power-card");
+  powerCard.classList.remove("power-normal", "power-warning", "power-critical", "power-not_reported");
+  powerCard.classList.add(`power-${power.condition || "not_reported"}`);
+  $("radio-power-level").textContent = power.reported
+    ? `${Number(power.battery_level).toFixed(0)}%`
+    : "No battery";
+  const trend = power.trend || {};
+  const thresholds = power.thresholds || {};
+  const shedding = power.shedding || {};
+  let powerDetail = "No battery reported · external power or unsupported telemetry";
+  if (power.reported) {
+    const trendText = trend.delta_percent == null || trend.elapsed_hours == null
+      ? "trend pending"
+      : `${trend.direction} ${Math.abs(Number(trend.delta_percent)).toFixed(0)} points / ${Number(trend.elapsed_hours).toFixed(1)}h`;
+    powerDetail = `${trendText} · warn ≤${thresholds.warning_percent}% · critical ≤${thresholds.critical_percent}%`;
+  }
+  if (shedding.active) powerDetail += " · AI, bulletins, and digests paused";
+  else if (shedding.enabled) powerDetail += ` · shedding armed at ≤${shedding.below_percent}%`;
+  if (status.radio !== "up" && power.observed_at) {
+    powerDetail += ` · last observed ${new Date(power.observed_at * 1000).toLocaleString()}`;
+  }
+  $("radio-power-detail").textContent = powerDetail;
+  const samples = (power.samples || []).filter(sample => sample.battery_level != null).slice(-24);
+  const trace = $("radio-power-trace");
+  trace.innerHTML = samples.map(sample => `<i style="height:${safe(Math.max(4, Number(sample.battery_level)))}%"></i>`).join("");
+  trace.hidden = samples.length < 2;
+  trace.setAttribute("aria-label", samples.length < 2
+    ? "No battery trend yet"
+    : `${samples.length} sampled battery readings; trend ${trend.direction || "unavailable"}`);
   let governorProfile = $("governor-profile");
   if (!governorProfile) {
     governorProfile = document.createElement("article");
@@ -521,6 +562,7 @@ $("send-form").addEventListener("submit", async (event) => {
 });
 
 installInboundHealthCard();
+installPowerCard();
 installQueueHistoryControls();
 $("refresh-radio").addEventListener("click", refresh);
 $("filter-queue-state").addEventListener("change", refresh);

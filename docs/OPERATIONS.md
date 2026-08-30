@@ -125,6 +125,13 @@ sudo systemctl start outpost
 
 Then verify serial path, node ID, DM `PING`, channel handling, positions, and telemetry.
 
+The Radio page labels current battery condition and plots the most recent sampled trend. “No
+battery” means the firmware reports external power or does not expose battery telemetry; it is not
+a zero-percent alarm. Warning/critical crossings update readiness immediately. Prometheus exports
+`outpost_radio_battery_level_percent` (`NaN` when not reported) and
+`outpost_radio_battery_reported`. Low-power traffic shedding is opt-in under `radio.power`; if
+enabled, verify that only AI, bulletins, and digests pause and that alert delivery remains live.
+
 For normal changes, use **Radio → Configure radio**. Before confirmation, Outpost reconnects to read
 fresh device state and shows a redacted field diff plus operational impact. Apply is bound to that
 exact preflight for ten minutes and follows `preflight → applying → reconnecting → verifying →

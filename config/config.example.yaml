@@ -13,6 +13,7 @@ radio:
   tcp: {host: "192.168.1.50", port: 4403}
   ble: {address: "AA:BB:CC:DD:EE:FF"}
   reconnect: {initial_s: 2, max_s: 120, jitter: 0.2}
+  power: {warning_percent: 30, critical_percent: 15, sample_interval_s: 300, trend_hours: 24, shed_discretionary: false, shed_below_percent: 15}
   liveness_timeout_s: 300
   federation_portnum: 260
   bridge_node_ids: []
@@ -186,6 +187,7 @@ store:
     federation_service_days: 7
     federation_history_days: 30
     outbound_history_days: 30
+    radio_power_days: 30
   backup:
     enabled: true
     keep: 14

@@ -16,6 +16,9 @@ def test_default_config_is_valid() -> None:
     assert Config().store.tiles_path == "/var/lib/outpost/.data/tiles"
     assert Config().store.releases_path == "/opt/outpost/releases"
     assert Config().store.backup.pre_upgrade_keep == 3
+    assert Config().radio.power.shed_discretionary is False
+    assert Config().radio.power.warning_percent == 30
+    assert Config().radio.power.critical_percent == 15
 
 
 def test_tile_path_must_be_absolute_and_is_resolved(tmp_path: Path) -> None:
@@ -137,6 +140,11 @@ def test_unsupported_node_locale_format_is_rejected(locale: str) -> None:
 def test_invalid_airtime_config_is_rejected(airtime: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         Config.model_validate({"airtime": airtime})
+
+
+def test_radio_power_thresholds_must_be_ordered() -> None:
+    with pytest.raises(ValidationError, match="critical_percent must be below"):
+        Config.model_validate({"radio": {"power": {"warning_percent": 20, "critical_percent": 20}}})
 
 
 @pytest.mark.parametrize(

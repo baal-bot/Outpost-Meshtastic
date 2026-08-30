@@ -40,6 +40,7 @@ TABLE_POLICIES = (
     TablePolicy("message_log", "system", "compact", "Age limit plus an absolute row ceiling."),
     TablePolicy("outbound_work", "system", "retain", "Terminal work only; active work is durable."),
     TablePolicy("outbound_attempt", "system", "cascade", "Follows its durable outbound item."),
+    TablePolicy("radio_power_sample", "system", "retain", "Bounded connected-radio power history."),
     TablePolicy(
         "safety_floor_attempt", "system", "retain", "Short replay/coalescing safety window."
     ),
@@ -450,6 +451,7 @@ class MaintenanceService:
         service_cutoff = now - retention.federation_service_days * DAY
         federation_cutoff = now - retention.federation_history_days * DAY
         outbound_cutoff = now - retention.outbound_history_days * DAY
+        radio_power_cutoff = now - retention.radio_power_days * DAY
         return (
             CleanupRule(
                 "member_positions",
@@ -490,6 +492,14 @@ class MaintenanceService:
                 "safety_floor_attempt",
                 "last_seen_at<?",
                 (now - self.config.security.safety_attempt_retention_hours * HOUR,),
+            ),
+            CleanupRule(
+                "radio_power",
+                "Connected-radio power history",
+                "system",
+                "radio_power_sample",
+                "captured_at<?",
+                (radio_power_cutoff,),
             ),
             CleanupRule(
                 "web_login_attempts",

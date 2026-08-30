@@ -678,6 +678,19 @@ def route_visual_content_api(page: object) -> None:
             "by_class_seconds": {},
         },
     )
+    fulfill(
+        "**/api/v1/mesh/power",
+        {
+            "battery_level": None,
+            "reported": False,
+            "condition": "not_reported",
+            "observed_at": 2_000_000_000,
+            "trend": {"direction": "unavailable", "sample_count": 1},
+            "thresholds": {"warning_percent": 30, "critical_percent": 15},
+            "shedding": {"enabled": False, "active": False, "below_percent": 15},
+            "samples": [],
+        },
+    )
     fulfill("**/api/v1/mesh/queue*", {"items": []})
     fulfill("**/api/v1/mesh/messages*", {"items": []})
 

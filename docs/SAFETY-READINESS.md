@@ -17,6 +17,7 @@ evidence. Prometheus exports `outpost_self_check_state{check,severity}` for each
 | check: `escalation_audiences` | Safety | Every configured caution, urgent, and critical escalation stage resolves to a destination. |
 | check: `maintenance_freshness` | Operations | Retention maintenance has a valid completion record no more than 48 hours old. |
 | check: `backup_rotation` | Operations | The snapshot inventory does not exceed `store.backup.keep`. |
+| check: `radio_power` | Operations | The connected radio reports no battery or remains above the configured warning threshold. |
 | check: `alert_delivery_history` | Safety | No alert escalation stage recorded zero admitted deliveries during the previous seven days. |
 | check: `intent_map` | Configuration | The configured tolerant-intent file exists, loads, and contains no rejected entries or regexes. |
 | check: `configured_keys_effective` | Configuration | Explicitly configured keys are not among settings known to have no runtime consumer. |

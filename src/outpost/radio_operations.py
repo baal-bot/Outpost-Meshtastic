@@ -6,6 +6,7 @@ from typing import Any
 from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.operator_context import current_actor_ref
+from outpost.radio_power import RadioPowerMonitor
 from outpost.store import Database
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.models import TrafficClass
@@ -40,9 +41,11 @@ class RadioOperations:
         governor: AirtimeGovernor,
         clock: Clock,
         retention_days: int = 30,
+        power: RadioPowerMonitor | None = None,
     ) -> None:
         self.database, self.governor, self.clock = database, governor, clock
         self.retention_days = retention_days
+        self.power_monitor = power
 
     async def queue(self) -> list[dict[str, Any]]:
         if self.governor.outbox is not None:
@@ -227,6 +230,18 @@ class RadioOperations:
             "warnings": list(self.governor.profile_warnings),
             "by_class_seconds": self.governor.airtime_breakdown(),
         }
+
+    async def power(self) -> dict[str, Any]:
+        if self.power_monitor is None:
+            return {
+                "battery_level": None,
+                "reported": False,
+                "condition": "unavailable",
+                "observed_at": None,
+                "trend": {"direction": "unavailable", "sample_count": 0},
+                "samples": [],
+            }
+        return await self.power_monitor.history()
 
     async def _audit(self, action: str, target: str, detail: object) -> None:
         await write_audit(

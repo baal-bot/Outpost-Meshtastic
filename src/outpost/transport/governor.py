@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import uuid
 from collections import defaultdict, deque
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import time
 from typing import TYPE_CHECKING
 
 from outpost.clock import Clock
-from outpost.config import AirtimeConfig
+from outpost.config import AirtimeConfig, RadioPowerConfig
+from outpost.radio_power import normalize_battery_level
 from outpost.store.outbox import OutboxRejected, OutboxStore
 from outpost.transport.chunker import truncate_utf8
 
@@ -23,6 +25,9 @@ from .metrics import (
     OUTBOUND_ENQUEUED,
     OUTBOUND_SENT,
     QUEUE_DEPTH,
+    RADIO_BATTERY_LEVEL,
+    RADIO_BATTERY_REPORTED,
+    RADIO_POWER_OBSERVATION_FAILURES,
     TOA_SECONDS,
 )
 from .models import LinkState, RadioLink, SendResult, Severity, TrafficClass
@@ -42,6 +47,9 @@ ALERT_SEVERITY_ORDER = (
     Severity.URGENT,
     Severity.CAUTION,
     Severity.INFO,
+)
+DISCRETIONARY_POWER_CLASSES = frozenset(
+    {TrafficClass.AI, TrafficClass.BULLETIN, TrafficClass.DIGEST}
 )
 
 
@@ -118,9 +126,14 @@ class AirtimeGovernor:
         region: str | None = None,
         regional_ceiling_percent: float | None = None,
         outbox: OutboxStore | None = None,
+        power_config: RadioPowerConfig | None = None,
+        power_observer: Callable[[int | None], Awaitable[None]] | None = None,
     ) -> None:
         self.link, self.config, self.clock = link, config, clock
         self.outbox = outbox
+        self.power_config = power_config or RadioPowerConfig()
+        self.power_observer = power_observer
+        self.battery_level: int | None = None
         self.reported_preset = ""
         self.preset = ""
         self.region = "unknown"
@@ -593,7 +606,7 @@ class AirtimeGovernor:
         return item.item_id not in self._held_ids and item.next_attempt_at <= now
 
     def _eligible_class(
-        self, *, only_critical: bool, high_util: bool, now: float
+        self, *, only_critical: bool, high_util: bool, low_power: bool, now: float
     ) -> TrafficClass | None:
         alerts = self.queues[TrafficClass.ALERT]
         available_alerts = [item for item in alerts if self._available(item, now)]
@@ -607,6 +620,8 @@ class AirtimeGovernor:
         for _ in range(len(self._rr)):
             cls = self._rr[0]
             self._rr.rotate(-1)
+            if low_power and cls in DISCRETIONARY_POWER_CLASSES:
+                continue
             if any(self._available(item, now) for item in self.queues[cls]) and not self._quiet(
                 cls
             ):
@@ -653,6 +668,17 @@ class AirtimeGovernor:
         telemetry = await self.link.local_telemetry()
         CHANNEL_UTIL.set(telemetry.channel_utilisation / 100)
         AIR_UTIL_TX.set(telemetry.air_util_tx / 100)
+        self.battery_level = normalize_battery_level(telemetry.battery_level)
+        RADIO_BATTERY_REPORTED.set(int(self.battery_level is not None))
+        RADIO_BATTERY_LEVEL.set(
+            float(self.battery_level) if self.battery_level is not None else float("nan")
+        )
+        if self.power_observer is not None:
+            try:
+                await self.power_observer(self.battery_level)
+            except Exception:
+                # Power history must never become a new failure boundary for alert egress.
+                RADIO_POWER_OBSERVATION_FAILURES.inc()
         budget_s = 3_600 * self.budget_percent / 100
         total_s = 3_600 * (self.budget_percent + self.reserve_percent) / 100
         if self.used_airtime >= total_s:
@@ -660,10 +686,29 @@ class AirtimeGovernor:
             return None
         only_critical = self.noncritical_airtime >= budget_s or self.used_airtime >= budget_s
         high_util = telemetry.channel_utilisation >= self.config.utilisation_ceiling
-        cls = self._eligible_class(only_critical=only_critical, high_util=high_util, now=now)
+        low_power = bool(
+            self.power_config.shed_discretionary
+            and self.battery_level is not None
+            and self.battery_level <= self.power_config.shed_below_percent
+        )
+        cls = self._eligible_class(
+            only_critical=only_critical,
+            high_util=high_util,
+            low_power=low_power,
+            now=now,
+        )
         if cls is None:
             if any(self.queues.values()):
-                self.metrics.throttled["budget" if only_critical else "utilisation"] += 1
+                reason = (
+                    "budget"
+                    if only_critical
+                    else "utilisation"
+                    if high_util
+                    else "low_power"
+                    if low_power
+                    else "unavailable"
+                )
+                self.metrics.throttled[reason] += 1
             return None
         queue = self.queues[cls]
         if cls == TrafficClass.ALERT:

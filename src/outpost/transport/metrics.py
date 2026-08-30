@@ -44,6 +44,18 @@ QUEUE_DEPTH = Gauge("outpost_outbound_queue_depth", "Outbound queue depth", ("cl
 AIRTIME_USED = Gauge("outpost_airtime_used_ratio", "Own rolling one-hour airtime ratio")
 CHANNEL_UTIL = Gauge("outpost_channel_utilisation_ratio", "Radio channel utilisation ratio")
 AIR_UTIL_TX = Gauge("outpost_air_util_tx_ratio", "Radio-reported transmit airtime ratio")
+RADIO_BATTERY_LEVEL = Gauge(
+    "outpost_radio_battery_level_percent",
+    "Connected radio battery percentage; NaN when no battery is reported",
+)
+RADIO_BATTERY_REPORTED = Gauge(
+    "outpost_radio_battery_reported",
+    "Whether the connected radio currently reports a battery percentage",
+)
+RADIO_POWER_OBSERVATION_FAILURES = Counter(
+    "outpost_radio_power_observation_failures_total",
+    "Failures while recording connected-radio power history",
+)
 TOA_SECONDS = Histogram("outpost_toa_seconds", "Estimated packet time on air")
 ACK_OUTCOME = Counter(
     "outpost_ack_outcome_total", "Outbound acknowledgement outcomes", ("outcome",)

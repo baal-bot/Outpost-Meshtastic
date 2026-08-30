@@ -87,12 +87,28 @@ class ReconnectConfig(StrictModel):
     jitter: float = Field(default=0.2, ge=0, le=1)
 
 
+class RadioPowerConfig(StrictModel):
+    warning_percent: int = Field(default=30, ge=1, le=100)
+    critical_percent: int = Field(default=15, ge=0, le=99)
+    sample_interval_s: int = Field(default=300, ge=30, le=3_600)
+    trend_hours: int = Field(default=24, ge=1, le=168)
+    shed_discretionary: bool = False
+    shed_below_percent: int = Field(default=15, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def validate_thresholds(self) -> RadioPowerConfig:
+        if self.critical_percent >= self.warning_percent:
+            raise ValueError("radio.power.critical_percent must be below warning_percent")
+        return self
+
+
 class RadioConfig(StrictModel):
     transport: Literal["serial", "tcp", "ble"] = "serial"
     serial: SerialConfig = Field(default_factory=SerialConfig)
     tcp: TcpConfig = Field(default_factory=TcpConfig)
     ble: BleConfig = Field(default_factory=BleConfig)
     reconnect: ReconnectConfig = Field(default_factory=ReconnectConfig)
+    power: RadioPowerConfig = Field(default_factory=RadioPowerConfig)
     liveness_timeout_s: int = Field(default=300, gt=0)
     federation_portnum: int = Field(default=260, ge=256, le=511)
     bridge_node_ids: list[str] = Field(default_factory=list)
@@ -437,6 +453,7 @@ class RetentionConfig(StrictModel):
     federation_service_days: int = Field(default=7, ge=1, le=90)
     federation_history_days: int = Field(default=30, ge=1, le=365)
     outbound_history_days: int = Field(default=30, ge=1, le=365)
+    radio_power_days: int = Field(default=30, ge=1, le=365)
 
     @model_validator(mode="after")
     def validate_ai_retention(self) -> RetentionConfig:

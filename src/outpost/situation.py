@@ -664,8 +664,10 @@ class SituationBriefingService:
         radio = str(runtime.get("radio") or "unknown")
         raw_inbound = runtime.get("inbound")
         raw_queues = runtime.get("queues")
+        raw_power = runtime.get("radio_power")
         inbound: Mapping[str, Any] = raw_inbound if isinstance(raw_inbound, dict) else {}
         queues: Mapping[str, Any] = raw_queues if isinstance(raw_queues, dict) else {}
+        power: Mapping[str, Any] = raw_power if isinstance(raw_power, dict) else {}
         queue_total = sum(int(value or 0) for value in queues.values())
         backlog = int(inbound.get("backlog") or 0)
         items = [
@@ -686,6 +688,56 @@ class SituationBriefingService:
                 "runtime:radio", "Live radio runtime", None, STALE_AFTER["network"], "/radio.html"
             )
         ]
+        level = power.get("battery_level")
+        display_level = int(level) if isinstance(level, (int, float)) else None
+        reported = power.get("reported") is True and display_level is not None
+        condition = str(power.get("condition") or "not_reported")
+        raw_trend = power.get("trend")
+        trend: Mapping[str, Any] = raw_trend if isinstance(raw_trend, dict) else {}
+        direction = str(trend.get("direction") or "unavailable")
+        delta = trend.get("delta_percent")
+        elapsed = trend.get("elapsed_hours")
+        power_title = f"Radio power {display_level}%" if reported else "Radio power not reported"
+        if reported and isinstance(delta, (int, float)) and isinstance(elapsed, (int, float)):
+            power_detail = f"{direction} {abs(int(delta))} point(s) over {float(elapsed):.1f}h"
+        elif reported:
+            power_detail = "Trend will appear after another sampled reading"
+        else:
+            power_detail = "No battery reported; the node may use external power"
+        raw_shedding = power.get("shedding")
+        shedding: Mapping[str, Any] = raw_shedding if isinstance(raw_shedding, dict) else {}
+        if shedding.get("active") is True:
+            power_detail += " · discretionary traffic paused"
+        power_observed = power.get("observed_at")
+        observed_at = int(power_observed) if isinstance(power_observed, (int, float)) else None
+        items.append(
+            BriefingItem(
+                "network:power",
+                "N2",
+                "network",
+                "critical"
+                if condition == "critical"
+                else "caution"
+                if condition == "warning"
+                else "info",
+                power_title,
+                power_detail,
+                condition,
+                ("runtime:power",),
+                "/radio.html",
+                hazard=condition in {"warning", "critical"},
+            )
+        )
+        sources.append(
+            BriefingSource(
+                "runtime:power",
+                "Connected radio power telemetry",
+                observed_at,
+                STALE_AFTER["network"],
+                "/radio.html",
+                stale=bool(observed_at is not None and now - observed_at > STALE_AFTER["network"]),
+            )
+        )
         member = (
             await self.database.read(
                 "SELECT COUNT(*) total,COALESCE(SUM(last_seen>=?),0) active FROM member "
@@ -698,7 +750,7 @@ class SituationBriefingService:
         items.append(
             BriefingItem(
                 "network:members",
-                "N2",
+                "N3",
                 "network",
                 "info",
                 "Member activity",
@@ -728,7 +780,7 @@ class SituationBriefingService:
             items.append(
                 BriefingItem(
                     "network:federation",
-                    "N3",
+                    "N4",
                     "network",
                     "info",
                     "Federation peers",

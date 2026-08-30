@@ -67,6 +67,7 @@ from outpost.operations_center import MeshOperationsCenter
 from outpost.operator_context import current_actor
 from outpost.radio_configuration import RadioConfigurationManager
 from outpost.radio_operations import RadioOperations
+from outpost.radio_power import RadioPowerMonitor
 from outpost.render.renderer import render_response
 from outpost.router.models import Line, Response, ResponseKind
 from outpost.router.router import Router
@@ -145,6 +146,7 @@ class OutpostApp:
         self._federation_control_locks: dict[str, asyncio.Lock] = {}
         self.clock = SystemClock()
         self.database = Database(self.config.store.path)
+        self.radio_power = RadioPowerMonitor(self.database, self.clock, self.config.radio.power)
         self.radio = MeshtasticRadioLink(self.config.radio, self.clock)
         self.radio_configuration = RadioConfigurationManager(
             self.database, self.radio, self.clock, self.config
@@ -164,12 +166,15 @@ class OutpostApp:
             preset=self.radio.snapshot.preset,
             region=self.radio.snapshot.region,
             outbox=OutboxStore(self.database),
+            power_config=self.config.radio.power,
+            power_observer=self.radio_power.observe,
         )
         self.radio_operations = RadioOperations(
             self.database,
             self.governor,
             self.clock,
             self.config.store.retention.outbound_history_days,
+            self.radio_power,
         )
         members = MemberRepo(self.database, self.clock)
         self.message_log = MessageLogRepo(self.database, self.clock)
@@ -344,6 +349,7 @@ class OutpostApp:
             self.backups,
             self.router.intents,
         )
+        self.radio_power.on_condition_change = lambda _condition: self.self_check.run("radio-power")
         self.web = create_web_app(
             self.status,
             self.database,
@@ -766,6 +772,7 @@ class OutpostApp:
 
     async def startup(self) -> None:
         await self.database.open()
+        await self.radio_power.restore()
         await self.ai_store.rechunk_stale_documents()
         await self.radio_configuration.initialize()
         if self.config.modules.fed.enabled:
@@ -3046,6 +3053,7 @@ class OutpostApp:
                 for name, enabled in self.config.modules.enabled_map().items()
             },
             "radio": self.radio.state.value,
+            "radio_power": self.radio_power.snapshot(),
             "airtime_used_ratio": self.governor.used_airtime / 3_600,
             "queues": self.governor.queue_depths(),
             "alert_delivery": self.governor.alert_delivery_status(),
