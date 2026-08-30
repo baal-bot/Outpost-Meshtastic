@@ -67,7 +67,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
         ctx.session.cursor_kind = "board"
         ctx.session.cursor_target = slug
         ctx.session.cursor_offset = len(values)
-        ctx.session.cursor_expires_at = service.clock.monotonic() + 15 * 60
+        ctx.session.cursor_expires_at = service.clock.monotonic() + service.page_ttl_seconds
         if not values:
             if ctx.message.is_direct:
                 return Response(
@@ -174,7 +174,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
         ctx.session.cursor_kind = "replies"
         ctx.session.cursor_target = str(thread_id)
         ctx.session.cursor_offset = 1
-        ctx.session.cursor_expires_at = service.clock.monotonic() + 15 * 60
+        ctx.session.cursor_expires_at = service.clock.monotonic() + service.page_ttl_seconds
         replies = max(0, value.post_count - 1)
         response = Response(
             ResponseKind.DETAIL,

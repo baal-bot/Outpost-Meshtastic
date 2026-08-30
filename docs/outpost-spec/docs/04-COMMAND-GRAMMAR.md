@@ -313,7 +313,7 @@ last part **MUST** end with a continuation affordance showing the remaining coun
 `Expired. Repeat the command.` in one line.
 
 **REQ-CMD-021** — Default page sizes: boards 6, threads 5, posts 3, mail 5, incidents 5,
-members 8. All config-driven.
+members 8. These are fixed rendering limits in the current release.
 
 ---
 
@@ -352,7 +352,7 @@ not stylistic, and **MUST** be enforced by a lint test over the string catalogue
 
 **Reference renderings.** These are normative: an agent **MUST** match this density,
 separator style, and page size. `·` is the field separator; runs of spaces are prohibited
-(rule 8). Page sizes follow `router.page_sizes` (REQ-CMD-021). Doc 07 §9 and doc 09 §6
+(rule 8). Page sizes follow the fixed limits in REQ-CMD-021. Doc 07 §9 and doc 09 §6
 extend this set and **MUST** stay consistent with it.
 
 ```

@@ -300,9 +300,8 @@ the operator must be able to see that the node is choosing not to talk.
   within `dedupe_window_s` (default 300) is dropped.
 - **Supersession.** A newer item may declare `supersedes=<queue_key>`; the older item is
   removed. Used for alert updates and for regenerated digests.
-- **Coalescing.** Items to the same destination in the same class within
-  `coalesce_window_s` (default 15) **MAY** be merged if the renderer supplies a merge
-  function and the merged result still fits the part budget.
+- **Atomic batches.** A renderer may submit a bounded multipart batch, but the governor
+  does not implicitly merge unrelated queued messages.
 
 ### 4.6 Broadcast discipline
 
@@ -310,9 +309,9 @@ the operator must be able to see that the node is choosing not to talk.
 except for: `alert` class content, operator-initiated bulletins, and the once-per-interval
 presence beacon (§7). Everything else is a direct message to the requester.
 
-**REQ-TRANSPORT-029** — Broadcast rate **MUST** be capped independently of the airtime
-budget: default no more than 6 broadcasts per hour outside `alert` class, and no more than
-1 per 60 s within `alert` class for the same incident.
+**REQ-TRANSPORT-029** — Broadcasts **MUST** remain inside their class share and the rolling
+airtime ceiling. Alert repeats use explicit interval and count policy; duplicate suppression
+and supersession prevent identical or obsolete broadcasts from amplifying.
 
 ---
 

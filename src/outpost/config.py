@@ -11,7 +11,6 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 TRAFFIC_CLASSES = {"alert", "reply", "ai", "bulletin", "digest", "federation"}
-PAGE_SCOPES = {"boards", "threads", "posts", "mail", "incidents", "members"}
 
 
 class StrictModel(BaseModel):
@@ -103,8 +102,6 @@ class AirtimeConfig(StrictModel):
     interpart_delay_s: float = Field(default=12.0, ge=0)
     queue_max_items: int = Field(default=500, gt=0)
     dedupe_window_s: int = Field(default=300, ge=0)
-    coalesce_window_s: int = Field(default=15, ge=0)
-    broadcast_max_per_hour: int = Field(default=6, ge=0)
     quiet_hours: QuietHours = Field(default_factory=QuietHours)
     class_shares: dict[str, float] = Field(
         default_factory=lambda: {
@@ -170,29 +167,7 @@ class RouterConfig(StrictModel):
     inbound_workers: int = Field(default=4, ge=1, le=32)
     inbound_queue_max: int = Field(default=256, ge=1, le=4096)
     member_lock_timeout_s: float = 60
-    page_sizes: dict[str, int] = Field(
-        default_factory=lambda: {
-            "boards": 6,
-            "threads": 5,
-            "posts": 3,
-            "mail": 5,
-            "incidents": 5,
-            "members": 8,
-        }
-    )
     intents_file: str = "config/intents.yaml"
-
-    @model_validator(mode="after")
-    def validate_page_sizes(self) -> RouterConfig:
-        unknown = set(self.page_sizes) - PAGE_SCOPES
-        missing = PAGE_SCOPES - set(self.page_sizes)
-        if unknown:
-            raise ValueError(f"router.page_sizes has unknown scopes: {sorted(unknown)}")
-        if missing:
-            raise ValueError(f"router.page_sizes is missing scopes: {sorted(missing)}")
-        if any(value < 1 for value in self.page_sizes.values()):
-            raise ValueError("router.page_sizes values must be at least 1")
-        return self
 
 
 class Enabled(StrictModel):
@@ -243,12 +218,6 @@ class AIKeepWarmConfig(StrictModel):
     interval_s: int = Field(default=240, ge=30, le=3600)
 
 
-class AIEmbeddingConfig(StrictModel):
-    enabled: bool = False
-    model: str = "all-MiniLM-L6-v2"
-    queue_max: int = Field(default=100, ge=1, le=10_000)
-
-
 class AICircuitBreakerConfig(StrictModel):
     failures: int = Field(default=5, ge=1, le=20)
     window_minutes: int = Field(default=10, ge=1, le=60)
@@ -263,16 +232,12 @@ class AIConfig(StrictModel):
     timeout_s: float = Field(default=45, gt=0, le=180)
     max_concurrency: int = Field(default=1, ge=1, le=4)
     queue_depth: int = Field(default=3, ge=0, le=20)
-    max_tool_rounds: int = Field(default=2, ge=0, le=2)
     max_output_tokens: int = Field(default=220, ge=32, le=512)
     required_for_readiness: bool = True
     budget: AIBudgetConfig = Field(default_factory=AIBudgetConfig)
     keep_warm: AIKeepWarmConfig = Field(default_factory=AIKeepWarmConfig)
-    embeddings: AIEmbeddingConfig = Field(default_factory=AIEmbeddingConfig)
     circuit_breaker: AICircuitBreakerConfig = Field(default_factory=AICircuitBreakerConfig)
     persona_addendum: str = Field(default="", max_length=200)
-    cold_placeholder_threshold_s: int = Field(default=15, ge=5, le=120)
-    cold_placeholder_enabled: bool = False
     hailo_vlm: AIHailoVLMConfig = Field(default_factory=AIHailoVLMConfig)
     hailo: AIProviderEndpoint = Field(
         default_factory=lambda: AIProviderEndpoint(base_url="http://127.0.0.1:8000")
@@ -348,10 +313,6 @@ class EnvConfig(StrictModel):
 
 class FedMqttConfig(StrictModel):
     enabled: bool = False
-    discovery_enabled: bool = False
-    server: str = "mqtt.meshtastic.org"
-    port: int = Field(default=1883, ge=1, le=65535)
-    topic_root: str = "msh"
     use_radio_module: bool = True
 
 
@@ -454,8 +415,6 @@ class SecurityConfig(StrictModel):
     global_rate_ceiling: int = Field(default=60, gt=0)
     safety_repeat_window_seconds: int = Field(default=120, ge=10, le=3600)
     safety_attempt_retention_hours: int = Field(default=72, ge=1, le=720)
-    handle_change_per_hours: int = Field(default=24, gt=0)
-    handle_reserve_days: int = Field(default=30, ge=0)
 
 
 class BBSConfig(StrictModel):
@@ -466,7 +425,6 @@ class BBSConfig(StrictModel):
 
 class MailConfig(StrictModel):
     hold_unknown_days: int = Field(default=14, ge=1)
-    notify_window_hours: int = Field(default=12, ge=1)
 
 
 class EscalationStage(StrictModel):
@@ -512,7 +470,6 @@ class WatchConfig(StrictModel):
     position_max_age_minutes: int = Field(default=30, ge=1)
     dedupe_radius_m: int = Field(default=500, ge=1)
     dedupe_window_minutes: int = Field(default=120, ge=1)
-    self_resolve_hours: int = Field(default=24, ge=1)
     emergency_keywords_enabled: bool = False
     emergency_keywords: list[str] = Field(
         default_factory=lambda: ["sos", "mayday", "emergency", "help me", "911"]

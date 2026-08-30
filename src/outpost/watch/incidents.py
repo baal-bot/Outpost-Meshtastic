@@ -83,10 +83,16 @@ class IncidentService:
         origin_node: str = "local",
         position_retention_hours: int = 168,
         history_retention_days: int = 30,
+        position_max_age_minutes: int = 30,
+        dedupe_radius_m: int = 500,
+        dedupe_window_minutes: int = 120,
     ) -> None:
         self.database, self.clock, self.origin_node = database, clock, origin_node
         self.position_retention_seconds = position_retention_hours * 3_600
         self.history_retention_days = history_retention_days
+        self.position_max_age_seconds = position_max_age_minutes * 60
+        self.dedupe_radius_m = dedupe_radius_m
+        self.dedupe_window_minutes = dedupe_window_minutes
 
     @staticmethod
     def infer(text: str) -> str:
@@ -187,12 +193,14 @@ class IncidentService:
         title: str,
         lat: float | None,
         lon: float | None,
-        radius_m: int = 500,
-        window_minutes: int = 120,
+        radius_m: int | None = None,
+        window_minutes: int | None = None,
     ) -> Incident | None:
         if lat is None or lon is None:
             return None
-        cutoff = int(self.clock.now().timestamp()) - window_minutes * 60
+        effective_radius = self.dedupe_radius_m if radius_m is None else radius_m
+        effective_window = self.dedupe_window_minutes if window_minutes is None else window_minutes
+        cutoff = int(self.clock.now().timestamp()) - effective_window * 60
         rows = await self.database.read(
             "SELECT * FROM incident WHERE status IN ('open','monitoring') AND type=? "
             "AND merged_into_id IS NULL AND created_at>=? AND lat IS NOT NULL AND lon IS NOT NULL",
@@ -202,9 +210,21 @@ class IncidentService:
         for row in rows:
             other = set(re.findall(r"[a-z0-9]+", row["title"].lower()))
             overlap = len(tokens & other) / max(1, len(tokens | other))
-            if overlap >= 0.2 and self.distance_m(lat, lon, row["lat"], row["lon"]) <= radius_m:
+            if (
+                overlap >= 0.2
+                and self.distance_m(lat, lon, row["lat"], row["lon"]) <= effective_radius
+            ):
                 return self._row(row)
         return None
+
+    async def recent_position(self, member: Member) -> tuple[float, float] | None:
+        now = int(self.clock.now().timestamp())
+        rows = await self.database.read(
+            "SELECT lat,lon FROM member_position WHERE member_id=? AND expires_at>? "
+            "AND received_at>=? ORDER BY received_at DESC LIMIT 1",
+            (member.id, now, now - self.position_max_age_seconds),
+        )
+        return (float(rows[0]["lat"]), float(rows[0]["lon"])) if rows else None
 
     async def create(
         self,
@@ -236,11 +256,13 @@ class IncidentService:
             raise ValueError("REPORT needs details.")
         kind = self.infer(clean)
         severity, expiry_hours = TAXONOMY[kind][1:]
-        lat, lon = (
-            (None, None)
-            if suppressed
-            else (waypoint_coordinates or coordinates or self.coordinates(clean))
-        )
+        parsed_lat, parsed_lon = self.coordinates(clean)
+        resolved_coordinates = waypoint_coordinates or coordinates
+        if resolved_coordinates is None and parsed_lat is not None and parsed_lon is not None:
+            resolved_coordinates = (parsed_lat, parsed_lon)
+        if resolved_coordinates is None and member is not None and not suppressed:
+            resolved_coordinates = await self.recent_position(member)
+        lat, lon = (None, None) if suppressed else resolved_coordinates or (None, None)
         title = clean[:64]
         if not force:
             similar = await self.duplicate(kind, title, lat, lon)
@@ -376,8 +398,9 @@ class IncidentService:
             assert updated is not None
             return updated, False
         positions = await self.database.read(
-            "SELECT lat,lon FROM member_position WHERE member_id=? AND expires_at>?",
-            (member.id, now),
+            "SELECT lat,lon FROM member_position WHERE member_id=? AND expires_at>? "
+            "AND received_at>=? ORDER BY received_at DESC LIMIT 1",
+            (member.id, now, now - self.position_max_age_seconds),
         )
         coordinates = (
             (float(positions[0]["lat"]), float(positions[0]["lon"])) if positions else None

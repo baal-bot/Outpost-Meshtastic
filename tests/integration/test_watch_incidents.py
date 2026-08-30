@@ -151,6 +151,51 @@ async def test_shared_position_becomes_pending_report_location(tmp_path) -> None
 
 
 @pytest.mark.asyncio
+async def test_position_age_policy_controls_implicit_report_location(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    member = await MemberRepo(database, clock).resolve("!00000001")
+    service = IncidentService(database, clock, position_max_age_minutes=1)
+
+    await service.record_position(member, 40.4406, -79.9959, prompt=False)
+    current, _ = await service.create("tree blocking current road", member)
+    assert current is not None and current.lat == pytest.approx(40.4406)
+
+    clock.advance(61)
+    stale, _ = await service.create("water outage on upper street", member)
+    assert stale is not None and stale.lat is None
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_configured_dedupe_radius_and_window_change_matching(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    member = await MemberRepo(database, clock).resolve("!00000001")
+    service = IncidentService(
+        database,
+        clock,
+        dedupe_radius_m=10,
+        dedupe_window_minutes=1,
+    )
+
+    first, _ = await service.create("tree blocking cedar road 40.0000 -79.0000", member)
+    outside_radius, similar = await service.create(
+        "tree blocking cedar road 40.0010 -79.0000", member
+    )
+    assert first is not None and outside_radius is not None and similar is None
+
+    clock.advance(61)
+    outside_window, similar = await service.create(
+        "tree blocking cedar road 40.0000 -79.0000", member
+    )
+    assert outside_window is not None and similar is None
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_report_can_use_saved_waypoint_without_creating_location_incident(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()

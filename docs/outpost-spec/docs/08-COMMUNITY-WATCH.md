@@ -349,9 +349,7 @@ can see how a situation developed.
 **REQ-WATCH-050** — Auto-expiry **MUST** run on a schedule; an expired incident leaves active
 listings but remains queryable and mappable in history.
 
-**REQ-WATCH-051** — Resolving an incident **MUST** require trust ≥ `trusted`, **except** that
-the original reporter **MAY** resolve their own incident within
-`watch.self_resolve_hours` (default 24).
+**REQ-WATCH-051** — Resolving an incident **MUST** require trust ≥ `trusted`.
 
 **REQ-WATCH-052** — Resolution **MUST** capture a note, and the resolution **MUST** be
 included in the all-clear broadcast when one is sent.

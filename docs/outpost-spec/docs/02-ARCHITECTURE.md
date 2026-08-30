@@ -300,8 +300,6 @@ airtime:
   interpart_delay_s: 12
   queue_max_items: 500
   dedupe_window_s: 300
-  coalesce_window_s: 15
-  broadcast_max_per_hour: 6
   quiet_hours: { start: "22:00", end: "06:00", classes: [digest, bulletin, federation] }
   class_shares:                # fraction of budget_percent, must sum to <= 1.0
     alert: 0.30
@@ -328,7 +326,6 @@ router:
   inbound_workers: 4
   inbound_queue_max: 256
   member_lock_timeout_s: 60
-  page_sizes: { boards: 6, threads: 5, posts: 3, mail: 5, incidents: 5, members: 8 }
   intents_file: "config/intents.yaml"
 
 modules:
@@ -345,7 +342,6 @@ bbs:
 
 mail:
   hold_unknown_days: 14
-  notify_window_hours: 12
 
 security:
   require_approval: false      # handle claims need operator approval before `member`
@@ -353,8 +349,6 @@ security:
   global_rate_ceiling: 60      # inbound commands/min before the circuit breaker
   safety_repeat_window_seconds: 120
   safety_attempt_retention_hours: 72
-  handle_change_per_hours: 24
-  handle_reserve_days: 30
 
 ai:
   provider: hailo_vlm          # hailo_vlm | hailo | llamacpp | ollama | openai_compat | null
@@ -366,14 +360,10 @@ ai:
   openai_compat: { base_url: "", api_key_env: "OUTPOST_AI_KEY" }
   budget: { context_tokens: 2048, reserve_output_tokens: 220,
             max_evidence_tokens: 820, max_history_tokens: 200 }
-  max_tool_rounds: 2
   max_concurrency: 1
   queue_depth: 3
   timeout_s: 45
-  cold_placeholder_threshold_s: 15
-  cold_placeholder_enabled: false
   keep_warm: { enabled: true, interval_s: 240 }
-  embeddings: { enabled: true, model: "all-MiniLM-L6-v2" }
   persona_addendum: ""         # ≤40 tokens; cannot remove structural clauses
   circuit_breaker: { failures: 5, window_minutes: 10, open_minutes: 15 }
 
@@ -381,7 +371,6 @@ watch:
   position_max_age_minutes: 30
   dedupe_radius_m: 500
   dedupe_window_minutes: 120
-  self_resolve_hours: 24
   alert_repeat_max: 3
   alert_repeat_interval_minutes: 20
   emergency_keywords_enabled: false
@@ -454,7 +443,6 @@ store:
 - `airtime.budget_percent + airtime.emergency_reserve_percent > 20.0`
 - `airtime.budget_percent + airtime.emergency_reserve_percent >= airtime.utilisation_ceiling`
 - invalid `airtime.quiet_hours` times or class names
-- an incomplete or non-positive `router.page_sizes` map
 - channel indices outside 0–7, or a channel index absent from the radio's configuration
 - an AI provider with no reachable base URL when `modules.ai.enabled`
 - `env.user_agent` still containing `CHANGE-ME` when `modules.env.enabled` (REQ-WX-005)

@@ -24,8 +24,6 @@ airtime:
   interpart_delay_s: 12
   queue_max_items: 500
   dedupe_window_s: 300
-  coalesce_window_s: 15
-  broadcast_max_per_hour: 6
   quiet_hours: {start: "22:00", end: "06:00", classes: [digest, bulletin, federation]}
   class_shares: {alert: 0.30, reply: 0.30, ai: 0.15, bulletin: 0.05, digest: 0.10, federation: 0.10}
   max_parts: {reply: 3, ai: 2, digest: 4, alert: 2, bulletin: 2, federation: 1}
@@ -43,7 +41,6 @@ router:
   inbound_workers: 4
   inbound_queue_max: 256
   member_lock_timeout_s: 60
-  page_sizes: {boards: 6, threads: 5, posts: 3, mail: 5, incidents: 5, members: 8}
   intents_file: /etc/outpost/intents.yaml
 modules:
   bbs: {enabled: true}
@@ -57,7 +54,6 @@ ai:
   timeout_s: 45
   max_concurrency: 1
   queue_depth: 3
-  max_tool_rounds: 2
   max_output_tokens: 220
   required_for_readiness: true
   budget:
@@ -69,11 +65,8 @@ ai:
     reserve_output_tokens: 220
     safety_margin_percent: 15
   keep_warm: {enabled: true, interval_s: 240}
-  embeddings: {enabled: false, model: "all-MiniLM-L6-v2", queue_max: 100}
   circuit_breaker: {failures: 5, window_minutes: 10, open_minutes: 15}
   persona_addendum: ""
-  cold_placeholder_threshold_s: 15
-  cold_placeholder_enabled: false
   hailo_vlm: {model_path: "/var/lib/outpost/models/Qwen3-VL-2B-Instruct.hef", context_tokens: 2048, optimize_memory_on_device: true}
   hailo: {base_url: "http://127.0.0.1:8000", context_tokens: 2048, supports_tools: false}
   llamacpp: {base_url: "http://127.0.0.1:8080", context_tokens: 4096, supports_tools: true}
@@ -111,10 +104,6 @@ fed:
   incident_radius_km: 25
   mqtt:
     enabled: false
-    discovery_enabled: false
-    server: "mqtt.meshtastic.org"
-    port: 1883
-    topic_root: "msh"
     use_radio_module: true
 security:
   require_approval: false
@@ -122,20 +111,16 @@ security:
   global_rate_ceiling: 60
   safety_repeat_window_seconds: 120
   safety_attempt_retention_hours: 72
-  handle_change_per_hours: 24
-  handle_reserve_days: 30
 bbs:
   immediate_max_per_hour: 3
   immediate_enabled: true
   self_delete_minutes: 30
 mail:
   hold_unknown_days: 14
-  notify_window_hours: 12
 watch:
   position_max_age_minutes: 30
   dedupe_radius_m: 500
   dedupe_window_minutes: 120
-  self_resolve_hours: 24
   emergency_keywords_enabled: false
   emergency_keywords: [sos, mayday, emergency, "help me", "911"]
   emergency_cooldown_minutes: 10

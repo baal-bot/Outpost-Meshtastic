@@ -185,7 +185,12 @@ class OutpostApp:
             self.ai_store,
             now=lambda: int(self.clock.now().timestamp()),
         )
-        bbs = BBSService(self.database, self.clock, "local")
+        self.bbs = BBSService(
+            self.database,
+            self.clock,
+            "local",
+            self.config.router.page_ttl_minutes,
+        )
         directory = ChannelDirectory(self.database)
         mail = MailService(
             self.database,
@@ -202,6 +207,9 @@ class OutpostApp:
             "local",
             self.config.store.retention.member_positions_hours,
             self.config.store.retention.incident_history_days,
+            self.config.watch.position_max_age_minutes,
+            self.config.watch.dedupe_radius_m,
+            self.config.watch.dedupe_window_minutes,
         )
         self.alerts = AlertService(self.database, self.governor, self.clock, self.config)
         self.checkins = CheckinService(self.database, self.governor, self.clock)
@@ -262,13 +270,13 @@ class OutpostApp:
                 True,
             ),
             (
-                bbs_specs(bbs, self.config.bbs.self_delete_minutes),
+                bbs_specs(self.bbs, self.config.bbs.self_delete_minutes),
                 self.config.modules.bbs.enabled,
             ),
             (mail_specs(mail), True),
             (directory_specs(directory), True),
             (ai_specs(self.ai_service), self.config.modules.ai.enabled),
-            (operator_specs(bbs), self.config.modules.bbs.enabled),
+            (operator_specs(self.bbs), self.config.modules.bbs.enabled),
             (operations_specs(self.operations_center), True),
             (situation_specs(self.situation), True),
             (watch_specs(self.incidents), self.config.modules.watch.enabled),

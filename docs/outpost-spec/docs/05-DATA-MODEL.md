@@ -628,7 +628,6 @@ CREATE TABLE kb_chunk (
   seq         INTEGER NOT NULL,
   text        TEXT NOT NULL,
   token_count INTEGER NOT NULL,
-  embedding   BLOB,                -- float32 array; NULL if embeddings disabled
   UNIQUE (document_id, seq)
 );
 

@@ -92,7 +92,7 @@ tool-capability flag, and optional API-key environment-variable name. A selected
 below 1,600 tokens is invalid.
 
 Runtime bounds include a 45-second timeout, concurrency of one, queue depth of three, at most two
-tool rounds, a 220-token output ceiling, keep-warm policy, embedding queue, and circuit breaker.
+tool rounds, a 220-token output ceiling, keep-warm policy, and circuit breaker.
 The token budget reserves system, tool, evidence, history, question, output, and at least 15%
 safety-margin allocations. The future dashboard may tune bounded values but cannot remove safety,
 grounding, attribution, or emergency clauses.
@@ -130,14 +130,17 @@ operator approves it in Environment; approval then uses the normal alert policy 
 
 ### `watch`
 
-Controls position freshness, duplicate radius/window, self-resolution, alert repetition, and
-escalation stages. Emergency keyword matching is off by default. Enabling it requires a response
-policy, false-positive review, and operator training.
+Controls position freshness, duplicate radius/window, alert repetition, and escalation stages.
+Terminal incident state changes require a trusted operator or responder. Emergency keyword
+matching is off by default. Enabling it requires a response policy, false-positive review, and
+operator training.
 
 ### `fed`
 
-Controls frame limits, discovery/sync cadence, batch size, stale peers, incident radius, and MQTT.
-Discovery never grants trust. See [Federation](FEDERATION.md).
+Controls frame limits, discovery/sync cadence, batch size, stale peers, incident radius, and
+whether the Meshtastic radio's MQTT module may be used. Broker, topic, and MQTT discovery policy
+are managed on the radio rather than duplicated in Outpost YAML. Discovery never grants trust.
+See [Federation](FEDERATION.md).
 
 ### `web`
 
@@ -180,6 +183,23 @@ OUTPOST__NODE__LOCATION='{"lat":40.4406,"lon":-79.9959}'
 
 Use a protected systemd environment file or override. Never commit credentials, channel keys, or
 precise private positions.
+
+## Removed no-effect settings
+
+Outpost rejects unknown settings so a stale value cannot appear active while doing nothing. The
+following pre-release keys were removed because they never had a runtime consumer:
+
+- `airtime.broadcast_max_per_hour`, `airtime.coalesce_window_s`
+- `router.page_sizes` (response sizes remain command-specific; `page_ttl_minutes` is configurable)
+- `ai.max_tool_rounds`, `ai.cold_placeholder_enabled`, `ai.cold_placeholder_threshold_s`, and
+  `ai.embeddings.*`
+- `security.handle_change_per_hours`, `security.handle_reserve_days`
+- `mail.notify_window_hours`, `watch.self_resolve_hours`
+- `fed.mqtt.discovery_enabled`, `fed.mqtt.server`, `fed.mqtt.port`, `fed.mqtt.topic_root`
+
+Remove these keys before upgrading. Position freshness and incident duplicate detection are live
+through `watch.position_max_age_minutes`, `watch.dedupe_radius_m`, and
+`watch.dedupe_window_minutes`.
 
 ## High-risk settings
 

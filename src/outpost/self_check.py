@@ -113,25 +113,10 @@ CHECK_DEFINITIONS = (
 CHECK_NAMES = frozenset(check.name for check in CHECK_DEFINITIONS)
 _DEFINITION = {check.name: check for check in CHECK_DEFINITIONS}
 
-# These strict-schema fields are currently tracked by #63 because they are
-# accepted but have no runtime consumer. The readiness check only reports keys
-# explicitly supplied by the operator, not unused defaults.
+# Strict-schema fields tracked by an open defect because they are accepted but
+# have no runtime consumer. The check reports only operator-supplied keys.
 KNOWN_INEFFECTIVE_CONFIG_KEYS = frozenset(
     {
-        "router.page_sizes",
-        "airtime.broadcast_max_per_hour",
-        "airtime.coalesce_window_s",
-        "ai.cold_placeholder_enabled",
-        "ai.cold_placeholder_threshold_s",
-        "ai.embeddings.enabled",
-        "ai.embeddings.model",
-        "ai.embeddings.queue_max",
-        "ai.max_tool_rounds",
-        "security.handle_change_per_hours",
-        "security.handle_reserve_days",
-        "fed.mqtt.discovery_enabled",
-        "fed.mqtt.server",
-        "fed.mqtt.topic_root",
         "web.auth.mode",
     }
 )

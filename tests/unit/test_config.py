@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-import pytest
-from pydantic import ValidationError
+import ast
+from pathlib import Path
 
+import pytest
+from pydantic import BaseModel, ValidationError
+
+import outpost.config as config_module
+from outpost.app import OutpostApp
 from outpost.config import Config
 
 
@@ -35,7 +40,6 @@ def test_invalid_airtime_config_is_rejected(airtime: dict[str, object]) -> None:
             {"airtime": {"quiet_hours": {"classes": ["alerts", "bulletins"]}}},
             "quiet_hours.classes has unknown",
         ),
-        ({"router": {"page_sizes": {"boards": 6}}}, "page_sizes is missing"),
     ],
 )
 def test_structured_dispatch_config_must_be_complete_and_parseable(
@@ -142,7 +146,6 @@ def test_ai_runtime_policy_defaults_are_bounded() -> None:
     config = Config()
     assert config.ai.max_concurrency == 1
     assert config.ai.queue_depth == 3
-    assert config.ai.max_tool_rounds == 2
     assert config.ai.provider == "hailo_vlm"
     assert config.ai.model == "Qwen3-VL-2B-Instruct"
     assert config.ai.required_for_readiness
@@ -156,10 +159,78 @@ def test_ai_runtime_policy_defaults_are_bounded() -> None:
         {"provider": "hailo_vlm", "hailo_vlm": {"context_tokens": 1599}},
         {"provider": "hailo", "hailo": {"context_tokens": 1599}},
         {"max_concurrency": 0},
-        {"max_tool_rounds": 3},
         {"openai_compat": {"api_key_env": "not a safe env name"}},
     ],
 )
 def test_invalid_ai_runtime_policy_is_rejected(ai: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         Config.model_validate({"ai": ai})
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"airtime": {"broadcast_max_per_hour": 6}},
+        {"airtime": {"coalesce_window_s": 15}},
+        {"router": {"page_sizes": {"boards": 6}}},
+        {"ai": {"cold_placeholder_enabled": False}},
+        {"ai": {"cold_placeholder_threshold_s": 15}},
+        {"ai": {"embeddings": {"enabled": False}}},
+        {"ai": {"max_tool_rounds": 2}},
+        {"security": {"handle_change_per_hours": 24}},
+        {"security": {"handle_reserve_days": 30}},
+        {"fed": {"mqtt": {"discovery_enabled": False}}},
+        {"fed": {"mqtt": {"server": "mqtt.example"}}},
+        {"fed": {"mqtt": {"port": 1883}}},
+        {"fed": {"mqtt": {"topic_root": "msh"}}},
+        {"mail": {"notify_window_hours": 12}},
+        {"watch": {"self_resolve_hours": 24}},
+    ],
+)
+def test_removed_no_effect_settings_are_rejected(values: dict[str, object]) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        Config.model_validate(values)
+
+
+def test_remaining_config_fields_have_runtime_references() -> None:
+    source_root = Path(config_module.__file__).parent
+    referenced: set[str] = set()
+    for source in source_root.rglob("*.py"):
+        if source.name in {"config.py", "self_check.py"}:
+            continue
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        referenced.update(node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute))
+
+    dynamic_fields = {"caution", "urgent", "critical"}
+    missing: list[str] = []
+    for name, model in vars(config_module).items():
+        if not isinstance(model, type) or not issubclass(model, BaseModel):
+            continue
+        if model is config_module.StrictModel:
+            continue
+        missing.extend(
+            f"{name}.{field}"
+            for field in model.model_fields
+            if field not in referenced and field not in dynamic_fields
+        )
+    assert missing == []
+
+
+def test_live_configurable_paging_and_incident_policy_reach_runtime_services(tmp_path) -> None:
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "router": {"page_ttl_minutes": 3},
+            "watch": {
+                "position_max_age_minutes": 4,
+                "dedupe_radius_m": 25,
+                "dedupe_window_minutes": 6,
+            },
+        }
+    )
+    app = OutpostApp(config)
+
+    assert app.bbs.page_ttl_seconds == 180
+    assert app.incidents.position_max_age_seconds == 240
+    assert app.incidents.dedupe_radius_m == 25
+    assert app.incidents.dedupe_window_minutes == 6

@@ -106,7 +106,7 @@ translation belongs entirely in the `hailo` adapter.
   <text>`, and the parser is strict. Malformed output triggers **one** retry with a
   corrective system note, then falls back to a non-AI response.
 
-**REQ-AI-007** — Maximum **2** tool-call rounds per question (config `ai.max_tool_rounds`).
+**REQ-AI-007** — Maximum **2** tool-call rounds per question.
 A 1.5B model on a 2048-token budget cannot sustain a longer loop, and each round costs
 seconds. Beyond the limit, the agent answers with whatever evidence it has or declines.
 
@@ -160,10 +160,8 @@ or explicitly best-effort AI module **MUST NOT** block core offline service. Shu
 the provider within a bounded service-stop window before a replacement process acquires exclusive
 accelerator resources.
 
-**REQ-AI-014** — If a request arrives while cold and the estimated wait exceeds
-`ai.cold_placeholder_threshold_s` (default 15), the node **MAY** send a single ≤40-byte
-placeholder — **only** on a DM, **only** if the `ai` airtime class has budget, and **never**
-on a channel. Default for this behaviour is **off**.
+**REQ-AI-014** — The current release **MUST NOT** send speculative cold-start placeholders.
+It returns one governed answer or an explicit unavailable response, never an untracked extra DM.
 
 ---
 
@@ -246,18 +244,14 @@ post from yesterday beats a semantically better match from eight months ago. Def
 
 ### 4.3 Embeddings
 
-**REQ-AI-023** — Embeddings **MUST** be optional and **MUST** run on the CPU (no Hailo
-embedding model exists). Default model: `all-MiniLM-L6-v2` (22.7M params, 384 dims, 256-token
-max sequence) via ONNX Runtime or `fastembed` — chosen to avoid a full PyTorch install on
-ARM.
+**REQ-AI-023** — The current release uses FTS5/BM25 retrieval and exposes no embeddings
+configuration. Any future embedding implementation **MUST** run on CPU and ship its runtime,
+indexing, and resource-bound tests before configuration is exposed.
 
-**REQ-AI-024** — With embeddings disabled the system **MUST** remain fully functional using
-FTS5 BM25 + recency alone. Hybrid retrieval (BM25 recall → embedding re-rank) is the
-preferred configuration when enabled.
+**REQ-AI-024** — Retrieval **MUST** remain fully functional using FTS5 BM25 + recency alone.
 
-**REQ-AI-025** — Embedding generation **MUST** be a background task with a bounded queue,
-**MUST** be idempotent, and **MUST NOT** block a user's question. A chunk with no embedding
-is simply retrieved by BM25 only.
+**REQ-AI-025** — If embeddings are introduced later, generation **MUST** use a bounded,
+idempotent background queue and **MUST NOT** block a user's question.
 
 > No credible Pi 5 embedding-throughput benchmark exists in public sources. Measure it in
 > the Phase 2 benchmark and record the result. Indexing is a batch cost and query-time

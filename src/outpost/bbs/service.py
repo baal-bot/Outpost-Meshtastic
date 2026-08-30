@@ -54,8 +54,15 @@ def derive_subject(body: str) -> str:
 
 
 class BBSService:
-    def __init__(self, database: Database, clock: Clock, origin_node: str) -> None:
+    def __init__(
+        self,
+        database: Database,
+        clock: Clock,
+        origin_node: str,
+        page_ttl_minutes: int = 15,
+    ) -> None:
         self.database, self.clock, self.origin_node = database, clock, origin_node
+        self.page_ttl_seconds = page_ttl_minutes * 60
 
     async def boards(self, member: Member) -> list[BoardSummary]:
         rows = await self.database.read(

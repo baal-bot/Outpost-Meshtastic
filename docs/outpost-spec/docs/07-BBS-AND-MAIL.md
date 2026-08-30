@@ -198,8 +198,8 @@ order:
 1. **Piggy-back**: appended to the recipient's next outbound response as a ≤24-byte suffix
    (`· 1 mail`).
 2. **Digest**: included in their next `NEW` or scheduled digest.
-3. **DM notification**: only if the recipient has `mail.notify: immediate` set and has been
-   heard within `mail.notify_window_hours` (default 12), and only within airtime budget.
+
+The current release does not send an unsolicited mail-notification DM.
 
 **REQ-BBS-034** — Mail bodies **MUST** be transmitted only on explicit `READMAIL`.
 
