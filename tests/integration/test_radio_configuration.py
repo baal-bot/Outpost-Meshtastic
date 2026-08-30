@@ -134,6 +134,15 @@ async def test_live_channel_map_includes_all_slots_history_and_revalidates_sends
         json={"severity": "caution", "headline": "Bridge inspection", "channels": [7]},
     )
     assert raised.status_code == 200, raised.text
+    duplicate = client.post(
+        "/api/v1/alerts",
+        json={"severity": "caution", "headline": "Bridge inspection", "channels": [7]},
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.json()["id"] == raised.json()["id"]
+    assert duplicate.json()["coalesced"] is True
+    assert len(await database.read("SELECT 1 FROM alert")) == 1
+    assert await database.read("SELECT 1 FROM audit_log WHERE action='alert.raise_coalesced'")
 
     channels[7]["role"] = "DISABLED"
     rejected_send = client.post(

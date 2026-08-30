@@ -3068,8 +3068,13 @@ def create_web_app(
                     )
                 await database.write(
                     "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'alert.raise',?,?,unixepoch())",
-                    (current_actor_ref(), f"alert:{value.id}", value.headline),
+                    "VALUES('web',?,?,?,?,unixepoch())",
+                    (
+                        current_actor_ref(),
+                        "alert.raise_coalesced" if value.coalesced else "alert.raise",
+                        f"alert:{value.id}",
+                        value.headline,
+                    ),
                 )
                 return value.json()
 

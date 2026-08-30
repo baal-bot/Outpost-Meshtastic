@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, cast
 
 from outpost.clock import Clock
@@ -42,6 +43,7 @@ class Alert:
     delivery_state: str
     last_delivery_count: int
     delivery_error_at: int | None
+    coalesced: bool = False
 
     def json(self) -> dict[str, Any]:
         value = asdict(self)
@@ -57,7 +59,7 @@ class AlertService:
         self.notifier = AudienceNotifier(database, governor, clock)
 
     def _row(self, row: Any) -> Alert:
-        return Alert(**{key: row[key] for key in Alert.__dataclass_fields__})
+        return Alert(**{key: row[key] for key in Alert.__dataclass_fields__ if key != "coalesced"})
 
     def render(self, severity: str, headline: str) -> str:
         marker = {"caution": "!", "urgent": "⚠", "critical": "⚠⚠"}[severity]
@@ -149,6 +151,7 @@ class AlertService:
         selected = channels or sorted(
             {channel for stage in policy.stages for channel in stage.channels}
         )
+        selected = sorted(set(selected))
         if any(channel not in self.config.channels for channel in selected):
             raise ValueError("Alert channel is not configured.")
         if not policy.stages:
@@ -163,34 +166,75 @@ class AlertService:
         if alert_expires_at <= now:
             raise ValueError("Alert expiry must be in the future.")
         ack_required = policy.ack_threshold
-        alert_id = await self.database.write(
-            """INSERT INTO alert(uid,incident_id,severity,headline,source,channels,raised_by,
-               raised_at,effective_at,expires_at,escalation_stage,next_escalation_at,ack_required,
-               lat,lon,radius_m) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                str(uuid.uuid4()),
-                incident_id,
-                severity,
-                headline,
-                source,
-                json.dumps(selected, separators=(",", ":")),
-                raised_by,
-                now,
-                now,
-                alert_expires_at,
-                0,
-                now,
-                ack_required,
-                lat,
-                lon,
-                radius_m,
-            ),
-        )
-        if supersedes_alert_id is not None:
-            await self.database.write(
-                "UPDATE alert SET cancelled_at=?,next_escalation_at=NULL WHERE id=?",
-                (now, supersedes_alert_id),
-            )
+        fingerprint_value = json.dumps(
+            {
+                "severity": severity,
+                "headline": headline,
+                "raised_by": raised_by,
+                "source": source,
+                "incident_id": incident_id,
+                "channels": selected,
+                "lat": lat,
+                "lon": lon,
+                "radius_m": radius_m,
+                "expires_at": expires_at,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        request_fingerprint = hashlib.sha256(fingerprint_value).hexdigest()
+        coalesced = False
+        async with self.database.transaction() as transaction:
+            existing = []
+            if supersedes_alert_id is None:
+                existing = await transaction.read(
+                    "SELECT id FROM alert WHERE request_fingerprint=? AND raised_at>=? "
+                    "AND cancelled_at IS NULL AND all_clear_at IS NULL "
+                    "ORDER BY id DESC LIMIT 1",
+                    (
+                        request_fingerprint,
+                        now - self.config.watch.alert_submission_dedupe_seconds,
+                    ),
+                )
+            if existing:
+                alert_id = int(existing[0]["id"])
+                coalesced = True
+            else:
+                alert_id = await transaction.write(
+                    """INSERT INTO alert(
+                       uid,incident_id,severity,headline,source,channels,raised_by,raised_at,
+                       effective_at,expires_at,escalation_stage,next_escalation_at,ack_required,
+                       lat,lon,radius_m,request_fingerprint
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        str(uuid.uuid4()),
+                        incident_id,
+                        severity,
+                        headline,
+                        source,
+                        json.dumps(selected, separators=(",", ":")),
+                        raised_by,
+                        now,
+                        now,
+                        alert_expires_at,
+                        0,
+                        now,
+                        ack_required,
+                        lat,
+                        lon,
+                        radius_m,
+                        request_fingerprint,
+                    ),
+                )
+                if supersedes_alert_id is not None:
+                    await transaction.write(
+                        "UPDATE alert SET cancelled_at=?,next_escalation_at=NULL WHERE id=?",
+                        (now, supersedes_alert_id),
+                    )
+        if coalesced:
+            alert = await self.by_id(alert_id)
+            assert alert is not None
+            return replace(alert, coalesced=True)
         await self._advance_alert(
             alert_id,
             override_channels=channels,

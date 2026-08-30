@@ -126,6 +126,7 @@ watch:
   emergency_cooldown_minutes: 10
   alert_repeat_max: 3
   alert_repeat_interval_minutes: 20
+  alert_submission_dedupe_seconds: 30
   escalation:
     caution:
       ack_threshold: 0

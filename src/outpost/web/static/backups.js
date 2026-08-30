@@ -3,6 +3,7 @@ import {byId as $, escapeHtml as safe} from "/ui-primitives.js";
 const RESTORE_JOB_KEY = "outpost.restore.job";
 const TERMINAL_STATES = new Set(["completed", "failed_recovered", "failed", "interrupted"]);
 let csrfToken = "";
+let restoreInFlight = false;
 
 const formatSize = (bytes) => {
   const value = Number(bytes || 0);
@@ -192,7 +193,7 @@ async function loadBackups() {
     button.addEventListener("click", () => validate(button));
   });
   document.querySelectorAll("[data-restore]").forEach((button) => {
-    button.addEventListener("click", () => restore(button.dataset.restore));
+    button.addEventListener("click", () => restore(button));
   });
 }
 
@@ -205,30 +206,39 @@ async function validate(button) {
   button.disabled = false;
 }
 
-async function restore(name) {
+async function restore(button) {
+  if (restoreInFlight) return;
+  restoreInFlight = true;
+  button.disabled = true;
+  const name = button.dataset.restore;
   const verification = `RESTORE ${name}`;
-  const phrase = await window.OutpostUI.prompt({
-    eyebrow: "CONTROLLED RECOVERY",
-    title: `Restore ${name}?`,
-    message: "Outpost will enter maintenance mode, drain background work, restore the verified snapshot, and restart. A safety copy is retained for automatic recovery.",
-    label: "Restore confirmation",
-    verification,
-    confirmLabel: "Enter maintenance and restore",
-    danger: true,
-  });
-  if (phrase === null) return;
-  const response = await fetch(`/api/v1/backups/${encodeURIComponent(name)}/restore`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
-    body: JSON.stringify({ confirmation: phrase }),
-  });
-  const body = await response.json();
-  if (!response.ok) {
-    await window.OutpostUI.alert({title: "Restore could not start", message: body.error.message});
-    return;
+  try {
+    const phrase = await window.OutpostUI.prompt({
+      eyebrow: "CONTROLLED RECOVERY",
+      title: `Restore ${name}?`,
+      message: "Outpost will enter maintenance mode, drain background work, restore the verified snapshot, and restart. A safety copy is retained for automatic recovery.",
+      label: "Restore confirmation",
+      verification,
+      confirmLabel: "Enter maintenance and restore",
+      danger: true,
+    });
+    if (phrase === null) return;
+    const response = await fetch(`/api/v1/backups/${encodeURIComponent(name)}/restore`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+      body: JSON.stringify({ confirmation: phrase }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      await window.OutpostUI.alert({title: "Restore could not start", message: body.error.message});
+      return;
+    }
+    renderRestore(body);
+    await monitorRestore(body.job_id);
+  } finally {
+    restoreInFlight = false;
+    if (button.isConnected) button.disabled = false;
   }
-  renderRestore(body);
-  await monitorRestore(body.job_id);
 }
 
 $("create-backup-page").addEventListener("click", async () => {

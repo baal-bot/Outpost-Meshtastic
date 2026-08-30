@@ -4103,6 +4103,77 @@ def test_watch_partial_api_failure_is_explicit_and_does_not_claim_empty_state(
         page.close()
 
 
+def test_alert_form_rapid_submit_queues_once(browser: object, dashboard_url: str) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    submitted: list[object] = []
+
+    def watch_route(route: object) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        if path == "/api/v1/alerts" and request.method == "POST":
+            submitted.append(request.post_data_json)
+            body = {"id": 9, "last_delivery_count": 1, "coalesced": False}
+        else:
+            body = {
+                "/api/v1/incidents": {"items": []},
+                "/api/v1/incidents/history": {"items": [], "retention_days": 30},
+                "/api/v1/alerts": {"items": []},
+                "/api/v1/events": {"current": None},
+                "/api/v1/watch/map": {"incidents": [], "nodes": [], "alerts": []},
+                "/api/v1/environment/alerts": {
+                    "items": [],
+                    "health": {"last_error": None, "last_poll_at": None},
+                },
+                "/api/v1/environment/earthquakes": {"items": []},
+                "/api/v1/status": {"alert_delivery": {}},
+                "/api/v1/radio/channels": {
+                    "available": True,
+                    "stale": False,
+                    "items": [
+                        {
+                            "index": 3,
+                            "name": "Watch",
+                            "active": True,
+                            "last_verified_active": True,
+                        }
+                    ],
+                },
+            }.get(path, {})
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    for pattern in (
+        "**/api/v1/incidents**",
+        "**/api/v1/alerts**",
+        "**/api/v1/events**",
+        "**/api/v1/watch/map**",
+        "**/api/v1/environment/alerts**",
+        "**/api/v1/environment/earthquakes**",
+        "**/api/v1/status",
+        "**/api/v1/radio/channels",
+    ):
+        page.route(pattern, watch_route)
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/watch.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.locator("#alert-channel option", has_text="Watch · ch 3").wait_for(state="attached")
+        page.locator("#alert-headline").fill("Bridge closed")
+        page.locator("#alert-form").evaluate(
+            "form => { const event = () => new Event('submit', "
+            "{bubbles: true, cancelable: true}); form.dispatchEvent(event()); "
+            "form.dispatchEvent(event()); }"
+        )
+        page.get_by_text("Alert #9 recorded", exact=False).wait_for()
+
+        assert len(submitted) == 1
+        assert page.locator("#alert-headline").input_value() == ""
+        health.assert_clean()
+    finally:
+        page.close()
+
+
 def test_bbs_read_failure_is_not_rendered_as_an_empty_board_list(
     browser: object, dashboard_url: str
 ) -> None:

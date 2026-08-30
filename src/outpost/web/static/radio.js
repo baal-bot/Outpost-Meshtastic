@@ -11,6 +11,7 @@ let queueNextCursor = null;
 let queueFilterKey = "";
 let queueHistoryExpanded = false;
 let queueMeta = { counts: {}, total: 0, retention_days: 30 };
+let sendInFlight = false;
 
 $("send-channel").disabled = true;
 $("send-form").querySelector("button").disabled = true;
@@ -485,24 +486,38 @@ async function refresh() {
 
 $("send-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (sendInFlight) return;
+  sendInFlight = true;
+  const button = event.currentTarget.querySelector("button");
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "Queueing…";
   $("send-result").textContent = "";
-  const response = await api("/api/v1/mesh/send", {
-    method: "POST",
-    body: JSON.stringify({
-      text: $("send-text").value,
-      destination: $("send-destination").value,
-      channel: Number($("send-channel").value),
-      traffic_class: $("send-class").value,
-    }),
-  });
-  const body = await response.json();
-  if (!response.ok) {
-    $("send-result").textContent = body.error.message;
-    return;
+  try {
+    const response = await api("/api/v1/mesh/send", {
+      method: "POST",
+      body: JSON.stringify({
+        text: $("send-text").value,
+        destination: $("send-destination").value,
+        channel: Number($("send-channel").value),
+        traffic_class: $("send-class").value,
+      }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      $("send-result").textContent = body.error.message;
+      return;
+    }
+    $("send-result").textContent = `Queued as item #${body.queue_id}`;
+    $("send-text").value = "";
+    await refresh();
+  } catch (error) {
+    $("send-result").textContent = error?.message || "Message could not be queued.";
+  } finally {
+    sendInFlight = false;
+    button.textContent = label;
+    button.disabled = $("send-channel").disabled;
   }
-  $("send-result").textContent = `Queued as item #${body.queue_id}`;
-  $("send-text").value = "";
-  await refresh();
 });
 
 installInboundHealthCard();

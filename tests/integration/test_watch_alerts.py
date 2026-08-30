@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from outpost.clock import VirtualClock
@@ -11,6 +13,39 @@ from outpost.watch import AlertService, IncidentService
 from tests.support.application import production_governor
 
 pytestmark = pytest.mark.production_wiring
+
+
+@pytest.mark.asyncio
+async def test_identical_alert_submissions_coalesce_transactionally(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "channels": {3: {"name": "watch"}},
+        }
+    )
+    governor = production_governor(database, clock, airtime=config.airtime)
+    responder = await MemberRepo(database, clock).resolve("!00000002")
+    await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
+    service = AlertService(database, governor, clock, config)
+
+    first, duplicate = await asyncio.gather(
+        service.raise_alert("urgent", "Bridge closed", "web:operator", channels=[3]),
+        service.raise_alert("urgent", "Bridge closed", "web:operator", channels=[3]),
+    )
+
+    assert first.id == duplicate.id
+    assert {first.coalesced, duplicate.coalesced} == {False, True}
+    assert len(await database.read("SELECT 1 FROM alert")) == 1
+    assert len(await database.read("SELECT 1 FROM outbound_work")) == 1
+
+    clock.advance(config.watch.alert_submission_dedupe_seconds + 1)
+    later = await service.raise_alert("urgent", "Bridge closed", "web:operator", channels=[3])
+    assert later.id != first.id and later.coalesced is False
+    assert len(await database.read("SELECT 1 FROM alert")) == 2
+    await database.close()
 
 
 @pytest.mark.asyncio

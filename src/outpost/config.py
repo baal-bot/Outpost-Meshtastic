@@ -529,6 +529,7 @@ class WatchConfig(StrictModel):
     emergency_cooldown_minutes: int = Field(default=10, ge=1)
     alert_repeat_max: int = Field(default=3, ge=1, le=10)
     alert_repeat_interval_minutes: int = Field(default=20, ge=1)
+    alert_submission_dedupe_seconds: int = Field(default=30, ge=5, le=300)
     escalation: EscalationConfig = Field(default_factory=EscalationConfig)
 
 
