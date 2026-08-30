@@ -3,6 +3,8 @@ import {byId as $, createApiClient, escapeHtml as safe} from "/ui-primitives.js"
 let csrf = "";
 let selectedKey = null;
 let conversations = [];
+let dataRequests = [];
+let removalPolicy = {};
 let peers = [];
 let searchTimer = null;
 
@@ -35,21 +37,29 @@ function filters() {
 }
 
 async function loadConversations() {
-  const response = await api(`/api/v1/mail/conversations?${filters()}`);
-  if (!response.ok) return;
-  const body = await response.json();
+  const [response, requestResponse] = await Promise.all([
+    api(`/api/v1/mail/conversations?${filters()}`),
+    api("/api/v1/member-data-requests?state=all"),
+  ]);
+  if (!response.ok || !requestResponse.ok) return;
+  const [body, requestBody] = await Promise.all([response.json(), requestResponse.json()]);
   conversations = body.items;
+  dataRequests = requestBody.items;
+  removalPolicy = requestBody.removal_policy;
   $("unread-count").textContent = body.counts.unread;
   $("action-count").textContent = body.counts.actionable;
+  $("data-request-count").textContent = requestBody.pending;
   $("mail-count").textContent = body.total;
   $("filter-summary").textContent = `${body.total} shown`;
   $("mail-list").innerHTML = conversations.map(item => {
+    const request = dataRequests.find(value => value.conversation_key === item.conversation_key);
     const identity = item.message_kind === "system"
       ? "Outpost system"
       : `Member @${safe(item.participant_handle)}`;
     const badges = [
       item.unread_count ? `<span class="mail-badge unread">${item.unread_count} unread</span>` : "",
       item.failed_count ? `<span class="mail-badge failed">Delivery failed</span>` : "",
+      request ? `<span class="mail-badge request">Removal · ${safe(request.state)}</span>` : "",
       `<span class="mail-badge route">${item.route_kind === "federated" ? "⤨ Federated" : "⌁ Local"}</span>`,
     ].join("");
     return `<button class="conversation-row ${selectedKey === item.conversation_key ? "active" : ""} ` +
@@ -87,6 +97,23 @@ function messageCard(message) {
     `${actor}</footer></article>`;
 }
 
+function dataRequestCard(request) {
+  const policy = ["deleted", "pseudonymized", "preserved"].map(key =>
+    `<li><b>${safe(key[0].toUpperCase() + key.slice(1))}:</b> ${safe(removalPolicy[key] || "")}</li>`,
+  ).join("");
+  const actions = request.state === "pending"
+    ? `<div class="data-request-actions"><button class="secondary-button reject-request" ` +
+      `data-review-request="reject">Reject request</button><button class="approve-request" ` +
+      `data-review-request="approve">Approve & pseudonymize</button></div>`
+    : `<p>Reviewed ${safe(date(request.reviewed_at))} by ${safe(request.reviewed_by || "operator")}` +
+      `${request.review_reason ? ` · ${safe(request.review_reason)}` : ""}</p>`;
+  return `<section class="data-request-review"><header><strong>Verified member removal request ` +
+    `#${request.id}</strong><span class="request-state ${safe(request.state)}">` +
+    `${safe(request.state)}</span></header><p>Requested ${safe(date(request.requested_at))}. ` +
+    `Approval applies the policy below atomically and does not erase protected safety or audit ` +
+    `evidence.</p><ul>${policy}</ul>${actions}</section>`;
+}
+
 async function openConversation(key) {
   selectedKey = key;
   $("mail-detail").className = "mail-loading";
@@ -99,6 +126,7 @@ async function openConversation(key) {
   }
   const body = await response.json();
   const item = body.conversation;
+  const dataRequest = dataRequests.find(value => value.conversation_key === key);
   const identity = item.message_kind === "system"
     ? `<span class="identity-pill system">OUTPOST SYSTEM TRAFFIC</span>`
     : `<span class="identity-pill member">MEMBER · @${safe(item.participant_handle)}</span>`;
@@ -122,15 +150,71 @@ async function openConversation(key) {
     `<div class="conversation-route"><div><small>PARTICIPANT</small><strong>${item.message_kind === "system" ? "Remote Outpost operator" : `@${safe(item.participant_handle)}`}</strong></div>` +
     `<div><small>ROUTE</small><strong>${safe(routeName(item))}</strong></div><div><small>LAST ACTIVITY</small>` +
     `<strong>${safe(date(item.updated_at))}</strong></div><div><small>DELIVERY</small><strong>` +
-    `${safe(item.latest_state)}</strong></div></div><div class="message-thread">` +
+    `${safe(item.latest_state)}</strong></div></div>${dataRequest ? dataRequestCard(dataRequest) : ""}` +
+    `<div class="message-thread">` +
     `${body.messages.map(messageCard).join("")}</div>${reply}` +
     `<p class="audit-confirm">Conversation access was recorded in the audit trail.</p>`;
   document.querySelectorAll("[data-mail-state]").forEach(button => {
     button.addEventListener("click", () => setConversationState(button.dataset.mailState));
   });
   $("conversation-reply")?.addEventListener("submit", sendReply);
+  document.querySelectorAll("[data-review-request]").forEach(button => {
+    button.addEventListener("click", () => reviewDataRequest(dataRequest, button.dataset.reviewRequest));
+  });
   await loadConversations();
   window.dispatchEvent(new Event("outpost:mail-updated"));
+}
+
+async function reviewDataRequest(request, action) {
+  if (!request || request.state !== "pending") return;
+  const reason = await window.OutpostUI.prompt({
+    title: action === "approve" ? "Approve member removal?" : "Reject member removal?",
+    message: action === "approve"
+      ? "Record why this request is being approved. Identity and private content will be pseudonymized or redacted immediately; protected safety and audit evidence remains."
+      : "Record why this request is not being approved.",
+    label: "Review reason",
+    multiline: true,
+    confirmLabel: action === "approve" ? "Continue" : "Reject request",
+  });
+  if (!reason?.trim()) return;
+  if (action === "approve" && !await window.OutpostUI.confirm({
+    title: "Apply irreversible member removal?",
+    message: "This permanently removes the active identity, exact positions, message and mail content, and AI content. Retained safety records become pseudonymous.",
+    confirmLabel: "Approve & pseudonymize",
+    danger: true,
+  })) return;
+  const response = await api(`/api/v1/member-data-requests/${request.id}/review`, {
+    method: "POST",
+    body: JSON.stringify({action, reason: reason.trim()}),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    await window.OutpostUI.alert({
+      title: "Request not reviewed",
+      message: result.error?.message || "The review could not be saved.",
+    });
+    return;
+  }
+  await openConversation(selectedKey);
+}
+
+async function openRetentionPolicy() {
+  const dialog = $("retention-dialog");
+  dialog.showModal();
+  const response = await fetch("/api/v1/privacy/retention");
+  if (!response.ok) {
+    $("retention-body").innerHTML = `<p class="ui-empty empty">The active policy could not be loaded.</p>`;
+    return;
+  }
+  const policy = await response.json();
+  const categories = policy.categories.map(item => `<div><dt>${safe(item.label)}</dt>` +
+    `<dd>${safe(item.window)}</dd><dd>${safe(item.removal)}</dd></div>`).join("");
+  const removal = ["deleted", "pseudonymized", "preserved"].map(key =>
+    `<p><b>${safe(key[0].toUpperCase() + key.slice(1))}.</b> ` +
+    `${safe(policy.removal_policy[key])}</p>`,
+  ).join("");
+  $("retention-body").innerHTML = `<p class="retention-summary">${safe(policy.summary)}</p>` +
+    `<dl class="retention-list">${categories}</dl><section class="removal-policy">${removal}</section>`;
 }
 
 async function setConversationState(state) {
@@ -237,6 +321,9 @@ $("compose-mail").addEventListener("click", openCompose);
 $("compose-form").addEventListener("submit", sendNewMessage);
 $("compose-dialog").querySelector(".dialog-close").addEventListener("click", () => $("compose-dialog").close());
 $("compose-dialog").querySelector(".dialog-cancel").addEventListener("click", () => $("compose-dialog").close());
+$("retention-details").addEventListener("click", openRetentionPolicy);
+$("retention-dialog").querySelector(".dialog-close").addEventListener("click", () => $("retention-dialog").close());
+$("retention-dialog").querySelector(".dialog-cancel").addEventListener("click", () => $("retention-dialog").close());
 $("compose-peer").addEventListener("change", updateComposePreview);
 $("compose-recipient-type").addEventListener("change", updateComposePreview);
 $("compose-member").addEventListener("input", updateComposePreview);

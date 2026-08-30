@@ -220,6 +220,7 @@ def _menu_screen(ctx: CommandContext, topic: str) -> Response:
             "MY OUTPOST",
             [
                 ("My identity", "WHOAMI", "WHOAMI", ("identity",)),
+                ("My stored data", "MYDATA", "MYDATA", ("data", "retention")),
                 ("Set my name", "MENU NAME", "NAME", ("name",)),
                 ("About this node", "ABOUT", "ABOUT", ("about",)),
                 ("Test connection", "PING", "PING", ("ping", "test")),
@@ -558,7 +559,8 @@ async def help_command(ctx: CommandContext) -> Response:
         if topic == "PRIVACY":
             return _detail(
                 "Mail is private from other members, not the node operator. "
-                "The operator can view stored plaintext; every dashboard view is audited."
+                "The operator can view stored plaintext and exact shared positions; dashboard "
+                "views are audited. Members: MYDATA · FORGETPOS · REMOVEME."
             )
         modules = groups.get(topic)
         if modules:

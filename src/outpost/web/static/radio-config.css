@@ -3,6 +3,7 @@
 .radio-config-operation{margin-top:9px;padding:9px 11px;color:var(--muted);background:#071713;border:1px solid var(--line);border-left:3px solid var(--green);border-radius:6px;font-size:.62rem;line-height:1.45}.radio-config-operation.state-failed{color:var(--amber);border-left-color:var(--amber)}
 
 /* Theme-aware surfaces for the effective channel policy summary. */
+.radio-config-summary>span{color:var(--ui-text-muted);background:var(--ui-surface-inset)}
 .radio-policy-overview{background:var(--ui-surface-inset)}
 .radio-policy-table article{background:var(--ui-surface-subtle)}
 .radio-policy-table span{color:var(--ui-text-muted)}

@@ -108,7 +108,14 @@ def dashboard_poll_body(
         name: {"enabled": True, "restart_required_to_change": True}
         for name in ("bbs", "ai", "watch", "env", "fed")
     }
-    review_counts = {"total": 0, "board": 0, "incidents": 0, "alerts": 0, "members": 0}
+    review_counts = {
+        "total": 0,
+        "board": 0,
+        "incidents": 0,
+        "alerts": 0,
+        "members": 0,
+        "data_requests": 0,
+    }
     review_counts.update(reviews or {})
     return json.dumps(
         {
@@ -800,6 +807,18 @@ def route_visual_content_api(page: object) -> None:
     )
     fulfill("**/api/v1/mesh/queue*", {"items": []})
     fulfill("**/api/v1/mesh/messages*", {"items": []})
+    fulfill(
+        "**/api/v1/mail/conversations*",
+        {"items": [], "total": 0, "counts": {"unread": 0, "actionable": 0, "failed": 0}},
+    )
+    fulfill(
+        "**/api/v1/member-data-requests*",
+        {"items": [], "pending": 0, "removal_policy": {}},
+    )
+    fulfill(
+        "**/api/v1/privacy/retention",
+        {"summary": "Active policy", "categories": [], "removal_policy": {}},
+    )
 
     fulfill("**/api/v1/federation/peers*", {"items": []})
     fulfill(
@@ -3554,6 +3573,14 @@ def route_operations_inbox(page: object, mutations: list[tuple[str, object]]) ->
                 body=json.dumps({"conversation": detail, "messages": messages}),
             )
 
+    page.route(
+        "**/api/v1/member-data-requests*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"items":[],"pending":0,"removal_policy":{}}',
+        ),
+    )
     page.route("**/api/v1/mail/conversations**", mail)
     page.route(
         "**/api/v1/dashboard/poll",
@@ -3742,6 +3769,111 @@ def test_operations_inbox_conversation_reply_compose_and_responsive_layout(
                 },
             )
             assert results.violations_count == 0, results.generate_report()
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("width", (390, 1280))
+def test_operations_inbox_reviews_verified_member_removal_without_overflow(
+    browser: object, dashboard_url: str, width: int
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme="dark")
+    mutations: list[tuple[str, object]] = []
+    route_operations_inbox(page, mutations)
+    request_state = {"value": "pending"}
+
+    def data_requests(route: object) -> None:
+        item = {
+            "id": 17,
+            "member_id": 1,
+            "request_type": "removal",
+            "state": request_state["value"],
+            "conversation_key": "fed:!bbbbbbbb:abc123",
+            "requested_at": "2026-08-30T10:00:00Z",
+            "reviewed_at": (
+                "2026-08-30T10:05:00Z" if request_state["value"] != "pending" else None
+            ),
+            "reviewed_by": "web:operator" if request_state["value"] != "pending" else None,
+            "review_reason": (
+                "Identity verified in person" if request_state["value"] != "pending" else None
+            ),
+            "pseudonym": ("former-a1b2c3" if request_state["value"] == "approved" else None),
+            "member_label": "666",
+            "directory_state": "active",
+        }
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": [item],
+                    "pending": int(request_state["value"] == "pending"),
+                    "removal_policy": {
+                        "deleted": "Exact positions and private content are removed.",
+                        "pseudonymized": "Retained author labels are replaced.",
+                        "preserved": "Safety and audit evidence remains.",
+                    },
+                }
+            ),
+        )
+
+    def data_review(route: object) -> None:
+        payload = route.request.post_data_json
+        mutations.append(("data-review", payload))
+        request_state["value"] = str(payload["action"]).replace("approve", "approved")
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "id": 17,
+                    "member_id": 1,
+                    "request_type": "removal",
+                    "state": request_state["value"],
+                    "conversation_key": "fed:!bbbbbbbb:abc123",
+                    "requested_at": "2026-08-30T10:00:00Z",
+                    "reviewed_at": "2026-08-30T10:05:00Z",
+                    "reviewed_by": "web:operator",
+                    "review_reason": payload["reason"],
+                    "pseudonym": "former-a1b2c3",
+                }
+            ),
+        )
+
+    page.unroute("**/api/v1/member-data-requests*")
+    page.route("**/api/v1/member-data-requests*", data_requests)
+    page.route("**/api/v1/member-data-requests/17/review", data_review)
+    try:
+        page.goto(f"{dashboard_url}/mail.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.get_by_role("button", name="Moderation review").wait_for()
+        assert page.locator("#data-request-count").text_content() == "1"
+        assert "Removal · pending" in page.locator(".mail-badge.request").text_content()
+
+        page.get_by_role("button", name="Retention & removal policy").click()
+        retention = page.get_by_role("dialog", name="Retention & member removal")
+        retention.get_by_text("Exact member positions", exact=True).wait_for()
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        retention.get_by_role("button", name="Close", exact=True).click()
+
+        page.get_by_role("button", name="Moderation review").click()
+        review = page.locator(".data-request-review")
+        review.get_by_text("Verified member removal request #17", exact=True).wait_for()
+        review.get_by_role("button", name="Approve & pseudonymize").click()
+        reason = page.get_by_role("dialog", name="Approve member removal?")
+        reason.get_by_role("textbox", name="Review reason").fill("Identity verified in person")
+        reason.get_by_role("button", name="Continue").click()
+        confirmation = page.get_by_role("dialog", name="Apply irreversible member removal?")
+        with page.expect_request("**/api/v1/member-data-requests/17/review"):
+            confirmation.get_by_role("button", name="Approve & pseudonymize").click()
+        page.wait_for_timeout(250)
+        assert (
+            "data-review",
+            {"action": "approve", "reason": "Identity verified in person"},
+        ) in mutations
+        assert request_state["value"] == "approved"
+        assert "approved" in review.text_content()
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     finally:
         page.close()
 

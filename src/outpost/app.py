@@ -67,6 +67,7 @@ from outpost.fed import (
     wire_bytes,
     wire_int,
 )
+from outpost.member_data import MemberDataService
 from outpost.operations_center import MeshOperationsCenter
 from outpost.operator_context import current_actor
 from outpost.radio_configuration import RadioConfigurationManager
@@ -228,6 +229,7 @@ class OutpostApp:
             self.config.mail.hold_unknown_days,
             self._send_federated_operator_reply,
         )
+        self.member_data = MemberDataService(self.database, self.clock, self.config.store.retention)
         self.digests = DigestService(self.database, self.clock, self.config)
         self.incidents = IncidentService(
             self.database,
@@ -303,7 +305,12 @@ class OutpostApp:
         )
         command_groups = (
             (
-                identity_specs(members, mail, self.config.security.require_approval),
+                identity_specs(
+                    members,
+                    mail,
+                    self.member_data,
+                    self.config.security.require_approval,
+                ),
                 True,
             ),
             (
@@ -412,6 +419,7 @@ class OutpostApp:
             web_config=self.config.web,
             tile_path=self.config.store.tiles_path,
             incident_reports=self.incident_reports,
+            member_data=self.member_data,
         )
 
     def _start_background_task(

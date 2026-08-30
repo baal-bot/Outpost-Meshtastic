@@ -89,6 +89,13 @@ TABLE_POLICIES = (
         "Writer-pruned replay window; bounded to 90 days.",
     ),
     TablePolicy(
+        "member_data_request",
+        "directory",
+        "preserve",
+        "Member request and operator decision evidence requires explicit lifecycle action.",
+        True,
+    ),
+    TablePolicy(
         "member_position",
         "directory",
         "expire",
@@ -760,7 +767,10 @@ class MaintenanceService:
                 "Expired/aged mail",
                 "community",
                 "mail",
-                "expires_at<=? OR created_at<?",
+                "(expires_at<=? OR created_at<?) AND NOT EXISTS ("
+                "SELECT 1 FROM member_data_request r WHERE "
+                "r.conversation_key=mail.conversation_key "
+                "AND r.state='pending')",
                 (now, now - retention.mail_days * DAY),
             ),
             CleanupRule(

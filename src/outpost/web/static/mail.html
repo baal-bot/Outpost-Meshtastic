@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/layout.css?v=1">
   <link rel="stylesheet" href="/mail.css?v=2">
   <link rel="stylesheet" href="/components.css?v=1">
+  <link rel="stylesheet" href="/member-data.css?v=1">
 </head>
 <body>
   <aside class="rail">
@@ -29,11 +30,12 @@
       <section class="mail-kpis" aria-label="Inbox status">
         <article><small>UNREAD</small><strong id="unread-count">—</strong><p>Conversations needing review</p></article>
         <article><small>ACTIONABLE</small><strong id="action-count">—</strong><p>Unread or failed delivery</p></article>
+        <article><small>DATA REQUESTS</small><strong id="data-request-count">—</strong><p>Verified requests awaiting decision</p></article>
         <article><small>VISIBLE</small><strong id="mail-count">—</strong><p>Matching the current filters</p></article>
       </section>
       <section class="ui-notice privacy-banner">
-        <strong>Operator-readable plaintext</strong>
-        <p>System-to-system traffic stays in this workspace. Messages addressed to a named member remain member mail. Opening a conversation and every operator reply are permanently audited.</p>
+        <div><strong>Operator-readable plaintext</strong><p>System-to-system traffic stays in this workspace. Messages addressed to a named member remain member mail. Opening a conversation and every operator reply are permanently audited.</p></div>
+        <button id="retention-details" class="ui-button secondary-button">Retention & removal policy</button>
       </section>
       <section class="inbox-toolbar" aria-label="Inbox filters">
         <label class="mail-search"><span>Search conversations</span><input id="mail-search" type="search" placeholder="Person, Outpost, subject, or message text"></label>
@@ -74,6 +76,13 @@
       <footer><button type="button" class="ui-button secondary-button dialog-cancel">Cancel</button><button type="submit">Queue encrypted message</button></footer>
     </form>
   </dialog>
-  <script type="module" src="/mail.js?v=3"></script>
+  <dialog id="retention-dialog" class="mail-dialog retention-dialog" aria-labelledby="retention-title">
+    <article>
+      <header><div><p class="eyebrow">GENERATED FROM RUNNING CONFIGURATION</p><h2 id="retention-title">Retention & member removal</h2></div><button type="button" class="dialog-close" aria-label="Close retention policy">×</button></header>
+      <div id="retention-body" class="dialog-body"><p>Loading the active policy…</p></div>
+      <footer><button type="button" class="ui-button secondary-button dialog-cancel">Close</button></footer>
+    </article>
+  </dialog>
+  <script type="module" src="/mail.js?v=4"></script>
 </body>
 </html>

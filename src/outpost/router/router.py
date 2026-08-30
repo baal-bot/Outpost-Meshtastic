@@ -30,6 +30,8 @@ from .registry import CommandRegistry
 from .session import Session, SessionStore
 from .tui import TuiController
 
+VERIFIED_MEMBER_MUTATIONS = frozenset({"FORGETPOS", "REMOVEME"})
+
 
 class Router:
     def __init__(
@@ -283,18 +285,28 @@ class Router:
                     flush=True,
                 )
             return Response(ResponseKind.ERROR, [Line(channel_decision.message)])
-        if spec.min_trust >= TrustLevel.RESPONDER:
+        requires_verified_identity = spec.name in VERIFIED_MEMBER_MUTATIONS
+        if spec.min_trust >= TrustLevel.RESPONDER or requires_verified_identity:
             authorized, _reason = await self.members.authorize_elevated(member, inbound, spec.name)
             if not authorized:
                 if trace is not None:
-                    trace.decision = "elevated_identity_denied"
+                    trace.decision = (
+                        "verified_identity_denied"
+                        if requires_verified_identity and spec.min_trust < TrustLevel.RESPONDER
+                        else "elevated_identity_denied"
+                    )
                 session.clear_operations_state()
+                prefix = (
+                    "Verified action denied."
+                    if requires_verified_identity and spec.min_trust < TrustLevel.RESPONDER
+                    else "Elevated action denied."
+                )
                 return Response(
                     ResponseKind.ERROR,
                     [
                         Line(
-                            "Elevated action denied. Use a verified PKI direct message or ask "
-                            "the operator to review this radio key."
+                            f"{prefix} Use a verified PKI direct message or ask the operator to "
+                            "review this radio key."
                         )
                     ],
                 )

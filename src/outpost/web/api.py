@@ -21,7 +21,8 @@ from outpost.ai import AIService
 from outpost.ai.store import AIStore
 from outpost.audit import display_audit_detail, write_audit
 from outpost.bbs.admin import BBSAdmin
-from outpost.config import DEFAULT_TILES_PATH, WebConfig
+from outpost.clock import SystemClock
+from outpost.config import DEFAULT_TILES_PATH, RetentionConfig, WebConfig
 from outpost.env import (
     AstronomyService,
     CapAlertService,
@@ -35,6 +36,7 @@ from outpost.fed import (
     FederationRelayService,
     FederationTopologyService,
 )
+from outpost.member_data import MemberDataService, retention_statement
 from outpost.operator_context import (
     current_actor,
     current_actor_ref,
@@ -58,6 +60,7 @@ from outpost.web.transport import WebTransportMiddleware, transport_status
 PUBLIC_API_PATHS = frozenset(
     {
         "/api/v1/health",
+        "/api/v1/privacy/retention",
         "/api/v1/runtime",
         "/api/v1/diagnostics/readiness",
         "/api/v1/diagnostics/status",
@@ -104,6 +107,7 @@ STEP_UP_PREFIXES = (
     "/api/v1/config/watch",
     "/api/v1/ai",
     "/api/v1/alerts",
+    "/api/v1/member-data-requests",
     "/api/v1/environment/alerts",
     "/api/v1/environment/earthquakes",
     "/api/v1/environment/same",
@@ -598,6 +602,11 @@ class MailConversationReplyBody(BaseModel):
     body: str = Field(min_length=1, max_length=800)
 
 
+class MemberDataReviewBody(BaseModel):
+    action: Literal["approve", "reject"]
+    reason: str = Field(min_length=3, max_length=240)
+
+
 def _timestamp(value: int) -> str:
     return datetime.fromtimestamp(value, UTC).isoformat().replace("+00:00", "Z")
 
@@ -659,6 +668,7 @@ def create_web_app(
     self_check: SelfCheckService | None = None,
     tile_path: str | Path = DEFAULT_TILES_PATH,
     incident_reports: IncidentReportService | None = None,
+    member_data: MemberDataService | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Outpost API",
@@ -673,6 +683,18 @@ def create_web_app(
         if database is not None and incidents is not None
         else None
     )
+    effective_member_data = member_data or (
+        MemberDataService(database, SystemClock()) if database is not None else None
+    )
+
+    @app.get("/api/v1/privacy/retention")
+    async def privacy_retention() -> dict[str, Any]:
+        retention = (
+            effective_member_data.retention
+            if effective_member_data is not None
+            else RetentionConfig()
+        )
+        return retention_statement(retention)
 
     def effective_modules() -> dict[str, bool]:
         if module_provider is not None:
@@ -2303,7 +2325,14 @@ def create_web_app(
 
     @app.get("/api/v1/dashboard/poll", response_model=None)
     async def dashboard_poll(request: Request) -> Response:
-        reviews = {"total": 0, "board": 0, "incidents": 0, "alerts": 0, "members": 0}
+        reviews = {
+            "total": 0,
+            "board": 0,
+            "incidents": 0,
+            "alerts": 0,
+            "members": 0,
+            "data_requests": 0,
+        }
         actionable_mail = 0
         same_pending = 0
         local_incident_reviews = 0
@@ -2317,10 +2346,15 @@ def create_web_app(
                      FROM fed_inbox_item WHERE state='pending'
                    )
                    SELECT reviews.*,
-                     (SELECT COUNT(DISTINCT conversation_key) FROM mail
-                      WHERE conversation_key IS NOT NULL AND archived_at IS NULL AND
-                        ((operator_read_at IS NULL AND mail_direction<>'out')
-                         OR state IN ('failed','undeliverable'))) actionable,
+                     (SELECT COUNT(*) FROM (
+                        SELECT conversation_key FROM mail
+                        WHERE conversation_key IS NOT NULL AND archived_at IS NULL AND
+                          ((operator_read_at IS NULL AND mail_direction<>'out')
+                           OR state IN ('failed','undeliverable'))
+                        GROUP BY conversation_key
+                        UNION
+                        SELECT conversation_key FROM member_data_request WHERE state='pending'
+                      )) actionable,
                      (SELECT COUNT(*) FROM same_event
                       WHERE review_state IN ('pending','duplicate')) same_pending,
                      (SELECT COUNT(*) FROM member
@@ -2328,11 +2362,14 @@ def create_web_app(
                         {NEEDS_REVIEW_SQL}) member_key_reviews,
                      (SELECT COUNT(*) FROM incident
                       WHERE reporter_id IS NOT NULL AND status='open'
-                        AND merged_into_id IS NULL) local_incident_reviews
+                        AND merged_into_id IS NULL) local_incident_reviews,
+                     (SELECT COUNT(*) FROM member_data_request
+                      WHERE state='pending') member_data_requests
                    FROM reviews"""  # noqa: S608 - review expression is a fixed application constant.
             )
             reviews = {key: int(rows[0][key]) for key in ("total", "board", "incidents", "alerts")}
             reviews["members"] = int(rows[0]["member_key_reviews"])
+            reviews["data_requests"] = int(rows[0]["member_data_requests"])
             actionable_mail = int(rows[0]["actionable"])
             same_pending = int(rows[0]["same_pending"])
             local_incident_reviews = int(rows[0]["local_incident_reviews"])
@@ -4109,40 +4146,24 @@ def create_web_app(
 
         @app.delete("/api/v1/members/{member_id}/position", response_model=None)
         async def member_position_delete(member_id: int) -> dict[str, bool] | Response:
-            async with database.transaction() as transaction:
-                rows = await transaction.read(
-                    """SELECT m.mesh_id,p.source,p.received_at,p.expires_at
-                       FROM member m JOIN member_position p ON p.member_id=m.id WHERE m.id=?""",
-                    (member_id,),
-                )
-                if not rows:
-                    return JSONResponse(
-                        {
-                            "error": {
-                                "code": "not_found",
-                                "message": "Member position not found.",
-                            }
-                        },
-                        status_code=404,
-                    )
-                row = rows[0]
-                detail = (
-                    f"source={row['source']};received_at={row['received_at']};"
-                    f"scheduled_expiry={row['expires_at']}"
-                )
-                await transaction.write(
-                    "DELETE FROM pending_incident_location WHERE member_id=?", (member_id,)
-                )
-                await transaction.write(
-                    "DELETE FROM member_position WHERE member_id=?", (member_id,)
-                )
-                await write_audit(
-                    transaction,
+            assert effective_member_data is not None
+            try:
+                result = await effective_member_data.delete_position(
+                    member_id,
                     actor_kind="web",
                     actor_ref=current_actor_ref(),
-                    action="member.position_delete",
-                    target=str(row["mesh_id"]),
-                    detail=detail,
+                )
+            except ValueError:
+                result = {"positions": 0}
+            if not result["positions"]:
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "not_found",
+                            "message": "Member position not found.",
+                        }
+                    },
+                    status_code=404,
                 )
             return {"deleted": True}
 
@@ -4377,6 +4398,46 @@ def create_web_app(
             return {"items": items, "next_cursor": cursor + limit if len(rows) > limit else None}
 
         operator_inbox = OperatorInboxService(database)
+
+        @app.get("/api/v1/member-data-requests")
+        async def member_data_requests(
+            state: Literal["pending", "approved", "rejected", "all"] = "pending",
+        ) -> dict[str, Any]:
+            assert effective_member_data is not None
+            items = await effective_member_data.list_requests(state)
+            for item in items:
+                for key in ("requested_at", "reviewed_at"):
+                    if item[key] is not None:
+                        item[key] = _timestamp(item[key])
+            return {
+                "items": items,
+                "pending": await effective_member_data.pending_count(),
+                "removal_policy": retention_statement(effective_member_data.retention)[
+                    "removal_policy"
+                ],
+            }
+
+        @app.post("/api/v1/member-data-requests/{request_id}/review", response_model=None)
+        async def member_data_request_review(
+            request_id: int, body: MemberDataReviewBody
+        ) -> dict[str, Any] | Response:
+            assert effective_member_data is not None
+            try:
+                result = await effective_member_data.review(
+                    request_id,
+                    body.action,
+                    body.reason,
+                    current_actor_ref(),
+                )
+            except ValueError as error:
+                return JSONResponse(
+                    {"error": {"code": "review_failed", "message": str(error)}},
+                    status_code=409,
+                )
+            for key in ("requested_at", "reviewed_at"):
+                if result[key] is not None:
+                    result[key] = _timestamp(result[key])
+            return result
 
         @app.get("/api/v1/mail/conversations")
         async def mail_conversations(

@@ -38,6 +38,7 @@ configured channel capability, available local data, or a higher role for a sens
 | `DIST`<br>Aliases: `DISTANCE` | `DIST <waypoint>` · range and bearing | Guest | General | reply | Read-only |
 | `EVENT` | `EVENT OPEN <policy> <name>\|CLOSE` | Responder | Alert | reply | Changes state |
 | `FC`<br>Aliases: `FORECAST` | `FC [1-5] [-long]` · local forecast | Guest | General | reply | Read-only |
+| `FORGETPOS`<br>Aliases: `DELPOS` | `FORGETPOS` · delete my exact position | Member | General | reply | Changes state |
 | `HELP`<br>Aliases: `?`, `H` | `HELP [cmd]` · command help | Guest | General | reply | Read-only |
 | `HELPME` | `HELPME [note]` · record need-help and notify responders | Guest | General | reply | Changes state |
 | `HOME`<br>Aliases: `..`, `/` | `HOME` · clear context | Guest | General | reply | Read-only |
@@ -46,6 +47,7 @@ configured channel capability, available local data, or a higher role for a sens
 | `MAIL`<br>Aliases: `MB` | `MAIL` · inbox | Guest | General | reply | Read-only |
 | `MENU`<br>Aliases: `COMMANDS` | `MENU` · guided Outpost interface | Guest | General | reply | Read-only |
 | `MORE`<br>Aliases: `+`, `M+` | `MORE` · next page | Guest | BBS read | reply | Read-only |
+| `MYDATA`<br>Aliases: `DATA` | `MYDATA` · my retained data counts | Member | General | reply | Read-only |
 | `NAME`<br>Aliases: `HANDLE` | `NAME <handle>` · claim handle | Guest | General | reply | Changes state |
 | `NEW`<br>Aliases: `N` | `NEW` · unread digest | Guest | BBS write | reply | Changes state |
 | `OK` | `OK [note]` · welfare check-in | Guest | General | reply | Changes state |
@@ -57,6 +59,7 @@ configured channel capability, available local data, or a higher role for a sens
 | `QUAKE`<br>Aliases: `EARTHQUAKE` | `QUAKE [number]` · nearby USGS earthquakes | Guest | General | reply | Read-only |
 | `READ`<br>Aliases: `R` | `READ <n>` · open thread | Guest | BBS read | reply | Read-only |
 | `READMAIL`<br>Aliases: `RM` | `READMAIL <n>` · read mail | Guest | General | reply | Changes state |
+| `REMOVEME` | `REMOVEME` · request operator-reviewed removal | Member | General | reply | Changes state |
 | `REPLY`<br>Aliases: `RE` | `RE [thread] <text>` | Guest | BBS write | reply | Changes state |
 | `REPLYMAIL`<br>Aliases: `RR` | `RR <text>` · reply mail | Guest | General | reply | Changes state |
 | `REPORT` | `REPORT [-nopos\|-wp name] <details>` · files a public incident; attached position is visible. Not 911. | Guest | Incident report | reply | Changes state |
@@ -87,6 +90,11 @@ configured channel capability, available local data, or a higher role for a sens
 packet; numbered section pages carry compact source-ID/age markers. `SITREP AI` optionally asks the
 configured model to phrase already-selected facts, but facts, ordering, and safety state never
 depend on AI.
+
+`MYDATA` is a direct-message, member-only count of the records attributed to the sender.
+`FORGETPOS` and `REMOVEME` additionally require the sender's operator-verified Meshtastic PKI key
+and replay-safe direct delivery. The former deletes current and pending exact positions; the latter
+queues a removal request for operator review and never unilaterally erases safety history.
 
 `OPS` opens a responder-only action center with incident, welfare, delivery-failure, and action
 queues. Operators additionally see operations inbox and federation-review queues. Sensitive

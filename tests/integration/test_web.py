@@ -276,6 +276,7 @@ async def test_dashboard_poll_batches_status_and_revalidates_with_etag(tmp_path)
         "incidents": 1,
         "alerts": 1,
         "members": 1,
+        "data_requests": 0,
     }
     assert response.json()["mail"] == {"actionable": 1}
     assert response.json()["watch"] == {"incidents_pending_review": 1}

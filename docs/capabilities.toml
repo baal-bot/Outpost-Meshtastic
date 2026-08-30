@@ -371,7 +371,7 @@ description = "Release evidence, verified update, rollback, compromise, and revo
 [[capabilities]]
 id = "retention_privacy"
 area = "Retention and privacy controls"
-present = "Bounded retention, foreign-key-safe incident deletion, isolated maintenance failures, atomic rotated snapshots, exact-position expiry/deletion, message limits, and auditable policy changes."
+present = "Bounded retention, foreign-key-safe incident deletion, isolated maintenance failures, atomic rotated snapshots, member-visible data counts, PKI-bound exact-position deletion, operator-reviewed pseudonymization, message limits, and a configuration-generated public policy."
 maturity = "automated_tested"
 introduced_commit = "4d8af9c"
 limitations = ["Thirty-day write-volume and SD-card wear evidence remains open."]
@@ -379,7 +379,11 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-29"
+date = "2026-08-30"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_member_data_requests.py::test_member_data_summary_verified_requests_and_operator_pseudonymization"
+description = "A member inspects retained category counts, uses PKI-bound deletion and removal requests, and the operator applies the documented pseudonymization policy atomically."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_maintenance.py::test_maintenance_deletes_merged_children_before_their_canonical_incident"

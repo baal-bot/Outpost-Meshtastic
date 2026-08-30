@@ -37,6 +37,32 @@ policy; Outpost never silently replaces audit detail with a summary.
 The safety-floor replay window separately uses
 `security.safety_attempt_retention_hours` (72 hours by default).
 
+## Member access and removal
+
+An enrolled member can send `MYDATA` in a direct message to see counts for their own retained
+positions, message telemetry, mail, posts, welfare records, incident activity, AI interactions, and
+security history. The response is deliberately count-only and fits the configured radio reply
+budget. `FORGETPOS` immediately removes current and pending exact positions, while `REMOVEME`
+creates an operator-review item in the Operations inbox. Both mutations require a direct message
+authenticated with the member's operator-verified Meshtastic PKI key; social trust or a forgeable
+node number alone is insufficient.
+
+Approving a removal request atomically applies this policy:
+
+- Exact and pending positions, retained check-in coordinates, packet bodies/binary payloads/keys,
+  mail content, AI questions and answers, subscriptions, and read cursors are removed or redacted.
+- The active mesh identity and retained board, welfare, mail, and incident author labels are
+  replaced with a random former-member pseudonym. A later packet from the original radio starts a
+  new guest identity rather than silently reconnecting to the removed record.
+- Published incident facts, safety history, trust/PKI events, the request decision, and append-only
+  audit evidence remain. Free text in those protected records may still contain information the
+  member deliberately published; the Operations inbox states this before approval.
+
+`GET /api/v1/privacy/retention` is a public, content-free statement generated directly from the
+validated running `RetentionConfig`. The Operations inbox renders that contract rather than
+duplicating configurable time windows in JavaScript or prose. The detailed table below remains the
+operator reference for database ownership and cleanup behavior.
+
 `watch_history_days`, `outbound_history_days`, and `message_log_days` must each be at
 least `incident_history_days`. Startup rejects a shorter supporting window. Maintenance also
 protects incident-linked alerts, welfare context, durable delivery attempts, and measured packet
@@ -69,6 +95,7 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | Members/directory | `member_trust_history` | Preserve reviewed trust-change evidence forever and protect. |
 | Members/directory | `member_pki_event` | Preserve key-verification and conflict evidence forever and protect. |
 | Members/directory | `member_pki_replay` | Expire through its writer-maintained 90-day replay window. |
+| Members/directory | `member_data_request` | Preserve the member request and accountable operator decision; pending requests also protect their inbox conversation from mail cleanup. |
 | Members/directory | `member_position` | Expire at its per-share deadline. |
 | Members/directory | `channel_dir` | Preserve operator-managed directory. |
 | BBS/mail | `board` | Preserve operator configuration. |

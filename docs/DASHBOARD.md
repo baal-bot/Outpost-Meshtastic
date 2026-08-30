@@ -14,7 +14,8 @@ endpoint boundary.
 - **Overview:** identity, service/radio state, message activity, weather, and operational summary.
 - **Members:** actual members, discovered radios, trust/approval controls, and member map.
 - **BBS and Mail:** boards, threads, moderation, and a conversation-based operations inbox with
-  member/system identity, route previews, delivery state, search, unread state, and archiving.
+  member/system identity, route previews, delivery state, search, unread state, archiving, and
+  verified member-removal review against the active generated retention policy.
 - **Watch:** incident map/list, monitoring state, alerts, acknowledgements, welfare events, and
   human-reviewed cross-Outpost incident reconciliation with origin/provenance inspection.
 - **Sitrep:** deterministic, role-filtered key facts; source IDs and ages; changes since the prior
