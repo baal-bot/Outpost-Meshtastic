@@ -318,7 +318,10 @@ function applyModuleState() {
     banner?.remove();
   }
   for (const section of main.children) {
-    if (!section.classList.contains("module-disabled-banner")) {
+    if (
+      !section.classList.contains("module-disabled-banner")
+      && !section.classList.contains("readiness-banner")
+    ) {
       section.toggleAttribute("inert", Boolean(disabled));
     }
   }
@@ -526,10 +529,81 @@ async function refreshOperationsInboxBadge() {
 
 operatorIdentity.then(refreshOperationsInboxBadge);
 window.addEventListener("outpost:mail-updated", refreshOperationsInboxBadge);
+
+function renderReadinessBanner(report) {
+  document.querySelector(".readiness-banner")?.remove();
+  if (
+    document.body.dataset.operatorRole === "viewer"
+    || Number(report?.safety_failures || 0) < 1
+  ) return;
+  const failed = (report.checks || []).find(check => (
+    check.severity === "safety" && check.passed === false
+  ));
+  const main = document.querySelector("main");
+  if (!main || !failed) return;
+  const banner = document.createElement("aside");
+  banner.className = "readiness-banner";
+  banner.setAttribute("role", "alert");
+  const copy = document.createElement("div");
+  const eyebrow = document.createElement("p");
+  eyebrow.className = "eyebrow";
+  eyebrow.textContent = "SAFETY READINESS FAILED";
+  const title = document.createElement("b");
+  title.textContent = failed.title;
+  const detail = document.createElement("span");
+  detail.textContent = `${failed.detail} ${failed.impact}`;
+  const remediation = document.createElement("small");
+  remediation.textContent = failed.remediation;
+  copy.append(eyebrow, title, detail, remediation);
+  const actions = document.createElement("div");
+  const mail = document.createElement("a");
+  mail.href = "/mail.html";
+  mail.textContent = "Open operator inbox";
+  const run = document.createElement("button");
+  run.type = "button";
+  run.textContent = "Run readiness check";
+  run.addEventListener("click", async () => {
+    run.disabled = true;
+    try {
+      const sessionResponse = await nativeFetch("/api/v1/auth/session", {cache: "no-store"});
+      if (!sessionResponse.ok) return;
+      const session = await sessionResponse.json();
+      const response = await fetch("/api/v1/readiness/run", {
+        method: "POST",
+        headers: {"x-csrf-token": session.csrf_token},
+      });
+      if (!response.ok) return;
+      renderReadinessBanner(await response.json());
+      navigationStatus = null;
+      navigationStatusEtag = "";
+      window.dispatchEvent(new Event("outpost:mail-updated"));
+    } finally {
+      run.disabled = false;
+    }
+  });
+  actions.append(mail, run);
+  banner.append(copy, actions);
+  main.prepend(banner);
+}
+
+async function refreshReadinessBanner() {
+  try {
+    renderReadinessBanner((await loadNavigationStatus()).readiness);
+  } catch (_) {
+    // The last rendered safety state remains visible while the backend reconnects.
+  }
+}
+
+operatorIdentity.then(refreshReadinessBanner);
 scheduler.schedule(
   "navigation-status",
   () => sessionStorage.getItem("outpost.operator.authenticated") === "true"
-    ? Promise.all([refreshModuleState(), refreshFederationReviews(), refreshOperationsInboxBadge()])
+    ? Promise.all([
+      refreshModuleState(),
+      refreshFederationReviews(),
+      refreshOperationsInboxBadge(),
+      refreshReadinessBanner(),
+    ])
     : undefined,
   {interval: 30000},
 );

@@ -41,6 +41,7 @@ from outpost.operator_context import (
     set_current_actor,
 )
 from outpost.radio_operations import RadioOperations
+from outpost.self_check import SelfCheckService
 from outpost.situation import BriefingCapability, SituationBriefingService
 from outpost.store import Database
 from outpost.store.backups import BackupService, RestoreCoordinator
@@ -576,6 +577,7 @@ def create_web_app(
     ) = None,
     situation: SituationBriefingService | None = None,
     web_config: WebConfig | None = None,
+    self_check: SelfCheckService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Outpost API", version=__version__, docs_url="/api/docs")
     effective_web_config = web_config or WebConfig()
@@ -754,6 +756,9 @@ def create_web_app(
         if request.url.path.startswith("/api/v1/auth/") or request.url.path in {
             "/api/v1/wallboard/summary",
             "/api/v1/sitrep",
+            "/api/v1/readiness",
+            "/api/v1/diagnostics/readiness",
+            "/api/v1/diagnostics/status",
         }:
             response.headers["Cache-Control"] = "no-store"
         return response
@@ -763,6 +768,7 @@ def create_web_app(
         path = request.url.path
         public = path in {
             "/api/v1/health",
+            "/api/v1/diagnostics/readiness",
             "/api/v1/diagnostics/status",
             "/api/v1/auth/login",
             "/api/v1/auth/setup",
@@ -1309,7 +1315,40 @@ def create_web_app(
             "ai": safe_ai,
             "same_receiver": safe_receiver,
             "providers": safe_providers,
+            "readiness": (
+                await self_check.latest()
+                if self_check is not None
+                else {"status": "unavailable", "checks": []}
+            ),
         }
+
+    if self_check is not None:
+
+        @app.post(
+            "/api/v1/diagnostics/readiness",
+            response_class=JSONResponse,
+            response_model=None,
+        )
+        async def diagnostic_readiness(request: Request) -> dict[str, Any] | Response:
+            host = request.client.host if request.client is not None else ""
+            try:
+                local_request = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                local_request = False
+            if not local_request:
+                return JSONResponse(
+                    {"error": {"code": "loopback_required", "message": "Local access required."}},
+                    status_code=403,
+                )
+            return await self_check.run("diagnostics-cli")
+
+        @app.get("/api/v1/readiness")
+        async def readiness() -> dict[str, Any]:
+            return await self_check.latest()
+
+        @app.post("/api/v1/readiness/run")
+        async def run_readiness() -> dict[str, Any]:
+            return await self_check.run(f"dashboard:{current_actor_ref()}")
 
     if restore_coordinator is not None:
 
@@ -2124,6 +2163,11 @@ def create_web_app(
             "watch": {"incidents_pending_review": local_incident_reviews},
             "environment": {"same_pending": same_pending},
             "mail": {"actionable": actionable_mail},
+            "readiness": (
+                await self_check.latest()
+                if self_check is not None
+                else {"status": "unavailable", "safety_failures": 0, "checks": []}
+            ),
         }
         encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
         etag = f'"{sha256(encoded).hexdigest()[:24]}"'
@@ -3481,6 +3525,11 @@ def create_web_app(
                     await maintenance.health()
                     if maintenance is not None
                     else {"status": "unavailable", "completed_at": None, "failures": {}}
+                ),
+                "readiness": (
+                    await self_check.latest()
+                    if self_check is not None
+                    else {"status": "unavailable", "safety_failures": 0, "checks": []}
                 ),
             }
 

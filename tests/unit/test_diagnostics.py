@@ -6,8 +6,9 @@ import zipfile
 from contextlib import closing
 from pathlib import Path
 
-from outpost.config import load_config
-from outpost.diagnostics import build_bundle, database_secrets
+import outpost.diagnostics as diagnostics
+from outpost.config import Config, load_config
+from outpost.diagnostics import build_bundle, database_secrets, runtime_evidence
 
 
 def test_diagnostic_bundle_redacts_bootstrap_password_session_and_csrf(
@@ -46,6 +47,15 @@ def test_diagnostic_bundle_redacts_bootstrap_password_session_and_csrf(
                 "tasks_healthy": True,
                 "providers": {"nws": {"status": "up", "failures": 0}},
             },
+            "self_check": {
+                "status": "failed",
+                "checks": [
+                    {
+                        "name": "responder_audience",
+                        "detail": "password=must-not-leak",
+                    }
+                ],
+            },
         },
         exact_values=(setup_token, password_hash),
     )
@@ -63,6 +73,8 @@ def test_diagnostic_bundle_redacts_bootstrap_password_session_and_csrf(
     assert "radio supervisor connected" in contents
     assert manifest["runtime"]["database"] == {"schema": 147, "quick_check": "ok"}
     assert manifest["runtime"]["live"]["radio"] == "up"
+    assert manifest["runtime"]["self_check"]["status"] == "failed"
+    assert "must-not-leak" not in contents
 
 
 def test_full_journal_is_opt_in(tmp_path: Path) -> None:
@@ -80,6 +92,36 @@ def test_full_journal_is_opt_in(tmp_path: Path) -> None:
             "recent-errors.log",
             "journal.log",
         }
+
+
+def test_runtime_evidence_triggers_and_embeds_live_self_check(tmp_path: Path, monkeypatch) -> None:
+    calls: list[str] = []
+    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    monkeypatch.setattr(
+        diagnostics,
+        "_run_live_self_check",
+        lambda _config: calls.append("trigger") or {"reachable": True},
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "_live_status",
+        lambda _config: (
+            calls.append("status")
+            or {
+                "reachable": True,
+                "readiness": {"status": "failed", "failed_checks": ["responder_audience"]},
+            }
+        ),
+    )
+    monkeypatch.setattr(diagnostics, "_service_status", lambda: {"available": False})
+
+    evidence = runtime_evidence(config)
+
+    assert calls == ["trigger", "status"]
+    assert evidence["self_check"] == {
+        "status": "failed",
+        "failed_checks": ["responder_audience"],
+    }
 
 
 def test_database_secrets_returns_only_auth_redaction_values(tmp_path: Path) -> None:

@@ -61,7 +61,7 @@ class AudienceNotifier:
             params += exclude_mesh_ids
         rows = await self.database.read(
             f"SELECT mesh_id FROM member WHERE trust IN ({placeholders}){exclusion} "  # noqa: S608
-            "ORDER BY mesh_id",
+            "AND directory_state='active' ORDER BY mesh_id",
             params,
         )
         return [str(row["mesh_id"]) for row in rows]

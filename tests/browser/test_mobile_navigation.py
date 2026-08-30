@@ -94,6 +94,7 @@ def dashboard_poll_body(
     reviews: dict[str, int] | None = None,
     actionable: int = 0,
     watch_reviews: int = 0,
+    readiness: dict[str, object] | None = None,
 ) -> str:
     module_states = states or {
         name: {"enabled": True, "restart_required_to_change": True}
@@ -110,6 +111,7 @@ def dashboard_poll_body(
             "reviews": review_counts,
             "watch": {"incidents_pending_review": watch_reviews},
             "mail": {"actionable": actionable},
+            "readiness": readiness or {"status": "ready", "safety_failures": 0, "checks": []},
         }
     )
 
@@ -812,6 +814,61 @@ def test_every_destination_is_reachable_from_navigation(
                 "expected => location.pathname + location.hash === expected",
                 arg=f"{expected.path}{expected.fragment and '#' + expected.fragment}",
             )
+    finally:
+        page.close()
+
+
+def test_safety_readiness_failure_is_persistent_actionable_and_rerunnable(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url)
+    runs: list[str] = []
+    failed = {
+        "status": "failed",
+        "safety_failures": 1,
+        "checks": [
+            {
+                "name": "responder_audience",
+                "severity": "safety",
+                "passed": False,
+                "title": "A responder can receive urgent help",
+                "detail": "No active responder radio is available.",
+                "impact": "Urgent help cannot reach another person.",
+                "remediation": "Promote a verified radio to Responder.",
+            }
+        ],
+    }
+    try:
+        page.route(
+            "**/api/v1/dashboard/poll",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=dashboard_poll_body(readiness=failed),
+            ),
+        )
+
+        def rerun(route: object) -> None:
+            runs.append(route.request.headers.get("x-csrf-token", ""))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"status": "ready", "safety_failures": 0, "checks": []}),
+            )
+
+        page.route("**/api/v1/readiness/run", rerun)
+        for _ in range(2):
+            page.reload(wait_until="domcontentloaded")
+            banner = page.locator("aside.readiness-banner")
+            banner.wait_for(state="visible")
+            assert "A responder can receive urgent help" in banner.text_content()
+            assert "Promote a verified radio" in banner.text_content()
+            assert banner.get_by_role("link", name="Open operator inbox").get_attribute("href") == (
+                "/mail.html"
+            )
+        banner.get_by_role("button", name="Run readiness check").click()
+        banner.wait_for(state="detached")
+        assert runs == ["test"]
     finally:
         page.close()
 

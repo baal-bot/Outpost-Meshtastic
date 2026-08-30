@@ -70,6 +70,7 @@ from outpost.router.models import Line, Response, ResponseKind
 from outpost.router.router import Router
 from outpost.router.session import SessionStore
 from outpost.security.rate_limit import RateLimiter
+from outpost.self_check import SelfCheckService
 from outpost.situation import SituationBriefingService
 from outpost.store import Database
 from outpost.store.backups import BackupService, RestoreCoordinator
@@ -303,6 +304,13 @@ class OutpostApp:
             self.backups, self._restore_database, self._request_restart
         )
         self.maintenance = MaintenanceService(self.database, self.backups, self.clock, self.config)
+        self.self_check = SelfCheckService(
+            self.database,
+            self.config,
+            self.clock,
+            self.backups,
+            self.router.intents,
+        )
         self.web = create_web_app(
             self.status,
             self.database,
@@ -331,6 +339,7 @@ class OutpostApp:
             self.send_federation_mail,
             self.restore_coordinator,
             self.maintenance,
+            self_check=self.self_check,
             module_provider=self.config.modules.enabled_map,
             federation_mail_reply=self.reply_federation_mail,
             same_events=self.same_events,
@@ -750,6 +759,7 @@ class OutpostApp:
                 )
         await self.governor.recover()
         await self.runtime_settings.load()
+        await self.self_check.run("startup")
         self.federation_sync.local_mesh_id = self.radio.local_node_id
         if self.radio.local_node_id:
             await self.federation_sync.import_approved_replies(
@@ -2404,6 +2414,7 @@ class OutpostApp:
         while True:
             if await self.maintenance.due():
                 await self.maintenance.run()
+                await self.self_check.run("maintenance")
             self._task_progress("store-maintenance")
             await self.clock.sleep(60)
 
@@ -2737,6 +2748,7 @@ class OutpostApp:
             "tasks_healthy": self.core_tasks_healthy(),
             "subsystems_healthy": self.background_tasks_healthy(),
             "task_failure": self._fatal_task_error,
+            "readiness": self.self_check.snapshot(),
             "recovery": self.restore_coordinator.maintenance_status(),
             "tasks": {name: dict(health) for name, health in self._task_health.items()},
             "inbound": {

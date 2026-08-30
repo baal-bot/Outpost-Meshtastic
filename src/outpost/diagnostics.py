@@ -175,17 +175,18 @@ def _service_status() -> dict[str, object]:
     return {"available": True, **values}
 
 
-def _live_status(config: Config) -> dict[str, Any]:
+def _live_request(config: Config, path: str, *, method: str = "GET") -> dict[str, Any]:
     direct_https = config.web.transport.mode == "direct_https"
     scheme = "https" if direct_https else "http"
-    url = f"{scheme}://127.0.0.1:{config.web.port}/api/v1/diagnostics/status"
+    url = f"{scheme}://127.0.0.1:{config.web.port}{path}"
+    request = urllib.request.Request(url, method=method)  # noqa: S310 - fixed HTTP(S) loopback URL.
     try:
         if direct_https:
             context = ssl._create_unverified_context()  # noqa: SLF001, S323
-            request = urllib.request.urlopen(url, timeout=3, context=context)  # noqa: S310
+            opened = urllib.request.urlopen(request, timeout=3, context=context)  # noqa: S310
         else:
-            request = urllib.request.urlopen(url, timeout=3)  # noqa: S310
-        with request as response:
+            opened = urllib.request.urlopen(request, timeout=3)  # noqa: S310
+        with opened as response:
             content = response.read(1024 * 1024 + 1)
         if len(content) > 1024 * 1024:
             return {"reachable": False, "reason": "response_too_large"}
@@ -197,12 +198,28 @@ def _live_status(config: Config) -> dict[str, Any]:
     return {"reachable": True, **value}
 
 
+def _live_status(config: Config) -> dict[str, Any]:
+    return _live_request(config, "/api/v1/diagnostics/status")
+
+
+def _run_live_self_check(config: Config) -> dict[str, Any]:
+    return _live_request(config, "/api/v1/diagnostics/readiness", method="POST")
+
+
 def runtime_evidence(config: Config) -> dict[str, object]:
     try:
         os_release = platform.freedesktop_os_release().get("PRETTY_NAME", platform.system())
     except OSError:
         os_release = platform.platform()
     database_path = Path(config.store.path)
+    trigger = _run_live_self_check(config)
+    live = _live_status(config)
+    readiness = live.get("readiness") if live.get("reachable") is True else None
+    if not isinstance(readiness, dict):
+        readiness = {
+            "status": "unavailable",
+            "trigger_reachable": trigger.get("reachable") is True,
+        }
     return {
         "platform": {
             "operating_system": os_release,
@@ -213,7 +230,8 @@ def runtime_evidence(config: Config) -> dict[str, object]:
         "database": _database_status(database_path),
         "storage": _storage_status(database_path),
         "service": _service_status(),
-        "live": _live_status(config),
+        "live": live,
+        "self_check": readiness,
     }
 
 

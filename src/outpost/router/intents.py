@@ -78,6 +78,10 @@ class IntentResolver:
         self.path = Path(path)
         self._mtime_ns: int | None = None
         self._patterns: tuple[tuple[re.Pattern[str], str], ...] = ()
+        self._configured_loaded = 0
+        self._configured_rejected = 0
+        self._load_error: str | None = None
+        self._exists = False
 
     def _reload(self) -> None:
         try:
@@ -87,24 +91,68 @@ class IntentResolver:
         if self._patterns and mtime_ns == self._mtime_ns:
             return
         configured: list[tuple[str, str]] = []
+        rejected = 0
+        error: str | None = None
+        self._exists = mtime_ns >= 0
         if mtime_ns >= 0:
             try:
-                payload = yaml.safe_load(self.path.read_text()) or []
-                configured = [
-                    (str(item["pattern"]), str(item["command"]))
-                    for item in payload
-                    if isinstance(item, dict) and "pattern" in item and "command" in item
-                ]
-            except (OSError, TypeError, ValueError, yaml.YAMLError):
+                payload = yaml.safe_load(self.path.read_text(encoding="utf-8")) or []
+                if not isinstance(payload, list):
+                    raise TypeError("intent map must contain a list")
+                for item in payload:
+                    pattern = item.get("pattern") if isinstance(item, dict) else None
+                    command = item.get("command") if isinstance(item, dict) else None
+                    if (
+                        isinstance(pattern, str)
+                        and pattern.strip()
+                        and isinstance(command, str)
+                        and command.strip()
+                    ):
+                        configured.append((pattern, command))
+                    else:
+                        rejected += 1
+            except OSError:
                 configured = []
+                error = "OSError: configured intent map could not be read"
+            except TypeError:
+                configured = []
+                error = "TypeError: intent map must contain a list"
+            except (UnicodeError, ValueError, yaml.YAMLError) as exc:
+                configured = []
+                error = f"{type(exc).__name__}: configured intent map could not be parsed"
+        else:
+            error = "configured intent map was not found"
         patterns: list[tuple[re.Pattern[str], str]] = []
-        for pattern, command in (*configured, *BUILTIN_INTENTS):
+        loaded = 0
+        for pattern, command in configured:
+            try:
+                patterns.append((re.compile(pattern, re.IGNORECASE), command))
+            except re.error:
+                rejected += 1
+                continue
+            loaded += 1
+        for pattern, command in BUILTIN_INTENTS:
             try:
                 patterns.append((re.compile(pattern, re.IGNORECASE), command))
             except re.error:
                 continue
         self._patterns = tuple(patterns)
         self._mtime_ns = mtime_ns
+        self._configured_loaded = loaded
+        self._configured_rejected = rejected
+        self._load_error = error
+
+    def status(self) -> dict[str, object]:
+        """Return content-safe parse evidence for readiness diagnostics."""
+        self._reload()
+        return {
+            "path": str(self.path),
+            "exists": self._exists,
+            "loaded": self._configured_loaded,
+            "rejected": self._configured_rejected,
+            "builtin": len(BUILTIN_INTENTS),
+            "error": self._load_error,
+        }
 
     @staticmethod
     def _allowed(command: str, trust: str, registry: CommandRegistry) -> bool:
