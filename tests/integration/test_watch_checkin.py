@@ -1,3 +1,6 @@
+import csv
+import io
+
 import pytest
 
 from outpost.clock import VirtualClock
@@ -41,6 +44,28 @@ async def test_event_roster_checkins_and_csv(tmp_path) -> None:
     assert "dana" in exported and "unaccounted" in exported
     closed = await service.close_event(event.id)
     assert closed.closed_at is not None and await service.current_event() is None
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_roster_csv_neutralizes_every_spreadsheet_formula_prefix(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    governor = production_governor(database, clock)
+    members = MemberRepo(database, clock)
+    service = CheckinService(database, governor, clock)
+    event = await service.open_event("Export drill", "all", "operator")
+    notes = ["=SUM(1,1)", "+cmd", "-2+3", "@link", " \t=hidden"]
+
+    for index, note in enumerate(notes, start=1):
+        member = await members.resolve(f"!{index:08x}")
+        member = await members.claim_handle(member.mesh_id, f"member{index}")
+        await service.checkin(member, "ok", note)
+
+    exported = await service.csv_export(event.id)
+    rows = list(csv.DictReader(io.StringIO(exported)))
+    assert {row["note"] for row in rows} == {f"'{note}" for note in notes}
     await database.close()
 
 

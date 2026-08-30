@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from outpost.clock import Clock
+from outpost.csv_safety import csv_safe_row
 from outpost.store import Database
 from outpost.store.members import Member
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
@@ -280,5 +281,5 @@ class CheckinService:
             extrasaction="ignore",
         )
         writer.writeheader()
-        writer.writerows(summary["items"])
+        writer.writerows(csv_safe_row(row) for row in summary["items"])
         return output.getvalue()

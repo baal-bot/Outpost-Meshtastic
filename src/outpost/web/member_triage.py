@@ -8,6 +8,7 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
+from outpost.csv_safety import csv_safe_row
 from outpost.store import Database
 
 ADMITTED_TRUST = ("member", "trusted", "responder", "operator")
@@ -619,12 +620,6 @@ class MemberTriageService:
             "skipped": len(ids) - len(eligible_ids),
         }
 
-    @staticmethod
-    def _csv_safe(value: Any) -> Any:
-        if isinstance(value, str) and value.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
-            return f"'{value}"
-        return value
-
     async def export(
         self, member_ids: Sequence[int], *, actor: str = "web:operator"
     ) -> tuple[str, int]:
@@ -658,7 +653,7 @@ class MemberTriageService:
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
         for row in rows:
-            writer.writerow({key: self._csv_safe(row[key]) for key in fields})
+            writer.writerow(csv_safe_row({key: row[key] for key in fields}))
         await self.database.write(
             """
             INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
