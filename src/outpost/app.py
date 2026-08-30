@@ -11,8 +11,9 @@ from collections import defaultdict, deque
 from collections.abc import Callable, Coroutine
 from contextvars import ContextVar
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import cbor2
 
@@ -25,7 +26,7 @@ from outpost.bbs.channels import ChannelDirectory
 from outpost.bbs.digests import DigestService
 from outpost.bbs.mail import MailService
 from outpost.bbs.service import BBSService
-from outpost.clock import SystemClock
+from outpost.clock import Clock, SystemClock
 from outpost.commands.ai import specs as ai_specs
 from outpost.commands.alerts import specs as alert_specs
 from outpost.commands.bbs import specs as bbs_specs
@@ -72,7 +73,7 @@ from outpost.radio_configuration import RadioConfigurationManager
 from outpost.radio_operations import RadioOperations
 from outpost.radio_power import RadioPowerMonitor
 from outpost.render.renderer import render_response
-from outpost.router.models import Line, Response, ResponseKind
+from outpost.router.models import DispatchTrace, Line, Response, ResponseKind
 from outpost.router.router import Router
 from outpost.router.session import SessionStore
 from outpost.security.rate_limit import RateLimiter
@@ -131,6 +132,10 @@ _MAX_RECONCILIATION_ROUNDS = 16
 @dataclass
 class OutpostApp:
     config: Config
+    clock: Clock = dataclass_field(default_factory=SystemClock)
+    radio: Any = None
+    runtime_mode: Literal["live", "replay", "drill"] = "live"
+    runtime_source: str | None = None
 
     def __post_init__(self) -> None:
         self._tasks: list[asyncio.Task[None]] = []
@@ -147,10 +152,10 @@ class OutpostApp:
         self._inbound_fast_processed = 0
         self._inbound_backlog_dropped = 0
         self._federation_control_locks: dict[str, asyncio.Lock] = {}
-        self.clock = SystemClock()
         self.database = Database(self.config.store.path)
         self.radio_power = RadioPowerMonitor(self.database, self.clock, self.config.radio.power)
-        self.radio = MeshtasticRadioLink(self.config.radio, self.clock)
+        if self.radio is None:
+            self.radio = MeshtasticRadioLink(self.config.radio, self.clock)
         self.radio_configuration = RadioConfigurationManager(
             self.database, self.radio, self.clock, self.config
         )
@@ -3229,17 +3234,27 @@ class OutpostApp:
                 else:
                     self._inbound_pending.pop(sender, None)
 
-    async def _handle_inbound_safely(self, message: InboundMessage, log_id: int) -> bool:
+    async def _handle_inbound_safely(
+        self,
+        message: InboundMessage,
+        log_id: int,
+        trace: DispatchTrace | None = None,
+    ) -> bool:
         """Contain message-specific faults while leaving infrastructure failures fatal."""
         token = _INBOUND_LOG_ID.set(log_id)
         try:
-            await self._handle_inbound_message(message, ordered=False)
+            if trace is None:
+                await self._handle_inbound_message(message, ordered=False)
+            else:
+                await self._handle_inbound_message(message, ordered=False, trace=trace)
         except asyncio.CancelledError:
             raise
         except sqlite3.Error:
             raise
         except Exception as error:
             reason = f"handler failure: {type(error).__name__}"
+            if trace is not None:
+                trace.decision = reason
             INBOUND_HANDLER_FAILURES.labels(type(error).__name__).inc()
             # A failure to record the drop is an infrastructure fault and must still
             # reach CORE supervision instead of being mistaken for a poison message.
@@ -3250,16 +3265,26 @@ class OutpostApp:
         return True
 
     async def _handle_inbound_message(
-        self, message: InboundMessage, *, ordered: bool = True
+        self,
+        message: InboundMessage,
+        *,
+        ordered: bool = True,
+        trace: DispatchTrace | None = None,
     ) -> None:
         if (
             self.config.modules.fed.enabled
             and message.portnum == self.config.radio.federation_portnum
         ):
+            if trace is not None:
+                trace.resolved_command = "FEDERATION"
+                trace.decision = "federation_frame"
             await self._handle_federation_discovery(message)
             return
         if message.portnum == 5 and message.request_id is not None:
             outcome = "acked" if message.routing_error in {None, "NONE"} else "naked"
+            if trace is not None:
+                trace.resolved_command = "ROUTING_ACK"
+                trace.decision = outcome
             if await self.message_log.resolve_ack(message.request_id, outcome):
                 ACK_OUTCOME.labels(outcome).inc()
             return
@@ -3268,11 +3293,16 @@ class OutpostApp:
             and message.latitude is not None
             and message.longitude is not None
         ):
+            if trace is not None:
+                trace.resolved_command = "POSITION"
+                trace.decision = "position_recorded"
             member = await self.router.members.resolve(
                 message.from_id,
                 last_heard_snr=message.rx_snr,
                 hops_away=message.hops_away,
             )
+            if trace is not None:
+                trace.member_trust = member.trust
             await self.incidents.record_position(
                 member, message.latitude, message.longitude, prompt=message.is_direct
             )
@@ -3294,11 +3324,16 @@ class OutpostApp:
             and message.text
             and self.incidents.emergency_keyword(message.text, self.config.watch.emergency_keywords)
         ):
+            if trace is not None:
+                trace.resolved_command = "EMERGENCY_KEYWORD"
+                trace.decision = "incident_triggered"
             member = await self.router.members.resolve(
                 message.from_id,
                 last_heard_snr=message.rx_snr,
                 hops_away=message.hops_away,
             )
+            if trace is not None:
+                trace.member_trust = member.trust
             incident, incident_created = await self.incidents.emergency_trigger(
                 member, message.text, self.config.watch.emergency_cooldown_minutes
             )
@@ -3314,13 +3349,20 @@ class OutpostApp:
                 last_heard_snr=message.rx_snr,
                 hops_away=message.hops_away,
             )
+            if trace is not None:
+                trace.member_trust = member.trust
             if self.incidents.is_position_share_notice(message.text):
+                if trace is not None:
+                    trace.decision = "position_notice_ignored"
                 response = Response(ResponseKind.NONE)
             else:
                 pending_report = await self.incidents.create_from_pending(message.text, member)
                 if pending_report is None:
-                    response = await self.router.dispatch(message, ordered=ordered)
+                    response = await self.router.dispatch(message, ordered=ordered, trace=trace)
                 else:
+                    if trace is not None:
+                        trace.resolved_command = "REPORT"
+                        trace.decision = "pending_report"
                     created_incident, similar = pending_report
                     if similar is not None:
                         response = Response(
@@ -3345,10 +3387,12 @@ class OutpostApp:
                             ],
                         )
         else:
-            response = await self.router.dispatch(message, ordered=ordered)
+            response = await self.router.dispatch(message, ordered=ordered, trace=trace)
             if response.kind == ResponseKind.NONE:
                 return
         if response.kind == ResponseKind.NONE:
+            if trace is not None:
+                trace.response_kind = response.kind.value
             return
         text = render_response(response)
         configured_max_parts = self.config.airtime.max_parts[response.airtime_class.value]
@@ -3358,6 +3402,11 @@ class OutpostApp:
             else configured_max_parts
         )
         parts = chunk_text(text, max_parts=max_parts)
+        if trace is not None:
+            trace.response_kind = response.kind.value
+            trace.response_text = text
+            trace.airtime_class = response.airtime_class.value
+            trace.outbound_parts = len(parts)
         outbound = [
             OutboundItem(
                 text=part,
@@ -3371,6 +3420,8 @@ class OutpostApp:
         ]
         admission = await self.governor.admit_many_result(outbound)
         outcome = admission.rejection_reason or "admitted"
+        if trace is not None:
+            trace.admission = outcome
         COMMAND_REPLY_DELIVERY.labels(outcome).inc()
         if admission.rejection_reason is not None:
             command = ((message.text or "").split(maxsplit=1) or [""])[0].upper() or None
@@ -3416,6 +3467,13 @@ class OutpostApp:
         available = set(self.radio.snapshot.channels)
         return {
             "node": self.config.node.name,
+            "runtime": {
+                "mode": self.runtime_mode,
+                "simulated": self.runtime_mode != "live",
+                "source": self.runtime_source,
+                "store": "scratch" if self.runtime_mode != "live" else "live",
+                "transmit": "simulated" if self.runtime_mode != "live" else "radio",
+            },
             "modules": {
                 name: {"enabled": enabled, "restart_required_to_change": True}
                 for name, enabled in self.config.modules.enabled_map().items()

@@ -721,29 +721,62 @@ class SituationBriefingService:
         raw_inbound = runtime.get("inbound")
         raw_queues = runtime.get("queues")
         raw_power = runtime.get("radio_power")
+        raw_mode = runtime.get("runtime")
         inbound: Mapping[str, Any] = raw_inbound if isinstance(raw_inbound, dict) else {}
         queues: Mapping[str, Any] = raw_queues if isinstance(raw_queues, dict) else {}
         power: Mapping[str, Any] = raw_power if isinstance(raw_power, dict) else {}
         queue_total = sum(int(value or 0) for value in queues.values())
         backlog = int(inbound.get("backlog") or 0)
-        items = [
+        mode: Mapping[str, Any] = raw_mode if isinstance(raw_mode, dict) else {}
+        simulated = mode.get("simulated") is True
+        mode_name = str(mode.get("mode") or "live")
+        items: list[BriefingItem] = []
+        sources: list[BriefingSource] = []
+        if simulated:
+            items.append(
+                BriefingItem(
+                    "network:runtime-mode",
+                    "N0",
+                    "network",
+                    "caution",
+                    f"{mode_name.title()} mode · simulated transmission",
+                    "Recorded traffic · scratch database · no RF or MQTT output",
+                    mode_name,
+                    ("runtime:mode",),
+                    "/",
+                )
+            )
+            sources.append(
+                BriefingSource(
+                    "runtime:mode",
+                    "Isolated replay runtime",
+                    None,
+                    STALE_AFTER["network"],
+                    "/",
+                )
+            )
+        items.append(
             BriefingItem(
                 "network:radio",
                 "N1",
                 "network",
                 "caution" if radio != "up" else "info",
-                f"Radio {radio}",
+                f"{'Simulated radio' if simulated else 'Radio'} {radio}",
                 f"{backlog} inbound waiting · {queue_total} governed outbound",
                 radio,
                 ("runtime:radio",),
                 "/radio.html",
             )
-        ]
-        sources = [
+        )
+        sources.append(
             BriefingSource(
-                "runtime:radio", "Live radio runtime", None, STALE_AFTER["network"], "/radio.html"
+                "runtime:radio",
+                "Simulated radio runtime" if simulated else "Live radio runtime",
+                None,
+                STALE_AFTER["network"],
+                "/radio.html",
             )
-        ]
+        )
         level = power.get("battery_level")
         display_level = int(level) if isinstance(level, (int, float)) else None
         reported = power.get("reported") is True and display_level is not None

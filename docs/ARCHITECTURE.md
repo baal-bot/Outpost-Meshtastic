@@ -14,6 +14,8 @@ durable state, and an asynchronous supervisor owns the radio.
 - **Web app:** authenticated APIs, static dashboards, shared map controller, tiles, metrics.
 - **Providers:** weather, CAP, seismic, and map data with caching.
 - **Federation:** peer trust, framing, replay protection, filtering, import.
+- **Replay harness:** query-only recorded input, virtual time, scratch persistence, simulated
+  transport, deterministic decision/output records, and redacted bundles.
 
 ## Message path
 
@@ -29,6 +31,13 @@ radio packet
  → radio send
  → atomic attempt/message-log completion
 ```
+
+`outpost-replay` uses the same path from normalization through durable admission, but its
+composition root injects `VirtualClock` and `SimulatedRadioLink`. It opens a newly created scratch
+store and reads the source store only through a separate query-only connection. Simulation is not a
+normal `radio.transport` option, so production configuration cannot accidentally replace the
+physical link. Drill mode publishes its boundary through `/api/v1/runtime`, the dashboard banner,
+status, and situation briefing.
 
 Position packets may update an allowed member position or start report/waypoint interaction; they
 are not blindly converted to incidents.

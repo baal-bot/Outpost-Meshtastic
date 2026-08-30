@@ -14,6 +14,7 @@ detailed intended product design.
 7. [Troubleshooting](TROUBLESHOOTING.md)
 8. [Dashboard and API](DASHBOARD.md)
 9. [Local AI](AI.md)
+10. [Mesh traffic replay and operator drills](REPLAY.md)
 
 ## Members and responders
 

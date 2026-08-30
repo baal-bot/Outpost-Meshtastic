@@ -90,6 +90,7 @@ gate, preventing renames from silently removing a critical subsystem from enforc
 | Process restart and durable outbox recovery | `tests/integration/test_durable_outbox.py` |
 | Federation clock skew and expiry | `tests/integration/test_federation_radio.py` |
 | Duplicate/replayed frames | `tests/unit/test_inbound.py`, `tests/integration/test_federation_radio.py` |
+| Recorded traffic / simulated egress isolation | `tests/integration/test_replay.py` |
 | Partial federation assembly and retry | `tests/unit/test_federation_framing.py`, `tests/integration/test_federation_radio.py` |
 
 The Playwright suite performs functional operator flows for authentication, Settings, BBS, Mail,

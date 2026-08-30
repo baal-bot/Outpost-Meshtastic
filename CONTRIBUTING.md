@@ -10,4 +10,6 @@ Behavior, limitation, field-result, or maturity changes must update `docs/capabi
 regenerate the capability documentation with `python tools/check_capabilities.py`.
 
 Never submit real databases, credentials, precise member locations, private messages, or pairing
-secrets. Follow [SECURITY.md](SECURITY.md) for vulnerability reports.
+secrets. Use `outpost-replay export` for the smallest relevant pseudonymized, position-coarsened
+bundle, review it manually, and use `--strip-bodies` when command text is unnecessary. Follow
+[SECURITY.md](SECURITY.md) for vulnerability reports.

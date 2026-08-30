@@ -380,7 +380,11 @@ def test_viewer_overview_requests_only_the_redacted_wallboard_contract(
     assert page.locator(".read-only-banner").is_visible()
     assert page.locator("#system").is_hidden()
     paths = {url.split(dashboard_url, 1)[-1] for url in api_requests}
-    assert paths <= {"/api/v1/auth/session", "/api/v1/wallboard/summary"}
+    assert paths <= {
+        "/api/v1/auth/session",
+        "/api/v1/runtime",
+        "/api/v1/wallboard/summary",
+    }
     page.close()
 
 
@@ -953,6 +957,8 @@ def test_operator_styles_follow_static_component_contract() -> None:
         "--ui-warning-surface",
         "--ui-danger-surface",
         "--ui-disabled-surface",
+        ".runtime-mode-banner",
+        ".runtime-mode-active .rail",
     ):
         assert token in layout_css
 

@@ -1,0 +1,48 @@
+{
+  "format": "outpost-replay/v1",
+  "limitations": [
+    "Fixture identifiers are synthetic."
+  ],
+  "members": [
+    {
+      "handle": "field-one",
+      "mesh_id": "!10000001",
+      "pki_state": "unknown",
+      "public_key": null,
+      "trust": "member"
+    }
+  ],
+  "messages": [
+    {
+      "channel": 0,
+      "created_at": 1767225600,
+      "is_direct": true,
+      "packet_id": 101,
+      "peer_mesh_id": "!10000001",
+      "portnum": 1,
+      "rx_snr": 7.5,
+      "hops_away": 1,
+      "source_id": 1,
+      "text": "PING",
+      "to_mesh_id": "!fffffffe"
+    },
+    {
+      "channel": 0,
+      "created_at": 1767225610,
+      "is_direct": false,
+      "packet_id": 102,
+      "peer_mesh_id": "!10000001",
+      "portnum": 1,
+      "source_id": 2,
+      "text": "BLORP",
+      "to_mesh_id": "^all"
+    }
+  ],
+  "metadata": {
+    "bodies_stripped": false,
+    "coarsen_meters": 1000,
+    "message_count": 2,
+    "redacted": true,
+    "source_schema": 170
+  }
+}

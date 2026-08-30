@@ -110,6 +110,13 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | Federation | `fed_relay_usage` | Retain quota windows for `provider_cache_days`. |
 | Federation | `fed_relay_event` | Retain append-only relay event history for `federation_history_days`; maintenance alone may delete elapsed records. |
 
+`message_log` retains the inbound destination, binary payload, acknowledgement request, authenticated
+PKI metadata, transport/routing status, packet receive time, and position needed for faithful local
+replay. These fields follow the same `message_log_days` and row-ceiling policy; replay does not
+create a second live-data archive. Binary packets, keys, exact positions, and message text are
+sensitive. Redacted replay export always strips binary payloads/keys, pseudonymizes node IDs,
+coarsens positions, and can strip bodies.
+
 ## Writer and recovery bounds
 
 `maintenance_batch_rows` defaults to 250. Each batch is its own SQLite transaction and control is

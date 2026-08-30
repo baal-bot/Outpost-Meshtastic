@@ -25,6 +25,24 @@ The minimal health endpoint and systemd watchdog reflect core offline progress. 
 and restartable-local failures remain visible in the authenticated dashboard and loopback-only
 diagnostics while the core continues serving mesh traffic.
 
+## Replay and exercise mode
+
+Use `outpost-replay` to regression-test a bounded retained traffic range or run a dashboard drill
+without transmitting. Replay reads the source database in query-only mode, uses a new scratch
+database, and replaces the radio with an in-process simulator. Provider access is off unless an
+operator explicitly enables it. The dashboard, status API, and situation briefing all display the
+drill boundary.
+
+```sh
+sudo outpost-replay run /var/lib/outpost/outpost.db --limit 500 \
+  --output /var/lib/outpost/replay-result.json
+sudo outpost-replay drill /var/lib/outpost/outpost.db --limit 100 --speed 60
+```
+
+For defect reports, export a minimal pseudonymized, location-coarsened bundle rather than copying
+the database. See [Mesh traffic replay and operator drills](REPLAY.md) for selection, redaction,
+comparison, remote-bind, and scratch-retention guidance.
+
 Diagnostics include content-safe tolerant-intent health: file existence, state, loaded/rejected
 counts, and indexed rejection reasons. A non-ready intent map also appears in the persistent
 readiness banner. The configured patterns and member message content are not included.

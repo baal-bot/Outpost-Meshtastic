@@ -29,8 +29,10 @@ class MessageLogRepo:
             """
             INSERT INTO message_log(
               direction,peer_mesh_id,channel,portnum,is_direct,packet_id,text,byte_len,
-              outcome,rx_snr,rx_rssi,hops,transport,created_at
-            ) VALUES('in',?,?,?,?,?,?,?,?,?,?,?,?,?)
+              outcome,rx_snr,rx_rssi,hops,transport,created_at,to_mesh_id,payload,
+              want_ack,pki_encrypted,pki_public_key,no_reply,request_id,routing_error,
+              latitude,longitude,rx_time
+            ) VALUES('in',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 message.from_id,
@@ -46,6 +48,17 @@ class MessageLogRepo:
                 message.hops_away,
                 "mqtt" if message.via_mqtt else "radio",
                 int(self.clock.now().timestamp()),
+                message.to_id,
+                message.payload,
+                int(message.want_ack),
+                int(message.pki_encrypted),
+                message.pki_public_key,
+                int(message.no_reply),
+                message.request_id,
+                message.routing_error,
+                message.latitude,
+                message.longitude,
+                int(message.rx_time.timestamp()),
             ),
         )
 

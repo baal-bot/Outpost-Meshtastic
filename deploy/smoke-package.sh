@@ -51,7 +51,7 @@ with zipfile.ZipFile(wheel) as archive:
 missing = sorted(required - names)
 if missing:
     raise SystemExit(f"wheel is missing runtime files: {', '.join(missing)}")
-for command in ("outpost-diagnostics", "outpost-onboarding", "outpost-setup-token"):
+for command in ("outpost-diagnostics", "outpost-onboarding", "outpost-replay", "outpost-setup-token"):
     if command not in entry_points:
         raise SystemExit(f"wheel is missing console command: {command}")
 PY

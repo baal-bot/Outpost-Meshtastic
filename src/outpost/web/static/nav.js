@@ -129,6 +129,30 @@ new MutationObserver(applySharedEnhancements).observe(document.body, {
   childList: true,
   subtree: true,
 });
+
+async function showRuntimeBoundary() {
+  try {
+    const response = await nativeFetch("/api/v1/runtime", {cache: "no-store"});
+    if (!response.ok) return;
+    const runtime = await response.json();
+    if (!runtime.simulated || runtime.mode === "live") return;
+    const banner = document.createElement("aside");
+    banner.className = "runtime-mode-banner";
+    banner.setAttribute("role", "status");
+    banner.setAttribute("aria-live", "polite");
+    const title = document.createElement("b");
+    title.textContent = `${String(runtime.mode).toUpperCase()} MODE · NO RADIO TRANSMISSION`;
+    const detail = document.createElement("span");
+    detail.textContent = "Recorded traffic is running against a scratch database and simulated radio. Every dashboard mutation remains inside this drill.";
+    banner.append(title, detail);
+    document.body.classList.add("runtime-mode-active");
+    document.body.prepend(banner);
+  } catch (_) {
+    // A missing mode endpoint means an older live node; do not obscure the dashboard.
+  }
+}
+
+showRuntimeBoundary();
 const links = [
   ["/", "⌂", "Overview"],
   ["/operator.html", "♙", "Members"],

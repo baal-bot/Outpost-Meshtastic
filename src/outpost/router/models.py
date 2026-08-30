@@ -80,6 +80,22 @@ class Response:
     max_parts: int | None = None
 
 
+@dataclass
+class DispatchTrace:
+    """Content-bounded decision record used by the isolated replay harness."""
+
+    input_command: str | None = None
+    resolved_command: str | None = None
+    member_trust: str | None = None
+    decision: str = "not_dispatched"
+    resolution: str | None = None
+    response_kind: str = "none"
+    response_text: str | None = None
+    airtime_class: str | None = None
+    admission: str | None = None
+    outbound_parts: int = 0
+
+
 @dataclass(frozen=True)
 class ContextFrame:
     kind: str

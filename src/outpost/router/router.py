@@ -16,7 +16,16 @@ from outpost.transport.models import InboundMessage
 
 from .channel_policy import CHANNEL_POLICY_REJECTIONS, decide
 from .intents import TOLERANT_REJECTIONS, IntentResolver
-from .models import CommandContext, Line, Response, ResponseKind, TrustLevel, TuiChoice, TuiScreen
+from .models import (
+    CommandContext,
+    DispatchTrace,
+    Line,
+    Response,
+    ResponseKind,
+    TrustLevel,
+    TuiChoice,
+    TuiScreen,
+)
 from .registry import CommandRegistry
 from .session import Session, SessionStore
 from .tui import TuiController
@@ -98,20 +107,38 @@ class Router:
             direct=True,
         )
 
-    async def dispatch(self, inbound: InboundMessage, *, ordered: bool = True) -> Response:
+    async def dispatch(
+        self,
+        inbound: InboundMessage,
+        *,
+        ordered: bool = True,
+        trace: DispatchTrace | None = None,
+    ) -> Response:
         try:
             async with asyncio.timeout(self.config.router.member_lock_timeout_s):
                 if not ordered:
-                    return await self._dispatch_unlocked(inbound)
-                lock = self._locks[inbound.from_id]
-                async with lock:
-                    return await self._dispatch_unlocked(inbound)
+                    response = await self._dispatch_unlocked(inbound, trace)
+                else:
+                    lock = self._locks[inbound.from_id]
+                    async with lock:
+                        response = await self._dispatch_unlocked(inbound, trace)
         except TimeoutError:
-            return Response(ResponseKind.ERROR, [Line(message("internal_error"))])
+            if trace is not None:
+                trace.decision = "member_lock_timeout"
+            response = Response(ResponseKind.ERROR, [Line(message("internal_error"))])
+        if trace is not None:
+            trace.response_kind = response.kind.value
+        return response
 
-    async def _dispatch_unlocked(self, inbound: InboundMessage) -> Response:
+    async def _dispatch_unlocked(
+        self, inbound: InboundMessage, trace: DispatchTrace | None = None
+    ) -> Response:
         invoked = self._invoked(inbound)
+        if trace is not None:
+            trace.input_command = invoked
         if invoked is None or inbound.no_reply:
+            if trace is not None:
+                trace.decision = "no_reply"
             return Response(ResponseKind.NONE)
         member = await self.members.resolve(
             inbound.from_id,
@@ -121,7 +148,11 @@ class Router:
                 inbound.pki_public_key if inbound.is_direct and inbound.pki_encrypted else None
             ),
         )
+        if trace is not None:
+            trace.member_trust = member.trust
         if member.trust == "blocked":
+            if trace is not None:
+                trace.decision = "blocked_member"
             return Response(ResponseKind.NONE)
         channel = -1 if inbound.is_direct else inbound.channel
         session = self.sessions.get(member.mesh_id, channel)
@@ -129,8 +160,13 @@ class Router:
         token = parts[0] if parts else ""
         known = self.registry.known(token)
         if known is not None and self.registry.resolve(token) is None:
+            if trace is not None:
+                trace.resolved_command = known.name
+                trace.decision = "module_disabled"
             self.tui.cancel_for_command(session)
             if not await self.rate_limiter.allow(member.mesh_id, member.trust, "COMMAND_REJECTED"):
+                if trace is not None:
+                    trace.decision = "rate_limited:module_disabled"
                 return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
             TOLERANT_REJECTIONS.labels("module_disabled", known.name.lower()).inc()
             return Response(
@@ -147,7 +183,11 @@ class Router:
                 direct=inbound.is_direct,
             )
             if pending_response is not None:
+                if trace is not None:
+                    trace.decision = "tui_prompt"
                 if not await self.rate_limiter.allow(member.mesh_id, member.trust, "MENU"):
+                    if trace is not None:
+                        trace.decision = "rate_limited:tui"
                     return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
                 return pending_response
             parts = invoked.split(maxsplit=1)
@@ -159,44 +199,70 @@ class Router:
                 self.registry,
             )
             if resolution.candidates:
+                if trace is not None:
+                    trace.resolution = resolution.mode
+                    trace.decision = "ambiguous"
                 session.clear_operations_state()
                 if not await self.rate_limiter.allow(
                     member.mesh_id, member.trust, "COMMAND_REJECTED"
                 ):
+                    if trace is not None:
+                        trace.decision = "rate_limited:ambiguity"
                     return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
                 return self._clarify_command(invoked, resolution.candidates, session, inbound)
             if resolution.mode == "mutation_protected":
+                if trace is not None:
+                    trace.resolution = resolution.mode
+                    trace.decision = "mutation_protected"
                 session.clear_operations_state()
                 if not await self.rate_limiter.allow(
                     member.mesh_id, member.trust, "COMMAND_REJECTED"
                 ):
+                    if trace is not None:
+                        trace.decision = "rate_limited:mutation_protected"
                     return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
                 return Response(
                     ResponseKind.ERROR,
                     [Line("Command not run. Send ? for available actions.")],
                 )
             invoked = resolution.invoked
+            if trace is not None:
+                trace.resolution = resolution.mode
             parts = invoked.split(maxsplit=1)
             token = parts[0] if parts else ""
         if self.registry.resolve(token) is not None:
             self.tui.cancel_for_command(session, preserve_operations=token.casefold() == "ops")
         args = parts[1] if len(parts) > 1 else ""
         if not await self.rate_limiter.allow(member.mesh_id, member.trust, token):
+            if trace is not None:
+                trace.resolved_command = token.upper() or None
+                trace.decision = "rate_limited"
             return Response(ResponseKind.ERROR, [Line(message("rate_limited"))])
         spec = self.registry.resolve(token)
         if spec is None and inbound.is_direct and self.config.modules.ai.enabled:
             if session.tui_active:
+                if trace is not None:
+                    trace.decision = "tui_invalid_option"
                 return Response(ResponseKind.ERROR, [Line("Not an option. Send ? for the menu.")])
             spec = self.registry.resolve("ASK")
             args = invoked
         if spec is None:
+            if trace is not None:
+                trace.decision = "unknown_command"
             session.clear_operations_state()
             return Response(ResponseKind.ERROR, [Line(message("unknown"))])
         if TrustLevel.parse(member.trust) < spec.min_trust:
+            if trace is not None:
+                trace.resolved_command = spec.name
+                trace.decision = "insufficient_trust"
             return Response(ResponseKind.ERROR, [Line(message("unknown"))])
+        if trace is not None:
+            trace.resolved_command = spec.name
         policy = None if inbound.is_direct else self.config.channels.get(inbound.channel)
         channel_decision = decide(spec, direct=inbound.is_direct, policy=policy)
         if not channel_decision.allowed:
+            if trace is not None:
+                trace.decision = f"channel_policy:{channel_decision.reason}"
             CHANNEL_POLICY_REJECTIONS.labels(
                 str(inbound.channel), spec.channel_use.value, channel_decision.reason
             ).inc()
@@ -220,6 +286,8 @@ class Router:
         if spec.min_trust >= TrustLevel.RESPONDER:
             authorized, _reason = await self.members.authorize_elevated(member, inbound, spec.name)
             if not authorized:
+                if trace is not None:
+                    trace.decision = "elevated_identity_denied"
                 session.clear_operations_state()
                 return Response(
                     ResponseKind.ERROR,
@@ -235,6 +303,8 @@ class Router:
             decision = await self.rate_limiter.safety_floor_decision(member.mesh_id, token, args)
             safety_decision = decision
             if not decision.accepted:
+                if trace is not None:
+                    trace.decision = "safety_repeat_suppressed"
                 return Response(ResponseKind.NONE)
         ctx = CommandContext(
             message=inbound,
@@ -259,6 +329,8 @@ class Router:
         try:
             response = await spec.handler(ctx)
         except Exception:
+            if trace is not None:
+                trace.decision = "handler_error"
             if safety_decision is not None and safety_decision.accepted:
                 await self.rate_limiter.release_safety_floor(
                     member.mesh_id, token, safety_decision.fingerprint
@@ -270,6 +342,8 @@ class Router:
             )
         if response.max_parts is None:
             response.max_parts = spec.max_parts
+        if trace is not None:
+            trace.decision = "allowed" if response.kind != ResponseKind.ERROR else "handler_denied"
         return self.tui.activate(
             response,
             session,

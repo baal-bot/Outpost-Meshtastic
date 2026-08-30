@@ -58,6 +58,7 @@ from outpost.web.transport import WebTransportMiddleware, transport_status
 PUBLIC_API_PATHS = frozenset(
     {
         "/api/v1/health",
+        "/api/v1/runtime",
         "/api/v1/diagnostics/readiness",
         "/api/v1/diagnostics/status",
         "/api/v1/auth/login",
@@ -1273,6 +1274,19 @@ def create_web_app(
             },
             status_code=200 if ready else 503,
         )
+
+    @app.get("/api/v1/runtime")
+    async def runtime_mode() -> dict[str, object]:
+        runtime = status_provider().get("runtime", {})
+        if not isinstance(runtime, dict):
+            runtime = {}
+        return {
+            "mode": str(runtime.get("mode", "live")),
+            "simulated": bool(runtime.get("simulated", False)),
+            "source": runtime.get("source"),
+            "store": str(runtime.get("store", "live")),
+            "transmit": str(runtime.get("transmit", "radio")),
+        }
 
     @app.get("/api/v1/diagnostics/status", response_class=JSONResponse, response_model=None)
     async def diagnostic_status(request: Request) -> dict[str, Any] | Response:

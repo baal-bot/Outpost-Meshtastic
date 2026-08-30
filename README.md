@@ -45,6 +45,7 @@ hardware, revision, limitation, and roadmap evidence.
 - Optional authenticated federation, bounded synchronization, peer services, and mail relay
 - Local AI assistant with guarded retrieval, review tooling, and target-hardware provider evaluation
 - Prometheus metrics and systemd watchdog integration
+- Isolated recorded-traffic replay, redacted bug bundles, and transmission-free dashboard drills
 
 See [Features and maturity](docs/FEATURES.md) for implementation and validation details.
 
@@ -163,7 +164,8 @@ curl http://127.0.0.1:8080/api/v1/health
 Runtime state lives under `/var/lib/outpost`; configuration lives under `/etc/outpost`. The
 dashboard creates, validates, downloads, and restores backups. Keep an off-device backup before
 upgrades. See [Operations](docs/OPERATIONS.md), [Security](docs/SECURITY.md), and
-[Troubleshooting](docs/TROUBLESHOOTING.md).
+[Troubleshooting](docs/TROUBLESHOOTING.md). Use the [replay and drill guide](docs/REPLAY.md) to test
+recorded traffic without touching the live radio or database.
 
 ## Develop
 
@@ -209,6 +211,7 @@ field acceptance.
 - [Dashboard design system](docs/UI-DESIGN-SYSTEM.md)
 - [Operations](docs/OPERATIONS.md)
 - [Data retention and storage](docs/RETENTION.md)
+- [Mesh traffic replay and drills](docs/REPLAY.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Federation](docs/FEDERATION.md)
 - [Security](docs/SECURITY.md)
