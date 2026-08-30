@@ -533,6 +533,84 @@ async def test_rejected_federation_frame_records_safe_reason(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_pairing_frame_rejects_integer_key_material_without_raising(tmp_path) -> None:
+    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    frame = app.federation_codec.encode(
+        MessageType.PAIR_REQ,
+        {
+            "mesh_id": "!remote",
+            "target_mesh_id": "!local",
+            "public_key": 2**63,
+            "nonce": 2**63,
+        },
+        0,
+        None,
+    )[0]
+    message = InboundMessage(
+        43,
+        "!remote",
+        "^all",
+        0,
+        config.radio.federation_portnum,
+        False,
+        None,
+        frame,
+        datetime.now(UTC),
+    )
+    await app.message_log.record_inbound(message)
+
+    await app._handle_federation_discovery(message)
+
+    row = (await app.database.read("SELECT outcome,drop_reason FROM message_log"))[0]
+    assert tuple(row) == ("rejected", "invalid federation frame")
+    assert await app.federation.list() == []
+    await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_sync_frame_rejects_non_integer_bounds_without_raising(tmp_path) -> None:
+    config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
+    app = OutpostApp(config)
+    await app.database.open()
+    app.radio._local_id = "!local"
+    secret = bytes(range(32))
+    await app.federation.discover("!remote", "Remote", 1, {}, "radio")
+    await app.database.write(
+        "UPDATE fed_peer SET state='active',shared_secret=?,local_approved=1,remote_approved=1 "
+        "WHERE mesh_id='!remote'",
+        (secret,),
+    )
+    frame = app.federation_codec.encode(
+        MessageType.SYNC_REQ,
+        {"mesh_id": "!remote", "target_mesh_id": "!local", "limit": float("inf")},
+        1,
+        secret,
+    )[0]
+    message = InboundMessage(
+        44,
+        "!remote",
+        "^all",
+        0,
+        config.radio.federation_portnum,
+        False,
+        None,
+        frame,
+        datetime.now(UTC),
+    )
+    await app.message_log.record_inbound(message)
+
+    await app._handle_federation_discovery(message)
+
+    row = (await app.database.read("SELECT outcome,drop_reason FROM message_log"))[0]
+    assert tuple(row) == ("rejected", "invalid federation frame")
+    assert app.governor.queued_items() == []
+    await app.database.close()
+
+
+@pytest.mark.asyncio
 async def test_tampered_replayed_and_clock_skewed_frames_fail_without_side_effects(
     tmp_path,
 ) -> None:

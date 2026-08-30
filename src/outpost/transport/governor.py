@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from outpost.clock import Clock
 from outpost.config import AirtimeConfig
 from outpost.store.outbox import OutboxRejected, OutboxStore
+from outpost.transport.chunker import truncate_utf8
 
 if TYPE_CHECKING:
     from outpost.store.database import Transaction
@@ -25,7 +26,7 @@ from .metrics import (
     TOA_SECONDS,
 )
 from .models import LinkState, RadioLink, SendResult, Severity, TrafficClass
-from .toa import toa
+from .toa import MAX_PAYLOAD_BYTES, toa
 
 TTL_SECONDS = {
     TrafficClass.ALERT: 86_400,
@@ -68,6 +69,10 @@ class OutboundItem:
     expires_at_epoch: float = 0.0
     attempts: int = 0
     next_attempt_at: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.binary_payload is None:
+            self.text = truncate_utf8(self.text, MAX_PAYLOAD_BYTES)
 
     @property
     def payload_size(self) -> int:
@@ -141,6 +146,10 @@ class AirtimeGovernor:
         now = self.clock.monotonic()
         if self.outbox is not None:
             raise RuntimeError("durable governors require await governor.admit()")
+        if item.payload_size > MAX_PAYLOAD_BYTES:
+            self.metrics.dropped[(item.traffic_class, "payload_too_large")] += 1
+            OUTBOUND_DROPPED.labels(item.traffic_class.value, "payload_too_large").inc()
+            return None
         digest = self._digest(item)
         dedupe_key = (item.dest, item.channel, digest)
         if self._recent.get(dedupe_key, float("-inf")) + self.config.dedupe_window_s > now:
@@ -185,6 +194,12 @@ class AirtimeGovernor:
             return self.enqueue_many(items, hold=hold)
         if not items:
             return []
+        oversized = [item for item in items if item.payload_size > MAX_PAYLOAD_BYTES]
+        if oversized:
+            for item in items:
+                self.metrics.dropped[(item.traffic_class, "payload_too_large")] += 1
+                OUTBOUND_DROPPED.labels(item.traffic_class.value, "payload_too_large").inc()
+            return None
         now_mono = self.clock.monotonic()
         now_epoch = self.clock.now().timestamp()
         batch_uid = str(uuid.uuid4()) if len(items) > 1 else None
@@ -216,6 +231,7 @@ class AirtimeGovernor:
                     "dedupe_hash": self._digest(item),
                     "portnum": item.portnum,
                     "multipart": item.multipart,
+                    "byte_len": item.payload_size,
                 }
             )
         try:
@@ -297,6 +313,11 @@ class AirtimeGovernor:
         """Atomically admit a complete multi-part response (REQ-TRANSPORT-035)."""
         if self.outbox is not None:
             raise RuntimeError("durable governors require await governor.admit_many()")
+        if any(item.payload_size > MAX_PAYLOAD_BYTES for item in items):
+            for item in items:
+                self.metrics.dropped[(item.traffic_class, "payload_too_large")] += 1
+                OUTBOUND_DROPPED.labels(item.traffic_class.value, "payload_too_large").inc()
+            return None
         superseded = {item.supersedes for item in items if item.supersedes is not None}
         retained = sum(
             existing.queue_key not in superseded
@@ -548,7 +569,19 @@ class AirtimeGovernor:
             item = self._pop_alert(queue, now)
         else:
             item = self._pop_unheld(queue, now)
-        cost = toa(item.payload_size, self.preset)
+        try:
+            cost = toa(item.payload_size, self.preset)
+        except (KeyError, ValueError) as error:
+            self.metrics.dropped[(cls, "invalid_payload")] += 1
+            OUTBOUND_DROPPED.labels(cls.value, "invalid_payload").inc()
+            QUEUE_DEPTH.labels(cls.value).set(len(queue))
+            if self.outbox is not None:
+                await self.outbox.fail_unstarted(
+                    item.item_id,
+                    now_epoch,
+                    f"{type(error).__name__}: {error}",
+                )
+            return None
         item.estimated_toa = cost
         # Preflight prevents a packet from crossing either rolling ceiling.
         critical = cls == TrafficClass.ALERT and item.severity == Severity.CRITICAL

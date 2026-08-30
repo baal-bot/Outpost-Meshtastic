@@ -123,6 +123,7 @@ Maturity: **Simulated**.
 Evidence:
 
 - Acceptance: [docs/PHASE3-ACCEPTANCE.md](PHASE3-ACCEPTANCE.md) — Automated phase gates and explicitly open tabletop criteria.
+- Automated: [tests/integration/test_safety_commands.py](../tests/integration/test_safety_commands.py) — Member-facing incident, alert, acknowledgement, and trust paths through the mesh router.
 - Automated: [tests/integration/test_watch_alerts.py](../tests/integration/test_watch_alerts.py) — Audience delivery, repeats, acknowledgements, escalation, and all-clear.
 - Automated: [tests/integration/test_incident_reconciliation.py](../tests/integration/test_incident_reconciliation.py) — Partition, concurrent edit, immutable identity, human merge/unmerge, and resolution-lock behavior.
 
@@ -137,6 +138,7 @@ Maturity: **Simulated**.
 Evidence:
 
 - Acceptance: [docs/PHASE3-ACCEPTANCE.md](PHASE3-ACCEPTANCE.md) — Simulated roster, solicitation, help, and export gates.
+- Automated: [tests/integration/test_safety_commands.py](../tests/integration/test_safety_commands.py) — Member-facing OK, HELPME, roster, and event lifecycle through the mesh router.
 - Automated: [tests/integration/test_watch_checkin.py](../tests/integration/test_watch_checkin.py) — Welfare state transitions and privacy boundaries.
 
 Known limitations:

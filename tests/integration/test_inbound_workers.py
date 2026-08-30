@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from datetime import UTC, datetime
 
 import pytest
@@ -183,5 +184,94 @@ async def test_full_worker_backlog_drops_and_marks_newest_message(tmp_path) -> N
                 "drop_reason": "worker backlog full",
             },
         ]
+    finally:
+        await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_poison_message_is_dropped_and_worker_processes_next_message(tmp_path) -> None:
+    app = OutpostApp(Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}}))
+    await app.database.open()
+    processed = asyncio.Event()
+
+    async def handle(message: InboundMessage, *, ordered: bool = True) -> None:
+        if message.text == "poison":
+            raise OverflowError("peer-controlled integer")
+        processed.set()
+
+    app._handle_inbound_message = handle  # type: ignore[method-assign]
+    worker = asyncio.create_task(app._inbound_worker(1))
+    try:
+        poison = inbound(20, "poison", "!member")
+        following = inbound(21, "PING", "!member")
+        await app._route_inbound(poison, await app.message_log.record_inbound(poison))
+        await app._route_inbound(following, await app.message_log.record_inbound(following))
+        await asyncio.wait_for(processed.wait(), timeout=1)
+
+        assert not worker.done()
+        rows = await app.database.read(
+            "SELECT packet_id,outcome,drop_reason FROM message_log ORDER BY packet_id"
+        )
+        assert [dict(row) for row in rows] == [
+            {
+                "packet_id": 20,
+                "outcome": "dropped",
+                "drop_reason": "handler failure: OverflowError",
+            },
+            {"packet_id": 21, "outcome": "received", "drop_reason": None},
+        ]
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_safety_fast_path_contains_failure_and_accepts_following_message(tmp_path) -> None:
+    app = OutpostApp(Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}}))
+    await app.database.open()
+    calls = 0
+
+    async def handle(message: InboundMessage, *, ordered: bool = True) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ValueError("bad emergency report")
+
+    app._handle_inbound_message = handle  # type: ignore[method-assign]
+    try:
+        first = inbound(30, "HELPME", "!member")
+        second = inbound(31, "HELPME", "!member")
+        await app._route_inbound(first, await app.message_log.record_inbound(first))
+        await app._route_inbound(second, await app.message_log.record_inbound(second))
+
+        assert calls == 2
+        rows = await app.database.read(
+            "SELECT outcome,drop_reason FROM message_log ORDER BY packet_id"
+        )
+        assert [tuple(row) for row in rows] == [
+            ("dropped", "handler failure: ValueError"),
+            ("received", None),
+        ]
+    finally:
+        await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_infrastructure_database_failure_reaches_core_supervision(tmp_path) -> None:
+    app = OutpostApp(Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}}))
+    await app.database.open()
+
+    async def handle(message: InboundMessage, *, ordered: bool = True) -> None:
+        raise sqlite3.OperationalError("database unavailable")
+
+    app._handle_inbound_message = handle  # type: ignore[method-assign]
+    message = inbound(40, "PING", "!member")
+    log_id = await app.message_log.record_inbound(message)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="database unavailable"):
+            await app._handle_inbound_safely(message, log_id)
+        row = (await app.database.read("SELECT outcome FROM message_log WHERE id=?", (log_id,)))[0]
+        assert row["outcome"] == "received"
     finally:
         await app.database.close()

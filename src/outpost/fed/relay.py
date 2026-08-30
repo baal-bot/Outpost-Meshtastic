@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from outpost.clock import Clock
+from outpost.fed.framing import wire_bytes, wire_int
 from outpost.fed.peers import FederationPeerService
 from outpost.store import Database, Transaction
 
@@ -412,10 +413,12 @@ class FederationRelayService:
             destination = str(core["destination"]).lower()
             scope = str(core["scope"])
             key = str(core["idempotency_key"])
-            created_at = int(core["created_at"])
-            expires_at = int(core["expires_at"])
-            hop_limit = int(core["hop_limit"])
-            payload = bytes(core["payload"])
+            created_at = wire_int(core["created_at"], "created_at")
+            expires_at = wire_int(core["expires_at"], "expires_at")
+            hop_limit = wire_int(core["hop_limit"], "hop_limit", minimum=1, maximum=4)
+            payload = wire_bytes(core["payload"], "payload")
+            if not isinstance(value["route"], list):
+                raise ValueError("relay route must be a list")
             route = [str(node).lower() for node in value["route"]]
             if not NODE_ID.fullmatch(origin) or not NODE_ID.fullmatch(destination):
                 raise ValueError("invalid relay origin or destination")
@@ -441,16 +444,14 @@ class FederationRelayService:
                 raise ValueError("relay loop detected")
             if destination != local_id and len(route) >= hop_limit:
                 raise ValueError("relay hop limit is exhausted before destination")
-            public_key = bytes(value["origin_public_key"])
-            signature = bytes(value["origin_signature"])
-            if len(public_key) != 32 or len(signature) != 64:
-                raise ValueError("invalid relay signing material")
+            public_key = wire_bytes(value["origin_public_key"], "origin_public_key", length=32)
+            signature = wire_bytes(value["origin_signature"], "origin_signature", length=64)
             core_bytes = self._core_bytes(core)
             envelope_id = self._envelope_id(core_bytes)
             if str(value["envelope_id"]) != envelope_id:
                 raise ValueError("relay envelope identity mismatch")
             Ed25519PublicKey.from_public_bytes(public_key).verify(signature, core_bytes)
-        except (InvalidSignature, KeyError, TypeError, ValueError) as error:
+        except (InvalidSignature, KeyError, OverflowError, TypeError, ValueError) as error:
             reason = (
                 "relay origin signature failed"
                 if isinstance(error, InvalidSignature)

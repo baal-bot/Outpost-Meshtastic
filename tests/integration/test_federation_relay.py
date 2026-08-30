@@ -154,6 +154,23 @@ async def test_duplicate_clock_skew_loop_and_signature_attacks_fail_closed(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_relay_rejects_non_integer_timestamp_without_overflow(tmp_path) -> None:
+    a_db, _, a_peers, a_relay = await relay_node(tmp_path, "a", A)
+    b_db, _, b_peers, b_relay = await relay_node(tmp_path, "b", B)
+    await allow_relay(a_db, a_peers, a_relay, B)
+    await allow_relay(b_db, b_peers, b_relay, A)
+    envelope_id = await a_relay.create(B, "incident", {"status": "open"})
+    malformed = {**(await a_relay.wire(envelope_id)), "created_at": float("inf")}
+
+    with pytest.raises(ValueError, match="created_at must be an integer"):
+        await b_relay.accept(A, malformed)
+
+    assert (await b_relay.summary())["counts"] == {}
+    await a_db.close()
+    await b_db.close()
+
+
+@pytest.mark.asyncio
 async def test_operator_relay_api_exposes_policy_queue_and_controls(tmp_path) -> None:
     database, _, peers, relay = await relay_node(tmp_path, "api", A)
     await peers.discover(B, "Relay B", 1, {}, "radio")

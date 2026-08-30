@@ -11,6 +11,15 @@ files = [
   "src/outpost/commands/watch.py",
 ]
 
+[groups.safety_commands]
+minimum = 80
+per_file_minimum = 80
+files = [
+  "src/outpost/commands/alerts.py",
+  "src/outpost/commands/checkin.py",
+  "src/outpost/commands/watch.py",
+]
+
 [groups.federation_framing_import]
 minimum = 86
 files = [

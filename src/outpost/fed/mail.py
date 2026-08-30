@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from outpost.clock import Clock
+from outpost.fed.framing import wire_bytes, wire_int
 from outpost.fed.peers import FederationPeerService
 from outpost.store import Database
 
@@ -140,7 +141,7 @@ class FederationMailService:
             raise ValueError("mail relay is not enabled for this peer")
         relay_id = str(envelope["relay_id"])
         now = int(self.clock.now().timestamp())
-        if int(envelope["expires_at"]) <= now:
+        if wire_int(envelope["expires_at"], "expires_at") <= now:
             raise ValueError("federation mail expired")
         seen = await self.database.read(
             "SELECT state FROM fed_mail_delivery WHERE relay_id=?", (relay_id,)
@@ -149,7 +150,9 @@ class FederationMailService:
             return relay_id, str(seen[0]["state"])
         secret = await self.peers.secret(peer_id)
         plaintext = AESGCM(self._key(secret, self.peers.local_mesh_id, peer_id)).decrypt(
-            bytes(envelope["nonce"]), bytes(envelope["ciphertext"]), relay_id.encode()
+            wire_bytes(envelope["nonce"], "nonce", length=12),
+            wire_bytes(envelope["ciphertext"], "ciphertext"),
+            relay_id.encode(),
         )
         message = json.loads(plaintext)
         recipient = self._handle(message["to"])

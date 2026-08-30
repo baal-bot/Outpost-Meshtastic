@@ -176,6 +176,10 @@ path = "docs/PHASE3-ACCEPTANCE.md"
 description = "Automated phase gates and explicitly open tabletop criteria."
 [[capabilities.evidence]]
 kind = "automated"
+path = "tests/integration/test_safety_commands.py"
+description = "Member-facing incident, alert, acknowledgement, and trust paths through the mesh router."
+[[capabilities.evidence]]
+kind = "automated"
 path = "tests/integration/test_watch_alerts.py"
 description = "Audience delivery, repeats, acknowledgements, escalation, and all-clear."
 [[capabilities.evidence]]
@@ -199,6 +203,10 @@ date = "2026-08-27"
 kind = "acceptance"
 path = "docs/PHASE3-ACCEPTANCE.md"
 description = "Simulated roster, solicitation, help, and export gates."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_safety_commands.py"
+description = "Member-facing OK, HELPME, roster, and event lifecycle through the mesh router."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_watch_checkin.py"

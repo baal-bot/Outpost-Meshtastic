@@ -9,6 +9,11 @@ INBOUND = Counter(
     ("portnum", "channel", "direct"),
 )
 INBOUND_DROPPED = Counter("outpost_inbound_dropped_total", "Dropped inbound messages", ("reason",))
+INBOUND_HANDLER_FAILURES = Counter(
+    "outpost_inbound_handler_failures_total",
+    "Inbound messages contained after an application handler failure",
+    ("exception_type",),
+)
 INBOUND_QUEUE_DEPTH = Gauge("outpost_inbound_queue_depth", "Inbound queue depth", ("lane",))
 INBOUND_WORKERS_BUSY = Gauge("outpost_inbound_workers_busy", "Busy inbound workers")
 SAFETY_FLOOR_ATTEMPTS = Counter(

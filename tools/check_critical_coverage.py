@@ -47,6 +47,21 @@ def evaluate(report: dict[str, Any], config: dict[str, Any]) -> tuple[list[str],
         )
         if value < minimum:
             failures.append(f"{name} coverage {value:.1f}% is below {minimum:.1f}%")
+        if "per_file_minimum" in group:
+            per_file_minimum = float(group["per_file_minimum"])
+            for path, file_report in sorted(matched.items()):
+                summary = file_report["summary"]
+                file_value = _percentage(
+                    int(summary["covered_lines"]), int(summary["num_statements"])
+                )
+                lines.append(
+                    f"{name}/{path}: {file_value:.1f}% (per-file minimum {per_file_minimum:.1f}%)"
+                )
+                if file_value < per_file_minimum:
+                    failures.append(
+                        f"{name} file {path} coverage {file_value:.1f}% "
+                        f"is below {per_file_minimum:.1f}%"
+                    )
     return lines, failures
 
 

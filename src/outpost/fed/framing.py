@@ -51,6 +51,28 @@ class FrameError(ValueError):
     pass
 
 
+def wire_bytes(value: object, field: str, *, length: int | None = None) -> bytes:
+    """Validate a CBOR byte string before handing it to crypto or persistence code."""
+    if not isinstance(value, bytes):
+        raise FrameError(f"{field} must be a byte string")
+    if length is not None and len(value) != length:
+        raise FrameError(f"{field} must be {length} bytes")
+    return value
+
+
+def wire_int(
+    value: object,
+    field: str,
+    *,
+    minimum: int = 0,
+    maximum: int = 0x7FFF_FFFF_FFFF_FFFF,
+) -> int:
+    """Validate a CBOR integer without coercing floats, booleans, or containers."""
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise FrameError(f"{field} must be an integer in {minimum}..{maximum}")
+    return value
+
+
 @dataclass(frozen=True)
 class Fragment:
     msg_type: MessageType

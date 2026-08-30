@@ -70,6 +70,42 @@ async def test_admission_is_durable_and_safety_recovers_first(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_oversized_binary_is_rejected_before_durable_admission(tmp_path) -> None:
+    database, governor, _ = await durable_governor(tmp_path / "outpost.db", VirtualClock())
+    item = OutboundItem("", "^all", 0, TrafficClass.FEDERATION, binary_payload=b"x" * 234)
+
+    assert await governor.admit(item) is None
+    assert await database.read("SELECT id FROM outbound_work") == []
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_restart_quarantines_legacy_oversized_payload_and_recovers_next(tmp_path) -> None:
+    path = tmp_path / "outpost.db"
+    clock = VirtualClock()
+    database, governor, _ = await durable_governor(path, clock)
+    poison_id = await governor.admit(OutboundItem("legacy", "^all", 0, TrafficClass.ALERT))
+    valid_id = await governor.admit(OutboundItem("valid", "^all", 0, TrafficClass.REPLY))
+    await database.write(
+        "UPDATE outbound_work SET text=? WHERE id=?",
+        ("🚨" * 100, poison_id),
+    )
+    await database.close()
+
+    restarted_db, restarted, radio = await durable_governor(path, clock)
+    assert await restarted.recover() == 1
+    rows = await restarted_db.read("SELECT id,state,last_error FROM outbound_work ORDER BY id")
+    assert [tuple(row) for row in rows] == [
+        (poison_id, "failed", "payload exceeds radio byte limit"),
+        (valid_id, "pending", None),
+    ]
+    await radio.connect()
+    sent = await restarted.tick()
+    assert sent is not None and sent.item_id == valid_id
+    await restarted_db.close()
+
+
+@pytest.mark.asyncio
 async def test_interrupted_pre_send_attempt_is_requeued(tmp_path) -> None:
     path = tmp_path / "outpost.db"
     clock = VirtualClock()

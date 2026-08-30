@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import json
 import secrets
+import sqlite3
 from collections import defaultdict, deque
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
@@ -56,6 +57,8 @@ from outpost.fed import (
     MessageType,
     Peer,
     Reassembler,
+    wire_bytes,
+    wire_int,
 )
 from outpost.operations_center import MeshOperationsCenter
 from outpost.operator_context import current_actor
@@ -81,6 +84,7 @@ from outpost.transport.metrics import (
     ACK_OUTCOME,
     INBOUND,
     INBOUND_DROPPED,
+    INBOUND_HANDLER_FAILURES,
     INBOUND_QUEUE_DEPTH,
     INBOUND_WORKERS_BUSY,
 )
@@ -723,11 +727,14 @@ class OutpostApp:
         self._tasks = [
             self._start_background_task("radio-supervisor", self.supervisor.run),
             self._start_background_task("airtime-governor", self._governor_loop),
-            self._start_background_task("inbound-router", self._inbound_loop),
+            self._start_background_task(
+                "inbound-router", self._inbound_loop, TaskFailureDomain.CORE
+            ),
             *[
                 self._start_background_task(
                     f"inbound-worker-{worker}",
                     lambda worker=worker: self._inbound_worker(worker),
+                    TaskFailureDomain.CORE,
                 )
                 for worker in range(1, self.config.router.inbound_workers + 1)
             ],
@@ -1664,7 +1671,7 @@ class OutpostApp:
                 await self.federation.discover(
                     sender,
                     str(value.get("name", sender)),
-                    int(value.get("protocol", 1)),
+                    wire_int(value.get("protocol", 1), "protocol", minimum=1, maximum=255),
                     capabilities,
                     "mqtt" if getattr(message, "via_mqtt", False) else "radio",
                 )
@@ -1678,7 +1685,9 @@ class OutpostApp:
                         await self._queue_federation_hello(sender)
             elif msg_type is MessageType.PAIR_REQ:
                 _, acknowledgement, _ = await self.federation.accept_pairing_request(
-                    sender, bytes(value["public_key"]), bytes(value["nonce"])
+                    sender,
+                    wire_bytes(value.get("public_key"), "public_key", length=32),
+                    wire_bytes(value.get("nonce"), "nonce", length=16),
                 )
                 frames = self.federation_codec.encode(
                     MessageType.PAIR_ACK, acknowledgement, 0, None
@@ -1690,7 +1699,9 @@ class OutpostApp:
                 )
             elif msg_type is MessageType.PAIR_ACK:
                 await self.federation.accept_pairing_ack(
-                    sender, bytes(value["public_key"]), bytes(value["nonce"])
+                    sender,
+                    wire_bytes(value.get("public_key"), "public_key", length=32),
+                    wire_bytes(value.get("nonce"), "nonce", length=16),
                 )
             elif msg_type is MessageType.PAIR_CONFIRM and value.get("approved") is True:
                 peer = await self.federation.confirm_remote(sender)
@@ -1715,16 +1726,22 @@ class OutpostApp:
                 await self._handle_service_response(sender, value)
             elif msg_type is MessageType.SYNC_REQ:
                 peer = await self.federation.by_mesh_id(sender)
-                limit = max(1, min(int(value.get("limit", 8)), 8))
-                budget = max(1, min(int(value.get("budget", limit)), 100))
+                limit = wire_int(value.get("limit", 8), "limit", minimum=1, maximum=8)
+                budget = wire_int(value.get("budget", limit), "budget", minimum=1, maximum=100)
                 page_size = min(limit, budget)
-                snapshot = int(value.get("snapshot", int(self.clock.now().timestamp())))
+                snapshot = wire_int(
+                    value.get("snapshot", int(self.clock.now().timestamp())), "snapshot"
+                )
                 raw_before = value.get("before")
                 before = None
                 if raw_before is not None:
                     if not isinstance(raw_before, list) or len(raw_before) != 3:
                         raise ValueError("invalid federation reconciliation cursor")
-                    before = (int(raw_before[0]), str(raw_before[1]), str(raw_before[2]))
+                    before = (
+                        wire_int(raw_before[0], "before version"),
+                        str(raw_before[1]),
+                        str(raw_before[2]),
+                    )
                 page = await self.federation_sync.manifest(
                     peer, page_size + 1, snapshot=snapshot, before=before
                 )
@@ -1758,10 +1775,12 @@ class OutpostApp:
                 raw_next = value.get("next_before")
                 if raw_next is not None and (not isinstance(raw_next, list) or len(raw_next) != 3):
                     raise ValueError("invalid federation reconciliation cursor")
-                remaining = max(0, min(int(value.get("remaining", 0)), 100))
+                remaining = wire_int(value.get("remaining", 0), "remaining", minimum=0, maximum=100)
                 checkpoint = {
                     "before": raw_next,
-                    "snapshot": int(value.get("snapshot", int(self.clock.now().timestamp()))),
+                    "snapshot": wire_int(
+                        value.get("snapshot", int(self.clock.now().timestamp())), "snapshot"
+                    ),
                     "pending": False,
                 }
                 await self.database.write(
@@ -1963,7 +1982,7 @@ class OutpostApp:
                 if not isinstance(topology, dict):
                     raise ValueError("invalid federation topology update")
                 await self.federation_topology.accept(sender, topology)
-        except (FrameError, KeyError, TypeError, ValueError) as error:
+        except (FrameError, KeyError, OverflowError, TypeError, ValueError) as error:
             packet_id = getattr(message, "packet_id", None)
             if packet_id is not None:
                 await self.database.write(
@@ -2050,11 +2069,12 @@ class OutpostApp:
         request_id = str(value["request_id"])
         service = str(value["service"])
         args = value.get("args", {})
-        expires_at = int(value["expires_at"])
+        expires_at = wire_int(value["expires_at"], "expires_at")
+        ttl = wire_int(value.get("ttl", 0), "ttl", maximum=86_400)
         now = int(self.clock.now().timestamp())
         if len(request_id) > 64 or service not in {"weather", "alerts", "knowledge"}:
             raise ValueError("invalid service request")
-        if not isinstance(args, dict) or expires_at <= now or int(value.get("ttl", 0)) < 0:
+        if not isinstance(args, dict) or expires_at <= now or ttl < 0:
             raise ValueError("expired or invalid service request")
         normalized_args, fingerprint = self._normalized_service_args(service, args)
         args_json = json.dumps(normalized_args, separators=(",", ":"), sort_keys=True)
@@ -2429,7 +2449,7 @@ class OutpostApp:
     async def _route_inbound(self, message: InboundMessage, log_id: int) -> None:
         if self._is_safety_inbound(message):
             self._inbound_fast_processed += 1
-            await self._handle_inbound_message(message, ordered=False)
+            await self._handle_inbound_safely(message, log_id)
             return
         if self._inbound_queued >= self.config.router.inbound_queue_max:
             self._inbound_backlog_dropped += 1
@@ -2452,13 +2472,13 @@ class OutpostApp:
             if not pending:
                 continue
             self._inbound_active.add(sender)
-            message, _ = pending.popleft()
+            message, log_id = pending.popleft()
             self._inbound_queued -= 1
             self._inbound_busy += 1
             INBOUND_QUEUE_DEPTH.labels("worker_backlog").set(self._inbound_queued)
             INBOUND_WORKERS_BUSY.set(self._inbound_busy)
             try:
-                await self._handle_inbound_message(message, ordered=False)
+                await self._handle_inbound_safely(message, log_id)
                 self._task_progress(task_name)
             finally:
                 self._inbound_busy -= 1
@@ -2468,6 +2488,23 @@ class OutpostApp:
                     self._inbound_ready.put_nowait(sender)
                 else:
                     self._inbound_pending.pop(sender, None)
+
+    async def _handle_inbound_safely(self, message: InboundMessage, log_id: int) -> bool:
+        """Contain message-specific faults while leaving infrastructure failures fatal."""
+        try:
+            await self._handle_inbound_message(message, ordered=False)
+        except asyncio.CancelledError:
+            raise
+        except sqlite3.Error:
+            raise
+        except Exception as error:
+            reason = f"handler failure: {type(error).__name__}"
+            INBOUND_HANDLER_FAILURES.labels(type(error).__name__).inc()
+            # A failure to record the drop is an infrastructure fault and must still
+            # reach CORE supervision instead of being mistaken for a poison message.
+            await self.message_log.mark_inbound_dropped(log_id, reason)
+            return False
+        return True
 
     async def _handle_inbound_message(
         self, message: InboundMessage, *, ordered: bool = True

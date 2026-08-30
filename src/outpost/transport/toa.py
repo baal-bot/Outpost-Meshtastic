@@ -17,12 +17,13 @@ PRESETS = {
     "MEDIUM_SLOW": Preset(10, 250_000),
     "SHORT_FAST": Preset(7, 250_000),
 }
+MAX_PAYLOAD_BYTES = 233
 
 
 def toa(payload_bytes: int, preset: str | Preset = "LONG_FAST") -> float:
     """Semtech LoRa time-on-air with explicit header and CRC (REQ-TRANSPORT-001)."""
-    if payload_bytes < 0 or payload_bytes > 233:
-        raise ValueError("payload_bytes must be in 0..233")
+    if payload_bytes < 0 or payload_bytes > MAX_PAYLOAD_BYTES:
+        raise ValueError(f"payload_bytes must be in 0..{MAX_PAYLOAD_BYTES}")
     cfg = PRESETS[preset] if isinstance(preset, str) else preset
     sf, bw = cfg.spreading_factor, cfg.bandwidth_hz
     symbol = (2**sf) / bw

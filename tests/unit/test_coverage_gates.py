@@ -72,3 +72,32 @@ files = ["src/outpost/example.py"]
     assert result.returncode == 1
     assert "global coverage 69.0% is below 70.0%" in result.stderr
     assert "example coverage 60.0% is below 65.0%" in result.stderr
+
+
+def test_per_file_floor_cannot_be_masked_by_a_well_covered_sibling(tmp_path: Path) -> None:
+    report = {
+        "totals": {"percent_covered": 90.0},
+        "files": {
+            "src/outpost/safety/strong.py": {
+                "summary": {"num_statements": 90, "covered_lines": 90}
+            },
+            "src/outpost/safety/weak.py": {"summary": {"num_statements": 10, "covered_lines": 2}},
+        },
+    }
+    result = run_checker(
+        tmp_path,
+        report,
+        """
+[global]
+minimum = 70
+[groups.safety]
+minimum = 80
+per_file_minimum = 75
+files = ["src/outpost/safety/*.py"]
+""",
+    )
+
+    assert result.returncode == 1
+    assert "safety: 92.0%" in result.stdout
+    assert "safety/src/outpost/safety/weak.py: 20.0%" in result.stdout
+    assert "safety file src/outpost/safety/weak.py coverage 20.0%" in result.stderr

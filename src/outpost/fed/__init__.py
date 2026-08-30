@@ -1,4 +1,4 @@
-from .framing import FrameCodec, FrameError, MessageType, Reassembler
+from .framing import FrameCodec, FrameError, MessageType, Reassembler, wire_bytes, wire_int
 from .mail import FederationMailService
 from .peers import FederationPeerService, Peer
 from .relay import FederationRelayService, RelayPolicy
@@ -10,6 +10,8 @@ __all__ = [
     "FederationRelayService",
     "FrameCodec",
     "FrameError",
+    "wire_bytes",
+    "wire_int",
     "MessageType",
     "Peer",
     "Reassembler",

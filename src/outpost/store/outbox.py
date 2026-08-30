@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
+from outpost.transport.toa import MAX_PAYLOAD_BYTES
+
 from .database import Database, Transaction
 
 ACTIVE_STATES = ("pending", "held", "sending")
@@ -46,6 +48,11 @@ class OutboxStore:
     def __init__(self, database: Database) -> None:
         self.database = database
 
+    @staticmethod
+    def _valid_payload_size(record: dict[str, Any]) -> bool:
+        size = record.get("byte_len")
+        return type(size) is int and 0 <= size <= MAX_PAYLOAD_BYTES
+
     async def admit_many(
         self,
         records: list[dict[str, Any]],
@@ -55,6 +62,8 @@ class OutboxStore:
         transaction: Transaction | None = None,
     ) -> Admission:
         async def admit(store: _StoreTransaction) -> Admission:
+            if not all(self._valid_payload_size(record) for record in records):
+                raise OutboxRejected("payload_too_large")
             supersedes = sorted(
                 {str(record["supersedes"]) for record in records if record["supersedes"]}
             )
@@ -152,6 +161,13 @@ class OutboxStore:
                 "UPDATE outbound_attempt SET state='uncertain',completed_at=?,error=? "
                 "WHERE state='started'",
                 (now, RECOVERY_NOTE),
+            )
+            await transaction.write(
+                "UPDATE outbound_work SET state='failed',completed_at=?,last_error=? "
+                "WHERE state IN ('pending','held','sending','awaiting_ack') AND "
+                "length(CASE WHEN binary_payload IS NOT NULL THEN binary_payload "
+                "ELSE CAST(text AS BLOB) END)>?",
+                (now, "payload exceeds radio byte limit", MAX_PAYLOAD_BYTES),
             )
             await transaction.write(
                 "UPDATE outbound_work SET state='expired',completed_at=? "
@@ -255,6 +271,13 @@ class OutboxStore:
                 (item_id, attempt_no, now, estimated_toa_ms),
             )
         return True
+
+    async def fail_unstarted(self, item_id: int, now: float, error: str) -> None:
+        await self.database.write(
+            "UPDATE outbound_work SET state='failed',completed_at=?,last_error=? "
+            "WHERE id=? AND state IN ('pending','held')",
+            (now, error[:240], item_id),
+        )
 
     async def fail_attempt(
         self, item_id: int, now: float, error: str, *, retry_limit: int = 3

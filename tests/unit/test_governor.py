@@ -13,6 +13,25 @@ from outpost.transport.models import LocalTelemetry, Severity, TrafficClass
 from outpost.transport.simulated import SimulatedRadioLink
 
 
+def test_text_payload_is_truncated_by_utf8_bytes_before_admission() -> None:
+    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), VirtualClock())
+    item = OutboundItem("🚨" * 100, "^all", 0, TrafficClass.ALERT)
+
+    assert governor.enqueue(item) is not None
+    assert item.text.endswith("…")
+    assert item.payload_size <= 233
+
+
+def test_oversized_binary_payload_is_rejected_atomically() -> None:
+    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), VirtualClock())
+    valid = OutboundItem("valid", "^all", 0, TrafficClass.FEDERATION)
+    oversized = OutboundItem("", "^all", 0, TrafficClass.FEDERATION, binary_payload=b"x" * 234)
+
+    assert governor.enqueue_many([valid, oversized]) is None
+    assert governor.queued_items() == []
+    assert governor.metrics.dropped[(TrafficClass.FEDERATION, "payload_too_large")] == 2
+
+
 @pytest.mark.asyncio
 async def test_alert_preempts_reply_and_broadcast_has_no_ack() -> None:
     clock, link = VirtualClock(), SimulatedRadioLink()

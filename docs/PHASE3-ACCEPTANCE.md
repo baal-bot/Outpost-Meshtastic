@@ -6,14 +6,14 @@ run; this document does not treat simulation as proof of real-mesh timing.
 
 | # | Gate | Evidence | Status |
 |---|---|---|---|
-| 1 | One-message typed, geotagged report | `test_watch_incidents.py` | Pass |
+| 1 | One-message typed, geotagged report | `test_safety_commands.py`, `test_watch_incidents.py` | Pass |
 | 2 | ≥90% inference on 40 phrases | `test_phase3_acceptance.py` | Pass |
-| 3 | Duplicate offered as `CONFIRM` | `test_watch_incidents.py` | Pass |
+| 3 | Duplicate offered as `CONFIRM` | `test_safety_commands.py`, `test_watch_incidents.py` | Pass |
 | 4 | Responder alert preempts digest and broadcasts within 5 s | `test_governor.py`; real timing in tabletop | Sim pass / hardware open |
 | 5 | Durable escalation and ack threshold | `test_watch_alerts.py` | Pass |
 | 6 | All-clear supersedes queued repeat | `test_governor.py`, `test_watch_alerts.py` | Pass |
-| 7 | `OK`, roster, derived unaccounted | `test_watch_checkin.py` | Pass |
-| 8 | Need-help reaches responders and dashboard within 5 s | Integration path passes; real timing in tabletop | Sim pass / hardware open |
+| 7 | `OK`, roster, derived unaccounted | `test_safety_commands.py`, `test_watch_checkin.py` | Pass |
+| 8 | Need-help reaches responders and dashboard within 5 s | `test_safety_commands.py`; real timing in tabletop | Sim pass / hardware open |
 | 9 | Severity then haversine ordering | `test_watch_incidents.py` | Pass |
 | 10 | Offline map: incidents, nodes, alert areas, roster | Browser check; WAN-down hardware check remains | Sim pass / hardware open |
 | 11 | Three-alert storm stays within airtime ceiling | `test_governor.py` | Pass |
