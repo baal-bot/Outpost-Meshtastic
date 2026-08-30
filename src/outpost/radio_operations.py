@@ -214,8 +214,16 @@ class RadioOperations:
     def airtime(self) -> dict[str, Any]:
         return {
             "used_seconds": self.governor.used_airtime,
+            "configured_budget_percent": self.governor.config.budget_percent,
+            "configured_reserve_percent": self.governor.config.emergency_reserve_percent,
             "budget_percent": self.governor.budget_percent,
             "reserve_percent": self.governor.reserve_percent,
+            "region": self.governor.region,
+            "regional_ceiling_percent": self.governor.regional_ceiling_percent,
+            "reported_preset": self.governor.reported_preset,
+            "costing_preset": self.governor.preset,
+            "profile_matches": self.governor.reported_preset == self.governor.preset,
+            "warnings": list(self.governor.profile_warnings),
             "by_class_seconds": self.governor.airtime_breakdown(),
         }
 

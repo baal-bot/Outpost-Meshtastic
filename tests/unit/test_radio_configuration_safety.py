@@ -10,7 +10,7 @@ from outpost.clock import VirtualClock
 from outpost.config import Config
 from outpost.radio_configuration import RadioConfigurationError, RadioConfigurationManager
 from outpost.store import Database
-from outpost.transport.radio_frequency import frequency_plan
+from outpost.transport.radio_frequency import frequency_plan, regional_duty_cycle_percent
 
 
 def radio_state() -> dict[str, Any]:
@@ -143,6 +143,14 @@ def test_frequency_slot_is_bounded_and_automatic_slot_is_explained() -> None:
         frequency_plan("US", "LONG_FAST", 105, "LongFast")
     with pytest.raises(ValueError, match="not valid"):
         frequency_plan("EU_866", "LONG_FAST", 1, "LongFast")
+
+
+def test_regional_duty_cycle_matches_firmware_profiles() -> None:
+    assert regional_duty_cycle_percent("US") == 100
+    assert regional_duty_cycle_percent("EU_868") == 10
+    assert regional_duty_cycle_percent("EU_866") == 2.5
+    assert regional_duty_cycle_percent("UA_868") == 1
+    assert regional_duty_cycle_percent("future_region") is None
 
 
 @pytest.mark.asyncio

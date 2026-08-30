@@ -11,6 +11,7 @@ from outpost.config import AirtimeConfig
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.models import LocalTelemetry, Severity, TrafficClass
 from outpost.transport.simulated import SimulatedRadioLink
+from outpost.transport.toa import MAX_PAYLOAD_BYTES
 
 
 def test_text_payload_is_truncated_by_utf8_bytes_before_admission() -> None:
@@ -19,7 +20,56 @@ def test_text_payload_is_truncated_by_utf8_bytes_before_admission() -> None:
 
     assert governor.enqueue(item) is not None
     assert item.text.endswith("…")
-    assert item.payload_size <= 233
+    assert item.payload_size <= MAX_PAYLOAD_BYTES
+
+
+def test_governor_tracks_live_preset_and_regional_ceiling() -> None:
+    config = AirtimeConfig(budget_percent=8, emergency_reserve_percent=4)
+    governor = AirtimeGovernor(
+        SimulatedRadioLink(), config, VirtualClock(), preset="LONG_FAST", region="EU_866"
+    )
+    slow_cost = governor.estimate_toa(100)
+
+    assert governor.reported_preset == governor.preset == "LONG_FAST"
+    assert governor.region == "EU_866"
+    assert governor.regional_ceiling_percent == 2.5
+    assert governor.budget_percent == pytest.approx(2.5 * 8 / 12)
+    assert governor.reserve_percent == pytest.approx(2.5 * 4 / 12)
+
+    governor.sync_radio_profile("SHORT_FAST", "US")
+
+    assert governor.reported_preset == governor.preset == "SHORT_FAST"
+    assert governor.estimate_toa(100) < slow_cost
+    assert governor.budget_percent == 8
+    assert governor.reserve_percent == 4
+    assert governor.profile_warnings == ()
+
+
+def test_unknown_radio_profile_costs_conservatively_and_unknown_region_pauses() -> None:
+    governor = AirtimeGovernor(
+        SimulatedRadioLink(),
+        AirtimeConfig(),
+        VirtualClock(),
+        preset="FUTURE_ULTRA_LONG",
+        region="FUTURE_REGION",
+    )
+
+    assert governor.reported_preset == "FUTURE_ULTRA_LONG"
+    assert governor.preset == "VERY_LONG_SLOW"
+    assert governor.estimate_toa(100) >= 12
+    assert governor.regional_ceiling_percent == 0
+    assert governor.budget_percent == governor.reserve_percent == 0
+    assert len(governor.profile_warnings) == 2
+
+
+def test_explicit_regional_ceiling_is_validated() -> None:
+    with pytest.raises(ValueError, match="regional airtime ceiling"):
+        AirtimeGovernor(
+            SimulatedRadioLink(),
+            AirtimeConfig(),
+            VirtualClock(),
+            regional_ceiling_percent=101,
+        )
 
 
 def test_oversized_binary_payload_is_rejected_atomically() -> None:

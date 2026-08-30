@@ -428,7 +428,7 @@ def route_visual_content_api(page: object) -> None:
             "radio_config": {
                 "node_id": "!699c2f30",
                 "region": "US",
-                "preset": "LongFast",
+                "preset": "LONG_FAST",
                 "channels": [],
             },
             "queues": {},
@@ -613,7 +613,23 @@ def route_visual_content_api(page: object) -> None:
         {"node": {"location": {"lat": 40.4406, "lon": -79.9959}}},
     )
 
-    fulfill("**/api/v1/mesh/airtime", {"used_seconds": 0, "by_class_seconds": {}})
+    fulfill(
+        "**/api/v1/mesh/airtime",
+        {
+            "used_seconds": 0,
+            "configured_budget_percent": 8,
+            "configured_reserve_percent": 4,
+            "budget_percent": 8,
+            "reserve_percent": 4,
+            "region": "US",
+            "regional_ceiling_percent": 100,
+            "reported_preset": "LONG_FAST",
+            "costing_preset": "LONG_FAST",
+            "profile_matches": True,
+            "warnings": [],
+            "by_class_seconds": {},
+        },
+    )
     fulfill("**/api/v1/mesh/queue*", {"items": []})
     fulfill("**/api/v1/mesh/messages*", {"items": []})
 
@@ -1990,6 +2006,9 @@ def test_radio_queue_filter_hides_expired_history_by_default(
         assert "no queue loss" in page.locator("#inbound-detail").text_content()
         assert "queue-healthy" in page.locator("#inbound-health").get_attribute("class")
         assert "queue-critical" not in page.locator("#inbound-health").get_attribute("class")
+        assert page.locator("#governor-preset").text_content() == "LONG_FAST"
+        assert "effective 8.00% + 4.00% reserve" in page.locator("#governor-budget").text_content()
+        assert "warning" not in (page.locator("#governor-profile").get_attribute("class") or "")
         queue_filter = page.get_by_label("Queue state filter")
         assert queue_filter.input_value() == "current"
         assert page.locator(".queue-card").count() == 3

@@ -6,7 +6,14 @@ import pytest
 from outpost.app import OutpostApp
 from outpost.config import Config
 from outpost.fed import FrameCodec, MessageType
-from outpost.transport.models import InboundMessage
+from outpost.transport.models import InboundMessage, RadioSnapshot
+
+
+def configure_live_radio(app: OutpostApp, node_id: str) -> None:
+    """Match the supervisor state that necessarily exists before a real inbound frame."""
+    app.radio._local_id = node_id
+    app.radio._snapshot = RadioSnapshot(node_id=node_id, region="US", preset="LONG_FAST")
+    app._radio_progress()
 
 
 def public_alert(area: str) -> dict:
@@ -103,8 +110,7 @@ async def test_inbound_peer_services_default_to_denied_and_account_usage(tmp_pat
     config = Config.model_validate({"store": {"path": str(tmp_path / "outpost.db")}})
     app = OutpostApp(config)
     await app.database.open()
-    app.radio._local_id = "!serving"
-    app.federation.local_mesh_id = "!serving"
+    configure_live_radio(app, "!serving")
     secret = bytes(range(32))
     await app.federation.discover("!requester", "Requester", 1, {"weather": True}, "radio")
     await app.database.write(
@@ -289,8 +295,7 @@ async def test_serving_outpost_queries_alerts_for_requesting_nodes_exact_point(
     )
     app = OutpostApp(config)
     await app.database.open()
-    app.radio._local_id = "!serving"
-    app.federation.local_mesh_id = "!serving"
+    configure_live_radio(app, "!serving")
     secret = bytes(range(32))
     await app.federation.discover("!requester", "Requester", 1, {"alerts": True}, "radio")
     await app.database.write(

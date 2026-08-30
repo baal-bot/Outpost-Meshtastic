@@ -20,6 +20,7 @@ from outpost.clock import VirtualClock
 from outpost.config import Config
 from outpost.store import Database
 from outpost.store.members import Member, MemberRepo
+from outpost.transport.models import RadioSnapshot
 from outpost.web.api import create_web_app
 
 
@@ -102,11 +103,16 @@ async def test_app_ai_dry_run_uses_operator_context_and_refreshes_radio_identity
     await app.database.open()
     try:
         app.radio._local_id = "!00000001"
+        app.radio._snapshot = RadioSnapshot(
+            node_id="!00000001", region="EU_866", preset="SHORT_FAST"
+        )
         app._radio_progress()
         assert app.inbound_pipeline.local_node_id == "!00000001"
         assert app.incidents.origin_node == "!00000001"
         assert app.federation.local_mesh_id == "!00000001"
         assert app.federation_sync.local_mesh_id == "!00000001"
+        assert app.governor.reported_preset == app.governor.preset == "SHORT_FAST"
+        assert app.governor.regional_ceiling_percent == 2.5
 
         await MemberRepo(app.database, app.clock).resolve("!00000001")
         await app.database.write(

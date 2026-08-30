@@ -423,6 +423,27 @@ async function refresh() {
   $("radio-node").textContent = status.radio_config.node_id || "—";
   $("radio-preset").textContent =
     `${status.radio_config.region} · ${status.radio_config.preset}`;
+  let governorProfile = $("governor-profile");
+  if (!governorProfile) {
+    governorProfile = document.createElement("article");
+    governorProfile.id = "governor-profile";
+    governorProfile.innerHTML =
+      '<small>GOVERNOR MODEL</small><strong id="governor-preset">—</strong>' +
+      '<p id="governor-budget">—</p>';
+    document.querySelector(".radio-kpis").append(governorProfile);
+  }
+  $("governor-preset").textContent = airtime.costing_preset || "—";
+  const governorWarnings = airtime.warnings || [];
+  const regionalCeiling = airtime.regional_ceiling_percent == null
+    ? "no regional ceiling"
+    : `${Number(airtime.regional_ceiling_percent).toFixed(1)}% region ceiling`;
+  $("governor-budget").textContent = governorWarnings.length
+    ? governorWarnings.join(" ")
+    : `Radio ${airtime.reported_preset} · effective ${Number(airtime.budget_percent).toFixed(2)}% + ${Number(airtime.reserve_percent).toFixed(2)}% reserve · ${regionalCeiling}`;
+  governorProfile.classList.toggle(
+    "warning",
+    governorWarnings.length > 0 || !airtime.profile_matches,
+  );
   $("airtime-total").textContent = airtime.used_seconds.toFixed(2);
   updateNewestQueue(queue);
   const queueCounts = queueMeta.counts || {};

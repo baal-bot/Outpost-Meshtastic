@@ -98,7 +98,6 @@ from outpost.transport.models import InboundMessage, Severity, TrafficClass
 from outpost.transport.radio_frequency import frequency_plan
 from outpost.transport.radio_link import MeshtasticRadioLink
 from outpost.transport.supervisor import RadioSupervisor
-from outpost.transport.toa import toa
 from outpost.watch import AlertService, CheckinService, IncidentService
 from outpost.watch.delivery import AudienceDelivery
 from outpost.watch.incidents import Incident
@@ -146,6 +145,8 @@ class OutpostApp:
             self.radio,
             self.config.airtime,
             self.clock,
+            preset=self.radio.snapshot.preset,
+            region=self.radio.snapshot.region,
             outbox=OutboxStore(self.database),
         )
         self.radio_operations = RadioOperations(
@@ -501,6 +502,7 @@ class OutpostApp:
 
     def _radio_progress(self) -> None:
         self._task_progress("radio-supervisor")
+        self.governor.sync_radio_profile(self.radio.snapshot.preset, self.radio.snapshot.region)
         local_id = self.radio.local_node_id
         if local_id:
             self.inbound_pipeline.local_node_id = local_id
@@ -1589,7 +1591,12 @@ class OutpostApp:
                             counter,
                             secret,
                         )
-                        airtime = sum(toa(len(frame), self.governor.preset) for frame in frames)
+                        airtime = sum(
+                            self.governor.estimate_toa(
+                                len(frame), portnum=self.config.radio.federation_portnum
+                            )
+                            for frame in frames
+                        )
                         await self.federation_relay.reserve_forward(
                             envelope_id,
                             peer_id,
@@ -2061,7 +2068,12 @@ class OutpostApp:
             return (
                 frames,
                 content_bytes,
-                sum(toa(len(frame), self.governor.preset) for frame in frames),
+                sum(
+                    self.governor.estimate_toa(
+                        len(frame), portnum=self.config.radio.federation_portnum
+                    )
+                    for frame in frames
+                ),
             )
 
         frames, response_bytes, airtime_seconds = await encode_response(
@@ -2679,7 +2691,7 @@ class OutpostApp:
                     packet_id=None,
                     text=part,
                     byte_len=len(part.encode()),
-                    toa_ms=round(toa(len(part.encode()), self.governor.preset) * 1_000),
+                    toa_ms=round(self.governor.estimate_toa(len(part.encode())) * 1_000),
                     airtime_class=response.airtime_class.value,
                     outcome="dropped",
                     is_direct=True,

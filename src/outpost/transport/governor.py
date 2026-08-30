@@ -26,7 +26,8 @@ from .metrics import (
     TOA_SECONDS,
 )
 from .models import LinkState, RadioLink, SendResult, Severity, TrafficClass
-from .toa import MAX_PAYLOAD_BYTES, toa
+from .radio_frequency import regional_duty_cycle_percent
+from .toa import MAX_PAYLOAD_BYTES, Preset, resolve_preset, toa
 
 TTL_SECONDS = {
     TrafficClass.ALERT: 86_400,
@@ -114,19 +115,23 @@ class AirtimeGovernor:
         clock: Clock,
         *,
         preset: str = "LONG_FAST",
+        region: str | None = None,
         regional_ceiling_percent: float | None = None,
         outbox: OutboxStore | None = None,
     ) -> None:
-        self.link, self.config, self.clock, self.preset = link, config, clock, preset
+        self.link, self.config, self.clock = link, config, clock
         self.outbox = outbox
-        configured_total = config.budget_percent + config.emergency_reserve_percent
-        if regional_ceiling_percent is not None and configured_total > regional_ceiling_percent:
-            scale = regional_ceiling_percent / configured_total
-            self.budget_percent = config.budget_percent * scale
-            self.reserve_percent = config.emergency_reserve_percent * scale
-        else:
-            self.budget_percent = config.budget_percent
-            self.reserve_percent = config.emergency_reserve_percent
+        self.reported_preset = ""
+        self.preset = ""
+        self.region = "unknown"
+        self.regional_ceiling_percent: float | None = None
+        self.profile_warnings: tuple[str, ...] = ()
+        self._toa_preset = Preset(12, 62_500, 4)
+        self.sync_radio_profile(
+            preset,
+            region,
+            regional_ceiling_percent=regional_ceiling_percent,
+        )
         self.queues: dict[TrafficClass, deque[OutboundItem]] = {
             cls: deque() for cls in TrafficClass
         }
@@ -139,6 +144,58 @@ class AirtimeGovernor:
         self._next_outbox_sweep_at = 0.0
         self._rr = deque(cls for cls in TrafficClass if cls != TrafficClass.ALERT)
         self.metrics = GovernorMetrics()
+
+    def sync_radio_profile(
+        self,
+        preset: str,
+        region: str | None,
+        *,
+        regional_ceiling_percent: float | None = None,
+    ) -> None:
+        """Atomically refresh costing and legal ceilings from the live radio snapshot."""
+        reported = preset.strip().upper() or "UNKNOWN"
+        normalized_region = region.strip().upper() if region is not None else "UNKNOWN"
+        costing, toa_preset, supported = resolve_preset(
+            reported, wide_lora=normalized_region == "LORA_24"
+        )
+        warnings: list[str] = []
+        if not supported:
+            warnings.append(
+                f"Radio reports unsupported modem preset {reported}; governor is using "
+                f"conservative {costing} costing."
+            )
+        ceiling = regional_ceiling_percent
+        if ceiling is None and region is not None:
+            ceiling = regional_duty_cycle_percent(normalized_region)
+            if ceiling is None:
+                ceiling = 0.0
+                warnings.append(
+                    f"Radio region {normalized_region} has no known duty-cycle ceiling; "
+                    "outbound transmission is paused."
+                )
+        if ceiling is not None and not 0 <= ceiling <= 100:
+            raise ValueError("regional airtime ceiling must be between 0 and 100 percent")
+        self.reported_preset = reported
+        self.preset = costing
+        self.region = normalized_region
+        self.regional_ceiling_percent = ceiling
+        self.profile_warnings = tuple(warnings)
+        self._toa_preset = toa_preset
+        self._apply_budget(ceiling)
+
+    def _apply_budget(self, regional_ceiling_percent: float | None) -> None:
+        config = self.config
+        configured_total = config.budget_percent + config.emergency_reserve_percent
+        if regional_ceiling_percent is not None and configured_total > regional_ceiling_percent:
+            scale = regional_ceiling_percent / configured_total
+            self.budget_percent = config.budget_percent * scale
+            self.reserve_percent = config.emergency_reserve_percent * scale
+        else:
+            self.budget_percent = config.budget_percent
+            self.reserve_percent = config.emergency_reserve_percent
+
+    def estimate_toa(self, payload_bytes: int, *, portnum: int = 1) -> float:
+        return toa(payload_bytes, self._toa_preset, portnum=portnum)
 
     @property
     def durable(self) -> bool:
@@ -614,7 +671,8 @@ class AirtimeGovernor:
         else:
             item = self._pop_unheld(queue, now)
         try:
-            cost = toa(item.payload_size, self.preset)
+            portnum = item.portnum or (1 if item.binary_payload is None else 260)
+            cost = self.estimate_toa(item.payload_size, portnum=portnum)
         except (KeyError, ValueError) as error:
             self.metrics.dropped[(cls, "invalid_payload")] += 1
             OUTBOUND_DROPPED.labels(cls.value, "invalid_payload").inc()

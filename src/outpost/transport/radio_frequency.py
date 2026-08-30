@@ -94,6 +94,55 @@ _DEFAULT_CHANNEL_NAMES = {
     "NARROW_SLOW": "NarrowSlow",
 }
 
+_UNRESTRICTED_DUTY_REGIONS = frozenset(
+    {
+        "US",
+        "CN",
+        "JP",
+        "ANZ",
+        "ANZ_433",
+        "RU",
+        "KR",
+        "TW",
+        "IN",
+        "NZ_865",
+        "MY_433",
+        "MY_919",
+        "SG_923",
+        "PH_433",
+        "PH_868",
+        "PH_915",
+        "KZ_433",
+        "KZ_863",
+        "NP_865",
+        "BR_902",
+        "ITU1_2M",
+        "ITU2_2M",
+        "ITU3_2M",
+        "ITU2_125CM",
+        "ITU1_70CM",
+        "ITU2_70CM",
+        "ITU3_70CM",
+        "LORA_24",
+    }
+)
+_REGIONAL_DUTY_CYCLE_PERCENT = {
+    **dict.fromkeys(_UNRESTRICTED_DUTY_REGIONS, 100.0),
+    "EU_433": 10.0,
+    "EU_868": 10.0,
+    "EU_866": 2.5,
+    "EU_N_868": 10.0,
+    "TH": 10.0,
+    "UA_433": 10.0,
+    # Supported by the 2.7 firmware generation and retained for upgraded radios.
+    "UA_868": 1.0,
+}
+
+
+def regional_duty_cycle_percent(region: str) -> float | None:
+    """Return the Meshtastic firmware duty-cycle ceiling for a reported region."""
+    return _REGIONAL_DUTY_CYCLE_PERCENT.get(region.strip().upper())
+
 
 def _djb2(value: str) -> int:
     result = 5381
