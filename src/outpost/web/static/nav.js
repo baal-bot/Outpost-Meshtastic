@@ -175,6 +175,7 @@ async function showTransportBoundary(role) {
   link.href = "/api/v1/web/transport";
   link.textContent = "Transport status →";
   banner.append(title, message, link);
+  main.classList.add("has-web-transport-banner");
   main.prepend(banner);
 }
 

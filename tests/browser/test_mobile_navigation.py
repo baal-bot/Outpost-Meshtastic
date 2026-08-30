@@ -993,8 +993,11 @@ def test_operator_gets_one_nonblocking_http_boundary_notice(
         page.close()
 
 
-def test_http_boundary_notice_spans_the_bbs_columns(browser: object, dashboard_url: str) -> None:
-    page = prepare_page(browser, 1280, dashboard_url)
+@pytest.mark.parametrize("width", (600, 900, 1280))
+def test_http_boundary_notice_spans_the_bbs_columns(
+    browser: object, dashboard_url: str, width: int
+) -> None:
+    page = prepare_page(browser, width, dashboard_url)
     try:
         page.route(
             "**/api/v1/web/transport",
@@ -1032,6 +1035,7 @@ def test_http_boundary_notice_spans_the_bbs_columns(browser: object, dashboard_u
         first_box = panels.first.bounding_box()
         last_box = panels.last.bounding_box()
         assert notice_box is not None and first_box is not None and last_box is not None
+        assert notice_box["height"] <= 80
         assert notice_box["x"] <= first_box["x"]
         assert notice_box["x"] + notice_box["width"] >= last_box["x"] + last_box["width"]
         assert notice_box["y"] + notice_box["height"] <= first_box["y"]
