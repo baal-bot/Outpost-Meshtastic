@@ -567,7 +567,10 @@ def _env_overlay(data: dict[str, object], prefix: str = "OUTPOST__") -> None:
 
 
 def load_config(path: str | Path | None = None) -> Config:
-    source = Path(path or os.getenv("OUTPOST_CONFIG", "config/config.yaml"))
+    source_value: str | Path = (
+        path if path is not None else os.getenv("OUTPOST_CONFIG", "config/config.yaml")
+    )
+    source = Path(source_value)
     data = yaml.safe_load(source.read_text()) if source.exists() else {}
     if not isinstance(data, dict):
         raise ValueError(f"config root must be a mapping: {source}")

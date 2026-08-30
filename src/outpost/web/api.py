@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -928,7 +928,7 @@ def create_web_app(
         if auth is not None and hasattr(request.state, "web_session"):
             actor_token = set_current_actor(f"web:{request.state.web_session.username}")
         try:
-            return await call_next(request)
+            return cast(Response, await call_next(request))
         finally:
             if actor_token is not None:
                 reset_current_actor(actor_token)
@@ -975,7 +975,7 @@ def create_web_app(
                     headers={"Retry-After": "15"},
                 )
             try:
-                return await call_next(request)
+                return cast(Response, await call_next(request))
             finally:
                 if gated_request:
                     await restore_coordinator.leave_mutation()
@@ -2058,7 +2058,7 @@ def create_web_app(
                         {"error": {"code": "pairing_failed", "message": str(error)}},
                         status_code=400,
                     )
-                return peer.__dict__
+                return cast(dict[str, Any], peer.__dict__)
 
         if federation_approve is not None:
 
@@ -2073,7 +2073,7 @@ def create_web_app(
                         {"error": {"code": "approval_failed", "message": str(error)}},
                         status_code=400,
                     )
-                return peer.__dict__
+                return cast(dict[str, Any], peer.__dict__)
 
         if federation_mqtt_status is not None and federation_mqtt_configure is not None:
 
@@ -2553,19 +2553,22 @@ def create_web_app(
                                 status_code=503,
                             )
 
-                    @app.post(
-                        "/api/v1/environment/earthquakes/{quake_id}/approve", response_model=None
-                    )
-                    async def environment_earthquake_approve(
-                        quake_id: int,
-                    ) -> dict[str, Any] | Response:
-                        try:
-                            return await seismic.approve(quake_id, alerts)
-                        except ValueError as error:
-                            return JSONResponse(
-                                {"error": {"code": "not_eligible", "message": str(error)}},
-                                status_code=422,
-                            )
+                    if alerts is not None:
+
+                        @app.post(
+                            "/api/v1/environment/earthquakes/{quake_id}/approve",
+                            response_model=None,
+                        )
+                        async def environment_earthquake_approve(
+                            quake_id: int,
+                        ) -> dict[str, Any] | Response:
+                            try:
+                                return await seismic.approve(quake_id, alerts)
+                            except ValueError as error:
+                                return JSONResponse(
+                                    {"error": {"code": "not_eligible", "message": str(error)}},
+                                    status_code=422,
+                                )
 
                     @app.post(
                         "/api/v1/environment/earthquakes/{quake_id}/dismiss", response_model=None
@@ -3114,7 +3117,7 @@ def create_web_app(
                 )
                 return {"items": [dict(row) for row in rows]}
 
-            if cap_alerts is not None:
+            if cap_alerts is not None and settings is not None:
 
                 @app.get("/api/v1/environment/alerts")
                 async def environment_alerts(include_expired: bool = False) -> dict[str, Any]:
@@ -3398,9 +3401,7 @@ def create_web_app(
                         quota_items_per_hour=peer.quota_items_per_hour,
                         relay_mail=peer.relay_mail,
                         quota_mail_per_hour=peer.quota_mail_per_hour,
-                        quota_mail_per_recipient_per_hour=(
-                            peer.quota_mail_per_recipient_per_hour
-                        ),
+                        quota_mail_per_recipient_per_hour=(peer.quota_mail_per_recipient_per_hour),
                         service_permissions=peer.service_permissions,
                         quota_services_per_hour=peer.quota_services_per_hour,
                         service_concurrency=peer.service_concurrency,
@@ -4004,7 +4005,8 @@ def create_web_app(
             channel: int | None = Query(None, ge=0, le=7),
             outcome: str | None = None,
         ) -> dict[str, Any]:
-            conditions, params = ["1=1"], []
+            conditions: list[str] = ["1=1"]
+            params: list[object] = []
             if direction is not None:
                 conditions.append("direction=?")
                 params.append(direction)
@@ -4037,7 +4039,8 @@ def create_web_app(
             state: str | None = None,
             member: int | None = None,
         ) -> dict[str, Any]:
-            conditions, params = ["1=1"], []
+            conditions: list[str] = ["1=1"]
+            params: list[object] = []
             if state is not None:
                 conditions.append("state=?")
                 params.append(state)

@@ -30,7 +30,9 @@ PROVIDER_REQUESTS = Counter(
 
 
 def _optional_float(value: object) -> float | None:
-    if value is None:
+    if value is None or isinstance(value, bool):
+        return None
+    if not isinstance(value, (str, int, float)):
         return None
     try:
         return float(value)

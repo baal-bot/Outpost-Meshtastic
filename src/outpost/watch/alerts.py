@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, cast
 
 from outpost.clock import Clock
 from outpost.config import Config, EscalationPolicy, EscalationStage
@@ -64,7 +64,7 @@ class AlertService:
         return f"{marker}{severity.upper()} {headline} {self.config.node.short_name}"
 
     def _policy(self, severity: str) -> EscalationPolicy:
-        return getattr(self.config.watch.escalation, severity)
+        return cast(EscalationPolicy, getattr(self.config.watch.escalation, severity))
 
     async def operational_json(self, alert: Alert) -> dict[str, Any]:
         value = alert.json()
@@ -132,14 +132,16 @@ class AlertService:
             if not rows:
                 raise ValueError("No active incident at that reference.")
             incident_id = int(rows[0]["id"])
-            lat = lat if lat is not None else rows[0]["lat"]
-            lon = lon if lon is not None else rows[0]["lon"]
+            if lat is None and rows[0]["lat"] is not None:
+                lat = float(rows[0]["lat"])
+            if lon is None and rows[0]["lon"] is not None:
+                lon = float(rows[0]["lon"])
         if (lat is None) != (lon is None):
             raise ValueError("Alert center requires both latitude and longitude.")
         if lat is not None:
             assert lon is not None
-        if lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180):
-            raise ValueError("Alert center is outside valid coordinate bounds.")
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise ValueError("Alert center is outside valid coordinate bounds.")
         if not 0.1 <= radius_km <= 100:
             raise ValueError("Alert radius must be between 0.1 and 100 km.")
         radius_m = round(radius_km * 1000) if lat is not None else None
@@ -269,6 +271,7 @@ class AlertService:
             return False
         stage = policy.stages[stage_index]
         repeat_count = alert.repeat_count
+        next_at: int | None
         delivery_key = f"alert:{alert.id}:stage:{stage_index}:repeat:{repeat_count}"
         delivery = await self._broadcast(
             alert,
@@ -365,15 +368,19 @@ class AlertService:
         if alert is None or alert.cancelled_at is not None:
             raise ValueError("No active alert.")
         now = int(self.clock.now().timestamp())
-        audiences = await self.database.read(
+        audience_rows = await self.database.read(
             "SELECT destination,channel FROM alert_audience WHERE alert_id=? "
             "ORDER BY destination,channel",
             (alert.id,),
         )
+        audiences: list[dict[str, str | int]] = [
+            {"destination": str(row["destination"]), "channel": int(row["channel"])}
+            for row in audience_rows
+        ]
         if not audiences:
             audiences = [
                 {"destination": "^all", "channel": channel}
-                for channel in json.loads(alert.channels)
+                for channel in cast(list[int], json.loads(alert.channels))
             ]
         text = f"ALL CLEAR {resolution[:120]} {self.config.node.short_name}"
         items = [

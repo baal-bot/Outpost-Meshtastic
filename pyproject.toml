@@ -71,4 +71,27 @@ ignore = ["S101"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-packages = ["outpost.transport", "outpost.router", "outpost.store", "outpost.security"]
+packages = ["outpost"]
+
+# Keep the remaining command-handler debt explicit. tools/check_mypy_ratchet.py
+# still checks these modules with strict settings and prevents any count increase.
+[[tool.mypy.overrides]]
+module = [
+  "outpost.__main__",
+  "outpost.commands.ai",
+  "outpost.commands.alerts",
+  "outpost.commands.bbs",
+  "outpost.commands.checkin",
+  "outpost.commands.core",
+  "outpost.commands.directory",
+  "outpost.commands.environment",
+  "outpost.commands.identity",
+  "outpost.commands.mail",
+  "outpost.commands.operator",
+  "outpost.commands.watch",
+]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["outpost.ai.providers.hailo_vlm"]
+disable_error_code = ["import-untyped"]

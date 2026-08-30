@@ -24,13 +24,16 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - run: >-
           ruff format --check src tests tools/build_release_metadata.py
-          tools/check_capabilities.py tools/check_ci_evidence.py tools/check_static_markup.py
+          tools/check_capabilities.py tools/check_ci_evidence.py tools/check_mypy_ratchet.py
+          tools/check_static_markup.py
           tools/verify_release.py deploy/configure.py deploy/render_avahi.py
       - run: >-
           ruff check src tests tools/build_release_metadata.py
-          tools/check_capabilities.py tools/check_ci_evidence.py tools/check_static_markup.py
+          tools/check_capabilities.py tools/check_ci_evidence.py tools/check_mypy_ratchet.py
+          tools/check_static_markup.py
           tools/verify_release.py deploy/configure.py deploy/render_avahi.py
       - run: mypy
+      - run: python tools/check_mypy_ratchet.py
       - run: python tools/check_capabilities.py --check
       - run: python tools/check_static_markup.py
       - run: pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json
@@ -44,7 +47,8 @@ jobs:
           deploy/rollback.sh deploy/update.sh
           deploy/smoke-package.sh tools/pre-push.sh
       - run: >-
-          python -m py_compile tools/check_ci_evidence.py tools/check_static_markup.py
+          python -m py_compile tools/check_ci_evidence.py tools/check_mypy_ratchet.py
+          tools/check_static_markup.py
           deploy/configure.py deploy/render_avahi.py
       - run: sh deploy/smoke-package.sh
       - if: matrix.python-version == '3.13'

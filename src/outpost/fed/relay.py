@@ -688,8 +688,7 @@ class FederationRelayService:
                     (origin,),
                 )
                 usage = await transaction.read(
-                    "SELECT accepted FROM fed_relay_usage WHERE peer_id=? "
-                    "AND window_start=?",
+                    "SELECT accepted FROM fed_relay_usage WHERE peer_id=? AND window_start=?",
                     (peer.id, stamp - stamp % 3600),
                 )
                 # Inbound admission and outbound forwarding are independent budgets. A noisy
@@ -1159,10 +1158,7 @@ class FederationRelayService:
             not rows
             or str(rows[0]["state"]) != "queued"
             or int(rows[0]["expires_at"]) <= stamp
-            or (
-                rows[0]["next_attempt_at"] is not None
-                and int(rows[0]["next_attempt_at"]) > stamp
-            )
+            or (rows[0]["next_attempt_at"] is not None and int(rows[0]["next_attempt_at"]) > stamp)
         ):
             return None
         route = set(json.loads(str(rows[0]["route_json"])))
@@ -1275,7 +1271,8 @@ class FederationRelayService:
         # deterministic. It adds up to 25 percent of the exponential delay.
         jitter_ceiling = max(1, base // 4)
         digest = hashlib.sha256(f"{envelope_id}:{attempts}".encode("ascii")).digest()
-        return base + int.from_bytes(digest[:2], "big") % (jitter_ceiling + 1)
+        delay: int = base + int.from_bytes(digest[:2], "big") % (jitter_ceiling + 1)
+        return delay
 
     @staticmethod
     async def _record_terminal_failure(
@@ -1314,9 +1311,7 @@ class FederationRelayService:
             ),
         )
 
-    async def mark_failed(
-        self, envelope_id: str, error: str, *, now: int | None = None
-    ) -> None:
+    async def mark_failed(self, envelope_id: str, error: str, *, now: int | None = None) -> None:
         stamp = int(self.clock.now().timestamp()) if now is None else now
         reason = error[:160] or "relay delivery failed"
         async with self.database.transaction() as transaction:

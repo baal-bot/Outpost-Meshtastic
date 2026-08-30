@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -124,9 +125,7 @@ class FederationPeerService:
             relay_alerts=bool(row["relay_alerts"]),
             relay_mail=bool(row["relay_mail"]),
             quota_mail_per_hour=int(row["quota_mail_per_hour"]),
-            quota_mail_per_recipient_per_hour=int(
-                row["quota_mail_per_recipient_per_hour"]
-            ),
+            quota_mail_per_recipient_per_hour=int(row["quota_mail_per_recipient_per_hour"]),
             quota_items_per_hour=int(row["quota_items_per_hour"]),
             policy_configured=bool(row["policy_configured"]),
             policy_applied_by=row["policy_applied_by"],
@@ -392,7 +391,7 @@ class FederationPeerService:
         self,
         mesh_id: str,
         *,
-        boards: list[str],
+        boards: Sequence[str],
         sync_incidents: bool,
         relay_alerts: bool,
         quota_items_per_hour: int,
@@ -402,14 +401,14 @@ class FederationPeerService:
         relay_mail: bool = False,
         quota_mail_per_hour: int = 20,
         quota_mail_per_recipient_per_hour: int | None = None,
-        service_permissions: list[str] | None = None,
+        service_permissions: Sequence[str] | None = None,
         quota_services_per_hour: int | None = None,
         service_concurrency: int | None = None,
         service_max_response_bytes: int | None = None,
         service_airtime_seconds_per_hour: float | None = None,
         applied_by: str = "web:operator",
         policy_review_at: int | None = None,
-        enable_boards: list[str] | None = None,
+        enable_boards: Sequence[str] | None = None,
         confirm_enable_boards: bool = False,
     ) -> Peer:
         peer = await self.by_mesh_id(mesh_id)

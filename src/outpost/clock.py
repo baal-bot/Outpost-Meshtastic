@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 
@@ -32,7 +32,7 @@ class VirtualClock:
         return self.value
 
     def now(self) -> datetime:
-        return self.epoch + __import__("datetime").timedelta(seconds=self.value)
+        return self.epoch + timedelta(seconds=self.value)
 
     async def sleep(self, seconds: float) -> None:
         self.advance(seconds)

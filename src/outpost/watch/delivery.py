@@ -47,6 +47,7 @@ class AudienceNotifier:
     ) -> list[str]:
         if audience == "all":
             return ["^all"]
+        roles: tuple[str, ...]
         if audience == "responders":
             roles = ("responder", "operator")
         elif audience == "trusted":

@@ -48,9 +48,7 @@ async def test_encrypted_mail_relay_delivers_to_local_member_once(tmp_path) -> N
 async def test_inbound_mail_enforces_peer_and_recipient_quotas_without_spending_outbound(
     tmp_path,
 ) -> None:
-    sender_db, receiver_db = Database(tmp_path / "sender.db"), Database(
-        tmp_path / "receiver.db"
-    )
+    sender_db, receiver_db = Database(tmp_path / "sender.db"), Database(tmp_path / "receiver.db")
     await sender_db.open()
     await receiver_db.open()
     sender_peers = FederationPeerService(sender_db, VirtualClock(), "!aaaaaaaa")

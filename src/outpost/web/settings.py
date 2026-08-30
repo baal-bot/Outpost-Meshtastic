@@ -99,7 +99,9 @@ class RuntimeSettings:
             """,
             (current_actor_ref(), json.dumps(sorted(values)), now),
         )
-        return self.redacted()["node"]
+        node = self.redacted()["node"]
+        assert isinstance(node, dict)
+        return node
 
     async def update_watch(self, values: dict[str, Any]) -> dict[str, Any]:
         allowed = {
@@ -138,4 +140,6 @@ class RuntimeSettings:
             """,
             (current_actor_ref(), json.dumps(sorted(values)), now),
         )
-        return self.redacted()["watch"]
+        watch = self.redacted()["watch"]
+        assert isinstance(watch, dict)
+        return watch

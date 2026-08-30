@@ -167,9 +167,10 @@ class WebAuthService:
         ]
         if not overages:
             return 0
-        return min(
+        delay: int = min(
             self.throttle_max_seconds, self.throttle_base_seconds * 2 ** min(8, max(overages))
         )
+        return delay
 
     async def _record_login_attempt(
         self, *, source: str, username: str, successful: bool, now: int
@@ -409,26 +410,27 @@ class WebAuthService:
             "SELECT * FROM web_account WHERE username=? COLLATE NOCASE", (clean_username,)
         )
         account = rows[0] if rows else None
-        password_valid = self._password_valid(
-            str(account["password_hash"]) if account else self._dummy_hash, password
-        )
-        bootstrap = bool(account and account["must_change"])
-        active = bool(
-            account
-            and account["enabled"]
-            and (
-                not bootstrap
-                or (
-                    account["bootstrap_expires_at"] is None
+        if account is None:
+            password_hash = self._dummy_hash
+            bootstrap = False
+            active = False
+        else:
+            password_hash = str(account["password_hash"])
+            bootstrap = bool(account["must_change"])
+            active = bool(
+                account["enabled"]
+                and (
+                    not bootstrap
+                    or account["bootstrap_expires_at"] is None
                     or (
                         int(account["bootstrap_expires_at"]) > now
                         and account["bootstrap_consumed_at"] is None
                     )
                 )
             )
-        )
+        password_valid = self._password_valid(password_hash, password)
         valid = bool(password_valid and active)
-        if valid and account["totp_secret"]:
+        if valid and account is not None and account["totp_secret"]:
             if not code:
                 return MfaChallenge(str(account["username"]))
             valid = await self._mfa_valid(account, code, now)
@@ -637,7 +639,13 @@ class WebAuthService:
                     ),
                 }
             )
-        identities.sort(key=lambda item: (-int(item["failures"]), str(item["username"])))
+
+        def identity_order(item: dict[str, object]) -> tuple[int, str]:
+            failures = item["failures"]
+            assert isinstance(failures, int)
+            return -failures, str(item["username"])
+
+        identities.sort(key=identity_order)
         globally_throttled = len(global_times) >= self.global_failure_limit
         return {
             "window_seconds": self.failure_window_seconds,
@@ -656,9 +664,12 @@ class WebAuthService:
         self, login_security: dict[str, object] | None = None
     ) -> list[dict[str, object]]:
         security = login_security or await self.login_security_status()
+        raw_identities = security.get("identities", [])
+        if not isinstance(raw_identities, list):
+            raw_identities = []
         identity_security = {
             str(item["username"]).casefold(): item
-            for item in security.get("identities", [])
+            for item in raw_identities
             if isinstance(item, dict)
         }
         rows = await self.database.read(

@@ -200,8 +200,7 @@ class FederationMailService:
             if concurrent:
                 return relay_id, str(concurrent[0]["state"])
             usage = await transaction.read(
-                "SELECT inbound_accepted FROM fed_mail_usage "
-                "WHERE peer_id=? AND window_start=?",
+                "SELECT inbound_accepted FROM fed_mail_usage WHERE peer_id=? AND window_start=?",
                 (peer.id, window),
             )
             recipient_usage = await transaction.read(

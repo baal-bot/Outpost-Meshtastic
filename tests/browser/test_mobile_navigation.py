@@ -1394,9 +1394,7 @@ def test_federation_resource_limits_surface_mail_rejections_and_stopped_reconcil
         lambda route: route.fulfill(
             status=200,
             content_type="application/json",
-            body=json.dumps(
-                {"items": [stopped], "outbound": {"frames_24h": 0, "last_at": None}}
-            ),
+            body=json.dumps({"items": [stopped], "outbound": {"frames_24h": 0, "last_at": None}}),
         ),
     )
     page.route(

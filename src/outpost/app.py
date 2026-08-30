@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import json
 import secrets
@@ -82,7 +83,6 @@ from outpost.task_supervision import TaskFailureDomain, restart_delay
 from outpost.transport.chunker import chunk_text
 from outpost.transport.governor import (
     AirtimeGovernor,
-    GovernorConfigurationError,
     OutboundItem,
 )
 from outpost.transport.inbound import InboundPipeline
@@ -105,6 +105,19 @@ from outpost.watch.incidents import Incident
 from outpost.web.api import create_web_app
 from outpost.web.auth import WebAuthService
 from outpost.web.settings import RuntimeSettings
+
+
+def _int_value(value: object) -> int:
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        raise TypeError("value is not numeric")
+    return int(value)
+
+
+def _float_value(value: object) -> float:
+    if not isinstance(value, (str, int, float)):
+        raise TypeError("value is not numeric")
+    return float(value)
+
 
 _INBOUND_LOG_ID: ContextVar[int | None] = ContextVar("outpost_inbound_log_id", default=None)
 _MAX_RECONCILIATION_ROUNDS = 16
@@ -425,7 +438,7 @@ class OutpostApp:
             if failure_domain is TaskFailureDomain.CORE:
                 raise failure
             health = self._record_task_failure(name, failure)
-            consecutive = int(health["consecutive_failures"])
+            consecutive = _int_value(health["consecutive_failures"])
             delay, circuit_open = restart_delay(failure_domain, consecutive)
             health.update(
                 {
@@ -447,7 +460,7 @@ class OutpostApp:
                     "state": "restarting",
                     "last_started_at": now,
                     "stopped_at": None,
-                    "restart_count": int(health["restart_count"]) + 1,
+                    "restart_count": _int_value(health["restart_count"]) + 1,
                     "next_retry_at": None,
                     "circuit_open": False,
                 }
@@ -466,8 +479,8 @@ class OutpostApp:
                 "stopped_at": now,
                 "error": detail,
                 "degraded_reason": detail,
-                "failure_count": int(health["failure_count"]) + 1,
-                "consecutive_failures": int(health["consecutive_failures"]) + 1,
+                "failure_count": _int_value(health["failure_count"]) + 1,
+                "consecutive_failures": _int_value(health["consecutive_failures"]) + 1,
                 "last_error": detail,
                 "last_error_at": now,
                 "next_retry_at": None,
@@ -487,7 +500,7 @@ class OutpostApp:
                 "state": "degraded",
                 "error": detail,
                 "degraded_reason": detail,
-                "degradation_count": int(health["degradation_count"]) + 1,
+                "degradation_count": _int_value(health["degradation_count"]) + 1,
                 "last_error": detail,
                 "last_error_at": now,
             }
@@ -794,7 +807,7 @@ class OutpostApp:
             *[
                 self._start_background_task(
                     f"inbound-worker-{worker}",
-                    lambda worker=worker: self._inbound_worker(worker),
+                    functools.partial(self._inbound_worker, worker),
                     TaskFailureDomain.CORE,
                 )
                 for worker in range(1, self.config.router.inbound_workers + 1)
@@ -1123,8 +1136,8 @@ class OutpostApp:
     ) -> tuple[dict[str, object], str]:
         if service in {"weather", "alerts"}:
             try:
-                lat, lon = round(float(args["lat"]), 4), round(float(args["lon"]), 4)
-            except GovernorConfigurationError as error:
+                lat, lon = round(_float_value(args["lat"]), 4), round(_float_value(args["lon"]), 4)
+            except (KeyError, TypeError, ValueError) as error:
                 raise ValueError(f"{service} coordinates are required") from error
             if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                 raise ValueError(f"invalid {service} coordinates")
@@ -1170,8 +1183,8 @@ class OutpostApp:
             if not self.config.modules.env.enabled:
                 raise ValueError("environment module is disabled")
             location = self.config.node.location
-            lat = float(args.get("lat", location.lat if location else 0))
-            lon = float(args.get("lon", location.lon if location else 0))
+            lat = _float_value(args.get("lat", location.lat if location else 0))
+            lon = _float_value(args.get("lon", location.lon if location else 0))
             if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                 raise ValueError("invalid weather coordinates")
             snapshot = await self.weather.current(lat, lon)
@@ -1202,7 +1215,7 @@ class OutpostApp:
             if not self.config.modules.env.enabled:
                 raise ValueError("environment module is disabled")
             try:
-                lat, lon = float(args["lat"]), float(args["lon"])
+                lat, lon = _float_value(args["lat"]), _float_value(args["lon"])
             except (KeyError, TypeError, ValueError) as error:
                 raise ValueError("alert coordinates are required") from error
             result, provenance = await self.cap_alerts.query_point(lat, lon)
@@ -1470,9 +1483,7 @@ class OutpostApp:
         }
         await self._store_reconciliation_checkpoint(peer_id, stopped, now)
 
-    async def _handle_sync_manifest(
-        self, sender: str, value: dict[str, object]
-    ) -> None:
+    async def _handle_sync_manifest(self, sender: str, value: dict[str, object]) -> None:
         manifest = value.get("items", [])
         if not isinstance(manifest, list):
             raise ValueError("invalid sync manifest")
@@ -1535,16 +1546,17 @@ class OutpostApp:
             for item in manifest:
                 if not isinstance(item, dict):
                     raise ValueError("peer supplied an invalid reconciliation page item")
-                page_cursors.append(
-                    self._reconciliation_cursor(
-                        [
-                            item.get("version", item.get("v")),
-                            item.get("stream", item.get("s")),
-                            item.get("uid", item.get("u")),
-                        ],
-                        "page",
-                    )
+                item_cursor = self._reconciliation_cursor(
+                    [
+                        item.get("version", item.get("v")),
+                        item.get("stream", item.get("s")),
+                        item.get("uid", item.get("u")),
+                    ],
+                    "page",
                 )
+                if item_cursor is None:
+                    raise ValueError("peer supplied an invalid reconciliation page cursor")
+                page_cursors.append(item_cursor)
         except ValueError as error:
             reason = str(error)
             await self._stop_reconciliation(
@@ -1556,7 +1568,7 @@ class OutpostApp:
                 now=now,
             )
             raise
-        if any(int(cursor[0]) > snapshot for cursor in page_cursors) or any(
+        if any(_int_value(cursor[0]) > snapshot for cursor in page_cursors) or any(
             tuple(current) >= tuple(prior)
             for prior, current in zip(page_cursors, page_cursors[1:], strict=False)
         ):
@@ -1705,7 +1717,9 @@ class OutpostApp:
             continuation_due = continuing and not pending and not stopped and now - updated_at >= 30
             if stopped:
                 try:
-                    resume_after = int(checkpoint.get("resume_after") or updated_at + interval)
+                    resume_after = _int_value(
+                        checkpoint.get("resume_after") or updated_at + interval
+                    )
                 except (TypeError, ValueError):
                     resume_after = updated_at + interval
                 if now < resume_after:
@@ -1718,14 +1732,14 @@ class OutpostApp:
                     continue
             elif not periodic_due:
                 continue
-            snapshot = int(checkpoint.get("snapshot") or now)
+            snapshot = _int_value(checkpoint.get("snapshot") or now)
             if not continuing:
                 cursor = None
                 snapshot = now
             new_cycle = stopped or not continuing
             try:
-                used = 0 if new_cycle else max(0, int(checkpoint.get("used", 0)))
-                rounds = 0 if new_cycle else max(0, int(checkpoint.get("rounds", 0)))
+                used = 0 if new_cycle else max(0, _int_value(checkpoint.get("used", 0)))
+                rounds = 0 if new_cycle else max(0, _int_value(checkpoint.get("rounds", 0)))
             except (TypeError, ValueError):
                 used, rounds = 0, 0
             budget = self.config.fed.max_items_per_cycle
@@ -1930,9 +1944,7 @@ class OutpostApp:
                             continue
                         await self._queue_trusted_federation_frames(frames)
                     except (FrameError, ValueError) as error:
-                        await self.federation_relay.mark_failed(
-                            envelope_id, str(error), now=now
-                        )
+                        await self.federation_relay.mark_failed(envelope_id, str(error), now=now)
             self._task_progress("federation-relay")
             await self.clock.sleep(30)
 
@@ -2155,19 +2167,19 @@ class OutpostApp:
                     {"mesh_id": self.federation.local_mesh_id, "sent": sent},
                 )
             elif msg_type is MessageType.ITEM:
-                item = value.get("item")
-                if not isinstance(item, dict):
+                incoming_item = value.get("item")
+                if not isinstance(incoming_item, dict):
                     raise ValueError("invalid federation item")
                 peer = await self.federation.by_mesh_id(sender)
                 received = False
                 if not replayed_item:
                     received = await self.federation_sync.quarantine(
-                        peer, item, int(self.clock.now().timestamp())
+                        peer, incoming_item, int(self.clock.now().timestamp())
                     )
-                if received and str(item.get("stream", "")).startswith("board:"):
-                    payload = item.get("payload")
+                if received and str(incoming_item.get("stream", "")).startswith("board:"):
+                    payload = incoming_item.get("payload")
                     if isinstance(payload, dict):
-                        slug = str(item["stream"])[6:]
+                        slug = str(incoming_item["stream"])[6:]
                         approved = await self.federation_sync.approved_thread(
                             slug, str(payload.get("thread_uid", ""))
                         )
@@ -2175,7 +2187,11 @@ class OutpostApp:
                             inbox = await self.database.read(
                                 "SELECT id FROM fed_inbox_item WHERE peer_id=? AND stream=? "
                                 "AND uid=? AND state='pending'",
-                                (peer.id, str(item["stream"]), str(item.get("uid", ""))),
+                                (
+                                    peer.id,
+                                    str(incoming_item["stream"]),
+                                    str(incoming_item.get("uid", "")),
+                                ),
                             )
                             if inbox:
                                 await self.federation_sync.import_inbox(
@@ -2185,14 +2201,18 @@ class OutpostApp:
                                 )
                 receipt = await self.database.read(
                     "SELECT state FROM fed_inbox_item WHERE peer_id=? AND stream=? AND uid=?",
-                    (peer.id, str(item.get("stream", "")), str(item.get("uid", ""))),
+                    (
+                        peer.id,
+                        str(incoming_item.get("stream", "")),
+                        str(incoming_item.get("uid", "")),
+                    ),
                 )
                 if receipt:
                     await self._send_federation_value(
                         sender,
                         MessageType.ITEM_RECEIPT,
                         {
-                            "uid": str(item.get("uid", "")),
+                            "uid": str(incoming_item.get("uid", "")),
                             "state": str(receipt[0]["state"]),
                         },
                     )
@@ -2265,9 +2285,7 @@ class OutpostApp:
                     envelope_id, state = await self.federation_relay.accept(
                         sender,
                         envelope,
-                        transport=(
-                            "mqtt" if getattr(message, "via_mqtt", False) else "radio"
-                        ),
+                        transport=("mqtt" if getattr(message, "via_mqtt", False) else "radio"),
                     )
                 except ValueError as error:
                     rejected_id = envelope.get("envelope_id")
@@ -2477,7 +2495,11 @@ class OutpostApp:
                 ),
             )
             return
-        ok, result, provenance, error, provider_failed = True, {}, {}, None, False
+        ok = True
+        result: dict[str, object] = {}
+        provenance: dict[str, object] = {}
+        error: str | None = None
+        provider_failed = False
         try:
             result, provenance = await self._execute_peer_service(service, normalized_args)
             if service == "alerts" and result.get("status") == "provider_failure":
@@ -2902,10 +2924,10 @@ class OutpostApp:
                 last_heard_snr=message.rx_snr,
                 hops_away=message.hops_away,
             )
-            incident, created = await self.incidents.emergency_trigger(
+            incident, incident_created = await self.incidents.emergency_trigger(
                 member, message.text, self.config.watch.emergency_cooldown_minutes
             )
-            if created:
+            if incident_created:
                 await self._notify_emergency_responders(incident, member.mesh_id)
             response = Response(
                 ResponseKind.ACK,
@@ -2924,7 +2946,7 @@ class OutpostApp:
                 if pending_report is None:
                     response = await self.router.dispatch(message, ordered=ordered)
                 else:
-                    created, similar = pending_report
+                    created_incident, similar = pending_report
                     if similar is not None:
                         response = Response(
                             ResponseKind.DETAIL,
@@ -2936,13 +2958,14 @@ class OutpostApp:
                             ],
                         )
                     else:
-                        assert created is not None
+                        assert created_incident is not None
                         response = Response(
                             ResponseKind.ACK,
                             [
                                 Line(
-                                    f"✓ INC {created.local_ref} {created.type} · shared GPS "
-                                    f"{created.lat:.3f},{created.lon:.3f}"
+                                    f"✓ INC {created_incident.local_ref} "
+                                    f"{created_incident.type} · shared GPS "
+                                    f"{created_incident.lat:.3f},{created_incident.lon:.3f}"
                                 )
                             ],
                         )

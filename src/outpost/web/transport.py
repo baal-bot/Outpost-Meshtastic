@@ -43,7 +43,7 @@ def _trusted_source(source: object, networks: tuple[Any, ...]) -> bool:
 
 
 def _single_forwarded_value(scope: Scope, name: bytes) -> str | None:
-    values = [
+    values: list[str] = [
         value.decode("latin1").strip()
         for key, value in scope.get("headers", [])
         if key.lower() == name

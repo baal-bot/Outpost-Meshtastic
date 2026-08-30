@@ -166,6 +166,7 @@ async def test_read_only_bbs_api_is_paginated_and_never_exposes_channel_keys(tmp
     await database.write("UPDATE member SET handle='dana',trust='member' WHERE id=?", (member.id,))
     await MemberRepo(database, VirtualClock()).resolve("!00000002")
     client = TestClient(create_web_app(lambda: {"radio": "up"}, database))
+    assert client.get("/api/v1/environment/weather").status_code == 404
 
     await database.write(
         "INSERT INTO safety_floor_attempt(member_mesh_id,command,fingerprint,first_seen_at,"

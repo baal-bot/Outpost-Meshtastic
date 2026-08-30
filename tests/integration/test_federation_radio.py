@@ -409,9 +409,7 @@ async def test_legitimate_reconciliation_walk_completes_within_local_budget(tmp_
         now,
     )
 
-    async def accept_control(
-        peer_id: str, msg_type: MessageType, value: dict[str, object]
-    ) -> bool:
+    async def accept_control(peer_id: str, msg_type: MessageType, value: dict[str, object]) -> bool:
         return True
 
     app._queue_federation_control = accept_control  # type: ignore[method-assign]
@@ -445,9 +443,9 @@ async def test_legitimate_reconciliation_walk_completes_within_local_budget(tmp_
     )
     assert stored["status"] == "complete"
     assert stored["used"] == 5 and stored["rounds"] == 2
-    assert (
-        await app.database.read("SELECT last_sync_at FROM fed_peer WHERE id=?", (peer.id,))
-    )[0]["last_sync_at"] == now
+    assert (await app.database.read("SELECT last_sync_at FROM fed_peer WHERE id=?", (peer.id,)))[0][
+        "last_sync_at"
+    ] == now
     await app.database.close()
 
 
@@ -471,9 +469,7 @@ async def test_reconciliation_round_ceiling_is_local_and_independent_of_peer_bud
         now,
     )
 
-    async def accept_control(
-        peer_id: str, msg_type: MessageType, value: dict[str, object]
-    ) -> bool:
+    async def accept_control(peer_id: str, msg_type: MessageType, value: dict[str, object]) -> bool:
         return True
 
     app._queue_federation_control = accept_control  # type: ignore[method-assign]

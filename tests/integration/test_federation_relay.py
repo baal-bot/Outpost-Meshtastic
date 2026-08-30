@@ -388,12 +388,7 @@ async def test_outbound_saturation_does_not_starve_inbound_and_defers_to_rollove
     assert (await a_relay.accept(B, await b_relay.wire(incoming)))[1] == "delivered"
     usage = (await a_db.read("SELECT accepted,forwarded FROM fed_relay_usage"))[0]
     assert (usage["accepted"], usage["forwarded"]) == (1, 1)
-    assert (
-        await a_relay.reserve_forward(
-            second, B, 1.0, now=deferred["next_attempt_at"]
-        )
-        is True
-    )
+    assert await a_relay.reserve_forward(second, B, 1.0, now=deferred["next_attempt_at"]) is True
     await a_db.close()
     await b_db.close()
 
@@ -424,12 +419,15 @@ async def test_forward_failures_back_off_then_become_operator_visible_terminal_f
             assert item["history"][0]["event_kind"] == "delivery_failed"
 
     assert delays == sorted(delays)
-    assert len(
-        await database.read(
-            "SELECT 1 FROM mail WHERE conversation_key=?",
-            (f"system:relay-failure:{envelope_id}",),
+    assert (
+        len(
+            await database.read(
+                "SELECT 1 FROM mail WHERE conversation_key=?",
+                (f"system:relay-failure:{envelope_id}",),
+            )
         )
-    ) == 1
+        == 1
+    )
     await database.close()
 
 
