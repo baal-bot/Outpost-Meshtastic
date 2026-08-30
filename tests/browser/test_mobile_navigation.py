@@ -9,13 +9,14 @@ import socket
 import threading
 import time
 from collections.abc import Iterator
+from itertools import combinations
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 import uvicorn
 from axe_playwright_python.sync_playwright import Axe
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from outpost.config import WebConfig
 from outpost.web.api import create_web_app
@@ -49,17 +50,26 @@ DESTINATIONS = (
 )
 OPERATOR_PAGES = tuple(dict.fromkeys(target.split("#", 1)[0] for _label, target in DESTINATIONS))
 THEMES = ("dark", "daylight", "night")
+# A 64x48 preview preserves component geometry while smoothing subpixel font rasterization.
+# Two independent full-matrix renders stay within these limits; the nearest distinct-page
+# baseline has mean delta 5.07 and 7.7% materially changed channels, leaving a 2x margin.
+VISUAL_PREVIEW_SIZE = (64, 48)
+VISUAL_MEAN_DELTA_LIMIT = 2.5
+VISUAL_CHANNEL_DELTA = 16
+VISUAL_CHANGED_RATIO_LIMIT = 0.03
 VISUAL_PAGES = (
     ("overview", "/"),
     ("members", "/operator.html"),
     ("bbs", "/bbs.html"),
     ("mail", "/mail.html"),
     ("watch", "/watch.html"),
+    ("sitrep", "/sitrep.html"),
     ("environment", "/environment.html"),
     ("radio", "/radio.html"),
     ("federation", "/federation.html"),
     ("access", "/access.html"),
     ("backups", "/backups.html"),
+    ("ai", "/ai.html"),
 )
 VISUAL_VIEWPORTS = (
     ("mobile", 390, 844),
@@ -124,10 +134,12 @@ def visual_signature(png: bytes) -> dict[str, object]:
     """Create a renderer-tolerant perceptual baseline without committing large PNGs."""
     with Image.open(io.BytesIO(png)) as source:
         image = source.convert("RGB")
-        preview = image.resize((32, 24), Image.Resampling.LANCZOS)
+        preview = image.resize(VISUAL_PREVIEW_SIZE, Image.Resampling.LANCZOS)
         return {
             "width": image.width,
             "height": image.height,
+            "preview_width": preview.width,
+            "preview_height": preview.height,
             "preview": base64.b64encode(preview.tobytes()).decode("ascii"),
         }
 
@@ -139,14 +151,20 @@ def assert_visual_signature(
         expected["width"],
         expected["height"],
     ), key
+    assert (current["preview_width"], current["preview_height"]) == (
+        expected["preview_width"],
+        expected["preview_height"],
+    ), key
     current_bytes = base64.b64decode(str(current["preview"]))
     expected_bytes = base64.b64decode(str(expected["preview"]))
     assert len(current_bytes) == len(expected_bytes)
     deltas = [abs(left - right) for left, right in zip(current_bytes, expected_bytes, strict=True)]
     mean_delta = sum(deltas) / len(deltas)
-    changed_ratio = sum(delta > 32 for delta in deltas) / len(deltas)
-    assert mean_delta <= 12, f"{key}: mean screenshot delta {mean_delta:.2f} exceeds 12"
-    assert changed_ratio <= 0.18, (
+    changed_ratio = sum(delta > VISUAL_CHANNEL_DELTA for delta in deltas) / len(deltas)
+    assert mean_delta <= VISUAL_MEAN_DELTA_LIMIT, (
+        f"{key}: mean screenshot delta {mean_delta:.2f} exceeds {VISUAL_MEAN_DELTA_LIMIT}"
+    )
+    assert changed_ratio <= VISUAL_CHANGED_RATIO_LIMIT, (
         f"{key}: {changed_ratio:.1%} of screenshot channels changed materially"
     )
 
@@ -710,6 +728,36 @@ def route_visual_content_api(page: object) -> None:
         },
     )
 
+    fulfill(
+        "**/api/v1/sitrep*",
+        {
+            "generated_at": 2_000_000_000,
+            "capability": "Deterministic local briefing",
+            "digest": "browser-test-briefing",
+            "items": [],
+            "changes": [],
+            "sources": [],
+            "sections": [],
+            "ai": {"requested": False, "cached": False, "outcome": "not_requested"},
+        },
+    )
+    fulfill(
+        "**/api/v1/ai/status",
+        {
+            "provider": "local",
+            "external": False,
+            "model": "field-model",
+            "health": {"state": "healthy"},
+            "capabilities": {"context_tokens": 2048},
+            "queue": {"active_and_waiting": 0, "capacity": 4},
+            "generation": {"working": True, "last_success_at": 2_000_000_000},
+            "circuit": {"open": False},
+        },
+    )
+    fulfill("**/api/v1/ai/kb*", {"items": []})
+    fulfill("**/api/v1/ai/refusal-rules*", {"items": []})
+    fulfill("**/api/v1/ai/interactions*", {"items": []})
+
     fulfill("**/api/v1/auth/accounts", {"items": []})
     fulfill("**/api/v1/auth/sessions", {"items": [], "count": 0})
     fulfill("**/api/v1/backups", {"items": []})
@@ -738,6 +786,11 @@ def test_operator_styles_follow_static_component_contract() -> None:
         for theme in THEMES
     }
     assert set(json.loads(VISUAL_BASELINES.read_text())) == expected_baselines
+    visual_files = {
+        "index.html" if target == "/" else target.removeprefix("/")
+        for _page_name, target in VISUAL_PAGES
+    }
+    assert visual_files == {path.name for path in STATIC_ROOT.glob("*.html")}
 
     for _page_name, target in VISUAL_PAGES:
         filename = "index.html" if target == "/" else target.removeprefix("/")
@@ -782,6 +835,85 @@ def test_operator_styles_follow_static_component_contract() -> None:
         source = script.read_text()
         assert 'createElement("link")' not in source, script.name
         assert "createElement('link')" not in source, script.name
+
+
+def _visual_signatures_match(left: dict[str, object], right: dict[str, object]) -> bool:
+    try:
+        assert_visual_signature(left, right, key="cross-comparison")
+    except AssertionError:
+        return False
+    return True
+
+
+def test_visual_baseline_matrix_discriminates_pages_and_themes() -> None:
+    baselines: dict[str, dict[str, object]] = json.loads(VISUAL_BASELINES.read_text())
+    assert all(_visual_signatures_match(signature, signature) for signature in baselines.values())
+
+    page_cross_matches: list[str] = []
+    theme_cross_matches: list[str] = []
+    for left_key, right_key in combinations(baselines, 2):
+        left_page, left_viewport, left_theme = left_key.split("/")
+        right_page, right_viewport, right_theme = right_key.split("/")
+        if left_viewport != right_viewport:
+            continue
+        matches = _visual_signatures_match(baselines[left_key], baselines[right_key])
+        if left_theme == right_theme and left_page != right_page and matches:
+            page_cross_matches.append(f"{left_key} = {right_key}")
+        if left_page == right_page and left_theme != right_theme and matches:
+            theme_cross_matches.append(f"{left_key} = {right_key}")
+
+    assert page_cross_matches == []
+    assert theme_cross_matches == []
+
+
+@pytest.fixture
+def broken_flex_screenshots() -> tuple[bytes, bytes]:
+    """Stable control proving a two-column-to-stacked layout regression is detected."""
+
+    def render(*, broken: bool) -> bytes:
+        image = Image.new("RGB", (640, 480), "#071411")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 0, 110, 480), fill="#0b1d18")
+        draw.rectangle((130, 24, 615, 62), fill="#112821")
+
+        def panel(bounds: tuple[int, int, int, int], fill: str) -> None:
+            left, top, right, bottom = bounds
+            draw.rounded_rectangle(bounds, 8, fill=fill, outline="#28443b", width=2)
+            draw.rectangle(
+                (left + 18, top + 18, min(right - 18, left + 140), top + 25), fill="#a9e27c"
+            )
+            for offset, width in ((48, 0.82), (66, 0.66), (84, 0.74), (112, 0.48)):
+                line_right = left + int((right - left - 36) * width)
+                draw.rectangle(
+                    (left + 18, top + offset, line_right, top + offset + 5), fill="#9aada5"
+                )
+            draw.rectangle(
+                (left + 18, bottom - 42, min(right - 18, left + 115), bottom - 18),
+                fill="#286b45",
+            )
+
+        if broken:
+            panel((130, 85, 615, 225), "#112821")
+            panel((130, 242, 615, 382), "#0b1d18")
+        else:
+            panel((130, 85, 365, 382), "#112821")
+            panel((380, 85, 615, 382), "#0b1d18")
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    return render(broken=False), render(broken=True)
+
+
+def test_visual_comparator_rejects_broken_flex_fixture(
+    broken_flex_screenshots: tuple[bytes, bytes],
+) -> None:
+    expected, broken = broken_flex_screenshots
+
+    with pytest.raises(AssertionError):
+        assert_visual_signature(
+            visual_signature(broken), visual_signature(expected), key="broken-flex-control"
+        )
 
 
 def test_operator_gets_one_nonblocking_http_boundary_notice(
@@ -994,15 +1126,23 @@ def test_operator_page_visual_baseline_and_browser_health(
     health = BrowserHealth(page)
     key = f"{page_name}/{viewport_name}/{theme}"
     try:
-        page.goto(f"{dashboard_url}{target}", wait_until="networkidle")
+        page.goto(f"{dashboard_url}{target}", wait_until="domcontentloaded")
         wait_for_navigation(page)
+        page.wait_for_timeout(100)
         page.add_style_tag(
             content=(
                 "*,*::before,*::after{animation:none!important;transition:none!important;}"
                 "input,textarea{caret-color:transparent!important;}"
             )
         )
-        page.evaluate("document.fonts.ready")
+        page.evaluate(
+            """async () => {
+              await document.fonts.ready;
+              await new Promise(resolve => requestAnimationFrame(
+                () => requestAnimationFrame(resolve)
+              ));
+            }"""
+        )
         page.evaluate("window.scrollTo(0, 0)")
 
         overflow = page.evaluate(
