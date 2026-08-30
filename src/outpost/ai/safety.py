@@ -3,8 +3,10 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from string import Formatter
 
-from outpost.ai.budget import EvidenceChunk
+from outpost.ai.budget import EVIDENCE_PREAMBLE, EvidenceChunk
+from outpost.ai.prompts import SITUATION_PROMPT, SYSTEM_PROMPT, UNGROUNDED_PROMPT
 
 _URL = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
 _CITATION = re.compile(r"\bsrc:\s*([^\s,;]+)", re.IGNORECASE)
@@ -15,11 +17,33 @@ _INJECTION = re.compile(
     r"reply\s+only\s+|use\s+src\s+fake)",
     re.IGNORECASE,
 )
-_SYSTEM_LEAK = re.compile(
-    r"(?:EVIDENCE \(UNTRUSTED DATA|You are .{0,80}assistant for a local community radio|"
-    r"No greetings, no sign-offs|system prompt)",
-    re.IGNORECASE,
+
+
+def _prompt_shingles(*prompts: str, words: int = 6) -> frozenset[str]:
+    """Derive stable contiguous leak signatures from literal prompt text."""
+    values: set[str] = set()
+    for prompt in prompts:
+        for literal, _field, _format, _conversion in Formatter().parse(prompt):
+            tokens = re.findall(r"[a-z0-9]+", literal.casefold())
+            values.update(
+                " ".join(tokens[index : index + words]) for index in range(len(tokens) - words + 1)
+            )
+    return frozenset(values)
+
+
+_PROMPT_LEAK_SHINGLES = _prompt_shingles(
+    SYSTEM_PROMPT,
+    UNGROUNDED_PROMPT,
+    SITUATION_PROMPT,
+    EVIDENCE_PREAMBLE,
 )
+
+
+def contains_prompt_leak(text: str) -> bool:
+    normalized = " ".join(re.findall(r"[a-z0-9]+", text.casefold()))
+    return "system prompt" in normalized or any(
+        fragment in normalized for fragment in _PROMPT_LEAK_SHINGLES
+    )
 
 
 @dataclass(frozen=True)
@@ -136,7 +160,7 @@ def postfilter(
         return FilteredOutput(False, None, "empty")
     if _URL.search(text):
         return FilteredOutput(False, None, "url")
-    if _SYSTEM_LEAK.search(text):
+    if contains_prompt_leak(text):
         return FilteredOutput(False, None, "system_prompt_leak")
     expected_marker = "[AI]" if grounded else "[AI?]"
     if not text.startswith(expected_marker):

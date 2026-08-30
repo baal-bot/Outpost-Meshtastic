@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from outpost.ai.budget import EvidenceChunk
+from outpost.ai.prompts import SITUATION_PROMPT, SYSTEM_PROMPT, UNGROUNDED_PROMPT
 from outpost.ai.safety import extractive_fallback, postfilter, prefilter, unsafe_evidence
 
 
@@ -84,3 +85,24 @@ def test_extractive_fallback_is_evidence_only_cited_and_bounded() -> None:
     assert answer.startswith("[AI] Water station open daily.")
     assert answer.endswith("src: kb:water")
     assert len(answer.encode()) <= 200
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        SYSTEM_PROMPT.format(
+            node_name="Outpost",
+            locale="en_US",
+            emergency_number="911",
+            persona="",
+        ),
+        UNGROUNDED_PROMPT,
+        SITUATION_PROMPT,
+    ),
+)
+def test_postfilter_rejects_substantial_echoes_of_every_shipped_prompt(prompt: str) -> None:
+    echoed = f"[AI] {prompt} src: kb:test"
+
+    assert postfilter(echoed, evidence_refs=("kb:test",), grounded=True).reason == (
+        "system_prompt_leak"
+    )

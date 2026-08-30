@@ -39,10 +39,17 @@ function renderStatus(value) {
   $("model-context").textContent = `${Number(value.capabilities?.context_tokens || 0).toLocaleString()} token context`;
   $("queue-depth").textContent = String(value.queue?.active_and_waiting ?? "—");
   $("queue-capacity").textContent = `${value.queue?.capacity ?? "—"} total capacity`;
-  $("circuit-state").textContent = value.circuit?.open ? "OPEN" : "Ready";
-  $("circuit-detail").textContent = value.circuit?.recent_failures
-    ? `${value.circuit.recent_failures} recent provider failures`
-    : "No recent provider failures";
+  const generation = value.generation?.working;
+  $("generation-state").textContent = generation === true ? "Working" : generation === false ? "Failed" : "Unverified";
+  $("generation-detail").textContent = value.generation?.last_success_at
+    ? `Last success ${new Date(value.generation.last_success_at * 1000).toLocaleString()}`
+    : value.generation?.last_failure_at ? "Latest inference failed" : "No inference recorded";
+  $("circuit-state").textContent = value.circuit?.open ? "OPEN" : "Closed";
+  const circuitParts = [];
+  if (value.circuit?.recent_failures) circuitParts.push(`${value.circuit.recent_failures} recent generation failures`);
+  if (value.circuit?.open_count) circuitParts.push(`opened ${value.circuit.open_count}×`);
+  if (value.circuit?.last_close_reason) circuitParts.push(`closed by ${value.circuit.last_close_reason.replaceAll("_", " ")}`);
+  $("circuit-detail").textContent = circuitParts.join(" · ") || "No generation failures";
 }
 
 function resetKnowledgeForm() {
@@ -195,6 +202,10 @@ function renderInteractions(items) {
     row.append(header, element("p", "answer", item.answer || "No answer recorded."));
     const evidence = (item.evidence_refs || []).join(", ");
     if (evidence) row.append(element("p", "interaction-meta", `Evidence: ${evidence}`));
+    const rejectedEvidence = (item.rejected_evidence_refs || []).join(", ");
+    if (rejectedEvidence) {
+      row.append(element("p", "interaction-meta warning", `Rejected evidence (${item.evidence_rejection_reason || "unsafe"}): ${rejectedEvidence}`));
+    }
     list.append(row);
   }
 }

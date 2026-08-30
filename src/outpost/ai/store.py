@@ -148,6 +148,8 @@ class InteractionRecord:
     refused: bool
     refusal_reason: str | None
     outcome: str
+    rejected_evidence_refs: tuple[str, ...] = ()
+    evidence_rejection_reason: str | None = None
     prompt_tokens: int | None = None
     output_tokens: int | None = None
     ttft_ms: int | None = None
@@ -182,9 +184,10 @@ class AIStore:
             """
             INSERT INTO ai_interaction(
               member_id,channel,question,question_class,provider,model,tools_called,
-              evidence_refs,answer,grounded,refused,refusal_reason,outcome,
+              evidence_refs,rejected_evidence_refs,evidence_rejection_reason,
+              answer,grounded,refused,refusal_reason,outcome,
               prompt_tokens,output_tokens,ttft_ms,total_ms,created_at
-            ) VALUES(?,?,?,?,?,?,'[]',?,?,?,?,?,?,?,?,?,?,unixepoch())
+            ) VALUES(?,?,?,?,?,?,'[]',?,?,?,?,?,?,?,?,?,?,?,?,unixepoch())
             """,
             (
                 record.member_id,
@@ -194,6 +197,8 @@ class AIStore:
                 record.provider,
                 record.model,
                 json.dumps(record.evidence_refs),
+                json.dumps(record.rejected_evidence_refs),
+                record.evidence_rejection_reason,
                 record.answer,
                 int(record.grounded),
                 int(record.refused),
@@ -219,6 +224,7 @@ class AIStore:
         for raw in rows:
             value = dict(raw)
             value["evidence_refs"] = json.loads(value["evidence_refs"])
+            value["rejected_evidence_refs"] = json.loads(value["rejected_evidence_refs"])
             value["tools_called"] = json.loads(value["tools_called"])
             values.append(value)
         return values
