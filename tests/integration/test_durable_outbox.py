@@ -11,6 +11,8 @@ from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.models import Severity, TrafficClass
 from outpost.transport.simulated import SimulatedRadioLink
 
+pytestmark = pytest.mark.production_wiring
+
 
 async def durable_governor(
     path: object,

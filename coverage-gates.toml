@@ -45,3 +45,23 @@ files = [
 [groups.startup_shutdown]
 minimum = 55
 files = ["src/outpost/app.py"]
+
+[production_groups.durable_safety]
+minimum = 80
+files = [
+  "src/outpost/transport/governor.py",
+  "src/outpost/store/outbox.py",
+  "src/outpost/watch/alerts.py",
+  "src/outpost/watch/checkin.py",
+  "src/outpost/watch/delivery.py",
+  "src/outpost/commands/alerts.py",
+  "src/outpost/commands/checkin.py",
+  "src/outpost/commands/watch.py",
+]
+
+[production_groups.maintenance_restore]
+minimum = 85
+files = [
+  "src/outpost/store/maintenance.py",
+  "src/outpost/store/backups.py",
+]

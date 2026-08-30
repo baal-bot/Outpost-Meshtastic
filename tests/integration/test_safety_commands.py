@@ -8,6 +8,9 @@ from outpost.render.renderer import render_response
 from outpost.router.models import ResponseKind
 from outpost.transport.governor import OutboundItem
 from outpost.transport.models import InboundMessage, TrafficClass
+from tests.support.application import fresh_install
+
+pytestmark = pytest.mark.production_wiring
 
 
 def config(path) -> Config:
@@ -283,6 +286,48 @@ async def test_helpme_plainly_warns_when_no_other_responder_is_reached(
         assert "Responders notified" not in text
     finally:
         await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_fresh_install_safety_paths_make_zero_delivery_explicit(tmp_path) -> None:
+    value = config(tmp_path / "outpost.db")
+    value = value.model_copy(
+        update={
+            "watch": value.watch.model_copy(
+                update={"emergency_keywords_enabled": True, "emergency_keywords": ["mayday"]}
+            )
+        }
+    )
+    async with fresh_install(
+        value,
+        member_mesh_ids=("!00000091", "!00000092", "!00000093"),
+    ) as app:
+        alert = await app.alerts.raise_alert("urgent", "Bridge failure", "operator")
+        assert alert.escalation_stage == 0
+        assert alert.delivery_state == "empty_audience"
+        assert alert.last_delivery_count == 0
+
+        checked = await app.router.dispatch(inbound(91, "OK safe", "!00000091"))
+        assert render_response(checked).startswith("✓ ok")
+        checkin = (
+            await app.database.read(
+                "SELECT c.status FROM checkin c JOIN member m ON m.id=c.member_id "
+                "WHERE m.mesh_id='!00000091'"
+            )
+        )[0]
+        assert checkin["status"] == "ok"
+
+        help_response = await app.router.dispatch(inbound(92, "HELPME trapped", "!00000092"))
+        assert render_response(help_response).startswith("⚠ No responder was reached. Contact 911")
+
+        await app._handle_inbound_message(inbound(93, "mayday injured on ridge", "!00000093"))
+        incident = (
+            await app.database.read("SELECT notification_state,notification_count FROM incident")
+        )[0]
+        assert dict(incident) == {
+            "notification_state": "empty_audience",
+            "notification_count": 0,
+        }
 
 
 @pytest.mark.asyncio

@@ -6,16 +6,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from outpost.clock import SystemClock, VirtualClock
-from outpost.config import AirtimeConfig
 from outpost.env import WaypointService
 from outpost.security.rate_limit import RateLimiter
 from outpost.store import Database
 from outpost.store.backups import BackupService
 from outpost.store.members import MemberRepo
-from outpost.transport.governor import AirtimeGovernor
-from outpost.transport.simulated import SimulatedRadioLink
 from outpost.watch import CheckinService, IncidentService
 from outpost.web.api import create_web_app
+from tests.support.application import production_governor
+
+pytestmark = pytest.mark.production_wiring
 
 
 def test_expiry_migration_suppresses_legacy_exact_positions(tmp_path: Path) -> None:
@@ -58,7 +58,7 @@ async def test_expired_position_is_rejected_by_member_and_safety_consumers(tmp_p
 
     clock.advance(3_601)
     assert await waypoints.member_position(member_id=member.id) is None
-    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    governor = production_governor(database, clock)
     checkins = CheckinService(database, governor, clock)
     await checkins.checkin(member, "ok")
     checkin = await database.read("SELECT lat,lon FROM checkin WHERE member_id=?", (member.id,))
@@ -101,7 +101,7 @@ async def test_operator_position_lifecycle_and_sensitive_export_disclosure(tmp_p
         "VALUES(?,40.4406,-79.9959,?,?)",
         (member.id, now, now + 600),
     )
-    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    governor = production_governor(database, clock)
     checkins = CheckinService(database, governor, clock)
     event = await checkins.open_event("Privacy exercise", "all", "operator")
     await checkins.checkin(member, "ok")

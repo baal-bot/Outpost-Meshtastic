@@ -33,7 +33,11 @@ jobs:
       - run: mypy
       - run: python tools/check_capabilities.py --check
       - run: pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json
-      - run: python tools/check_critical_coverage.py coverage.json
+      - run: >-
+          pytest -m production_wiring --cov=outpost --cov-report=json:production-coverage.json
+      - run: >-
+          python tools/check_critical_coverage.py coverage.json
+          --production-report production-coverage.json
       - run: >-
           sh -n deploy/install.sh deploy/install-test-host.sh deploy/health_probe.sh
           deploy/rollback.sh deploy/update.sh

@@ -6,9 +6,10 @@ import pytest
 from outpost.clock import VirtualClock
 from outpost.config import Config
 from outpost.store import Database
-from outpost.transport.governor import AirtimeGovernor
-from outpost.transport.simulated import SimulatedRadioLink
 from outpost.watch import AlertService, IncidentService
+from tests.support.application import production_governor
+
+pytestmark = pytest.mark.production_wiring
 
 
 def test_incident_inference_corpus_exceeds_ninety_percent() -> None:
@@ -29,10 +30,11 @@ async def test_ai_is_not_a_permitted_alert_source(tmp_path) -> None:
             "channels": {0: {"name": "public"}, 3: {"name": "watch"}},
         }
     )
+    clock = VirtualClock()
     service = AlertService(
         database,
-        AirtimeGovernor(SimulatedRadioLink(), config.airtime, VirtualClock()),
-        VirtualClock(),
+        production_governor(database, clock, airtime=config.airtime),
+        clock,
         config,
     )
     with pytest.raises(ValueError, match="source"):

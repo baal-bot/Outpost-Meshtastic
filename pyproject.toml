@@ -53,8 +53,12 @@ artifacts = ["src/outpost/web/static/**"]
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers"
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
-markers = ["eval: requires an explicitly configured live inference provider"]
+markers = [
+  "eval: requires an explicitly configured live inference provider",
+  "production_wiring: exercises safety paths through the same durable wiring as OutpostApp",
+]
 
 [tool.ruff]
 target-version = "py312"

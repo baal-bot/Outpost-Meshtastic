@@ -7,14 +7,23 @@ CHECKER = Path(__file__).parents[2] / "tools" / "check_critical_coverage.py"
 
 
 def run_checker(
-    tmp_path: Path, report: dict[str, object], config: str
+    tmp_path: Path,
+    report: dict[str, object],
+    config: str,
+    *,
+    production_report: dict[str, object] | None = None,
 ) -> subprocess.CompletedProcess:
     report_path = tmp_path / "coverage.json"
     config_path = tmp_path / "gates.toml"
     report_path.write_text(json.dumps(report), encoding="utf-8")
     config_path.write_text(config, encoding="utf-8")
+    command = [sys.executable, str(CHECKER), str(report_path), "--config", str(config_path)]
+    if production_report is not None:
+        production_path = tmp_path / "production-coverage.json"
+        production_path.write_text(json.dumps(production_report), encoding="utf-8")
+        command.extend(("--production-report", str(production_path)))
     return subprocess.run(  # noqa: S603 -- fixed interpreter and repository script
-        [sys.executable, str(CHECKER), str(report_path), "--config", str(config_path)],
+        command,
         check=False,
         capture_output=True,
         text=True,
@@ -101,3 +110,47 @@ files = ["src/outpost/safety/*.py"]
     assert "safety: 92.0%" in result.stdout
     assert "safety/src/outpost/safety/weak.py: 20.0%" in result.stdout
     assert "safety file src/outpost/safety/weak.py coverage 20.0%" in result.stderr
+
+
+def test_production_wiring_floor_uses_only_the_separate_durable_report(tmp_path: Path) -> None:
+    full_report = {
+        "totals": {"percent_covered": 100.0},
+        "files": {
+            "src/outpost/transport/governor.py": {
+                "summary": {"num_statements": 100, "covered_lines": 100}
+            }
+        },
+    }
+    production_report = {
+        "totals": {"percent_covered": 50.0},
+        "files": {
+            "src/outpost/transport/governor.py": {
+                "summary": {"num_statements": 100, "covered_lines": 50}
+            }
+        },
+    }
+    config = """
+[global]
+minimum = 70
+[groups.transport]
+minimum = 90
+files = ["src/outpost/transport/governor.py"]
+[production_groups.durable_transport]
+minimum = 80
+files = ["src/outpost/transport/governor.py"]
+"""
+
+    missing = run_checker(tmp_path, full_report, config)
+    assert missing.returncode == 1
+    assert "production-wiring coverage report is required" in missing.stderr
+
+    result = run_checker(
+        tmp_path,
+        full_report,
+        config,
+        production_report=production_report,
+    )
+    assert result.returncode == 1
+    assert "transport: 100.0%" in result.stdout
+    assert "production/durable_transport: 50.0%" in result.stdout
+    assert "production/durable_transport coverage 50.0%" in result.stderr

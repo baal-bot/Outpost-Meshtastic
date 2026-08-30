@@ -9,10 +9,12 @@ from outpost.config import Config
 from outpost.fed import FederationPeerService
 from outpost.radio_operations import RadioOperations
 from outpost.store import Database
-from outpost.transport.governor import AirtimeGovernor
 from outpost.watch import AlertService
 from outpost.web.api import create_web_app
 from outpost.web.auth import WebAuthService
+from tests.support.application import production_governor
+
+pytestmark = pytest.mark.production_wiring
 
 
 def test_radio_configuration_surfaces_policy_drift(tmp_path) -> None:
@@ -71,7 +73,7 @@ async def test_live_channel_map_includes_all_slots_history_and_revalidates_sends
             }
         }
     )
-    governor = AirtimeGovernor(object(), config.airtime, clock)  # type: ignore[arg-type]
+    governor = production_governor(database, clock, airtime=config.airtime)
     operations = RadioOperations(database, governor, clock)
     alerts = AlertService(database, governor, clock, config)
     radio_state = {"radio": "up"}

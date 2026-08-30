@@ -6,18 +6,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from outpost.clock import VirtualClock
-from outpost.config import AirtimeConfig
 from outpost.store import Database
 from outpost.store.backups import (
     BackupService,
     RestoreCoordinator,
     RestoreRecoveredError,
 )
-from outpost.transport.governor import AirtimeGovernor
-from outpost.transport.simulated import SimulatedRadioLink
 from outpost.watch import CheckinService
 from outpost.web.api import create_web_app
 from outpost.web.auth import WebAuthService
+from tests.support.application import production_governor
+
+pytestmark = pytest.mark.production_wiring
 
 
 def test_backup_routes_are_independent_from_optional_checkins(tmp_path) -> None:
@@ -35,7 +35,7 @@ def test_backup_routes_are_independent_from_optional_checkins(tmp_path) -> None:
     clock = VirtualClock()
     checkins = CheckinService(
         database,
-        AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock),
+        production_governor(database, clock),
         clock,
     )
     without_backups = create_web_app(lambda: {"radio": "up"}, database=database, checkins=checkins)

@@ -1,13 +1,16 @@
 import pytest
 
 from outpost.clock import VirtualClock
-from outpost.config import AirtimeConfig, Config
+from outpost.config import Config
 from outpost.store import Database
 from outpost.store.members import MemberRepo
-from outpost.transport.governor import AirtimeGovernor, OutboundItem
+from outpost.transport.governor import OutboundItem
 from outpost.transport.models import TrafficClass
 from outpost.transport.simulated import SimulatedRadioLink
 from outpost.watch import AlertService, IncidentService
+from tests.support.application import production_governor
+
+pytestmark = pytest.mark.production_wiring
 
 
 @pytest.mark.asyncio
@@ -23,7 +26,7 @@ async def test_alert_preempts_acknowledges_and_cancels_with_all_clear(tmp_path) 
             "airtime": {"min_gap_s": 0},
         }
     )
-    governor = AirtimeGovernor(radio, config.airtime, clock)
+    governor = production_governor(database, clock, link=radio, airtime=config.airtime)
     members = MemberRepo(database, clock)
     reporter = await members.resolve("!00000001")
     responder = await members.resolve("!00000002")
@@ -32,7 +35,7 @@ async def test_alert_preempts_acknowledges_and_cancels_with_all_clear(tmp_path) 
         "fire at barn 40.4406 -79.9959", reporter
     )
     assert incident is not None
-    governor.enqueue(OutboundItem("digest", "!peer", 0, TrafficClass.DIGEST))
+    await governor.admit(OutboundItem("digest", "!peer", 0, TrafficClass.DIGEST))
     service = AlertService(database, governor, clock, config)
     alert = await service.raise_alert(
         "urgent", "Barn fire; avoid Mill Road", "responder", incident_ref=incident.local_ref
@@ -80,7 +83,7 @@ async def test_escalation_is_durable_and_stops_at_ack_threshold(tmp_path) -> Non
             },
         }
     )
-    governor = AirtimeGovernor(radio, AirtimeConfig(), clock)
+    governor = production_governor(database, clock, link=radio)
     members = MemberRepo(database, clock)
     reporter = await members.resolve("!00000001")
     first = await members.resolve("!00000002")
@@ -115,7 +118,7 @@ async def test_two_alerts_resume_after_restart_and_one_can_be_halted(tmp_path) -
             "channels": {0: {"name": "public"}, 3: {"name": "watch"}},
         }
     )
-    governor = AirtimeGovernor(radio, config.airtime, clock)
+    governor = production_governor(database, clock, link=radio, airtime=config.airtime)
     responder = await MemberRepo(database, clock).resolve("!00000009")
     await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
     first_service = AlertService(database, governor, clock, config)
@@ -166,7 +169,7 @@ async def test_repeat_stage_is_bounded_durable_and_stops_after_ack(tmp_path) -> 
             },
         }
     )
-    governor = AirtimeGovernor(radio, config.airtime, clock)
+    governor = production_governor(database, clock, link=radio, airtime=config.airtime)
     members = MemberRepo(database, clock)
     reporter = await members.resolve("!00000001")
     responder = await members.resolve("!00000002")
@@ -234,7 +237,12 @@ async def test_repeat_stage_stops_at_configured_maximum(tmp_path) -> None:
             },
         }
     )
-    service = AlertService(database, AirtimeGovernor(radio, config.airtime, clock), clock, config)
+    service = AlertService(
+        database,
+        production_governor(database, clock, link=radio, airtime=config.airtime),
+        clock,
+        config,
+    )
     alert = await service.raise_alert("critical", "Evacuate now", "operator")
 
     clock.advance(60)
@@ -286,7 +294,12 @@ async def test_repeat_budget_resets_for_each_repeating_escalation_stage(tmp_path
     )
     responder = await MemberRepo(database, clock).resolve("!00000002")
     await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
-    service = AlertService(database, AirtimeGovernor(radio, config.airtime, clock), clock, config)
+    service = AlertService(
+        database,
+        production_governor(database, clock, link=radio, airtime=config.airtime),
+        clock,
+        config,
+    )
 
     alert = await service.raise_alert("critical", "Evacuate now", "operator")
     assert alert.escalation_stage == 0 and alert.repeat_count == 1
@@ -336,7 +349,7 @@ async def test_all_clear_reuses_every_distinct_admitted_alert_audience(tmp_path)
             },
         }
     )
-    governor = AirtimeGovernor(radio, config.airtime, clock)
+    governor = production_governor(database, clock, link=radio, airtime=config.airtime)
     members = MemberRepo(database, clock)
     responder = await members.resolve("!00000002")
     trusted = await members.resolve("!00000003")
@@ -398,7 +411,7 @@ async def test_zero_recipient_alert_stays_at_stage_and_recovers_when_responder_a
             },
         }
     )
-    governor = AirtimeGovernor(radio, config.airtime, clock)
+    governor = production_governor(database, clock, link=radio, airtime=config.airtime)
     service = AlertService(database, governor, clock, config)
 
     alert = await service.raise_alert("urgent", "Bridge failure", "operator")
@@ -447,10 +460,10 @@ async def test_queue_refused_alert_retries_same_stage_after_capacity_returns(tmp
             "airtime": {"queue_max_items": 1},
         }
     )
-    governor = AirtimeGovernor(radio, config.airtime, clock)
+    governor = production_governor(database, clock, link=radio, airtime=config.airtime)
     responder = await MemberRepo(database, clock).resolve("!00000002")
     await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
-    filler = governor.enqueue(OutboundItem("busy", "!peer", 3, TrafficClass.DIGEST))
+    filler = await governor.admit(OutboundItem("busy", "!peer", 3, TrafficClass.DIGEST))
     assert filler is not None
     service = AlertService(database, governor, clock, config)
 
@@ -459,7 +472,7 @@ async def test_queue_refused_alert_retries_same_stage_after_capacity_returns(tmp
     assert alert.delivery_state == "refused"
     assert alert.escalation_stage == 0
     assert alert.next_escalation_at == int(clock.now().timestamp()) + 60
-    assert governor.cancel(filler)
+    assert await governor.cancel_work(filler)
     clock.advance(61)
     assert await service.advance_due() == 1
     recovered = await service.by_id(alert.id)
@@ -489,7 +502,7 @@ async def test_responder_demotion_pauses_the_next_empty_escalation_stage(tmp_pat
             },
         }
     )
-    governor = AirtimeGovernor(radio, config.airtime, clock)
+    governor = production_governor(database, clock, link=radio, airtime=config.airtime)
     responder = await MemberRepo(database, clock).resolve("!00000002")
     await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
     service = AlertService(database, governor, clock, config)

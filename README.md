@@ -182,7 +182,11 @@ The service starts without a radio. Run CI-equivalent checks:
 .venv/bin/ruff check src tests tools/build_release_metadata.py tools/check_capabilities.py \
   tools/check_ci_evidence.py tools/verify_release.py deploy/configure.py deploy/render_avahi.py
 .venv/bin/mypy
-.venv/bin/pytest --cov=outpost --cov-report=term
+.venv/bin/pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json
+.venv/bin/pytest -m production_wiring --cov=outpost \
+  --cov-report=json:production-coverage.json
+.venv/bin/python tools/check_critical_coverage.py coverage.json \
+  --production-report production-coverage.json
 sh deploy/smoke-package.sh
 ```
 

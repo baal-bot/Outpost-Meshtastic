@@ -2,14 +2,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from outpost.clock import VirtualClock
-from outpost.config import AirtimeConfig, Config, EnvConfig, SameConfig
+from outpost.config import Config, EnvConfig, SameConfig
 from outpost.env import CapAlertService, SameService
 from outpost.store import Database
 from outpost.transport.governor import AirtimeGovernor
-from outpost.transport.simulated import SimulatedRadioLink
 from outpost.watch import AlertService
 from outpost.web.api import create_web_app
 from outpost.web.settings import RuntimeSettings
+from tests.support.application import production_governor
+
+pytestmark = pytest.mark.production_wiring
 
 LIVE_HEADER = "ZCZC-WXR-TOR-042003+0130-0010000-KPBZ/NWS-"
 
@@ -40,7 +42,7 @@ def cap_feature(identifier: str = "cap-tor") -> dict:
 
 def alert_service(database: Database, clock: VirtualClock) -> tuple[AlertService, AirtimeGovernor]:
     config = Config.model_validate({"channels": {0: {"name": "public"}, 3: {"name": "watch"}}})
-    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    governor = production_governor(database, clock)
     return AlertService(database, governor, clock, config), governor
 
 

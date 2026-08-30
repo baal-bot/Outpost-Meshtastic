@@ -2,12 +2,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from outpost.clock import VirtualClock
-from outpost.config import AirtimeConfig
 from outpost.radio_operations import RadioOperations
 from outpost.store import Database
-from outpost.store.outbox import OutboxStore
-from outpost.transport.governor import AirtimeGovernor
 from outpost.web.api import create_web_app
+from tests.support.application import production_governor
+
+pytestmark = pytest.mark.production_wiring
 
 
 @pytest.mark.asyncio
@@ -15,7 +15,7 @@ async def test_operator_send_uses_governor_and_queue_can_be_cancelled(tmp_path) 
     database = Database(tmp_path / "outpost.db")
     await database.open()
     clock = VirtualClock()
-    governor = AirtimeGovernor(object(), AirtimeConfig(), clock)  # type: ignore[arg-type]
+    governor = production_governor(database, clock)
     operations = RadioOperations(database, governor, clock)
 
     item_id = await operations.send("Road closed", "^all", 0, "bulletin")
@@ -35,12 +35,7 @@ async def test_outbound_history_api_filters_explains_and_paginates_stably(tmp_pa
     database = Database(tmp_path / "outpost.db")
     await database.open()
     clock = VirtualClock()
-    governor = AirtimeGovernor(
-        object(),  # type: ignore[arg-type]
-        AirtimeConfig(),
-        clock,
-        outbox=OutboxStore(database),
-    )
+    governor = production_governor(database, clock)
     operations = RadioOperations(database, governor, clock, retention_days=21)
     states = (
         "pending",

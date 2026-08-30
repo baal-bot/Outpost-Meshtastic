@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,6 +13,8 @@ from outpost.store.members import MemberRepo
 from outpost.watch.incidents import IncidentService
 from outpost.web.api import create_web_app
 
+pytestmark = pytest.mark.production_wiring
+
 
 @pytest.mark.asyncio
 async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_path) -> None:
@@ -21,6 +24,7 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
     clock.advance(8 * 3_600)
     now = int(clock.now().timestamp())
     old = now - 200 * 86_400
+    old_clock = VirtualClock(epoch=datetime.fromtimestamp(old, UTC))
     board_id = (await database.read("SELECT id FROM board WHERE slug='gen'"))[0]["id"]
     await database.write(
         """
@@ -54,19 +58,16 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
         "last_seen_at,accepted_at) VALUES('!00000001','HELPME','old',?,?,?)",
         (old, old, old),
     )
-    member_id = await database.write(
-        "INSERT INTO member(mesh_id,mesh_num,first_seen,last_seen) VALUES('!00000003',3,?,?)",
-        (old, old),
-    )
+    old_member = await MemberRepo(database, old_clock).resolve("!00000003")
     await database.write(
         "INSERT INTO member_position(member_id,lat,lon,received_at,expires_at) "
         "VALUES(?,40,-80,?,?)",
-        (member_id, old, old),
+        (old_member.id, old, old),
     )
     await database.write(
         "INSERT INTO pending_incident_location(member_id,lat,lon,created_at,expires_at) "
         "VALUES(?,40,-80,?,?)",
-        (member_id, old, old),
+        (old_member.id, old, old),
     )
     peer_id = await database.write(
         "INSERT INTO fed_peer(mesh_id,created_at) VALUES('!00000002',?)", (old,)
@@ -91,26 +92,29 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
         "fetched_at) VALUES('old-alerts','test',0,0,'empty','[]',?)",
         (old,),
     )
-    await database.write(
-        "INSERT INTO incident(uid,local_ref,type,severity,status,title,reporter_label,"
-        "origin_node,created_at,updated_at,resolved_at,resolution_note) "
-        "VALUES('old-incident',1,'hazard','info','resolved','Old incident','member',"
-        "'local',?,?,?,'Resolved long ago')",
-        (old, old, old),
-    )
     recent_incident = now - 10 * 86_400
-    await database.write(
-        "INSERT INTO incident(uid,local_ref,type,severity,status,title,reporter_label,"
-        "origin_node,created_at,updated_at,resolved_at,resolution_note) "
-        "VALUES('recent-incident',2,'hazard','info','resolved','Recent incident','member',"
-        "'local',?,?,?,'Recently resolved')",
-        (recent_incident, recent_incident, recent_incident),
+    reporter = await MemberRepo(database, old_clock).resolve("!00000004")
+    old_incidents = IncidentService(database, old_clock)
+    old_incident, _ = await old_incidents.create("Old incident on closed road", reporter)
+    active_incident, _ = await old_incidents.create("Active incident at bridge", reporter)
+    assert old_incident is not None and active_incident is not None
+    await old_incidents.operator_patch(
+        old_incident.id,
+        status="resolved",
+        severity=None,
+        resolution="Resolved long ago",
+        actor="operator",
     )
-    await database.write(
-        "INSERT INTO incident(uid,local_ref,type,severity,status,title,reporter_label,"
-        "origin_node,created_at,updated_at) VALUES('active-incident',3,'hazard','info','open',"
-        "'Active incident','member','local',?,?)",
-        (old, old),
+    recent_clock = VirtualClock(epoch=datetime.fromtimestamp(recent_incident, UTC))
+    recent_incidents = IncidentService(database, recent_clock)
+    recent, _ = await recent_incidents.create("Recent incident near shelter", reporter)
+    assert recent is not None
+    await recent_incidents.operator_patch(
+        recent.id,
+        status="resolved",
+        severity=None,
+        resolution="Recently resolved",
+        actor="operator",
     )
     config = Config.model_validate(
         {"store": {"path": str(tmp_path / "outpost.db"), "maintenance_hour": 3}}
@@ -136,8 +140,11 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
     assert await database.read("SELECT 1 FROM fed_service_usage") == []
     assert await database.read("SELECT 1 FROM env_cache") == []
     assert await database.read("SELECT 1 FROM cap_point_cache") == []
-    retained_incidents = await database.read("SELECT uid FROM incident ORDER BY uid")
-    assert [row["uid"] for row in retained_incidents] == ["active-incident", "recent-incident"]
+    retained_incidents = await database.read("SELECT title FROM incident ORDER BY title")
+    assert [row["title"] for row in retained_incidents] == [
+        "Active incident at bridge",
+        "Recent incident near shelter",
+    ]
     assert [row["uid"] for row in await database.read("SELECT uid FROM thread")] == ["pinned"]
     assert backups.list()
     assert await service.due() is False

@@ -7,13 +7,13 @@ import pytest
 from outpost.bbs.admin import BBSAdmin
 from outpost.bbs.service import BBSService
 from outpost.clock import VirtualClock
-from outpost.config import AirtimeConfig
 from outpost.fed import FederationPeerService, FederationSyncService
 from outpost.store import Database, Transaction
 from outpost.store.members import MemberRepo
-from outpost.transport.governor import AirtimeGovernor
-from outpost.transport.simulated import SimulatedRadioLink
 from outpost.watch import CheckinService
+from tests.support.application import production_governor
+
+pytestmark = pytest.mark.production_wiring
 
 
 def inject_write_failure(monkeypatch: pytest.MonkeyPatch, failure_at: int) -> Any:
@@ -270,7 +270,7 @@ async def test_solicitation_rows_and_held_queue_roll_back_together(
     for number, handle in ((1, "dana"), (2, "ray")):
         member = await members.resolve(f"!{number:08x}")
         await members.claim_handle(member.mesh_id, handle)
-    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    governor = production_governor(database, clock)
     service = CheckinService(database, governor, clock)
     event = await service.open_event("Flood", "all", "operator")
     original = inject_write_failure(monkeypatch, failure_at)

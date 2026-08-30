@@ -1,13 +1,13 @@
 import pytest
 
 from outpost.clock import VirtualClock
-from outpost.config import AirtimeConfig
 from outpost.store import Database
 from outpost.store.members import MemberRepo
-from outpost.transport.governor import AirtimeGovernor
 from outpost.transport.models import TrafficClass
-from outpost.transport.simulated import SimulatedRadioLink
 from outpost.watch import CheckinService, IncidentService
+from tests.support.application import production_governor
+
+pytestmark = pytest.mark.production_wiring
 
 
 @pytest.mark.asyncio
@@ -15,7 +15,7 @@ async def test_event_roster_checkins_and_csv(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()
     clock = VirtualClock()
-    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    governor = production_governor(database, clock)
     members = MemberRepo(database, clock)
     dana = await members.resolve("!00000001")
     dana = await members.claim_handle(dana.mesh_id, "dana")
@@ -49,7 +49,7 @@ async def test_need_help_uses_position_and_notifies_responders(tmp_path) -> None
     database = Database(tmp_path / "outpost.db")
     await database.open()
     clock = VirtualClock()
-    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    governor = production_governor(database, clock)
     members = MemberRepo(database, clock)
     caller = await members.resolve("!00000001")
     caller = await members.claim_handle(caller.mesh_id, "caller")
@@ -76,7 +76,7 @@ async def test_discovered_guests_never_enter_roster_or_solicitation_preview(tmp_
     database = Database(tmp_path / "outpost.db")
     await database.open()
     clock = VirtualClock()
-    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    governor = production_governor(database, clock)
     members = MemberRepo(database, clock)
     member = await members.resolve("!00000001")
     member = await members.claim_handle(member.mesh_id, "member")
@@ -98,7 +98,7 @@ async def test_solicitation_is_direct_digest_and_only_once_per_member(tmp_path) 
     database = Database(tmp_path / "outpost.db")
     await database.open()
     clock = VirtualClock()
-    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    governor = production_governor(database, clock)
     members = MemberRepo(database, clock)
     member = await members.resolve("!00000001")
     member = await members.claim_handle(member.mesh_id, "member")
@@ -125,7 +125,7 @@ async def test_need_help_reports_zero_when_requester_is_only_responder(tmp_path)
     database = Database(tmp_path / "outpost.db")
     await database.open()
     clock = VirtualClock()
-    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    governor = production_governor(database, clock)
     members = MemberRepo(database, clock)
     caller = await members.resolve("!00000001")
     await database.write("UPDATE member SET trust='responder' WHERE id=?", (caller.id,))

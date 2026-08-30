@@ -7,12 +7,13 @@ import pytest
 
 from outpost.ai.retrieval import RetrievalEngine
 from outpost.clock import VirtualClock
-from outpost.config import AirtimeConfig, Config, EnvConfig
+from outpost.config import Config, EnvConfig
 from outpost.env import CapAlertService
 from outpost.store import Database
-from outpost.transport.governor import AirtimeGovernor
-from outpost.transport.simulated import SimulatedRadioLink
 from outpost.watch import AlertService
+from tests.support.application import production_governor
+
+pytestmark = pytest.mark.production_wiring
 
 
 def feature(identifier: str, *, severity: str = "Severe", status: str = "Actual") -> dict:
@@ -202,7 +203,7 @@ async def test_cap_update_supersedes_and_cancel_issues_all_clear(tmp_path, monke
     monkeypatch.setattr("outpost.env.cap._request_json", request)
     cap = CapAlertService(database, clock, EnvConfig())
     config = Config.model_validate({"channels": {0: {"name": "public"}, 3: {"name": "watch"}}})
-    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock)
+    governor = production_governor(database, clock)
     alerts = AlertService(database, governor, clock, config)
 
     await cap.poll(40.4406, -79.9959)
@@ -256,7 +257,7 @@ async def test_cap_approval_preserves_short_and_long_warning_expiry(tmp_path, mo
     monkeypatch.setattr("outpost.env.cap._request_json", request)
     config = Config.model_validate({"channels": {0: {"name": "public"}, 3: {"name": "watch"}}})
     alerts = AlertService(
-        database, AirtimeGovernor(SimulatedRadioLink(), config.airtime, clock), clock, config
+        database, production_governor(database, clock, airtime=config.airtime), clock, config
     )
     cap = CapAlertService(database, clock, EnvConfig())
 
@@ -286,7 +287,7 @@ async def test_cap_missing_expiry_uses_visible_six_hour_fallback(tmp_path, monke
     monkeypatch.setattr("outpost.env.cap._request_json", request)
     config = Config.model_validate({"channels": {0: {"name": "public"}, 3: {"name": "watch"}}})
     alerts = AlertService(
-        database, AirtimeGovernor(SimulatedRadioLink(), config.airtime, clock), clock, config
+        database, production_governor(database, clock, airtime=config.airtime), clock, config
     )
     cap = CapAlertService(database, clock, EnvConfig())
 
@@ -315,7 +316,7 @@ async def test_cap_approval_clearly_refuses_an_expired_warning(tmp_path, monkeyp
     monkeypatch.setattr("outpost.env.cap._request_json", request)
     config = Config.model_validate({"channels": {0: {"name": "public"}, 3: {"name": "watch"}}})
     alerts = AlertService(
-        database, AirtimeGovernor(SimulatedRadioLink(), config.airtime, clock), clock, config
+        database, production_governor(database, clock, airtime=config.airtime), clock, config
     )
     cap = CapAlertService(database, clock, EnvConfig())
 
