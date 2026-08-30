@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import json
+import os
 import re
+import subprocess
 import sys
 import tomllib
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +23,17 @@ STATE_ORDER = (
     "hardware_gated",
     "production_ready",
 )
-EVIDENCE_KINDS = {"automated", "acceptance", "field", "hardware", "operations"}
+EVIDENCE_KINDS = {"automated", "acceptance", "field", "hardware", "operations", "release"}
+MATURITY_EVIDENCE = {
+    "designed": set(),
+    "implemented": set(),
+    "automated_tested": {"automated"},
+    "simulated": {"automated", "acceptance"},
+    "single_node_field_tested": {"automated", "field"},
+    "two_node_field_tested": {"automated", "field"},
+    "hardware_gated": {"automated", "hardware"},
+    "production_ready": {"release"},
+}
 README_START = "<!-- capability-summary:start -->"
 README_END = "<!-- capability-summary:end -->"
 _ID = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -55,6 +69,7 @@ def validate_manifest(value: dict[str, Any], root: Path) -> None:
     if not isinstance(capabilities, list) or not capabilities:
         raise ManifestError("capabilities must be a non-empty list")
     seen: set[str] = set()
+    automated_nodes: list[tuple[str, str]] = []
     for capability in capabilities:
         if not isinstance(capability, dict):
             raise ManifestError("each capability must be a table")
@@ -83,20 +98,132 @@ def validate_manifest(value: dict[str, Any], root: Path) -> None:
         evidence = capability.get("evidence")
         if not isinstance(evidence, list) or not evidence:
             raise ManifestError(f"{identifier} requires at least one evidence item")
+        evidence_kinds: set[str] = set()
         for item in evidence:
             if not isinstance(item, dict) or item.get("kind") not in EVIDENCE_KINDS:
                 raise ManifestError(f"{identifier} has an invalid evidence kind")
-            relative = Path(str(item.get("path", "")))
+            kind = str(item["kind"])
+            evidence_kinds.add(kind)
+            reference = str(item.get("path", ""))
+            file_reference, separator, test_name = reference.partition("::")
+            relative = Path(file_reference)
             if relative.is_absolute() or ".." in relative.parts or not relative.parts:
                 raise ManifestError(f"{identifier} has an unsafe evidence path: {relative}")
             if not (root / relative).is_file():
                 raise ManifestError(f"{identifier} evidence does not exist: {relative}")
+            if kind == "automated":
+                if (
+                    not separator
+                    or not test_name
+                    or not relative.as_posix().startswith("tests/")
+                    or relative.suffix != ".py"
+                ):
+                    raise ManifestError(
+                        f"{identifier} automated evidence must be a specific tests/*.py::test node"
+                    )
+                automated_nodes.append((identifier, reference))
+            if kind == "release" and not (
+                relative.as_posix().startswith("docs/releases/") and relative.suffix == ".md"
+            ):
+                raise ManifestError(
+                    f"{identifier} release evidence must be a docs/releases/*.md record"
+                )
             if not _text(item.get("description")):
                 raise ManifestError(f"{identifier} evidence requires a description")
+        required = MATURITY_EVIDENCE[maturity]
+        missing = required - evidence_kinds
+        if missing:
+            raise ManifestError(
+                f"{identifier}.maturity {maturity} requires evidence kind(s): "
+                f"{', '.join(sorted(missing))}"
+            )
+        if maturity == "production_ready" and (
+            verification["release"] == "unreleased" or verification["commit"] == "HEAD"
+        ):
+            raise ManifestError(
+                f"{identifier}.maturity production_ready requires a released version and commit"
+            )
         for key in ("limitations", "roadmap"):
             entries = capability.get(key)
             if not isinstance(entries, list) or not all(_text(item) for item in entries):
                 raise ManifestError(f"{identifier}.{key} must be a list of non-empty strings")
+    _validate_automated_nodes(root, automated_nodes)
+
+
+@lru_cache(maxsize=8)
+def _collect_pytest_nodes(root: str, nodes: tuple[str, ...]) -> dict[str, str | None]:
+    project_root = Path(__file__).resolve().parents[1]
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "--collect-only",
+        "-q",
+        "-p",
+        "tools.pytest_evidence_plugin",
+        *nodes,
+    ]
+    environment = os.environ.copy()
+    existing_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = (
+        f"{project_root}{os.pathsep}{existing_pythonpath}"
+        if existing_pythonpath
+        else str(project_root)
+    )
+    completed = subprocess.run(  # noqa: S603 - fixed local pytest collector
+        command,
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=120,
+    )
+    prefix = "OUTPOST_EVIDENCE_COLLECTION="
+    payload = next(
+        (
+            line.removeprefix(prefix)
+            for line in completed.stdout.splitlines()
+            if line.startswith(prefix)
+        ),
+        None,
+    )
+    if completed.returncode != 0 or payload is None:
+        detail = "\n".join((completed.stdout, completed.stderr)).strip()
+        raise ManifestError(f"pytest could not collect automated evidence: {detail[-1200:]}")
+    value = json.loads(payload)
+    if not isinstance(value, dict) or not all(
+        isinstance(node, str) and (reason is None or isinstance(reason, str))
+        for node, reason in value.items()
+    ):
+        raise ManifestError("pytest evidence collector returned invalid data")
+    return value
+
+
+def _validate_automated_nodes(root: Path, evidence: list[tuple[str, str]]) -> None:
+    if not evidence:
+        return
+    nodes = tuple(dict.fromkeys(reference for _, reference in evidence))
+    try:
+        collected = _collect_pytest_nodes(str(root.resolve()), nodes)
+    except (json.JSONDecodeError, OSError, subprocess.TimeoutExpired) as error:
+        raise ManifestError(f"pytest evidence collection failed: {error}") from error
+    for identifier, requested in evidence:
+        matches = {
+            node: reason
+            for node, reason in collected.items()
+            if node == requested or node.startswith(f"{requested}[")
+        }
+        if not matches:
+            raise ManifestError(f"{identifier} automated evidence is not collected: {requested}")
+        skipped = sorted({reason for reason in matches.values() if reason is not None})
+        if skipped:
+            raise ManifestError(
+                f"{identifier} automated evidence is skipped in this environment: "
+                f"{requested} ({'; '.join(skipped)})"
+            )
 
 
 def render_features(value: dict[str, Any]) -> str:
@@ -264,7 +391,8 @@ def _cell(value: object) -> str:
 
 
 def _doc_link(path: str) -> str:
-    return path.removeprefix("docs/") if path.startswith("docs/") else f"../{path}"
+    file_path = path.partition("::")[0]
+    return file_path.removeprefix("docs/") if file_path.startswith("docs/") else f"../{file_path}"
 
 
 def _roadmap_link(value: str) -> str:

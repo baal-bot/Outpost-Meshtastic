@@ -13,7 +13,8 @@ cd "$PROJECT_DIR"
 "$RUFF" format --check src tests \
   tools/build_release_metadata.py tools/check_capabilities.py tools/check_ci_evidence.py \
   tools/check_dependency_lock.py tools/check_mypy_ratchet.py tools/check_static_markup.py \
-  tools/verify_release.py deploy/configure.py deploy/render_avahi.py
+  tools/pytest_evidence_plugin.py tools/verify_release.py deploy/configure.py \
+  deploy/render_avahi.py
 echo "Outpost pre-push formatting gate passed."
 python tools/check_mypy_ratchet.py
 python tools/check_static_markup.py

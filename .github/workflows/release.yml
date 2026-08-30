@@ -25,6 +25,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
+      - run: pip install -c requirements.lock '.[dev]'
       - run: python tools/check_capabilities.py --check
       - run: sh deploy/smoke-package.sh
       - run: mkdir dist && python -m pip wheel --no-deps --wheel-dir dist .

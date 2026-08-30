@@ -52,7 +52,7 @@ Maturity: **Single-node field-tested**.
 
 Evidence:
 
-- Automated: [tests/unit/test_radio_link.py](../tests/unit/test_radio_link.py) — Link lifecycle, packet handling, and failure normalization.
+- Automated: [tests/unit/test_radio_link.py::test_full_callback_queue_counts_drop_and_keeps_newest_frame](../tests/unit/test_radio_link.py) — A saturated callback queue records the dropped frame and retains the newest packet.
 - Field: [docs/FEDERATION-ACCEPTANCE-BACKLOG.md](FEDERATION-ACCEPTANCE-BACKLOG.md) — Live radio traffic and recovery were exercised between physical Outposts.
 
 Known limitations:
@@ -66,10 +66,10 @@ Maturity: **Automated-tested**.
 
 Evidence:
 
-- Automated: [tests/acceptance/test_phase1_acceptance.py](../tests/acceptance/test_phase1_acceptance.py) — Phase 1 command and radio-response behavior.
-- Automated: [tests/integration/test_inbound_workers.py](../tests/integration/test_inbound_workers.py) — Bounded concurrency, backpressure, and drop telemetry.
-- Automated: [tests/integration/test_mesh_tui.py](../tests/integration/test_mesh_tui.py) — First-class mesh journeys, capability and trust filtering, mutation-safe fuzzy resolution, disabled-command reservation, interruption recovery, guided composition, and packet budgets.
-- Automated: [tests/integration/test_mesh_pki_trust.py](../tests/integration/test_mesh_pki_trust.py) — Direct authenticated command gates, downgrade denial, key conflict demotion, explicit rotation, and durable replay rejection.
+- Automated: [tests/acceptance/test_phase1_acceptance.py::test_phase1_two_member_journey_from_cold_database](../tests/acceptance/test_phase1_acceptance.py) — Phase 1 command and radio-response behavior.
+- Automated: [tests/integration/test_inbound_workers.py::test_poison_message_is_dropped_and_worker_processes_next_message](../tests/integration/test_inbound_workers.py) — A malformed packet is contained and the inbound worker processes the next packet.
+- Automated: [tests/integration/test_mesh_tui.py::test_global_commands_interrupt_flows_and_home_recovers_after_lost_state](../tests/integration/test_mesh_tui.py) — Global commands interrupt guided flows and HOME recovers after lost session state.
+- Automated: [tests/integration/test_mesh_pki_trust.py::test_elevated_mesh_commands_require_reviewed_direct_pki_and_block_replay](../tests/integration/test_mesh_pki_trust.py) — Elevated commands require reviewed direct PKI and reject replayed authenticated packets.
 
 Known limitations:
 
@@ -81,10 +81,10 @@ Maturity: **Automated-tested**.
 
 Evidence:
 
-- Automated: [tests/integration/test_durable_outbox.py](../tests/integration/test_durable_outbox.py) — Admitted work survives restart and delivery state is idempotent.
-- Automated: [tests/unit/test_governor.py](../tests/unit/test_governor.py) — Priority, budget, reserve, pacing, invalid-runtime-config containment, and critical-path policy.
-- Automated: [tests/unit/test_config.py](../tests/unit/test_config.py) — Startup rejection of incomplete airtime maps, invalid quiet hours, and incomplete page-size policy.
-- Automated: [tests/unit/test_background_tasks.py](../tests/unit/test_background_tasks.py) — Dispatch-time configuration faults are surfaced as degraded without terminating the core governor loop.
+- Automated: [tests/integration/test_durable_outbox.py::test_acknowledgement_is_correlated_and_not_resent_after_restart](../tests/integration/test_durable_outbox.py) — Delivery acknowledgement is correlated durably and suppresses resend after restart.
+- Automated: [tests/unit/test_governor.py::test_three_alert_storm_is_bounded_and_critical_reaches_reserve](../tests/unit/test_governor.py) — A multi-alert storm remains bounded while critical traffic can reach the reserve.
+- Automated: [tests/unit/test_config.py::test_invalid_airtime_config_is_rejected](../tests/unit/test_config.py) — Invalid airtime budgets and utilisation ceilings are rejected at configuration load.
+- Automated: [tests/unit/test_background_tasks.py::test_governor_config_error_is_degraded_without_stopping_loop](../tests/unit/test_background_tasks.py) — Dispatch-time configuration faults are surfaced as degraded without terminating the core governor loop.
 
 Known limitations:
 
@@ -96,9 +96,9 @@ Maturity: **Automated-tested**.
 
 Evidence:
 
-- Automated: [tests/integration/test_directory_moderation.py](../tests/integration/test_directory_moderation.py) — Handle claims, approval, trust, and moderation boundaries.
-- Automated: [tests/integration/test_member_triage.py](../tests/integration/test_member_triage.py) — Discovered-radio triage and accountable operator actions.
-- Automated: [tests/integration/test_mesh_pki_trust.py](../tests/integration/test_mesh_pki_trust.py) — Fingerprint enrollment, promotion binding, conflict quarantine, audited rotation, and restart-persistent replay protection.
+- Automated: [tests/integration/test_directory_moderation.py::test_channel_keys_only_appear_in_member_dm_detail](../tests/integration/test_directory_moderation.py) — Channel keys stay confined to the authorized member DM detail path.
+- Automated: [tests/integration/test_member_triage.py::test_member_triage_filters_review_history_and_detail](../tests/integration/test_member_triage.py) — Discovered-radio triage and accountable operator actions.
+- Automated: [tests/integration/test_mesh_pki_trust.py::test_pki_key_change_demotes_and_requires_explicit_rotation_review](../tests/integration/test_mesh_pki_trust.py) — A PKI key change demotes trust until an explicit audited rotation review.
 
 Known limitations:
 
@@ -111,8 +111,8 @@ Maturity: **Automated-tested**.
 
 Evidence:
 
-- Automated: [tests/integration/test_bbs_mail.py](../tests/integration/test_bbs_mail.py) — Stored messaging, routing, authorization, and paging behavior.
-- Automated: [tests/integration/test_operator_inbox.py](../tests/integration/test_operator_inbox.py) — Unified reply routing and audited operator workflow.
+- Automated: [tests/integration/test_bbs_mail.py::test_thread_reply_search_and_mail_lifecycle](../tests/integration/test_bbs_mail.py) — Stored messaging, routing, authorization, and paging behavior.
+- Automated: [tests/integration/test_operator_inbox.py::test_operations_inbox_groups_member_conversation_and_preserves_reply_route](../tests/integration/test_operator_inbox.py) — Unified reply routing and audited operator workflow.
 
 Known limitations:
 
@@ -125,9 +125,9 @@ Maturity: **Simulated**.
 Evidence:
 
 - Acceptance: [docs/PHASE3-ACCEPTANCE.md](PHASE3-ACCEPTANCE.md) — Automated phase gates and explicitly open tabletop criteria.
-- Automated: [tests/integration/test_safety_commands.py](../tests/integration/test_safety_commands.py) — Member-facing incident, alert, acknowledgement, and trust paths through the mesh router.
-- Automated: [tests/integration/test_watch_alerts.py](../tests/integration/test_watch_alerts.py) — Audience delivery, empty/capacity refusal recovery, per-stage repeat budgets, acknowledgements, escalation, and all-clear.
-- Automated: [tests/integration/test_incident_reconciliation.py](../tests/integration/test_incident_reconciliation.py) — Partition, concurrent edit, immutable identity, human merge/unmerge, and resolution-lock behavior.
+- Automated: [tests/integration/test_safety_commands.py::test_incident_commands_render_validation_reactions_lists_and_detail](../tests/integration/test_safety_commands.py) — Mesh incident commands exercise validation, reactions, listing, detail, and rendered replies.
+- Automated: [tests/integration/test_watch_alerts.py::test_zero_recipient_alert_stays_at_stage_and_recovers_when_responder_appears](../tests/integration/test_watch_alerts.py) — Zero-recipient escalation remains pending and recovers when a responder becomes eligible.
+- Automated: [tests/integration/test_incident_reconciliation.py::test_reconnect_rejects_stale_and_concurrent_updates_and_keeps_monitoring](../tests/integration/test_incident_reconciliation.py) — Reconnect rejects stale/concurrent incident edits while preserving monitoring state.
 
 Known limitations:
 
@@ -140,8 +140,8 @@ Maturity: **Simulated**.
 Evidence:
 
 - Acceptance: [docs/PHASE3-ACCEPTANCE.md](PHASE3-ACCEPTANCE.md) — Simulated roster, solicitation, help, and export gates.
-- Automated: [tests/integration/test_safety_commands.py](../tests/integration/test_safety_commands.py) — Member-facing OK, HELPME, roster, and event lifecycle through the mesh router.
-- Automated: [tests/integration/test_watch_checkin.py](../tests/integration/test_watch_checkin.py) — Welfare state transitions, zero-recipient notification outcomes, and privacy boundaries.
+- Automated: [tests/integration/test_safety_commands.py::test_welfare_commands_cover_event_lifecycle_rosters_and_member_text](../tests/integration/test_safety_commands.py) — Member-facing OK, HELPME, roster, and event lifecycle through the mesh router.
+- Automated: [tests/integration/test_watch_checkin.py::test_need_help_reports_zero_when_requester_is_only_responder](../tests/integration/test_watch_checkin.py) — HELP reports zero notified responders when the requester is the only eligible responder.
 
 Known limitations:
 
@@ -154,8 +154,8 @@ Maturity: **Automated-tested**.
 Evidence:
 
 - Acceptance: [docs/PHASE4-ACCEPTANCE.md](PHASE4-ACCEPTANCE.md) — Provider, cache, CAP lifecycle, geometry, and provenance gates.
-- Automated: [tests/integration/test_weather.py](../tests/integration/test_weather.py) — Weather caching, expiry, observation/forecast labels, and safe failure.
-- Automated: [tests/integration/test_cap_alerts.py](../tests/integration/test_cap_alerts.py) — CAP lifecycle, source expiry propagation, visible six-hour fallback, past-expiry refusal, offset-safe migration repair, and re-poll recovery.
+- Automated: [tests/integration/test_weather.py::test_full_wan_down_day_degrades_safely_and_sun_remains_available](../tests/integration/test_weather.py) — A full simulated WAN outage degrades weather safely while local astronomy remains available.
+- Automated: [tests/integration/test_cap_alerts.py::test_cap_expiry_uses_instants_for_every_supported_iso_representation](../tests/integration/test_cap_alerts.py) — CAP expiry parsing compares instants correctly across supported ISO timestamp forms.
 
 Known limitations:
 
@@ -169,7 +169,7 @@ Maturity: **Hardware-gated**.
 Evidence:
 
 - Hardware: [docs/PHASE4-ACCEPTANCE.md](PHASE4-ACCEPTANCE.md) — Pi carrier, forced USB loss, backoff, recovery, and audio-fixture results.
-- Automated: [tests/unit/test_same_receiver.py](../tests/unit/test_same_receiver.py) — Process supervision and parser failure boundaries.
+- Automated: [tests/unit/test_same_receiver.py::test_receiver_restarts_with_bounded_backoff_and_stops_cleanly](../tests/unit/test_same_receiver.py) — Process supervision and parser failure boundaries.
 
 Known limitations:
 
@@ -181,10 +181,10 @@ Maturity: **Automated-tested**.
 
 Evidence:
 
-- Automated: [tests/browser/test_mobile_navigation.py](../tests/browser/test_mobile_navigation.py) — Desktop/mobile, accessibility, role, navigation, interaction, and partial API failure matrix.
-- Automated: [tests/integration/test_web_auth.py](../tests/integration/test_web_auth.py) — Authentication, route-registration fail-closed wallboard authorization, redacted data boundaries, recovery, session, and step-up behavior.
-- Automated: [tests/integration/test_web_transport_modes.py](../tests/integration/test_web_transport_modes.py) — Offline HTTP, direct/proxy HTTPS, Secure/HSTS behavior, forwarded-header spoof resistance, and trusted client attribution.
-- Automated: [tests/unit/test_web_transport.py](../tests/unit/test_web_transport.py) — Certificate validity, key pairing, rotation, server options, and certificate-free recovery behavior.
+- Automated: [tests/browser/test_mobile_navigation.py::test_shared_dialogs_manage_focus_escape_validation_and_live_regions](../tests/browser/test_mobile_navigation.py) — Shared dialogs enforce focus, Escape, validation, and accessible live-region behavior.
+- Automated: [tests/integration/test_web_auth.py::test_named_roles_sessions_and_last_administrator_guard](../tests/integration/test_web_auth.py) — Named roles, session controls, and the last-administrator guard are enforced.
+- Automated: [tests/integration/test_web_transport_modes.py::test_spoofed_proxy_headers_cannot_set_secure_cookie_or_client_source](../tests/integration/test_web_transport_modes.py) — Untrusted forwarded headers cannot forge secure cookies or the login source.
+- Automated: [tests/unit/test_web_transport.py::test_invalid_certificate_dates_fail_before_server_start](../tests/unit/test_web_transport.py) — Invalid certificate validity windows fail before server startup.
 - Operations: [docs/WEB-TRANSPORT.md](WEB-TRANSPORT.md) — Operator-only deployment modes, firewall boundaries, certificate rotation, setup hotspot, and local recovery guidance.
 
 Known limitations:
@@ -197,8 +197,8 @@ Maturity: **Automated-tested**.
 
 Evidence:
 
-- Automated: [tests/integration/test_backups.py](../tests/integration/test_backups.py) — Quiesce, integrity validation, restore failure, and recovery behavior.
-- Automated: [tests/unit/test_deploy_install.py](../tests/unit/test_deploy_install.py) — Executed scratch-prefix installs verify staging, atomic activation, snapshots, code-only and schema rollback, forensic preservation, and transport-aware health checks.
+- Automated: [tests/integration/test_backups.py::test_failed_restore_automatically_recovers_safety_snapshot](../tests/integration/test_backups.py) — A failed restore automatically returns to the verified safety snapshot.
+- Automated: [tests/unit/test_deploy_install.py::test_installer_harness_rejects_safety_mutants](../tests/unit/test_deploy_install.py) — Executed installer mutations prove rollback and activation safety assertions can fail.
 - Operations: [docs/RELEASES.md](RELEASES.md) — Release evidence, verified update, rollback, compromise, and revocation procedures.
 
 Known limitations:
@@ -211,8 +211,8 @@ Maturity: **Automated-tested**.
 
 Evidence:
 
-- Automated: [tests/integration/test_maintenance.py](../tests/integration/test_maintenance.py) — Bounded deletion, incident graph retention, per-rule isolation, snapshot limits, and dashboard observability.
-- Automated: [tests/integration/test_member_position_retention.py](../tests/integration/test_member_position_retention.py) — Exact-position expiry, deletion, and coarse-history behavior.
+- Automated: [tests/integration/test_maintenance.py::test_maintenance_deletes_merged_children_before_their_canonical_incident](../tests/integration/test_maintenance.py) — Retention deletes merged incident children before their canonical parent without FK failure.
+- Automated: [tests/integration/test_member_position_retention.py::test_operator_position_lifecycle_and_sensitive_export_disclosure](../tests/integration/test_member_position_retention.py) — Operator position lifecycle tests exact-location disclosure, expiry, and deletion.
 
 Known limitations:
 
@@ -225,11 +225,11 @@ Maturity: **Two-node field-tested**.
 Evidence:
 
 - Field: [docs/FEDERATION-ACCEPTANCE-BACKLOG.md](FEDERATION-ACCEPTANCE-BACKLOG.md) — Recorded two-Outpost pairing, radio sync, recovery, mail, privacy, and rejection probes.
-- Automated: [tests/integration/test_federation_sync.py](../tests/integration/test_federation_sync.py) — Bounded synchronization and reconciliation behavior.
-- Automated: [tests/integration/test_incident_reconciliation.py](../tests/integration/test_incident_reconciliation.py) — Origin-aware partition/reconnect conflict reconciliation and human merge correction.
-- Automated: [tests/integration/test_federation_relay.py](../tests/integration/test_federation_relay.py) — Signed three-node custody, forged-pin resistance, reinstall recovery, successor rotation, duplicate/reconnect safety, quotas, receipts, and operator controls.
+- Automated: [tests/integration/test_federation_sync.py::test_manifest_keyset_pages_recover_long_outage_without_skips](../tests/integration/test_federation_sync.py) — Keyset reconciliation pages recover a long outage without gaps or repeats.
+- Automated: [tests/integration/test_incident_reconciliation.py::test_merged_origin_updates_are_advisory_and_identity_is_exported](../tests/integration/test_incident_reconciliation.py) — Merged-origin updates remain advisory and preserve exported origin identity.
+- Automated: [tests/integration/test_federation_relay.py::test_partition_relay_custody_signature_origin_review_and_receipt](../tests/integration/test_federation_relay.py) — A partitioned three-node relay preserves signed custody, origin review, and receipts.
 - Operations: [docs/FEDERATION-RELAY-PROTOCOL.md](FEDERATION-RELAY-PROTOCOL.md) — Relay threat model, protocol bounds, confidentiality limits, resource policy, and operator runbook.
-- Automated: [tests/integration/test_federation_topology.py](../tests/integration/test_federation_topology.py) — Privacy-gated coarse location exchange, health paths/backlog, stale state, successors, tombstones, and safe API output.
+- Automated: [tests/integration/test_federation_topology.py::test_topology_health_states_paths_backlog_successor_and_forgotten](../tests/integration/test_federation_topology.py) — Topology health derives path, backlog, successor, stale, and forgotten states.
 - Operations: [docs/FEDERATION-TOPOLOGY.md](FEDERATION-TOPOLOGY.md) — Location privacy boundary, identity states, health derivation, offline behavior, and operator workflow.
 
 Known limitations:
@@ -246,7 +246,7 @@ Maturity: **Two-node field-tested**.
 Evidence:
 
 - Field: [docs/FEDERATION-ACCEPTANCE-BACKLOG.md](FEDERATION-ACCEPTANCE-BACKLOG.md) — Live MQTT discovery and mixed RF/MQTT pairing approval evidence.
-- Automated: [tests/integration/test_federation_radio.py](../tests/integration/test_federation_radio.py) — Radio/MQTT path selection and transport failure behavior.
+- Automated: [tests/integration/test_federation_radio.py::test_radio_hello_creates_pending_peer](../tests/integration/test_federation_radio.py) — A federation HELLO received through the radio path creates a pending peer safely.
 
 Known limitations:
 
@@ -259,8 +259,8 @@ Maturity: **Hardware-gated**.
 Evidence:
 
 - Hardware: [docs/benchmarks/HAILO-H10-QWEN-2026-08-27.md](benchmarks/HAILO-H10-QWEN-2026-08-27.md) — Target Hailo-10H load, latency, image smoke, and 60/60 guarded evaluation evidence.
-- Automated: [tests/integration/test_ai_runtime.py](../tests/integration/test_ai_runtime.py) — Retrieval, refusal, output filtering, fallback, queue, and circuit-breaker behavior.
-- Automated: [tests/eval/test_live_provider.py](../tests/eval/test_live_provider.py) — Opt-in hardware release-gate assertion for the full guarded corpus.
+- Automated: [tests/integration/test_ai_runtime.py::test_circuit_breaker_contains_provider_failure_and_recovers](../tests/integration/test_ai_runtime.py) — Provider failure opens the AI circuit breaker and later recovers without restart.
+- Hardware: [tests/eval/test_live_provider.py::test_live_provider_meets_release_gate](../tests/eval/test_live_provider.py) — Opt-in hardware release-gate assertion for the full guarded corpus.
 
 Known limitations:
 
@@ -273,8 +273,8 @@ Maturity: **Automated-tested**.
 
 Evidence:
 
-- Automated: [tests/unit/test_deploy_install.py](../tests/unit/test_deploy_install.py) — Executed installer and rollback harness plus mutation checks, discovery/hotspot boundaries, service sandbox, recovery, and acceptance-host invariants.
-- Automated: [tests/unit/test_onboarding.py](../tests/unit/test_onboarding.py) — Resumable checklist, secret-free credential detection, requirement metadata, and mDNS declaration.
+- Automated: [tests/unit/test_deploy_install.py::test_installer_harness_rejects_safety_mutants](../tests/unit/test_deploy_install.py) — Executed installer safety mutations prove the deployment assertions detect regressions.
+- Automated: [tests/unit/test_onboarding.py::test_checklist_is_complete_resumable_and_records_requirements](../tests/unit/test_onboarding.py) — The field checklist is complete, resumable, and records requirement metadata.
 - Operations: [docs/ONBOARDING.md](ONBOARDING.md) — Field checklist, local access, wallboard isolation, and redacted diagnostic procedure.
 
 Known limitations:
