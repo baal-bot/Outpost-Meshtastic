@@ -993,6 +993,52 @@ def test_operator_gets_one_nonblocking_http_boundary_notice(
         page.close()
 
 
+def test_http_boundary_notice_spans_the_bbs_columns(browser: object, dashboard_url: str) -> None:
+    page = prepare_page(browser, 1280, dashboard_url)
+    try:
+        page.route(
+            "**/api/v1/web/transport",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "mode": "trusted_http",
+                        "request_encrypted": False,
+                        "warning": {
+                            "code": "trusted_http_nonloopback",
+                            "title": "Trusted local HTTP",
+                            "message": "Dashboard traffic is not encrypted.",
+                        },
+                    }
+                ),
+            ),
+        )
+        page.route(
+            "**/api/v1/boards*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"items":[]}',
+            ),
+        )
+        page.goto(f"{dashboard_url}/bbs.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+
+        notice = page.locator(".bbs-main > .web-transport-banner")
+        notice.wait_for(state="visible")
+        notice_box = notice.bounding_box()
+        panels = page.locator(".bbs-main > .panel")
+        first_box = panels.first.bounding_box()
+        last_box = panels.last.bounding_box()
+        assert notice_box is not None and first_box is not None and last_box is not None
+        assert notice_box["x"] <= first_box["x"]
+        assert notice_box["x"] + notice_box["width"] >= last_box["x"] + last_box["width"]
+        assert notice_box["y"] + notice_box["height"] <= first_box["y"]
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("width", VIEWPORTS)
 def test_every_destination_is_reachable_from_navigation(
     browser: object, dashboard_url: str, width: int
