@@ -367,7 +367,7 @@ async def test_indexed_evidence_that_cannot_fit_is_reported_without_inference(ai
 
 @pytest.mark.asyncio
 async def test_operator_api_exposes_status_knowledge_review_and_dry_run(ai_runtime) -> None:
-    service, _provider, store, _member, _clock = ai_runtime
+    service, _provider, store, member, _clock = ai_runtime
 
     async def dry_run(question: str) -> dict[str, object]:
         return {"text": "[AI] test", "outcome": "test", "question_class": "general"}
@@ -406,6 +406,23 @@ async def test_operator_api_exposes_status_knowledge_review_and_dry_run(ai_runti
     )
     assert client.post("/api/v1/ai/test", json={"question": "hello"}).json()["outcome"] == "test"
     assert client.get("/api/v1/ai/interactions").status_code == 200
+    await store.database.write(
+        "INSERT INTO ai_interaction(member_id,channel,question,question_class,provider,model,"
+        "answer,outcome,created_at) VALUES(?,-1,'private question','general','test','test',"
+        "'private answer','grounded',unixepoch())",
+        (member.id,),
+    )
+    deleted = client.delete(f"/api/v1/ai/members/{member.id}/history")
+    assert deleted.status_code == 200 and deleted.json() == {"deleted": 1}
+    assert (
+        await store.database.read("SELECT 1 FROM ai_interaction WHERE member_id=?", (member.id,))
+        == []
+    )
+    assert await store.database.read(
+        "SELECT 1 FROM audit_log WHERE action='ai.member_history_delete' "
+        "AND target=? AND actor_ref='operator'",
+        (f"member:{member.id}",),
+    )
 
     duplicate_document = client.post(
         "/api/v1/ai/kb",

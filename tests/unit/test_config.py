@@ -209,6 +209,23 @@ def test_ai_runtime_policy_defaults_are_bounded() -> None:
     assert config.ai.hailo.context_tokens == 2048
 
 
+def test_ai_interaction_metrics_outlive_private_content() -> None:
+    config = Config()
+    assert config.store.retention.ai_interaction_content_days == 30
+    assert config.store.retention.ai_interaction_metrics_days == 180
+    with pytest.raises(ValidationError, match="metrics_days must be at least"):
+        Config.model_validate(
+            {
+                "store": {
+                    "retention": {
+                        "ai_interaction_content_days": 90,
+                        "ai_interaction_metrics_days": 60,
+                    }
+                }
+            }
+        )
+
+
 @pytest.mark.parametrize(
     "ai",
     [

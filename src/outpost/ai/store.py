@@ -242,6 +242,21 @@ class AIStore:
         )
         return True
 
+    async def delete_member_history(self, member_id: int, actor: str) -> int:
+        """Delete one member's AI interactions and atomically record the privacy action."""
+        async with self.database.transaction() as transaction:
+            rows = await transaction.read(
+                "SELECT COUNT(*) count FROM ai_interaction WHERE member_id=?", (member_id,)
+            )
+            count = int(rows[0]["count"])
+            await transaction.write("DELETE FROM ai_interaction WHERE member_id=?", (member_id,))
+            await transaction.write(
+                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                "VALUES('web',?,'ai.member_history_delete',?,?,unixepoch())",
+                (actor, f"member:{member_id}", json.dumps({"deleted": count})),
+            )
+        return count
+
     async def documents(self) -> list[dict[str, Any]]:
         token_limit = kb_chunk_token_limit(self.evidence_tokens)
         rows = await self.database.read(

@@ -222,6 +222,7 @@ async def test_maintenance_preview_storage_health_and_bounded_cleanup(tmp_path) 
         "community",
         "watch",
         "environment",
+        "ai",
         "federation",
     }
     audit_policy = next(item for item in health["policies"] if item["table"] == "audit_log")
@@ -247,6 +248,88 @@ async def test_maintenance_preview_storage_health_and_bounded_cleanup(tmp_path) 
     assert client.get("/api/v1/maintenance/preview").status_code == 200
     denied = client.post("/api/v1/maintenance/run", json={"confirmation": "wrong"})
     assert denied.status_code == 422
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_maintenance_redacts_ai_content_and_bounds_relay_history(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    now = int(clock.now().timestamp())
+    member = await MemberRepo(database, clock).resolve("!00000005")
+
+    async def add_interaction(question: str, age_days: int) -> None:
+        await database.write(
+            "INSERT INTO ai_interaction(member_id,channel,question,question_class,provider,"
+            "model,answer,outcome,rated,created_at) VALUES(?,-1,?,'general','test','test',"
+            "'private answer','grounded',1,?)",
+            (member.id, question, now - age_days * 86_400),
+        )
+
+    await add_interaction("recent private question", 10)
+    await add_interaction("elapsed private question", 60)
+    await add_interaction("expired metrics", 200)
+    peer_id = await database.write(
+        "INSERT INTO fed_peer(mesh_id,created_at) VALUES('!00000006',?)", (now,)
+    )
+    old = now - 60 * 86_400
+    await database.write(
+        "INSERT INTO fed_relay_usage(peer_id,window_start,accepted) VALUES(?,?,1)",
+        (peer_id, old),
+    )
+    relay_event_id = await database.write(
+        "INSERT INTO fed_relay_event(peer_id,event_kind,created_at,actor) "
+        "VALUES(?,'stored',?,'test')",
+        (peer_id, old),
+    )
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        await database.write("DELETE FROM fed_relay_event WHERE id=?", (relay_event_id,))
+    await database.write(
+        "INSERT INTO fed_relay_envelope(envelope_id,direction,origin_node,destination_node,"
+        "scope,idempotency_key,created_at,expires_at,hop_limit,payload_cbor,payload_bytes,"
+        "origin_public_key,origin_signature,route_json,state,stored_at,updated_at) "
+        "VALUES('old-envelope','relay','!00000006','!00000007','opaque','old',?,?,2,"
+        "X'01',1,?,?, '[]','delivered',?,?)",
+        (old, old, bytes(32), bytes(64), old, old),
+    )
+
+    config = Config.model_validate(
+        {"store": {"path": str(tmp_path / "outpost.db"), "backup": {"enabled": False}}}
+    )
+    service = MaintenanceService(database, BackupService(database), clock, config)
+    assert await service.audit_table_policies() == []
+
+    result = await service.run()
+
+    assert result.failures == {}
+    assert result.removed["ai_interactions"] == 1
+    assert result.removed["ai_interaction_content"] == 1
+    assert result.removed["federation_relay_usage"] == 1
+    assert result.removed["federation_relay_events"] == 1
+    assert result.removed["federation_relay_envelopes"] == 1
+    interactions = await database.read(
+        "SELECT member_id,question,answer,rated,content_purged_at FROM ai_interaction "
+        "ORDER BY created_at"
+    )
+    assert len(interactions) == 2
+    assert dict(interactions[0]) == {
+        "member_id": None,
+        "question": "",
+        "answer": None,
+        "rated": 1,
+        "content_purged_at": now,
+    }
+    assert interactions[1]["question"] == "recent private question"
+    assert await database.read("SELECT 1 FROM fed_relay_usage") == []
+    assert await database.read("SELECT 1 FROM fed_relay_event") == []
+    assert await database.read("SELECT 1 FROM fed_relay_envelope") == []
+    assert (
+        await database.read(
+            "SELECT 1 FROM runtime_setting WHERE key='maintenance.allow_relay_event_delete'"
+        )
+        == []
+    )
     await database.close()
 
 

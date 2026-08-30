@@ -168,6 +168,20 @@ async function promoteInteraction(item) {
   if (created) editKnowledge(created);
 }
 
+async function deleteMemberHistory(item) {
+  const member = item.member || `member ${item.member_id}`;
+  const confirmed = await window.OutpostUI?.confirm({
+    eyebrow: "MEMBER PRIVACY",
+    title: `Delete AI history for ${member}?`,
+    message: "This permanently deletes every stored question, answer, and quality record linked to this member.",
+    confirmLabel: "Delete member history",
+    danger: true,
+  });
+  if (!confirmed) return;
+  await body(await mutation(`/api/v1/ai/members/${item.member_id}/history`, {method: "DELETE"}));
+  await loadInteractions();
+}
+
 function renderInteractions(items) {
   const list = $("interaction-list");
   list.replaceChildren();
@@ -181,7 +195,7 @@ function renderInteractions(items) {
     const header = element("header");
     const heading = element("div");
     heading.append(
-      element("h3", "", item.question),
+      element("h3", "", item.content_purged_at ? "Content removed by retention" : item.question),
       element("span", "interaction-meta", `${item.outcome} · ${item.question_class} · ${item.member || "console"}`),
     );
     const actions = element("div", "interaction-actions");
@@ -198,8 +212,17 @@ function renderInteractions(items) {
       promote.addEventListener("click", () => void promoteInteraction(item));
       actions.append(promote);
     }
+    if (item.member_id) {
+      const removeHistory = element("button", "danger", "Delete member history");
+      removeHistory.type = "button";
+      removeHistory.addEventListener("click", () => void deleteMemberHistory(item));
+      actions.append(removeHistory);
+    }
     header.append(heading, actions);
-    row.append(header, element("p", "answer", item.answer || "No answer recorded."));
+    const answer = item.content_purged_at
+      ? "Question and answer removed under the configured privacy schedule."
+      : item.answer || "No answer recorded.";
+    row.append(header, element("p", "answer", answer));
     const evidence = (item.evidence_refs || []).join(", ");
     if (evidence) row.append(element("p", "interaction-meta", `Evidence: ${evidence}`));
     const rejectedEvidence = (item.rejected_evidence_refs || []).join(", ");

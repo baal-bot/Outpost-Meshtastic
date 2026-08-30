@@ -4,7 +4,7 @@ import asyncio
 import json
 import shutil
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from outpost.clock import Clock
@@ -64,6 +64,19 @@ TABLE_POLICIES = (
         True,
     ),
     TablePolicy(
+        "member_pki_event",
+        "directory",
+        "preserve",
+        "Member key verification and conflict evidence is never aged out.",
+        True,
+    ),
+    TablePolicy(
+        "member_pki_replay",
+        "directory",
+        "expire",
+        "Writer-pruned replay window; bounded to 90 days.",
+    ),
+    TablePolicy(
         "member_position",
         "directory",
         "expire",
@@ -113,6 +126,17 @@ TABLE_POLICIES = (
     TablePolicy("earthquake", "environment", "retain", "Earthquake review/history retention."),
     TablePolicy("same_event", "environment", "retain", "SAME event history retention."),
     TablePolicy("waypoint", "environment", "preserve", "Operator-managed reference data."),
+    TablePolicy("kb_document", "ai", "preserve", "Operator-managed verified knowledge."),
+    TablePolicy("kb_chunk", "ai", "cascade", "Follows its knowledge document."),
+    TablePolicy("kb_fts*", "ai", "compact", "Search index follows knowledge chunks."),
+    TablePolicy(
+        "ai_interaction",
+        "ai",
+        "redact/retain",
+        "Question, answer, and member link are purged before de-identified quality fields.",
+        True,
+    ),
+    TablePolicy("ai_refusal_rule", "ai", "preserve", "Operator-managed safety policy."),
     TablePolicy(
         "fed_peer",
         "federation",
@@ -123,8 +147,17 @@ TABLE_POLICIES = (
     TablePolicy(
         "fed_peer_successor", "federation", "preserve", "Identity adoption evidence.", True
     ),
+    TablePolicy(
+        "fed_peer_tombstone",
+        "federation",
+        "preserve",
+        "Explicit forget evidence prevents silent peer reappearance.",
+        True,
+    ),
     TablePolicy("fed_cursor", "federation", "preserve", "Bounded cursor per peer and stream."),
     TablePolicy("fed_service_circuit", "federation", "preserve", "Bounded state per peer/service."),
+    TablePolicy("fed_topology_policy", "federation", "cascade", "Follows its peer."),
+    TablePolicy("fed_topology_peer", "federation", "cascade", "Current state follows its peer."),
     TablePolicy(
         "fed_seen", "federation", "retain", "Replay/deduplication history retention.", True
     ),
@@ -151,6 +184,36 @@ TABLE_POLICIES = (
     TablePolicy(
         "fed_post_delivery", "federation", "retain", "Delivered posts; reconciliation protected."
     ),
+    TablePolicy(
+        "fed_relay_identity",
+        "federation",
+        "preserve",
+        "Local relay signing identity and rotation proof.",
+        True,
+    ),
+    TablePolicy("fed_relay_policy", "federation", "cascade", "Follows its peer."),
+    TablePolicy(
+        "fed_relay_origin_key",
+        "federation",
+        "preserve",
+        "Reviewed origin trust pins require operator action.",
+        True,
+    ),
+    TablePolicy(
+        "fed_relay_origin_candidate",
+        "federation",
+        "preserve",
+        "Origin-key observations remain until operator review.",
+        True,
+    ),
+    TablePolicy(
+        "fed_relay_envelope",
+        "federation",
+        "retain",
+        "Terminal envelope metadata ages out; live routing state is protected.",
+    ),
+    TablePolicy("fed_relay_usage", "federation", "retain", "Short rolling quota windows."),
+    TablePolicy("fed_relay_event", "federation", "retain", "Bounded relay audit history."),
 )
 
 DOMAIN_LABELS = {
@@ -159,6 +222,7 @@ DOMAIN_LABELS = {
     "community": "BBS & mail",
     "watch": "Watch & incidents",
     "environment": "Environment",
+    "ai": "AI assistant",
     "federation": "Federation",
 }
 
@@ -171,6 +235,12 @@ INTERNAL_TABLE_DOMAINS = {
     "post_fts_data": "community",
     "post_fts_docsize": "community",
     "post_fts_idx": "community",
+    "kb_fts": "ai",
+    "kb_fts_config": "ai",
+    "kb_fts_content": "ai",
+    "kb_fts_data": "ai",
+    "kb_fts_docsize": "ai",
+    "kb_fts_idx": "ai",
 }
 
 
@@ -182,6 +252,7 @@ class CleanupRule:
     table: str
     predicate: str
     params: tuple[Any, ...]
+    operation: Literal["delete", "redact_ai_content", "delete_relay_events"] = "delete"
 
 
 @dataclass(frozen=True)
@@ -342,6 +413,21 @@ class MaintenanceService:
                     missing.append(f"{table}.{row['from']} -> {parent}")
         return sorted(missing)
 
+    async def audit_table_policies(self) -> list[str]:
+        """Return product tables that have no declared lifecycle policy."""
+        rows = await self.database.read(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+
+        def covered(table: str) -> bool:
+            return any(
+                policy.table == table
+                or (policy.table.endswith("*") and table.startswith(policy.table[:-1]))
+                for policy in TABLE_POLICIES
+            )
+
+        return sorted(str(row["name"]) for row in rows if not covered(str(row["name"])))
+
     def _rules(self, now: int) -> tuple[CleanupRule, ...]:
         retention = self.config.store.retention
         auth_cutoff = now - retention.authentication_days * DAY
@@ -350,6 +436,8 @@ class MaintenanceService:
         watch_cutoff = now - retention.watch_history_days * DAY
         environment_cutoff = now - retention.environment_history_days * DAY
         provider_cutoff = now - retention.provider_cache_days * DAY
+        ai_content_cutoff = now - retention.ai_interaction_content_days * DAY
+        ai_metrics_cutoff = now - retention.ai_interaction_metrics_days * DAY
         service_cutoff = now - retention.federation_service_days * DAY
         federation_cutoff = now - retention.federation_history_days * DAY
         outbound_cutoff = now - retention.outbound_history_days * DAY
@@ -419,12 +507,54 @@ class MaintenanceService:
                 (provider_cutoff,),
             ),
             CleanupRule(
+                "ai_interactions",
+                "De-identified AI quality history",
+                "ai",
+                "ai_interaction",
+                "created_at<?",
+                (ai_metrics_cutoff,),
+            ),
+            CleanupRule(
+                "ai_interaction_content",
+                "Member AI questions and answers",
+                "ai",
+                "ai_interaction",
+                "content_purged_at IS NULL AND created_at<? AND created_at>=?",
+                (ai_content_cutoff, ai_metrics_cutoff),
+                "redact_ai_content",
+            ),
+            CleanupRule(
                 "federation_service_usage",
                 "Elapsed peer quota windows",
                 "federation",
                 "fed_service_usage",
                 "window_start<?",
                 (provider_cutoff,),
+            ),
+            CleanupRule(
+                "federation_relay_usage",
+                "Elapsed relay quota windows",
+                "federation",
+                "fed_relay_usage",
+                "window_start<?",
+                (provider_cutoff,),
+            ),
+            CleanupRule(
+                "federation_relay_events",
+                "Relay event history",
+                "federation",
+                "fed_relay_event",
+                "created_at<?",
+                (federation_cutoff,),
+                "delete_relay_events",
+            ),
+            CleanupRule(
+                "federation_relay_envelopes",
+                "Terminal relay envelope history",
+                "federation",
+                "fed_relay_envelope",
+                "state IN ('forwarded','delivered','rejected','expired','purged') AND updated_at<?",
+                (federation_cutoff,),
             ),
             CleanupRule(
                 "federation_mail_usage",
@@ -759,10 +889,36 @@ class MaintenanceService:
                 return 0
             ids = tuple(int(row["rid"]) for row in rows)
             placeholders = ",".join("?" for _ in ids)
-            await transaction.write(
-                f'DELETE FROM "{rule.table}" WHERE rowid IN ({placeholders})',  # noqa: S608
-                ids,
-            )
+            if rule.operation == "redact_ai_content":
+                statement = (
+                    "UPDATE ai_interaction SET member_id=NULL,question='',answer=NULL,"  # noqa: S608
+                    f"content_purged_at=? WHERE rowid IN ({placeholders})"
+                )
+                await transaction.write(
+                    statement,
+                    (int(self.clock.now().timestamp()), *ids),
+                )
+            else:
+                if rule.operation == "delete_relay_events":
+                    await transaction.write(
+                        "INSERT INTO runtime_setting(key,value,updated_at) VALUES(?,?,?) "
+                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value,"
+                        "updated_at=excluded.updated_at",
+                        (
+                            "maintenance.allow_relay_event_delete",
+                            "true",
+                            int(self.clock.now().timestamp()),
+                        ),
+                    )
+                await transaction.write(
+                    f'DELETE FROM "{rule.table}" WHERE rowid IN ({placeholders})',  # noqa: S608
+                    ids,
+                )
+                if rule.operation == "delete_relay_events":
+                    await transaction.write(
+                        "DELETE FROM runtime_setting "
+                        "WHERE key='maintenance.allow_relay_event_delete'"
+                    )
         return len(ids)
 
     async def _save_storage_snapshot(self, report: dict[str, Any], now: int) -> None:
@@ -803,6 +959,9 @@ class MaintenanceService:
             undefined_foreign_keys = await self.audit_cleanup_foreign_keys()
             if undefined_foreign_keys:
                 failures["foreign_key_policy"] = "; ".join(undefined_foreign_keys)[:500]
+            undefined_table_policies = await self.audit_table_policies()
+            if undefined_table_policies:
+                failures["table_policy"] = "; ".join(undefined_table_policies)[:500]
 
             # Snapshot before cleanup so a bad local policy remains recoverable.
             backups_removed = self.backups.rotate(self.config.store.backup.keep)

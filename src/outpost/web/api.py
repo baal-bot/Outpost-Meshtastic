@@ -2365,6 +2365,11 @@ def create_web_app(
                     )
                 return {"rated": body.rating}
 
+            @app.delete("/api/v1/ai/members/{member_id}/history")
+            async def ai_delete_member_history(member_id: int) -> dict[str, int]:
+                deleted = await ai_store.delete_member_history(member_id, current_actor_ref())
+                return {"deleted": deleted}
+
             @app.post("/api/v1/ai/interactions/{interaction_id}/promote", response_model=None)
             async def ai_promote(
                 interaction_id: int, body: AIPromoteBody

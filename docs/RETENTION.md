@@ -26,6 +26,8 @@ policy; Outpost never silently replaces audit detail with a summary.
 | `watch_history_days` | 365 days | Concluded alerts, closed events, and check-ins. |
 | `environment_history_days` | 30 days | CAP, earthquake, and SAME review history. |
 | `provider_cache_days` | 2 days | Environment caches and federation quota windows. |
+| `ai_interaction_content_days` | 30 days | Member identity link, verbatim question, and generated answer. |
+| `ai_interaction_metrics_days` | 180 days | De-identified AI safety, quality, rating, timing, and token-use fields. |
 | `federation_service_days` | 7 days | Completed, failed, or expired peer-service requests/results. |
 | `federation_history_days` | 30 days | Reviewed inbox items, receipts, replay state, and terminal deliveries. |
 | `outbound_history_days` | 30 days | Terminal durable outbound work and its attempts. |
@@ -54,6 +56,8 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | System/security | `audit_log` | Preserve forever and protect. |
 | Members/directory | `member` | Preserve identity/trust history until explicit operator lifecycle action. |
 | Members/directory | `member_trust_history` | Preserve reviewed trust-change evidence forever and protect. |
+| Members/directory | `member_pki_event` | Preserve key-verification and conflict evidence forever and protect. |
+| Members/directory | `member_pki_replay` | Expire through its writer-maintained 90-day replay window. |
 | Members/directory | `member_position` | Expire at its per-share deadline. |
 | Members/directory | `channel_dir` | Preserve operator-managed directory. |
 | BBS/mail | `board` | Preserve operator configuration. |
@@ -73,8 +77,14 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | Environment | `env_cache`, `cap_point_cache` | Expire after `provider_cache_days`. |
 | Environment | `cap_alert`, `earthquake`, `same_event` | Retain review/history for `environment_history_days`. |
 | Environment | `waypoint` | Preserve operator-managed reference data. |
+| AI assistant | `kb_document` | Preserve operator-managed verified knowledge until explicit deletion. |
+| AI assistant | `kb_chunk`, `kb_fts` and FTS shadow tables | Cascade/compact with their knowledge document. |
+| AI assistant | `ai_interaction` | Redact member link, question, and answer after `ai_interaction_content_days`; retain only de-identified quality fields until `ai_interaction_metrics_days`. An operator can permanently delete all AI history for a specific member sooner from the AI page. |
+| AI assistant | `ai_refusal_rule` | Preserve operator-managed safety policy until explicit deletion. |
 | Federation | `fed_peer`, `fed_peer_successor` | Preserve trust, pairing, and identity-adoption evidence until operator action. |
+| Federation | `fed_peer_tombstone` | Preserve explicit forget evidence so a removed peer cannot silently reappear. |
 | Federation | `fed_cursor`, `fed_service_circuit` | Preserve bounded state per peer/stream/service. |
+| Federation | `fed_topology_policy`, `fed_topology_peer` | Cascade current topology preferences/state with their peer. |
 | Federation | `fed_seen` | Retain replay/deduplication history for `federation_history_days`. |
 | Federation | `fed_outbox` | Retain sent or long-expired frames; live frames are protected. |
 | Federation | `fed_service_request` | Retain terminal/expired request results for `federation_service_days`; live requests are protected. |
@@ -82,6 +92,12 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | Federation | `fed_inbox_item` | Retain imported/rejected records; pending human approvals are protected. |
 | Federation | `fed_mail_delivery` | Retain terminal deliveries; queued/sent relay state is protected. |
 | Federation | `fed_post_delivery` | Retain delivered receipts; queued/sent reconciliation is protected. |
+| Federation | `fed_relay_identity` | Preserve the local relay signing identity and rotation proof. |
+| Federation | `fed_relay_policy` | Cascade with its peer. |
+| Federation | `fed_relay_origin_key`, `fed_relay_origin_candidate` | Preserve reviewed trust pins and pending observations until operator action. |
+| Federation | `fed_relay_envelope` | Retain terminal envelope metadata for `federation_history_days`; active routing state is protected and expired payload bytes are purged immediately. |
+| Federation | `fed_relay_usage` | Retain quota windows for `provider_cache_days`. |
+| Federation | `fed_relay_event` | Retain append-only relay event history for `federation_history_days`; maintenance alone may delete elapsed records. |
 
 ## Writer and recovery bounds
 

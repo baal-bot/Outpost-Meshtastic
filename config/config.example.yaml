@@ -179,6 +179,8 @@ store:
     watch_history_days: 365
     environment_history_days: 30
     provider_cache_days: 2
+    ai_interaction_content_days: 30
+    ai_interaction_metrics_days: 180
     federation_service_days: 7
     federation_history_days: 30
     outbound_history_days: 30

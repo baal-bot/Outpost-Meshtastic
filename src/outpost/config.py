@@ -432,9 +432,19 @@ class RetentionConfig(StrictModel):
     watch_history_days: int = Field(default=365, ge=30, le=3_650)
     environment_history_days: int = Field(default=30, ge=1, le=365)
     provider_cache_days: int = Field(default=2, ge=1, le=30)
+    ai_interaction_content_days: int = Field(default=30, ge=1, le=365)
+    ai_interaction_metrics_days: int = Field(default=180, ge=30, le=3_650)
     federation_service_days: int = Field(default=7, ge=1, le=90)
     federation_history_days: int = Field(default=30, ge=1, le=365)
     outbound_history_days: int = Field(default=30, ge=1, le=365)
+
+    @model_validator(mode="after")
+    def validate_ai_retention(self) -> RetentionConfig:
+        if self.ai_interaction_metrics_days < self.ai_interaction_content_days:
+            raise ValueError(
+                "ai_interaction_metrics_days must be at least ai_interaction_content_days"
+            )
+        return self
 
 
 class BackupConfig(StrictModel):
