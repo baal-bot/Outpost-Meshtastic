@@ -69,7 +69,7 @@ def specs(service: AlertService) -> list[CommandSpec]:
         ),
         CommandSpec(
             "ACK",
-            (),
+            ("ACKNOWLEDGE",),
             module="watch",
             min_trust=TrustLevel.GUEST,
             airtime_class=TrafficClass.REPLY,

@@ -665,7 +665,9 @@ def specs(center: MeshOperationsCenter) -> list[CommandSpec]:
             airtime_class=TrafficClass.REPLY,
             max_parts=3,
             rate_key="commands",
-            help_short="OPS · PKI-authenticated incident, welfare, inbox, and delivery triage",
+            help_short=(
+                "OPS [ACTION|INCS|WELFARE|INBOX|FAIL|REVIEWS] · PKI-authenticated action center"
+            ),
             handler=cast(CommandHandler, ops),
             mutates=True,
         )

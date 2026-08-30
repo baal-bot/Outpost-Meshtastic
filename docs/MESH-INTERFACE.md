@@ -79,6 +79,21 @@ network details are requested only when needed and use stable, bounded pages. Ex
 coordinates, private mail, operator notes, and boards above the member's trust are removed before
 briefing changes or optional AI phrasing are computed.
 
+Open the mesh operations action center (responder or operator):
+
+```text
+?  -> Incidents & safety -> Responder tools -> Operations center
+1  -> action-needed queues
+2  -> incident list, then a numbered incident
+0  -> Home
+```
+
+`OPS` creates its own navigation context, so numbered replies and `BACK` stay inside the action
+center until the member returns Home. Responders can triage incidents, welfare, and delivery
+failures. Operators additionally see the operations inbox and quarantined federation reviews.
+Listings omit coordinates, message bodies, payloads, and internal errors. Every operator mutation
+shows a separate ten-minute confirmation screen stating that nothing has changed yet.
+
 Reports and welfare check-ins are community coordination records, not emergency calls. Mail is
 hidden from other members but stored plaintext is readable by the Outpost operator.
 

@@ -16,6 +16,8 @@ itself promote any capability to production-ready.
   `docs/FEATURES.md` diff.
 - [ ] Run `python tools/check_capabilities.py --check`; CI and the release workflow must pass the
   same check on the exact release revision.
+- [ ] Run `python tools/check_commands.py` after command metadata changes, review the generated
+  `docs/COMMANDS.md` table, and confirm `python tools/check_commands.py --check` passes.
 
 ## Quality and recovery
 

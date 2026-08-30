@@ -472,7 +472,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
         ),
         CommandSpec(
             "SUB",
-            (),
+            ("SUBSCRIBE",),
             help_short="SUB <board> [cadence]",
             handler=subscribe,
             mutates=True,
@@ -481,7 +481,7 @@ def specs(service: BBSService, self_delete_minutes: int = 30) -> list[CommandSpe
         ),
         CommandSpec(
             "UNSUB",
-            (),
+            ("UNSUBSCRIBE",),
             help_short="UNSUB <board>",
             handler=unsubscribe,
             mutates=True,

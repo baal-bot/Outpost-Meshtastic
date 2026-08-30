@@ -64,5 +64,11 @@ def specs(service: AIService) -> list[CommandSpec]:
             "ASK", ("A", "AI"), help_short="ASK <question> · local answers", handler=ask, **base
         ),
         CommandSpec("SUM", (), help_short="SUM <board|thread|incident>", handler=summarize, **base),
-        CommandSpec("TR", (), help_short="TR <language> <text>", handler=translate, **base),
+        CommandSpec(
+            "TR",
+            ("TRANSLATE",),
+            help_short="TR <language> <text> · translate with the local assistant",
+            handler=translate,
+            **base,
+        ),
     ]

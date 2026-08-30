@@ -456,14 +456,15 @@ def test_release_update_verifies_artifacts_before_checkout_and_install() -> None
     workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "ci.yml").read_text()
     expected_scope = (
         "src tests tools/build_release_metadata.py tools/check_capabilities.py "
-        "tools/check_ci_evidence.py tools/check_dependency_lock.py tools/check_mypy_ratchet.py "
-        "tools/check_static_markup.py tools/pytest_evidence_plugin.py tools/verify_release.py "
-        "deploy/configure.py deploy/render_avahi.py"
+        "tools/check_commands.py tools/check_ci_evidence.py tools/check_dependency_lock.py "
+        "tools/check_mypy_ratchet.py tools/check_static_markup.py tools/pytest_evidence_plugin.py "
+        "tools/verify_release.py deploy/configure.py deploy/render_avahi.py"
     )
     assert expected_scope in " ".join(pre_push.replace("\\\n", "").split())
     assert " ".join(workflow.split()).count(expected_scope) == 2
-    assert "python tools/check_static_markup.py" in pre_push
-    assert "python tools/check_mypy_ratchet.py" in pre_push
+    assert '"$PYTHON" tools/check_static_markup.py' in pre_push
+    assert '"$PYTHON" tools/check_mypy_ratchet.py' in pre_push
+    assert '"$PYTHON" tools/check_commands.py --check' in pre_push
 
     smoke = (Path(__file__).parents[2] / "deploy" / "smoke-package.sh").read_text()
     assert 'install -c "$PROJECT_DIR/requirements.lock" "$WHEEL[radio]"' in smoke
