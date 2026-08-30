@@ -2,10 +2,18 @@
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
+PROJECT_DIR=${OUTPOST_PROJECT_DIR:-$(dirname -- "$SCRIPT_DIR")}
+. "$SCRIPT_DIR/health_probe.sh"
 PREFIX=${OUTPOST_PREFIX:-/opt/outpost}
 STATE_DIR=${OUTPOST_STATE_DIR:-/var/lib/outpost}
 CONFIG_DIR=${OUTPOST_CONFIG_DIR:-/etc/outpost}
+SYSTEM_ROOT=${OUTPOST_SYSTEM_ROOT:-}
+SYSTEMD_DIR=${OUTPOST_SYSTEMD_DIR:-$SYSTEM_ROOT/etc/systemd/system}
+UDEV_RULES_DIR=${OUTPOST_UDEV_RULES_DIR:-$SYSTEM_ROOT/etc/udev/rules.d}
+AVAHI_SERVICES_DIR=${OUTPOST_AVAHI_SERVICES_DIR:-$SYSTEM_ROOT/etc/avahi/services}
+SBIN_DIR=${OUTPOST_SBIN_DIR:-$SYSTEM_ROOT/usr/local/sbin}
+LIB_DIR=${OUTPOST_LIB_DIR:-$SYSTEM_ROOT/usr/local/lib/outpost}
+LOG_DIR=${OUTPOST_LOG_DIR:-$SYSTEM_ROOT/var/log/outpost}
 SERVICE_NAME=${OUTPOST_SERVICE_NAME:-outpost.service}
 HEALTH_URL=${OUTPOST_HEALTH_URL:-}
 METRICS_URL=
@@ -18,8 +26,13 @@ ALLOW_UNVERIFIED_CI=${OUTPOST_ALLOW_UNVERIFIED_CI:-0}
 CI_VERIFIED_REVISION=${OUTPOST_CI_VERIFIED_REVISION:-}
 CI_EVIDENCE=${OUTPOST_CI_EVIDENCE:-}
 WEB_TRANSPORT_MODE=trusted_http
+OUTPOST_HEALTH_ATTEMPTS=${OUTPOST_HEALTH_ATTEMPTS:-60}
+OUTPOST_HEALTH_DELAY_SECONDS=${OUTPOST_HEALTH_DELAY_SECONDS:-2}
 
 fail() { echo "Outpost install: $*" >&2; exit 1; }
+json_field() {
+  printf '%s' "$1" | python3 -c "import json,sys; print(json.load(sys.stdin)[$2])"
+}
 
 wait_for_hailo_release() {
   if [ "$AI_PROVIDER" = hailo_vlm ] && [ "$HAILO_RELEASE_GRACE_SECONDS" -gt 0 ]; then
@@ -28,21 +41,8 @@ wait_for_hailo_release() {
   fi
 }
 
-health_probe() {
-  if [ "$WEB_TRANSPORT_MODE" = direct_https ]; then
-    # Loopback liveness is certificate-name agnostic; startup separately validates dates/key match.
-    curl -fkSs "$HEALTH_URL"
-  else
-    curl -fsS "$HEALTH_URL"
-  fi
-}
-
 metrics_probe() {
-  if [ "$WEB_TRANSPORT_MODE" = direct_https ]; then
-    curl -fkSs "$METRICS_URL"
-  else
-    curl -fsS "$METRICS_URL"
-  fi
+  outpost_probe_url "$METRICS_URL"
 }
 
 [ "$(id -u)" -eq 0 ] || fail "run as root: sudo $0"
@@ -70,7 +70,7 @@ else
   FULL_REVISION=
   REVISION=$(date -u +%Y%m%dT%H%M%SZ)
 fi
-RELEASE_ID=$(date -u +%Y%m%dT%H%M%SZ)-$REVISION
+RELEASE_ID=${OUTPOST_RELEASE_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$REVISION}
 RELEASE_DIR=$PREFIX/releases/$RELEASE_ID
 CURRENT_LINK=$PREFIX/current
 PREVIOUS_LINK=$PREFIX/previous
@@ -94,10 +94,12 @@ getent group dialout >/dev/null 2>&1 && usermod -a -G dialout outpost
 usermod -a -G outpost-sdr outpost
 install -d -m 0755 "$PREFIX" "$PREFIX/releases"
 install -d -m 0750 -o outpost -g outpost "$STATE_DIR" "$STATE_DIR/.data" \
-  "$STATE_DIR/backups" "$STATE_DIR/models" /var/log/outpost
+  "$STATE_DIR/backups" "$STATE_DIR/models" "$LOG_DIR"
 install -d -m 0750 -o root -g outpost "$CONFIG_DIR"
 install -d -m 0750 -o root -g outpost "$CONFIG_DIR/tls"
-install -m 0644 "$SCRIPT_DIR/70-outpost-rtl-sdr.rules" /etc/udev/rules.d/70-outpost-rtl-sdr.rules
+install -d -m 0755 "$SYSTEMD_DIR" "$UDEV_RULES_DIR" "$AVAHI_SERVICES_DIR" "$SBIN_DIR" "$LIB_DIR"
+install -m 0644 "$SCRIPT_DIR/70-outpost-rtl-sdr.rules" \
+  "$UDEV_RULES_DIR/70-outpost-rtl-sdr.rules"
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=usb --action=change
 
@@ -133,14 +135,10 @@ else
   echo "First-run wizard skipped; edit $CONFIG_DIR/config.yaml before production use."
 fi
 OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" -c 'from outpost.config import load_config; load_config(); print("Configuration validated")'
-WEB_TRANSPORT_MODE=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
-from outpost.config import load_config
-print(load_config().web.transport.mode)
-PY
-)
+outpost_configure_health "$RELEASE_DIR/bin/python" "$CONFIG_DIR/config.yaml"
 if [ "$MDNS_ENABLED" = 1 ]; then
   "$RELEASE_DIR/bin/python" "$SCRIPT_DIR/render_avahi.py" \
-    --config "$CONFIG_DIR/config.yaml" --output /etc/avahi/services/outpost.service
+    --config "$CONFIG_DIR/config.yaml" --output "$AVAHI_SERVICES_DIR/outpost.service"
   if systemctl cat avahi-daemon.service >/dev/null 2>&1; then
     if systemctl enable avahi-daemon.service && systemctl restart avahi-daemon.service; then
       echo "mDNS service advertised by Avahi; use this host's .local name."
@@ -254,22 +252,7 @@ PY
     '3e302b1d0bdc4beaf4ff982cb34f18bc957d3acd1e20e275eb0dd3536b3043a7' \
     "$HAILO_VLM_MODEL_PATH" | sha256sum -c -
 fi
-if [ -z "$HEALTH_URL" ]; then
-  HEALTH_URL=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
-from outpost.config import load_config
-config = load_config()
-scheme = "https" if config.web.transport.mode == "direct_https" else "http"
-print(f"{scheme}://127.0.0.1:{config.web.port}/api/v1/health")
-PY
-  )
-fi
-METRICS_URL=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
-from outpost.config import load_config
-config = load_config()
-scheme = "https" if config.web.transport.mode == "direct_https" else "http"
-print(f"{scheme}://127.0.0.1:{config.web.port}/metrics")
-PY
-)
+METRICS_URL="$OUTPOST_LOOPBACK_BASE/metrics"
 
 if [ ! -f "$STATE_DIR/.data/tiles/manifest.json" ] && \
   "$RELEASE_DIR/bin/python" -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])) or {}; raise SystemExit(0 if d.get("node",{}).get("location") else 1)' "$CONFIG_DIR/config.yaml"; then
@@ -329,14 +312,14 @@ PY
 fi
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK.next"
 mv -Tf "$CURRENT_LINK.next" "$CURRENT_LINK"
-install -m 0644 "$SCRIPT_DIR/outpost.service" /etc/systemd/system/outpost.service
-install -m 0755 "$SCRIPT_DIR/rollback.sh" /usr/local/sbin/outpost-rollback
-install -m 0755 "$SCRIPT_DIR/setup-hotspot.sh" /usr/local/sbin/outpost-setup-hotspot
-ln -sfn "$CURRENT_LINK/bin/outpost-setup-token" /usr/local/sbin/outpost-setup-token
-ln -sfn "$CURRENT_LINK/bin/outpost-diagnostics" /usr/local/sbin/outpost-diagnostics
-ln -sfn "$CURRENT_LINK/bin/outpost-onboarding" /usr/local/sbin/outpost-onboarding
-install -d -m 0755 /usr/local/lib/outpost
-install -m 0755 "$SCRIPT_DIR/release_recovery.py" /usr/local/lib/outpost/release_recovery.py
+install -m 0644 "$SCRIPT_DIR/outpost.service" "$SYSTEMD_DIR/outpost.service"
+install -m 0755 "$SCRIPT_DIR/rollback.sh" "$SBIN_DIR/outpost-rollback"
+install -m 0755 "$SCRIPT_DIR/setup-hotspot.sh" "$SBIN_DIR/outpost-setup-hotspot"
+ln -sfn "$CURRENT_LINK/bin/outpost-setup-token" "$SBIN_DIR/outpost-setup-token"
+ln -sfn "$CURRENT_LINK/bin/outpost-diagnostics" "$SBIN_DIR/outpost-diagnostics"
+ln -sfn "$CURRENT_LINK/bin/outpost-onboarding" "$SBIN_DIR/outpost-onboarding"
+install -m 0755 "$SCRIPT_DIR/release_recovery.py" "$LIB_DIR/release_recovery.py"
+install -m 0755 "$SCRIPT_DIR/health_probe.sh" "$LIB_DIR/health_probe.sh"
 printf '%s\n' "$PROJECT_DIR" > "$CONFIG_DIR/install-source"
 chmod 0640 "$CONFIG_DIR/install-source"
 systemctl daemon-reload
@@ -355,11 +338,11 @@ fi
 systemctl start "$SERVICE_NAME"
 
 healthy=0
-attempt=0
-while [ "$attempt" -lt 30 ]; do
-  if health_probe >/dev/null 2>&1; then healthy=1; break; fi
-  attempt=$((attempt + 1)); sleep 2
-done
+if outpost_wait_for_health; then
+  healthy=1
+else
+  health_status=$?
+fi
 if [ "$healthy" -eq 1 ] && ! metrics_probe | grep -q '^# HELP outpost_'; then
   echo "Exact /metrics deployment smoke check failed." >&2
   healthy=0
@@ -368,34 +351,42 @@ if [ "$healthy" -ne 1 ]; then
   echo "New release failed health verification; rolling back." >&2
   systemctl stop "$SERVICE_NAME" || true
   wait_for_hailo_release
+  rollback_action=code-only
+  rollback_snapshot_at=
+  if [ -n "$OLD_TARGET" ] && [ -f "$RELEASE_DIR/rollback.json" ]; then
+    if ! rollback_plan=$(python3 "$SCRIPT_DIR/release_recovery.py" plan \
+      --metadata "$RELEASE_DIR/rollback.json" \
+      --current-release "$RELEASE_DIR" --target-release "$OLD_TARGET"); then
+      fail "release failed health verification and rollback compatibility planning failed"
+    fi
+    rollback_action=$(json_field "$rollback_plan" '"action"')
+    rollback_snapshot_at=$(json_field "$rollback_plan" '"snapshot_created_at"')
+  fi
+  if [ "$rollback_action" = restore ]; then
+    failed_path="$DATABASE_PATH.failed-$RELEASE_ID"
+    python3 "$SCRIPT_DIR/release_recovery.py" snapshot \
+      --source "$DATABASE_PATH" --destination "$failed_path" >/dev/null || \
+      fail "could not preserve the failed release database; live data was not replaced"
+    python3 "$SCRIPT_DIR/release_recovery.py" restore \
+      --source "$BACKUP_PATH" --destination "$DATABASE_PATH" \
+      --maximum-schema "$PREVIOUS_SCHEMA_CAP" >/dev/null || \
+      fail "could not restore the schema-compatible pre-upgrade snapshot"
+    chown outpost:outpost "$failed_path" "$DATABASE_PATH"
+    chmod 0640 "$failed_path" "$DATABASE_PATH"
+    echo "Restored database snapshot from $rollback_snapshot_at; writes after that point "\
+"were discarded. Failed-release forensic copy: $failed_path" >&2
+  else
+    echo "Rollback is code-only; the live database was left untouched." >&2
+  fi
   if [ -n "$OLD_TARGET" ]; then
     ln -sfn "$OLD_TARGET" "$CURRENT_LINK.next"
     mv -Tf "$CURRENT_LINK.next" "$CURRENT_LINK"
   fi
-  if [ -n "$OLD_TARGET" ] && [ -n "$BACKUP_PATH" ] && [ -f "$BACKUP_PATH" ]; then
-    cp -a "$DATABASE_PATH" "$DATABASE_PATH.failed-$RELEASE_ID" 2>/dev/null || true
-    "$OLD_TARGET/bin/python" - "$BACKUP_PATH" "$DATABASE_PATH" <<'PY'
-import os, sqlite3, sys
-temporary = sys.argv[2] + ".restore"
-if os.path.exists(temporary):
-    os.unlink(temporary)
-source = sqlite3.connect(sys.argv[1])
-target = sqlite3.connect(temporary)
-with target:
-    source.backup(target)
-assert target.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-source.close(); target.close()
-for suffix in ("-wal", "-shm"):
-    try:
-        os.unlink(sys.argv[2] + suffix)
-    except FileNotFoundError:
-        pass
-os.replace(temporary, sys.argv[2])
-PY
-    chown outpost:outpost "$DATABASE_PATH"
-  fi
   [ -n "$OLD_TARGET" ] && systemctl restart "$SERVICE_NAME" || true
-  fail "release $RELEASE_ID did not become healthy; previous release restored"
+  if [ "${health_status:-1}" -eq 2 ]; then
+    fail "release health probe could not be performed; previous release restored but unverified"
+  fi
+  fail "release $RELEASE_ID did not become healthy; previous release restored ($rollback_action)"
 fi
 if [ -n "$OLD_TARGET" ]; then
   rm -f "$PREVIOUS_LINK"

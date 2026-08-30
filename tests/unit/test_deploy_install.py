@@ -1,4 +1,6 @@
+import os
 import runpy
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -6,6 +8,9 @@ from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 from typing import Any, cast
+
+import pytest
+import yaml
 
 RECOVERY = runpy.run_path(
     str(Path(__file__).parents[2] / "deploy" / "release_recovery.py"),
@@ -18,71 +23,375 @@ snapshot_database = cast(Callable[..., Any], RECOVERY["snapshot_database"])
 write_metadata = cast(Callable[..., dict[str, Any]], RECOVERY["write_metadata"])
 
 
-def test_installer_stages_health_checked_release_with_rollback() -> None:
-    script = (Path(__file__).parents[2] / "deploy" / "install.sh").read_text()
+def _write_executable(path: Path, content: str) -> None:
+    path.write_text(content)
+    path.chmod(0o755)
 
-    assert "useradd --system --gid outpost" in script
-    assert 'pip" install -c "$PROJECT_DIR/requirements.lock"' in script
-    assert "pre-upgrade-$RELEASE_ID.db" in script
-    assert 'release_recovery.py" record' in script
-    assert '"$RELEASE_DIR/rollback.json"' in script
-    assert 'mv -Tf "$CURRENT_LINK.next" "$CURRENT_LINK"' in script
-    assert 'curl -fsS "$HEALTH_URL"' in script
-    assert 'ln -sfn "$CURRENT_LINK/bin/outpost-setup-token"' in script
-    assert 'ln -sfn "$CURRENT_LINK/bin/outpost-diagnostics"' in script
-    assert 'ln -sfn "$CURRENT_LINK/bin/outpost-onboarding"' in script
-    assert 'setup-hotspot.sh" /usr/local/sbin/outpost-setup-hotspot' in script
-    assert "sudo outpost-setup-token show" in script
-    assert "sudo outpost-setup-token reset" in script
-    assert "New release failed health verification; rolling back." in script
-    assert "Python 3.12 or 3.13 is required" in script
-    assert "apt-get install -y --no-install-recommends rtl-sdr" in script
-    assert "samedec-$SAMEDEC_VERSION/samedec-$SAMEDEC_TARGET" in script
-    assert "sha256sum -c -" in script
-    assert 'SAME_ENABLED" -eq 1' in script
-    assert 'AI_PROVIDER" = hailo' in script
-    assert 'AI_PROVIDER" = hailo_vlm' in script
-    assert "expected /dev/hailo0 or /dev/h1x-0" in script
-    assert "hailo-ollama.service" in script
-    assert '"$CONFIG_DIR/hailo-ollama/hailo-ollama.json"' in script
-    assert "OUTPOST_HAILORT_WHEEL" in script
-    assert "OUTPOST_HAILO_VLM_MODEL" in script
-    assert "3e302b1d0bdc4beaf4ff982cb34f18bc957d3acd1e20e275eb0dd3536b3043a7" in script
-    assert "from hailo_platform.genai import VLM" in script
-    assert "systemctl disable --now hailo-ollama.service" in script
-    assert "OUTPOST_HAILO_RELEASE_GRACE_SECONDS" in script
-    assert 'systemctl stop "$SERVICE_NAME"' in script
-    assert 'sleep "$HAILO_RELEASE_GRACE_SECONDS"' in script
-    assert 'systemctl start "$SERVICE_NAME"' in script
-    assert "OUTPOST_MDNS:-1" in script
-    assert "render_avahi.py" in script
-    assert "avahi-daemon.service" in script
-    assert "OUTPOST_CI_VERIFIED_REVISION" in script
-    assert "OUTPOST_CI_EVIDENCE" in script
-    assert "OUTPOST_ALLOW_UNVERIFIED_CI" in script
-    assert "upgrades from a Git checkout require exact-commit green CI" in script
-    assert '"$RELEASE_DIR/ci-evidence.json"' in script
-    assert '"$CONFIG_DIR/tls"' in script
-    assert 'WEB_TRANSPORT_MODE" = direct_https' in script
-    assert 'config.web.transport.mode == "direct_https"' in script
-    assert "health_probe" in script
-    assert 'f"{scheme}://127.0.0.1:{config.web.port}/metrics"' in script
-    assert "metrics_probe | grep -q '^# HELP outpost_'" in script
-    assert "Exact /metrics deployment smoke check failed." in script
 
-    unit = (Path(__file__).parents[2] / "deploy" / "outpost.service").read_text()
-    assert "TimeoutStopSec=30" in unit
-    assert "StartLimitIntervalSec=300" in unit
-    assert "StartLimitBurst=5" in unit
-    assert "uvicorn_options(load_config().web)" in unit
+def _installer_harness(tmp_path: Path, *, transport: str = "trusted_http") -> dict[str, Any]:
+    root = Path(__file__).parents[2]
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    prefix = tmp_path / "prefix"
+    state = tmp_path / "state"
+    config_dir = tmp_path / "config"
+    system_root = tmp_path / "system"
+    config_dir.mkdir()
+    state.mkdir()
+    database = state / "outpost.db"
+    _database(database, 1, "before")
+    config = yaml.safe_load((root / "config/config.example.yaml").read_text())
+    config["store"]["path"] = str(database)
+    config["modules"]["env"]["enabled"] = False
+    config["web"]["transport"].update(
+        {
+            "mode": transport,
+            "certificate_file": str(config_dir / "tls/cert.pem")
+            if transport == "direct_https"
+            else None,
+            "private_key_file": str(config_dir / "tls/key.pem")
+            if transport == "direct_https"
+            else None,
+            "trusted_proxies": ["127.0.0.1/32"] if transport == "trusted_proxy" else [],
+        }
+    )
+    (config_dir / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
 
-    hotspot = (Path(__file__).parents[2] / "deploy" / "setup-hotspot.sh").read_text()
-    assert "802-11-wireless.ap-isolation yes" in hotspot
-    assert 'iifname "$interface" drop' in hotspot
-    assert "hook forward" in hotspot
-    assert "outpost-setup-hotspot-expiry" in hotspot
-    assert '[ "$minutes" -ge 5 ] && [ "$minutes" -le 60 ]' in hotspot
-    assert '"$transport" = trusted_http' in hotspot
+    _write_executable(fake_bin / "id", '#!/bin/sh\n[ "${1:-}" = -u ] && echo 0\n')
+    for command in ("getent", "groupadd", "useradd", "usermod", "udevadm", "chown"):
+        _write_executable(fake_bin / command, "#!/bin/sh\nexit 0\n")
+    _write_executable(fake_bin / "sleep", "#!/bin/sh\nexit 0\n")
+    _write_executable(
+        fake_bin / "install",
+        """#!/usr/bin/python3
+import subprocess, sys
+arguments = []
+skip = False
+for index, value in enumerate(sys.argv[1:]):
+    if skip:
+        skip = False
+        continue
+    if value in {"-o", "-g"}:
+        skip = True
+        continue
+    arguments.append(value)
+raise SystemExit(subprocess.run(["/usr/bin/install", *arguments], check=False).returncode)
+""",
+    )
+    _write_executable(
+        fake_bin / "python3",
+        r"""#!/bin/sh
+if [ "${1:-}" = -m ] && [ "${2:-}" = venv ]; then
+  [ "${3:-}" = --help ] && exit 0
+  release=$3
+  mkdir -p "$release/bin"
+  printf '%s\n' "${HARNESS_SCHEMA_CAP:-1}" > "$release/.schema-cap"
+  cat > "$release/bin/python" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = - ]; then
+  wrapper_input=$(mktemp)
+  trap 'rm -f "$wrapper_input"' EXIT HUP INT TERM
+  cat > "$wrapper_input"
+  if grep -q 'migrations.glob' "$wrapper_input"; then
+    cat "$(dirname -- "$0")/../.schema-cap"
+    exit 0
+  fi
+  shift
+  "$REAL_PYTHON" - "$@" < "$wrapper_input"
+  exit $?
+fi
+exec "$REAL_PYTHON" "$@"
+EOF
+  cat > "$release/bin/pip" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+  chmod 0755 "$release/bin/python" "$release/bin/pip"
+  exit 0
+fi
+exec "$REAL_PYTHON" "$@"
+""",
+    )
+    _write_executable(
+        fake_bin / "systemctl",
+        """#!/bin/sh
+printf 'systemctl %s\n' "$*" >> "$HARNESS_LOG"
+case " $* " in
+  *" start "*|*" restart "*)
+    if [ "${HARNESS_MUTATION:-none}" != none ] && [ ! -e "$HARNESS_MUTATION_STATE" ]; then
+      : > "$HARNESS_MUTATION_STATE"
+      "$REAL_PYTHON" -c 'import os, sqlite3
+path = os.environ["HARNESS_DATABASE"]
+connection = sqlite3.connect(path)
+if os.environ["HARNESS_MUTATION"] == "schema":
+    connection.execute("INSERT OR IGNORE INTO schema_version VALUES(2,2)")
+connection.execute("UPDATE sample SET value=?", ("during-failed-release",))
+connection.commit()
+connection.close()'
+    fi
+    ;;
+esac
+exit 0
+""",
+    )
+    _write_executable(
+        fake_bin / "curl",
+        """#!/bin/sh
+printf 'curl %s\n' "$*" >> "$HARNESS_LOG"
+for argument in "$@"; do probe_url=$argument; done
+case "${HARNESS_HEALTH:-success}" in
+  fail) exit 7 ;;
+  probe-error) exit 3 ;;
+  tls)
+    case "$*|$probe_url" in
+      *-fkSs*\\|https://*) ;;
+      *) exit 60 ;;
+    esac
+    ;;
+esac
+case "$probe_url" in
+  */metrics) echo '# HELP outpost_test harness' ;;
+  *) echo '{"status":"ok"}' ;;
+esac
+""",
+    )
+    _write_executable(
+        fake_bin / "mv",
+        '#!/bin/sh\nprintf \'mv %s\\n\' "$*" >> "$HARNESS_LOG"\nexec /bin/mv "$@"\n',
+    )
+    log = tmp_path / "commands.log"
+    return {
+        "root": root,
+        "fake_bin": fake_bin,
+        "prefix": prefix,
+        "state": state,
+        "config": config_dir,
+        "system_root": system_root,
+        "database": database,
+        "log": log,
+    }
+
+
+def _run_install(
+    harness: dict[str, Any],
+    release: str,
+    *,
+    health: str = "success",
+    mutation: str = "none",
+    schema_cap: int = 1,
+    script: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    root = cast(Path, harness["root"])
+    environment = {
+        **os.environ,
+        "PATH": f"{harness['fake_bin']}:/usr/bin:/bin",
+        "PYTHONPATH": str(root / "src"),
+        "REAL_PYTHON": sys.executable,
+        "OUTPOST_PROJECT_DIR": str(root),
+        "OUTPOST_PREFIX": str(harness["prefix"]),
+        "OUTPOST_STATE_DIR": str(harness["state"]),
+        "OUTPOST_CONFIG_DIR": str(harness["config"]),
+        "OUTPOST_SYSTEM_ROOT": str(harness["system_root"]),
+        "OUTPOST_MDNS": "0",
+        "OUTPOST_NONINTERACTIVE": "1",
+        "OUTPOST_ALLOW_UNVERIFIED_CI": "1",
+        "OUTPOST_HAILO_RELEASE_GRACE_SECONDS": "0",
+        "OUTPOST_HEALTH_ATTEMPTS": "2",
+        "OUTPOST_HEALTH_DELAY_SECONDS": "0",
+        "OUTPOST_RELEASE_ID": release,
+        "HARNESS_SCHEMA_CAP": str(schema_cap),
+        "HARNESS_HEALTH": health,
+        "HARNESS_MUTATION": mutation,
+        "HARNESS_MUTATION_STATE": str(harness["state"] / f"mutation-{release}"),
+        "HARNESS_DATABASE": str(harness["database"]),
+        "HARNESS_LOG": str(harness["log"]),
+    }
+    return subprocess.run(  # noqa: S603
+        ["/bin/sh", str(script or root / "deploy/install.sh")],
+        cwd=root,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _assert_successful_install(harness: dict[str, Any], result, release: str) -> None:
+    assert result.returncode == 0, result.stderr
+    expected = cast(Path, harness["prefix"]) / "releases" / release
+    assert (cast(Path, harness["prefix"]) / "current").resolve() == expected
+    assert (
+        inspect_database(
+            cast(Path, harness["state"]) / "backups" / f"pre-upgrade-{release}.db"
+        ).integrity
+        == "ok"
+    )
+    log = cast(Path, harness["log"]).read_text()
+    assert f"mv -Tf {harness['prefix']}/current.next {harness['prefix']}/current" in log
+    assert "systemctl start outpost.service" in log
+
+
+def test_installer_executes_staging_snapshot_atomic_activation_and_service(tmp_path: Path) -> None:
+    harness = _installer_harness(tmp_path)
+    first = _run_install(harness, "initial")
+    _assert_successful_install(harness, first, "initial")
+    second = _run_install(harness, "upgrade")
+    _assert_successful_install(harness, second, "upgrade")
+
+    prefix = cast(Path, harness["prefix"])
+    assert (prefix / "previous").resolve() == prefix / "releases/initial"
+    assert (prefix / "releases/upgrade/rollback.json").is_file()
+    assert "systemctl stop outpost.service" in cast(Path, harness["log"]).read_text()
+
+
+def test_failed_code_only_upgrade_restores_code_without_discarding_live_data(
+    tmp_path: Path,
+) -> None:
+    harness = _installer_harness(tmp_path)
+    _assert_successful_install(harness, _run_install(harness, "initial"), "initial")
+
+    failed = _run_install(harness, "broken", health="fail", mutation="code")
+
+    assert failed.returncode != 0
+    prefix = cast(Path, harness["prefix"])
+    assert (prefix / "current").resolve() == prefix / "releases/initial"
+    with closing(sqlite3.connect(harness["database"])) as connection:
+        assert connection.execute("SELECT value FROM sample").fetchone()[0] == (
+            "during-failed-release"
+        )
+    assert "Rollback is code-only; the live database was left untouched." in failed.stderr
+    assert not Path(f"{harness['database']}.failed-broken").exists()
+
+
+def test_failed_schema_upgrade_restores_snapshot_and_preserves_forensic_copy(
+    tmp_path: Path,
+) -> None:
+    harness = _installer_harness(tmp_path)
+    _assert_successful_install(harness, _run_install(harness, "initial"), "initial")
+
+    failed = _run_install(harness, "schema-broken", health="fail", mutation="schema", schema_cap=2)
+
+    assert failed.returncode != 0
+    assert inspect_database(harness["database"]).schema_version == 1
+    with closing(sqlite3.connect(harness["database"])) as connection:
+        assert connection.execute("SELECT value FROM sample").fetchone()[0] == "before"
+    forensic = Path(f"{harness['database']}.failed-schema-broken")
+    assert inspect_database(forensic).schema_version == 2
+    with closing(sqlite3.connect(forensic)) as connection:
+        assert connection.execute("SELECT value FROM sample").fetchone()[0] == (
+            "during-failed-release"
+        )
+    assert "writes after that point were discarded" in failed.stderr
+    assert f"Failed-release forensic copy: {forensic}" in failed.stderr
+
+
+def _run_rollback(harness: dict[str, Any], health: str) -> subprocess.CompletedProcess[str]:
+    root = cast(Path, harness["root"])
+    environment = {
+        **os.environ,
+        "PATH": f"{harness['fake_bin']}:/usr/bin:/bin",
+        "PYTHONPATH": str(root / "src"),
+        "REAL_PYTHON": sys.executable,
+        "OUTPOST_PREFIX": str(harness["prefix"]),
+        "OUTPOST_CONFIG_DIR": str(harness["config"]),
+        "OUTPOST_RECOVERY_HELPER": str(root / "deploy/release_recovery.py"),
+        "OUTPOST_HEALTH_HELPER": str(root / "deploy/health_probe.sh"),
+        "OUTPOST_HEALTH_ATTEMPTS": "2",
+        "OUTPOST_HEALTH_DELAY_SECONDS": "0",
+        "HARNESS_HEALTH": health,
+        "HARNESS_MUTATION": "none",
+        "HARNESS_MUTATION_STATE": str(harness["state"] / "rollback-mutation"),
+        "HARNESS_DATABASE": str(harness["database"]),
+        "HARNESS_LOG": str(harness["log"]),
+    }
+
+    return subprocess.run(  # noqa: S603
+        ["/bin/sh", str(root / "deploy/rollback.sh")],
+        cwd=root,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.parametrize("transport", ["trusted_http", "trusted_proxy", "direct_https"])
+def test_manual_rollback_uses_shared_probe_for_every_transport(
+    tmp_path: Path, transport: str
+) -> None:
+    harness = _installer_harness(tmp_path, transport=transport)
+    health = "tls" if transport == "direct_https" else "success"
+    _assert_successful_install(harness, _run_install(harness, "initial", health=health), "initial")
+    _assert_successful_install(harness, _run_install(harness, "upgrade", health=health), "upgrade")
+    result = _run_rollback(harness, health)
+
+    assert result.returncode == 0, result.stderr
+    assert (cast(Path, harness["prefix"]) / "current").resolve() == (
+        cast(Path, harness["prefix"]) / "releases/initial"
+    )
+    curl = "-fkSs https" if transport == "direct_https" else "-fsS http"
+    assert f"curl {curl}://127.0.0.1:8080/api/v1/health" in cast(Path, harness["log"]).read_text()
+
+
+def test_manual_rollback_probe_error_fails_before_code_or_data_change(tmp_path: Path) -> None:
+    harness = _installer_harness(tmp_path)
+    _assert_successful_install(harness, _run_install(harness, "initial"), "initial")
+    _assert_successful_install(harness, _run_install(harness, "upgrade"), "upgrade")
+    log = cast(Path, harness["log"])
+    before = log.read_text()
+
+    result = _run_rollback(harness, "probe-error")
+
+    assert result.returncode != 0
+    prefix = cast(Path, harness["prefix"])
+    assert (prefix / "current").resolve() == prefix / "releases/upgrade"
+    assert "health probe configuration failed before rollback" in result.stderr
+    assert "systemctl stop" not in log.read_text()[len(before) :]
+    with closing(sqlite3.connect(harness["database"])) as connection:
+        assert connection.execute("SELECT value FROM sample").fetchone()[0] == "before"
+
+
+@pytest.mark.parametrize("mutation", ["rollback", "snapshot", "atomic"])
+def test_installer_harness_rejects_safety_mutants(tmp_path: Path, mutation: str) -> None:
+    harness = _installer_harness(tmp_path)
+    root = cast(Path, harness["root"])
+    deploy = tmp_path / "mutated-deploy"
+    shutil.copytree(root / "deploy", deploy)
+    script = deploy / "install.sh"
+    source = script.read_text()
+    if mutation == "rollback":
+        _assert_successful_install(harness, _run_install(harness, "initial"), "initial")
+        source = source.replace(
+            'if [ "$healthy" -ne 1 ]; then',
+            'if [ "$healthy" -ne 1 ] && false; then',
+            1,
+        )
+        script.write_text(source)
+        result = _run_install(harness, "mutant", health="fail", script=script)
+        with pytest.raises(AssertionError):
+            assert result.returncode != 0
+            assert (cast(Path, harness["prefix"]) / "current").resolve() == (
+                cast(Path, harness["prefix"]) / "releases/initial"
+            )
+    elif mutation == "snapshot":
+        snapshot_call = (
+            'python3 "$SCRIPT_DIR/release_recovery.py" snapshot \\\n'
+            '    --source "$DATABASE_PATH" --destination "$BACKUP_PATH" >/dev/null'
+        )
+        source = source.replace(
+            snapshot_call,
+            "true",
+            1,
+        )
+        script.write_text(source)
+        result = _run_install(harness, "mutant", script=script)
+        with pytest.raises(AssertionError):
+            _assert_successful_install(harness, result, "mutant")
+    else:
+        script.write_text(source.replace("mv -Tf", "mv -f"))
+        result = _run_install(harness, "mutant", script=script)
+        with pytest.raises(AssertionError):
+            _assert_successful_install(harness, result, "mutant")
 
 
 def test_acceptance_host_installer_keeps_test_tools_out_of_production() -> None:

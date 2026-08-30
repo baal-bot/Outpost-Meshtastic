@@ -195,7 +195,7 @@ Maturity: **Automated-tested**.
 Evidence:
 
 - Automated: [tests/integration/test_backups.py](../tests/integration/test_backups.py) — Quiesce, integrity validation, restore failure, and recovery behavior.
-- Automated: [tests/unit/test_deploy_install.py](../tests/unit/test_deploy_install.py) — Artifact verification, atomic activation, snapshot, health rollback, and installer invariants.
+- Automated: [tests/unit/test_deploy_install.py](../tests/unit/test_deploy_install.py) — Executed scratch-prefix installs verify staging, atomic activation, snapshots, code-only and schema rollback, forensic preservation, and transport-aware health checks.
 - Operations: [docs/RELEASES.md](RELEASES.md) — Release evidence, verified update, rollback, compromise, and revocation procedures.
 
 Known limitations:
@@ -270,7 +270,7 @@ Maturity: **Automated-tested**.
 
 Evidence:
 
-- Automated: [tests/unit/test_deploy_install.py](../tests/unit/test_deploy_install.py) — Installer, discovery/hotspot boundaries, service sandbox, recovery, and acceptance-host invariants.
+- Automated: [tests/unit/test_deploy_install.py](../tests/unit/test_deploy_install.py) — Executed installer and rollback harness plus mutation checks, discovery/hotspot boundaries, service sandbox, recovery, and acceptance-host invariants.
 - Automated: [tests/unit/test_onboarding.py](../tests/unit/test_onboarding.py) — Resumable checklist, secret-free credential detection, requirement metadata, and mDNS declaration.
 - Operations: [docs/ONBOARDING.md](ONBOARDING.md) — Field checklist, local access, wallboard isolation, and redacted diagnostic procedure.
 

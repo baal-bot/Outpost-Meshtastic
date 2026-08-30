@@ -45,8 +45,11 @@ If a supported RTL-SDR is attached, the wizard also offers receive-only SAME set
 Set `OUTPOST_NONINTERACTIVE=1` for automated provisioning. Later runs preserve active configuration
 and stage a new, isolated release under `/opt/outpost/releases`. The installer validates the
 package and configuration, creates an integrity-checked pre-upgrade database backup, switches the
-`current` symlink atomically, and waits for health. Failed health verification restores both the
-previous code and pre-upgrade database. `git pull` alone never updates the running installation.
+`current` symlink atomically, and allows up to two minutes for health. Failed health verification
+always restores the previous code, but restores the pre-upgrade database only when the previous
+release cannot read the live schema. Code-only failures leave live data untouched. A required data
+restore first captures a verified failed-release forensic snapshot and reports the discarded time
+window. `git pull` alone never updates the running installation.
 
 After service startup, resume the complete field checklist with `sudo outpost-onboarding status`.
 It covers credentials, identity/location, live radio and region/channel verification, maps and
@@ -234,7 +237,9 @@ capacity, and recorded pre-upgrade snapshot form one compatible rollback plan. I
 healthy service if that dry run fails. After stopping, it creates another safety snapshot, restores
 the matching pre-upgrade database only when a migration requires it, swaps code, and verifies
 health. If verification fails, it automatically returns both code and data to their pre-attempt
-state. Keep the generated safety snapshots until the result has been independently verified.
+state. All transport modes use the same loopback probe logic; direct HTTPS uses a certificate-name-
+agnostic loopback check. A malformed probe aborts before downtime. Keep the generated safety
+snapshots until the result has been independently verified.
 
 ## Releases and dependency lock
 

@@ -175,6 +175,7 @@ def plan_rollback(
         "candidate": asdict(backup_state) if backup_state else None,
         "target_schema_cap": target_cap,
         "current_schema_cap": int(metadata["upgrade_schema_cap"]),
+        "snapshot_created_at": str(metadata["created_at"]),
     }
 
 
@@ -220,9 +221,7 @@ def main() -> None:
             result = asdict(snapshot_database(args.source, args.destination))
         elif args.command == "restore":
             result = asdict(
-                restore_database(
-                    args.source, args.destination, maximum_schema=args.maximum_schema
-                )
+                restore_database(args.source, args.destination, maximum_schema=args.maximum_schema)
             )
         elif args.command == "record":
             result = write_metadata(

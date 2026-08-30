@@ -309,7 +309,7 @@ description = "Quiesce, integrity validation, restore failure, and recovery beha
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/unit/test_deploy_install.py"
-description = "Artifact verification, atomic activation, snapshot, health rollback, and installer invariants."
+description = "Executed scratch-prefix installs verify staging, atomic activation, snapshots, code-only and schema rollback, forensic preservation, and transport-aware health checks."
 [[capabilities.evidence]]
 kind = "operations"
 path = "docs/RELEASES.md"
@@ -446,7 +446,7 @@ date = "2026-08-27"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/unit/test_deploy_install.py"
-description = "Installer, discovery/hotspot boundaries, service sandbox, recovery, and acceptance-host invariants."
+description = "Executed installer and rollback harness plus mutation checks, discovery/hotspot boundaries, service sandbox, recovery, and acceptance-host invariants."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/unit/test_onboarding.py"

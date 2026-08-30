@@ -68,10 +68,12 @@ checksum matches: the attestation and source-commit checks establish where that 
 ## Rollback
 
 Before an upgrade, keep a validated off-device backup and retain the previous release. The
-installer creates an integrity-checked database snapshot and automatically restores code and data
-if the new service fails its health check. Required local-AI readiness is part of that check; an
-enabled Hailo model that cannot acquire the accelerator cannot cause an upgrade to be accepted as
-healthy. After a successful activation, run:
+installer creates an integrity-checked database snapshot and automatically restores code if the
+new service fails its health check. It leaves the live database untouched for code-only failures;
+only a schema-incompatible rollback restores the snapshot, after preserving a verified forensic
+copy of the failed-release data. Required local-AI readiness is part of that check; an enabled
+Hailo model that cannot acquire the accelerator cannot cause an upgrade to be accepted as healthy.
+After a successful activation, run:
 
 ```sh
 sudo outpost-rollback

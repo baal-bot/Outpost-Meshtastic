@@ -6,21 +6,13 @@ CONFIG_DIR=${OUTPOST_CONFIG_DIR:-/etc/outpost}
 SERVICE_NAME=${OUTPOST_SERVICE_NAME:-outpost.service}
 HEALTH_URL=${OUTPOST_HEALTH_URL:-}
 RECOVERY_HELPER=${OUTPOST_RECOVERY_HELPER:-/usr/local/lib/outpost/release_recovery.py}
+HEALTH_HELPER=${OUTPOST_HEALTH_HELPER:-/usr/local/lib/outpost/health_probe.sh}
 CURRENT=$PREFIX/current
 PREVIOUS=$PREFIX/previous
 
 fail() { echo "Outpost rollback: $*" >&2; exit 1; }
 json_field() {
   printf '%s' "$1" | python3 -c "import json,sys; print(json.load(sys.stdin)[$2])"
-}
-healthy() {
-  attempt=0
-  while [ "$attempt" -lt 30 ]; do
-    if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then return 0; fi
-    attempt=$((attempt + 1))
-    sleep 2
-  done
-  return 1
 }
 select_release() {
   destination=$1
@@ -33,6 +25,8 @@ for command in python3 systemctl ln mv readlink curl dirname chown chmod mktemp;
   command -v "$command" >/dev/null 2>&1 || fail "missing required command: $command"
 done
 [ -f "$RECOVERY_HELPER" ] || fail "recovery helper is missing: $RECOVERY_HELPER"
+[ -f "$HEALTH_HELPER" ] || fail "health helper is missing: $HEALTH_HELPER"
+. "$HEALTH_HELPER"
 [ -L "$CURRENT" ] && [ -L "$PREVIOUS" ] || fail "no previous versioned release is available"
 
 old=$(readlink "$CURRENT")
@@ -53,12 +47,18 @@ BACKUP_PATH=$(json_field "$PLAN" '"backup"')
 TARGET_SCHEMA_CAP=$(json_field "$PLAN" '"target_schema_cap"')
 CURRENT_SCHEMA_CAP=$(json_field "$PLAN" '"current_schema_cap"')
 
-if [ -z "$HEALTH_URL" ]; then
-  HEALTH_URL=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$target/bin/python" - <<'PY'
-from outpost.config import load_config
-print(f"http://127.0.0.1:{load_config().web.port}/api/v1/health")
-PY
-  )
+outpost_configure_health "$target/bin/python" "$CONFIG_DIR/config.yaml"
+
+# Catch malformed URLs, unavailable curl features, and TLS-mode mistakes while
+# the current release is still running and before any code or data changes.
+if outpost_probe_url "$HEALTH_URL" >/dev/null 2>&1; then
+  preflight_status=0
+else
+  preflight_status=$?
+fi
+if [ "$preflight_status" -ne 0 ] && \
+  ! outpost_probe_status_is_retryable "$preflight_status"; then
+  fail "health probe configuration failed before rollback (curl exit $preflight_status)"
 fi
 
 echo "Rollback dry-run passed: $ACTION from $old to $target"
@@ -95,9 +95,11 @@ fi
 rm -f "$PREVIOUS"
 ln -s "$old" "$PREVIOUS"
 systemctl start "$SERVICE_NAME" || true
-if healthy; then
+if outpost_wait_for_health; then
   echo "Rollback is healthy. Active release: $target"
   exit 0
+else
+  rollback_health_status=$?
 fi
 
 echo "Rollback health check failed; restoring the original known-good state." >&2
@@ -105,13 +107,18 @@ systemctl stop "$SERVICE_NAME" || true
 select_release "$old" || fail "could not reselect original release $old"
 rm -f "$PREVIOUS"
 ln -s "$target" "$PREVIOUS"
-python3 "$RECOVERY_HELPER" restore --source "$SAFETY_PATH" \
-  --destination "$DATABASE_PATH" --maximum-schema "$CURRENT_SCHEMA_CAP" >/dev/null \
-  || fail "original code restored, but automatic data recovery failed; use $SAFETY_PATH"
-chown outpost:outpost "$DATABASE_PATH"
-chmod 0640 "$DATABASE_PATH"
+if [ "$ACTION" = restore ]; then
+  python3 "$RECOVERY_HELPER" restore --source "$SAFETY_PATH" \
+    --destination "$DATABASE_PATH" --maximum-schema "$CURRENT_SCHEMA_CAP" >/dev/null \
+    || fail "original code restored, but automatic data recovery failed; use $SAFETY_PATH"
+  chown outpost:outpost "$DATABASE_PATH"
+  chmod 0640 "$DATABASE_PATH"
+fi
 systemctl start "$SERVICE_NAME" || fail "original state restored but service did not start"
-if healthy; then
+if [ "$rollback_health_status" -eq 2 ]; then
+  fail "rollback probe could not be performed; original state is running but health is unverified"
+fi
+if outpost_wait_for_health; then
   fail "rollback failed health verification; original code and data are running"
 fi
 fail "rollback and original-state health verification both failed"

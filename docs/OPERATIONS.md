@@ -76,8 +76,10 @@ Compare `/etc/outpost/config.yaml` with `.dist`, then perform dashboard and mesh
 the prior release and backup until verification is complete. Use `sudo outpost-rollback` for a
 compatibility-checked rollback. The command verifies its release metadata before downtime and
 automatically restores the matching pre-upgrade database when the older code cannot read the live
-schema. It also keeps a pre-attempt safety snapshot and restores it if rollback health checks fail.
-The verification and compromise-response procedures are in [Releases](RELEASES.md).
+schema; code-only failures do not replace live data. It also keeps a pre-attempt safety snapshot
+and restores it after a failed schema rollback. HTTP, trusted-proxy, and direct-HTTPS deployments
+share one loopback probe implementation, and probe configuration errors fail before downtime. The
+verification and compromise-response procedures are in [Releases](RELEASES.md).
 
 ## Radio maintenance
 
