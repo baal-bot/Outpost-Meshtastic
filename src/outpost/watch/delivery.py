@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 
 from outpost.audit import write_audit
 from outpost.clock import Clock
+from outpost.geo import distance_bearing
 from outpost.store import Database
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.metrics import SAFETY_NOTIFICATION_DELIVERY
@@ -43,29 +45,70 @@ class AudienceNotifier:
         self.database, self.governor, self.clock = database, governor, clock
 
     async def destinations(
-        self, audience: str, *, exclude_mesh_ids: tuple[str, ...] = ()
+        self,
+        audience: str,
+        *,
+        exclude_mesh_ids: tuple[str, ...] = (),
+        proximity: tuple[float, float, int] | None = None,
     ) -> list[str]:
-        if audience == "all":
+        if audience == "all" and proximity is None:
             return ["^all"]
-        roles: tuple[str, ...]
+        roles: tuple[str, ...] | None
         if audience == "responders":
             roles = ("responder", "operator")
         elif audience == "trusted":
             roles = ("trusted", "responder", "operator")
+        elif audience == "all":
+            roles = None
         else:
             raise ValueError(f"Unsupported notification audience: {audience}")
-        placeholders = ",".join("?" for _ in roles)
+        trust_clause = "m.trust<>'blocked'"
+        params: tuple[object, ...] = ()
+        if roles is not None:
+            placeholders = ",".join("?" for _ in roles)
+            trust_clause = f"m.trust IN ({placeholders})"
+            params = roles
         exclusion = ""
-        params: tuple[object, ...] = roles
         if exclude_mesh_ids:
-            exclusion = f" AND mesh_id NOT IN ({','.join('?' for _ in exclude_mesh_ids)})"
+            exclusion = f" AND m.mesh_id NOT IN ({','.join('?' for _ in exclude_mesh_ids)})"
             params += exclude_mesh_ids
         rows = await self.database.read(
-            f"SELECT mesh_id FROM member WHERE trust IN ({placeholders}){exclusion} "  # noqa: S608
-            "AND directory_state='active' ORDER BY mesh_id",
+            f"SELECT m.mesh_id,m.prefs,p.lat,p.lon,p.expires_at FROM member m "  # noqa: S608
+            "LEFT JOIN member_position p ON p.member_id=m.id "
+            f"WHERE {trust_clause}{exclusion} AND m.directory_state='active' ORDER BY m.mesh_id",
             params,
         )
-        return [str(row["mesh_id"]) for row in rows]
+        if proximity is None:
+            return [str(row["mesh_id"]) for row in rows]
+
+        center_lat, center_lon, radius_m = proximity
+        now = int(self.clock.now().timestamp())
+        destinations: list[str] = []
+        for row in rows:
+            try:
+                preference = json.loads(str(row["prefs"] or "{}")).get("position", "coarse")
+            except (AttributeError, TypeError, json.JSONDecodeError):
+                preference = "off"
+            current_position = (
+                row["lat"] is not None
+                and row["lon"] is not None
+                and row["expires_at"] is not None
+                and int(row["expires_at"]) > now
+            )
+            # Position absence and an explicit no-sharing preference fail open. Only a
+            # current position the member permits the Outpost to use may narrow delivery.
+            if preference not in {"coarse", "full"} or not current_position:
+                destinations.append(str(row["mesh_id"]))
+                continue
+            distance_km, _ = distance_bearing(
+                center_lat,
+                center_lon,
+                float(row["lat"]),
+                float(row["lon"]),
+            )
+            if distance_km * 1000 <= radius_m:
+                destinations.append(str(row["mesh_id"]))
+        return destinations
 
     async def deliver(
         self,
@@ -78,11 +121,16 @@ class AudienceNotifier:
         traffic_class: TrafficClass = TrafficClass.ALERT,
         severity: Severity = Severity.URGENT,
         exclude_mesh_ids: tuple[str, ...] = (),
+        proximity: tuple[float, float, int] | None = None,
         queue_key: str | None = None,
         supersedes: str | None = None,
         dedupe_token: str | None = None,
     ) -> AudienceDelivery:
-        destinations = await self.destinations(audience, exclude_mesh_ids=exclude_mesh_ids)
+        destinations = await self.destinations(
+            audience,
+            exclude_mesh_ids=exclude_mesh_ids,
+            proximity=proximity,
+        )
         items = [
             OutboundItem(
                 text=text,

@@ -25,6 +25,7 @@ configured channel capability, available local data, or a higher role for a sens
 | `ABOUT` | `ABOUT` · node and operator | Guest | General | reply | Read-only |
 | `ACK`<br>Aliases: `ACKNOWLEDGE` | `ACK <inc> [note]` · acknowledge active alert | Guest | Incident report | reply | Changes state |
 | `ALERT` | `ALERT <severity> <inc> <headline>` · responder broadcast | Responder | Alert | reply | Changes state |
+| `ALERTS` | `ALERTS [number]` · active alerts; distance/bearing in DM | Guest | Alert | reply | Read-only |
 | `ASK`<br>Aliases: `A`, `AI` | `ASK <question>` · local answers | Member | Local AI | ai | Read-only |
 | `BACK`<br>Aliases: `<` | `BACK` · leave current context | Guest | General | reply | Read-only |
 | `BOARD`<br>Aliases: `B` | `BOARD <name>` · recent threads | Guest | BBS read | reply | Read-only |

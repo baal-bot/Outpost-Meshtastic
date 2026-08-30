@@ -16,6 +16,13 @@ from outpost.transport.models import TrafficClass
 from outpost.watch.incidents import IncidentService
 
 
+def _proximity(distance_km: float | None, bearing: int | None) -> str | None:
+    if distance_km is None or bearing is None:
+        return None
+    distance = f"{distance_km:.1f}km" if distance_km < 10 else f"{distance_km:.0f}km"
+    return f"{distance} {bearing:03d}°"
+
+
 def specs(service: IncidentService) -> list[CommandSpec]:
     async def report(ctx: CommandContext) -> Response:
         try:
@@ -79,10 +86,11 @@ def specs(service: IncidentService) -> list[CommandSpec]:
         )
 
     async def incidents(ctx: CommandContext) -> Response:
-        values = await service.list(limit=5)
+        values = await service.list(limit=50 if ctx.message.is_direct else 5)
         if not values:
             return Response(ResponseKind.LISTING, [Line("No active incidents.")])
         if ctx.message.is_direct:
+            ranked = (await service.ranked_for_member(values, ctx.member))[:5]
             markers = {
                 "critical": "CRITICAL",
                 "urgent": "URGENT",
@@ -96,10 +104,19 @@ def specs(service: IncidentService) -> list[CommandSpec]:
                     "ACTIVE INCIDENTS",
                     choices=tuple(
                         TuiChoice(
-                            f"INC {item.local_ref} · {markers[item.severity]} · {item.title[:34]}",
+                            " · ".join(
+                                value
+                                for value in (
+                                    f"INC {item.local_ref}",
+                                    markers[item.severity],
+                                    _proximity(distance_km, bearing),
+                                    item.title[:18],
+                                )
+                                if value
+                            ),
                             f"INC {item.local_ref}",
                         )
-                        for item in values
+                        for item, distance_km, bearing in ranked
                     ),
                 ),
             )
@@ -122,13 +139,17 @@ def specs(service: IncidentService) -> list[CommandSpec]:
         if value is None:
             return Response(ResponseKind.ERROR, [Line("No incident.")])
         updates = await service.updates(value.id)
+        proximity = None
+        if ctx.message.is_direct:
+            _, distance_km, bearing = (await service.ranked_for_member([value], ctx.member))[0]
+            proximity = _proximity(distance_km, bearing)
+        location = value.location_text or "No location"
+        if proximity:
+            location = f"{location} · {proximity} from you"
         lines = [
             Line(f"INC {value.local_ref} · {value.severity} {value.type} · {value.status}"),
             Line(value.body or value.title),
-            Line(
-                f"{value.location_text or 'No location'} · "
-                f"✓{value.confirm_count} ?{value.dispute_count}"
-            ),
+            Line(f"{location} · ✓{value.confirm_count} ?{value.dispute_count}"),
         ]
         lines.extend(
             Line(f"{update['kind']} @{update['author_label']}: {update['body'] or 'noted'}")

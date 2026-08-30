@@ -134,7 +134,9 @@ watch:
     urgent:
       ack_threshold: 2
       stages:
-        - {after_minutes: 0, notify: responders, channels: [3]}
+        # Optional proximity: footprint intersects this trust audience with the alert radius.
+        # Members without a current, shared position remain included for safety.
+        - {after_minutes: 0, notify: responders, channels: [3], proximity: footprint}
         - {after_minutes: 10, notify: trusted, channels: [3]}
         - {after_minutes: 20, notify: all, channels: [0, 3]}
     critical:

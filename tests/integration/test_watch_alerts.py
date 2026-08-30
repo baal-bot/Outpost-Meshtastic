@@ -492,6 +492,150 @@ async def test_zero_recipient_alert_stays_at_stage_and_recovers_when_responder_a
 
 
 @pytest.mark.asyncio
+async def test_footprint_alert_intersects_trust_and_fails_open_without_shared_position(
+    tmp_path,
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "channels": {3: {"name": "watch"}},
+            "watch": {
+                "escalation": {
+                    "urgent": {
+                        "stages": [
+                            {
+                                "after_minutes": 0,
+                                "notify": "trusted",
+                                "channels": [3],
+                                "proximity": "footprint",
+                            }
+                        ]
+                    }
+                }
+            },
+        }
+    )
+    governor = production_governor(database, clock, airtime=config.airtime)
+    members = MemberRepo(database, clock)
+    inside = await members.resolve("!00000101")
+    outside = await members.resolve("!00000102")
+    expired = await members.resolve("!00000103")
+    sharing_off = await members.resolve("!00000104")
+    missing = await members.resolve("!00000105")
+    await database.write(
+        "UPDATE member SET trust='trusted' WHERE id IN (?,?,?,?,?)",
+        (inside.id, outside.id, expired.id, sharing_off.id, missing.id),
+    )
+    now = int(clock.now().timestamp())
+    for position in (
+        (inside.id, 40.4410, -79.9960, now, now + 3600),
+        (outside.id, 40.5000, -80.0000, now, now + 3600),
+        (expired.id, 40.5000, -80.0000, now - 7200, now - 1),
+        (sharing_off.id, 40.5000, -80.0000, now, now + 3600),
+    ):
+        await database.write(
+            "INSERT INTO member_position(member_id,lat,lon,received_at,expires_at) "
+            "VALUES(?,?,?,?,?)",
+            position,
+        )
+    await database.write(
+        "UPDATE member SET prefs=? WHERE id=?",
+        ('{"position":"off"}', sharing_off.id),
+    )
+    service = AlertService(database, governor, clock, config)
+
+    preview = await service.airtime_preview(
+        "urgent",
+        "Shelter in place",
+        [3],
+        lat=40.4406,
+        lon=-79.9959,
+        radius_km=1,
+    )
+    assert preview["proximity"] == "footprint"
+    assert preview["recipient_count"] == 4
+
+    alert = await service.raise_alert(
+        "urgent",
+        "Shelter in place",
+        "operator",
+        channels=[3],
+        lat=40.4406,
+        lon=-79.9959,
+        radius_km=1,
+    )
+    queued = governor.queued_items()
+    assert {item.dest for item in queued} == {
+        inside.mesh_id,
+        expired.mesh_id,
+        sharing_off.mesh_id,
+        missing.mesh_id,
+    }
+    assert outside.mesh_id not in {item.dest for item in queued}
+    assert all("40.4406" not in item.text and "-79.9959" not in item.text for item in queued)
+    assert alert.last_delivery_count == 4
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_empty_footprint_audience_uses_operator_visible_retry_path(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "channels": {3: {"name": "watch"}},
+            "watch": {
+                "escalation": {
+                    "urgent": {
+                        "stages": [
+                            {
+                                "after_minutes": 0,
+                                "notify": "trusted",
+                                "channels": [3],
+                                "proximity": "footprint",
+                            }
+                        ]
+                    }
+                }
+            },
+        }
+    )
+    governor = production_governor(database, clock, airtime=config.airtime)
+    member = await MemberRepo(database, clock).resolve("!00000110")
+    await database.write("UPDATE member SET trust='trusted' WHERE id=?", (member.id,))
+    now = int(clock.now().timestamp())
+    await database.write(
+        "INSERT INTO member_position(member_id,lat,lon,received_at,expires_at) VALUES(?,?,?,?,?)",
+        (member.id, 41.0000, -81.0000, now, now + 3600),
+    )
+    service = AlertService(database, governor, clock, config)
+
+    alert = await service.raise_alert(
+        "urgent",
+        "Shelter in place",
+        "operator",
+        lat=40.4406,
+        lon=-79.9959,
+        radius_km=1,
+    )
+
+    assert alert.delivery_state == "empty_audience"
+    assert alert.last_delivery_count == 0
+    assert alert.escalation_stage == 0
+    assert alert.next_escalation_at == now + 300
+    assert await database.read(
+        "SELECT 1 FROM audit_log WHERE action='safety.delivery.zero' AND target='alert:1:stage:0'"
+    )
+    assert (await database.read("SELECT state FROM mail"))[0]["state"] == "failed"
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_queue_refused_alert_retries_same_stage_after_capacity_returns(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()

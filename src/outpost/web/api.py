@@ -3099,7 +3099,15 @@ def create_web_app(
             async def alert_estimate(body: AlertCreateBody) -> dict[str, object] | Response:
                 try:
                     await require_active_radio_channels(body.channels)
-                    return await alerts.airtime_preview(body.severity, body.headline, body.channels)
+                    return await alerts.airtime_preview(
+                        body.severity,
+                        body.headline,
+                        body.channels,
+                        incident_ref=body.incident_ref,
+                        lat=body.lat,
+                        lon=body.lon,
+                        radius_km=body.radius_km,
+                    )
                 except ValueError as error:
                     return JSONResponse(
                         {"error": {"code": "invalid_alert", "message": str(error)}},
@@ -3111,7 +3119,13 @@ def create_web_app(
                 try:
                     await require_active_radio_channels(body.channels)
                     estimate = await alerts.airtime_preview(
-                        body.severity, body.headline, body.channels
+                        body.severity,
+                        body.headline,
+                        body.channels,
+                        incident_ref=body.incident_ref,
+                        lat=body.lat,
+                        lon=body.lon,
+                        radius_km=body.radius_km,
                     )
                     if estimate["requires_confirmation"] and not body.airtime_confirmation:
                         return JSONResponse(

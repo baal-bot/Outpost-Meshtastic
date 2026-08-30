@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import hashlib
 import json
 import uuid
@@ -8,12 +9,15 @@ from typing import Any, cast
 
 from outpost.clock import Clock
 from outpost.config import Config, EscalationPolicy, EscalationStage
+from outpost.geo import distance_bearing
 from outpost.store import Database
 from outpost.store.members import Member
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.models import Severity, TrafficClass
 
 from .delivery import AudienceDelivery, AudienceNotifier
+
+ALERT_SEVERITY_RANK = {"critical": 3, "urgent": 2, "caution": 1}
 
 
 @dataclass(frozen=True)
@@ -69,7 +73,15 @@ class AlertService:
         return cast(EscalationPolicy, getattr(self.config.watch.escalation, severity))
 
     async def airtime_preview(
-        self, severity: str, headline: str, channels: list[int] | None = None
+        self,
+        severity: str,
+        headline: str,
+        channels: list[int] | None = None,
+        *,
+        incident_ref: int | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
+        radius_km: float = 1.0,
     ) -> dict[str, object]:
         if severity not in {"caution", "urgent", "critical"}:
             raise ValueError("Alert severity must be caution, urgent, or critical.")
@@ -86,7 +98,31 @@ class AlertService:
         if any(channel not in self.config.channels for channel in selected):
             raise ValueError("Alert channel is not configured.")
         stage = policy.stages[0]
-        destinations = await self.notifier.destinations(stage.notify)
+        if incident_ref is not None:
+            rows = await self.database.read(
+                "SELECT lat,lon FROM incident WHERE local_ref=? "
+                "AND status IN ('open','monitoring')",
+                (incident_ref,),
+            )
+            if not rows:
+                raise ValueError("No active incident at that reference.")
+            if lat is None or lon is None:
+                lat = float(rows[0]["lat"]) if rows[0]["lat"] is not None else lat
+                lon = float(rows[0]["lon"]) if rows[0]["lon"] is not None else lon
+        if (lat is None) != (lon is None):
+            raise ValueError("Alert center requires both latitude and longitude.")
+        if lat is not None:
+            assert lon is not None
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise ValueError("Alert center is outside valid coordinate bounds.")
+        if not 0.1 <= radius_km <= 100:
+            raise ValueError("Alert radius must be between 0.1 and 100 km.")
+        proximity = (
+            (lat, lon, round(radius_km * 1000))
+            if stage.proximity == "footprint" and lat is not None and lon is not None
+            else None
+        )
+        destinations = await self.notifier.destinations(stage.notify, proximity=proximity)
         estimate = self.governor.estimate_text(
             self.render(severity, headline),
             traffic_class=TrafficClass.ALERT,
@@ -99,6 +135,7 @@ class AlertService:
                 "channel_count": len(selected),
                 "channels": selected,
                 "audience": stage.notify,
+                "proximity": stage.proximity,
             }
         )
         return estimate
@@ -293,6 +330,14 @@ class AlertService:
         severity = Severity(alert.severity)
         now = int(self.clock.now().timestamp())
         selected_channels = channels or stage.channels
+        proximity = (
+            (alert.lat, alert.lon, alert.radius_m)
+            if stage.proximity == "footprint"
+            and alert.lat is not None
+            and alert.lon is not None
+            and alert.radius_m is not None
+            else None
+        )
         delivery = await self.notifier.deliver(
             purpose="alert_escalation",
             target=f"alert:{alert.id}:stage:{alert.escalation_stage}",
@@ -301,6 +346,7 @@ class AlertService:
             channels=selected_channels,
             traffic_class=TrafficClass.ALERT,
             severity=severity,
+            proximity=proximity,
             queue_key=f"alert:{alert.id}:repeat",
             supersedes=supersedes,
             dedupe_token=dedupe_token,
@@ -419,6 +465,34 @@ class AlertService:
             params,
         )
         return [self._row(row) for row in rows]
+
+    async def ranked_for_member(
+        self, values: builtins.list[Alert], member: Member
+    ) -> builtins.list[tuple[Alert, float | None, int | None]]:
+        """Rank located alerts for a requesting member without exposing their position."""
+        rows = await self.database.read(
+            "SELECT lat,lon FROM member_position WHERE member_id=? AND expires_at>?",
+            (member.id, int(self.clock.now().timestamp())),
+        )
+        if not rows:
+            return [(value, None, None) for value in values]
+        origin_lat, origin_lon = float(rows[0]["lat"]), float(rows[0]["lon"])
+        ranked: builtins.list[tuple[Alert, float | None, int | None]] = []
+        for value in values:
+            if value.lat is None or value.lon is None:
+                ranked.append((value, None, None))
+                continue
+            distance_km, bearing = distance_bearing(origin_lat, origin_lon, value.lat, value.lon)
+            ranked.append((value, distance_km, bearing))
+        ranked.sort(
+            key=lambda item: (
+                -ALERT_SEVERITY_RANK[item[0].severity],
+                item[1] is None,
+                item[1] if item[1] is not None else float("inf"),
+                -item[0].raised_at,
+            )
+        )
+        return ranked
 
     async def acknowledge(self, incident_ref: int, member: Member, note: str = "") -> Alert:
         rows = await self.database.read(

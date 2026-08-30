@@ -386,16 +386,17 @@ html body .kpis strong {
 .policy-card header label { display: flex; align-items: center; gap: 8px; color: var(--ui-text-muted); font-size: .63rem; }
 .login-card .policy-card header input { width: 54px; }
 .policy-stages { display: grid; gap: 6px; }
-.escalation-editor .stage-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: end; gap: 10px 12px; padding: 12px; border: 1px solid var(--ui-border); border-radius: 6px; }
+.escalation-editor .stage-row { display: grid; grid-template-columns: minmax(44px, .55fr) minmax(92px, 1.35fr) minmax(40px, .55fr) 28px; align-items: end; gap: 8px 7px; padding: 10px; border: 1px solid var(--ui-border); border-radius: 6px; }
 .login-card .stage-row label { display: grid; gap: 4px; }
 .stage-row label span { color: var(--ui-text-muted); font-size: .58rem; }
 .stage-row label small { color: var(--ui-text-muted); font-size: .53rem; }
 .login-card .stage-row input,
 .login-card .stage-row select { min-width: 0; width: 100%; padding: 8px; }
-.escalation-editor .stage-row > label:nth-child(3) { grid-column: 1 / -1; }
+.escalation-editor .stage-row > label:has([data-stage-proximity]) { grid-column: 1 / 3; }
+.escalation-editor .stage-row > label:has([data-stage-repeat]) { grid-column: 3 / 5; }
 .login-card .stage-row .repeat-control { display: flex; align-items: center; align-self: center; gap: 5px; padding-top: 0; }
 .login-card .stage-row .repeat-control input { width: auto; }
-.escalation-editor .stage-row [data-remove-stage] { align-self: center; justify-self: end; width: 28px; height: 28px; padding: 0; margin-top: 0; }
+.escalation-editor .stage-row [data-remove-stage] { grid-column: 4; grid-row: 1; align-self: center; justify-self: end; width: 28px; height: 28px; padding: 0; margin-top: 0; }
 .policy-card > [data-add-stage] { justify-self: start; padding: 7px 9px; font-size: .62rem; }
 .login-card .advanced-toggle { display: flex; align-items: center; gap: 9px; padding-top: 4px; border-top: 1px solid var(--ui-border); cursor: pointer; }
 .login-card .advanced-toggle input { width: auto; accent-color: var(--ui-primary); }
@@ -405,8 +406,6 @@ html body .kpis strong {
 .escalation-editor > .advanced-policy { display: block; width: 100%; }
 
 @media (max-width: 700px) {
-  .escalation-editor .stage-row { grid-template-columns: 1fr; }
-  .escalation-editor .stage-row > label:nth-child(3) { grid-column: auto; }
   .policy-card header { align-items: flex-start; flex-direction: column; }
 }
 

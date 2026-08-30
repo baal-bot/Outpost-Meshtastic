@@ -523,6 +523,7 @@ class EscalationStage(StrictModel):
     notify: Literal["responders", "trusted", "all"]
     channels: list[Annotated[int, Field(ge=0, le=7)]]
     repeat: bool = False
+    proximity: Literal["any", "footprint"] = "any"
 
 
 class EscalationPolicy(StrictModel):

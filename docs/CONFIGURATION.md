@@ -150,7 +150,10 @@ operator approves it in Environment; approval then uses the normal alert policy 
 Controls position freshness, duplicate radius/window, alert repetition, and escalation stages.
 Terminal incident state changes require a trusted operator or responder. Emergency keyword
 matching is off by default. Enabling it requires a response policy, false-positive review, and
-operator training.
+operator training. Each escalation stage may set `proximity: footprint` to intersect its
+`notify` trust audience with the alert radius; the default is `any`. Filtering is fail-open:
+members without a current stored position, including members who disabled position sharing, are
+included. Proximity is evaluated locally and member coordinates are never added to alert traffic.
 
 ### `fed`
 

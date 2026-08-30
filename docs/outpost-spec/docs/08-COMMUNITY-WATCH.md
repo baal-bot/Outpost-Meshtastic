@@ -228,7 +228,7 @@ watch:
   escalation:
     urgent:
       stages:
-        - { after_minutes: 0,  notify: responders,      channels: [3] }
+        - { after_minutes: 0,  notify: responders,      channels: [3], proximity: footprint }
         - { after_minutes: 10, notify: trusted,         channels: [3] }
         - { after_minutes: 20, notify: all,             channels: [0, 3] }
       ack_threshold: 2       # stop escalating once 2 responders ack
@@ -238,6 +238,14 @@ watch:
         - { after_minutes: 10, notify: all,             channels: [0, 3], repeat: true }
       ack_threshold: 3
 ```
+
+**REQ-WATCH-031A** — `proximity` defaults to `any`. A `footprint` stage intersects the
+configured trust audience with the alert's center and radius. Members with missing, expired,
+malformed, or sharing-disabled position data **MUST** remain in the audience; only a current
+position shared as `coarse` or `full` may exclude a member. This evaluation is server-side and
+**MUST NOT** disclose member coordinates in an alert or to another member. A zero-result
+intersection follows the same operator-visible failed-delivery and retry path as every other
+empty audience.
 
 **REQ-WATCH-032** — Escalation **MUST** be driven by a durable scheduler backed by
 `alert.next_escalation_at`, so a node restart does not lose a pending escalation.
@@ -314,6 +322,12 @@ recency and the response says so in ≤20 bytes.
 
 **REQ-WATCH-047** — `INC <n>` **MUST** return the incident with its most recent 2 updates and
 a count of the rest.
+
+**REQ-WATCH-047A** — `ALERTS [number]` **MUST** list active Outpost alerts and provide detail.
+Direct incident and alert listings **MUST** include distance and bearing from the requesting
+member's current stored position, ordered by severity and then proximity. Channel listings
+**MUST NOT** include this member-relative context, because doing so would disclose information
+derived from the requester's position to other members.
 
 **REQ-WATCH-048** — The dashboard map (doc 11 §5) **MUST** plot: active incidents by type and
 severity, node positions with last-heard age, alert polygons from CAP, waypoints, and

@@ -3989,6 +3989,104 @@ def test_settings_save_is_functional_and_browser_clean(browser: object, dashboar
         page.close()
 
 
+def test_emergency_policy_edits_footprint_stages_in_compact_layout(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="daylight")
+    route_shared_operator_api(page)
+    mutations: list[dict[str, object]] = []
+    watch = {
+        "emergency_keywords_enabled": False,
+        "emergency_keywords": ["sos", "mayday"],
+        "emergency_cooldown_minutes": 10,
+        "escalation": {
+            "caution": {
+                "ack_threshold": 0,
+                "stages": [
+                    {"after_minutes": 0, "notify": "all", "channels": [3], "proximity": "any"}
+                ],
+            },
+            "urgent": {
+                "ack_threshold": 2,
+                "stages": [
+                    {
+                        "after_minutes": 0,
+                        "notify": "responders",
+                        "channels": [3],
+                        "proximity": "footprint",
+                    }
+                ],
+            },
+            "critical": {
+                "ack_threshold": 3,
+                "stages": [
+                    {"after_minutes": 0, "notify": "all", "channels": [3], "proximity": "any"}
+                ],
+            },
+        },
+    }
+
+    def config_route(route: object) -> None:
+        if route.request.method == "PATCH":
+            mutations.append(route.request.post_data_json)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"node": {}, "watch": watch}),
+        )
+
+    page.route("**/api/v1/config", config_route)
+    page.route("**/api/v1/config/watch", config_route)
+    health = BrowserHealth(page)
+    try:
+        page.goto(dashboard_url, wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.get_by_role("button", name="Open emergency settings").click()
+        card = page.locator(".emergency-card")
+        card.wait_for()
+        urgent = card.locator('[data-policy="urgent"]')
+        row = urgent.locator(".stage-row").first
+        assert row.locator("[data-stage-proximity]").is_checked()
+        bounds = row.bounding_box()
+        layout = row.evaluate(
+            "element => ({grid: getComputedStyle(element).gridTemplateColumns, "
+            "display: getComputedStyle(element).display, viewport: innerWidth})"
+        )
+        assert bounds is not None and bounds["height"] < 180, layout
+        remove = row.locator("[data-remove-stage]").bounding_box()
+        after = row.locator("[data-stage-after]").bounding_box()
+        repeat = row.locator("[data-stage-repeat]").bounding_box()
+        assert remove is not None and after is not None and repeat is not None
+        remove_center = remove["y"] + remove["height"] / 2
+        after_center = after["y"] + after["height"] / 2
+        assert abs(remove_center - after_center) < 8
+        assert bounds is not None
+        assert repeat["x"] >= bounds["x"]
+        assert repeat["x"] + repeat["width"] <= bounds["x"] + bounds["width"]
+        if VISUAL_ARTIFACT_DIR:
+            card.screenshot(path=str(Path(VISUAL_ARTIFACT_DIR) / "footprint-policy-desktop.png"))
+
+        page.set_viewport_size({"width": 390, "height": 844})
+        row.scroll_into_view_if_needed()
+        mobile_row = row.bounding_box()
+        mobile_card = card.bounding_box()
+        assert mobile_row is not None and mobile_row["height"] < 180
+        assert mobile_card is not None and mobile_card["width"] <= 390
+        if VISUAL_ARTIFACT_DIR:
+            page.screenshot(path=str(Path(VISUAL_ARTIFACT_DIR) / "footprint-policy-mobile.png"))
+
+        row.locator("[data-stage-proximity]").uncheck()
+        card.get_by_role("button", name="Save emergency policy").click()
+        page.wait_for_function(
+            "() => document.querySelector('#emergency-error').textContent.includes('saved')"
+        )
+        assert mutations[0]["escalation"]["urgent"]["stages"][0]["proximity"] == "any"
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
 def test_bbs_create_thread_and_reply_are_functional_and_browser_clean(
     browser: object, dashboard_url: str
 ) -> None:

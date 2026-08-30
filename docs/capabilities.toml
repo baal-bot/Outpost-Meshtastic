@@ -169,7 +169,7 @@ description = "Unified reply routing and audited operator workflow."
 [[capabilities]]
 id = "community_watch"
 area = "Community Watch"
-present = "Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, delivery-accountable responder alerts, retrying zero-recipient escalation, per-stage bounded repeats, all-clear, and maps."
+present = "Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, delivery-accountable and proximity-targeted responder alerts, member-relative mesh listings, retrying zero-recipient escalation, per-stage bounded repeats, all-clear, and maps."
 maturity = "simulated"
 introduced_commit = "8323143"
 limitations = ["The six-participant real-radio tabletop and receipt-latency gate remain open."]
@@ -177,7 +177,7 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-29"
+date = "2026-08-30"
 [[capabilities.evidence]]
 kind = "acceptance"
 path = "docs/PHASE3-ACCEPTANCE.md"
@@ -190,6 +190,14 @@ description = "Mesh incident commands exercise validation, reactions, listing, d
 kind = "automated"
 path = "tests/integration/test_watch_alerts.py::test_zero_recipient_alert_stays_at_stage_and_recovers_when_responder_appears"
 description = "Zero-recipient escalation remains pending and recovers when a responder becomes eligible."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_watch_alerts.py::test_footprint_alert_intersects_trust_and_fails_open_without_shared_position"
+description = "Footprint targeting intersects trust and distance while failing open for expired or sharing-disabled positions."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_safety_commands.py::test_direct_alert_and_incident_lists_rank_from_requesters_position"
+description = "Direct mesh alert and incident lists show member-relative distance and bearing without exposing them on channels."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_incident_reconciliation.py::test_reconnect_rejects_stale_and_concurrent_updates_and_keeps_monitoring"

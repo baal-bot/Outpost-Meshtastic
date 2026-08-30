@@ -7,7 +7,7 @@ from typing import Any
 
 from outpost.audit import write_audit
 from outpost.clock import Clock
-from outpost.env.seismic import SeismicService
+from outpost.geo import distance_bearing
 from outpost.store import Database
 
 
@@ -205,6 +205,6 @@ class WaypointService:
     def distance_bearing(
         origin_lat: float, origin_lon: float, waypoint: dict[str, Any]
     ) -> tuple[float, int]:
-        return SeismicService.distance_bearing(
+        return distance_bearing(
             origin_lat, origin_lon, float(waypoint["latitude"]), float(waypoint["longitude"])
         )

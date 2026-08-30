@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from outpost.clock import Clock
+from outpost.geo import distance_bearing
 from outpost.store import Database, Transaction
 from outpost.store.members import Member
 
@@ -459,6 +460,34 @@ class IncidentService:
             (*params, limit),
         )
         return [self._row(row) for row in rows]
+
+    async def ranked_for_member(
+        self, values: builtins.list[Incident], member: Member
+    ) -> builtins.list[tuple[Incident, float | None, int | None]]:
+        """Rank located incidents for a requesting member without exposing their position."""
+        rows = await self.database.read(
+            "SELECT lat,lon FROM member_position WHERE member_id=? AND expires_at>?",
+            (member.id, int(self.clock.now().timestamp())),
+        )
+        if not rows:
+            return [(value, None, None) for value in values]
+        origin_lat, origin_lon = float(rows[0]["lat"]), float(rows[0]["lon"])
+        ranked: builtins.list[tuple[Incident, float | None, int | None]] = []
+        for value in values:
+            if value.lat is None or value.lon is None:
+                ranked.append((value, None, None))
+                continue
+            distance_km, bearing = distance_bearing(origin_lat, origin_lon, value.lat, value.lon)
+            ranked.append((value, distance_km, bearing))
+        ranked.sort(
+            key=lambda item: (
+                -SEVERITY_RANK[item[0].severity],
+                item[1] is None,
+                item[1] if item[1] is not None else float("inf"),
+                -item[0].updated_at,
+            )
+        )
+        return ranked
 
     async def history(
         self, *, kind: str | None = None, limit: int = 100

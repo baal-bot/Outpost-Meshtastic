@@ -209,6 +209,59 @@ async def test_incident_commands_render_validation_reactions_lists_and_detail(tm
 
 
 @pytest.mark.asyncio
+async def test_direct_alert_and_incident_lists_rank_from_requesters_position(tmp_path) -> None:
+    app = OutpostApp(config(tmp_path / "outpost.db"))
+    await app.database.open()
+    requester = await app.router.members.resolve("!00000035")
+    now = int(app.clock.now().timestamp())
+    await app.database.write(
+        "INSERT INTO member_position(member_id,lat,lon,received_at,expires_at) VALUES(?,?,?,?,?)",
+        (requester.id, 40.4406, -79.9959, now, now + 3600),
+    )
+    try:
+        await app.router.dispatch(inbound(45, "REPORT fire far away 41.0000 -81.0000", "!00000036"))
+        await app.router.dispatch(
+            inbound(46, "REPORT medical near here 40.4410 -79.9960", "!00000037")
+        )
+
+        incidents = await app.router.dispatch(inbound(47, "INCIDENTS", requester.mesh_id))
+        assert incidents.screen is not None
+        assert [choice.command for choice in incidents.screen.choices[:2]] == ["INC 2", "INC 1"]
+        assert "0.0km" in incidents.screen.choices[0].label
+        assert "km" in incidents.screen.choices[1].label
+        incident_detail = await app.router.dispatch(inbound(48, "INC 2", requester.mesh_id))
+        assert "from you" in render_response(incident_detail)
+        public_incidents = await app.router.dispatch(
+            inbound(49, "INCIDENTS", "!00000038", direct=False)
+        )
+        assert "km" not in render_response(public_incidents)
+        assert "from you" not in render_response(public_incidents)
+
+        far = await app.alerts.raise_alert(
+            "caution", "Far alert", "operator", lat=41.0000, lon=-81.0000
+        )
+        near = await app.alerts.raise_alert(
+            "caution", "Near alert", "operator", lat=40.4410, lon=-79.9960
+        )
+        alerts = await app.router.dispatch(inbound(50, "ALERTS", requester.mesh_id))
+        assert alerts.screen is not None
+        assert [choice.command for choice in alerts.screen.choices[:2]] == [
+            f"ALERTS {near.id}",
+            f"ALERTS {far.id}",
+        ]
+        assert "0.0km" in alerts.screen.choices[0].label
+        alert_detail = await app.router.dispatch(
+            inbound(51, f"ALERTS {near.id}", requester.mesh_id)
+        )
+        assert "from you · radius 1.0km" in render_response(alert_detail)
+        public_alerts = await app.router.dispatch(inbound(52, "ALERTS", "!00000039", direct=False))
+        assert "km" not in render_response(public_alerts)
+        assert "from you" not in render_response(public_alerts)
+    finally:
+        await app.database.close()
+
+
+@pytest.mark.asyncio
 async def test_blocked_radio_cannot_invoke_any_safety_command(tmp_path) -> None:
     app = OutpostApp(config(tmp_path / "outpost.db"))
     await app.database.open()

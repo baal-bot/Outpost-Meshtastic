@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from outpost.clock import Clock
 from outpost.config import EnvConfig
 from outpost.env.weather import _request_json
+from outpost.geo import distance_bearing
 from outpost.operator_context import current_actor
 from outpost.store import Database
 from outpost.watch import AlertService
@@ -22,17 +22,7 @@ class SeismicService:
 
     @staticmethod
     def distance_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> tuple[float, int]:
-        phi1, phi2 = math.radians(lat1), math.radians(lat2)
-        delta_phi = math.radians(lat2 - lat1)
-        delta_lon = math.radians(lon2 - lon1)
-        a = (
-            math.sin(delta_phi / 2) ** 2
-            + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lon / 2) ** 2
-        )
-        distance = 6371.0088 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-        y = math.sin(delta_lon) * math.cos(phi2)
-        x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(delta_lon)
-        return distance, round((math.degrees(math.atan2(y, x)) + 360) % 360)
+        return distance_bearing(lat1, lon1, lat2, lon2)
 
     async def poll(self, lat: float, lon: float) -> dict[str, int]:
         try:

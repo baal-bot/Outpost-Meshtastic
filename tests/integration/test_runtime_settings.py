@@ -47,4 +47,25 @@ async def test_runtime_node_settings_are_validated_persisted_and_audited(tmp_pat
     assert fresh.watch.emergency_keywords_enabled is True
     assert fresh.watch.emergency_cooldown_minutes == 15
     assert fresh.watch.escalation.urgent.ack_threshold == 1
+    assert fresh.watch.escalation.urgent.stages[0].proximity == "any"
+    footprint = await settings.update_watch(
+        {
+            "escalation": {
+                "urgent": {
+                    "ack_threshold": 1,
+                    "stages": [
+                        {
+                            "after_minutes": 0,
+                            "notify": "responders",
+                            "channels": [3],
+                            "proximity": "footprint",
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    assert footprint["escalation"]["urgent"]["stages"][0]["proximity"] == "footprint"
+    await restored.load()
+    assert fresh.watch.escalation.urgent.stages[0].proximity == "footprint"
     await database.close()
