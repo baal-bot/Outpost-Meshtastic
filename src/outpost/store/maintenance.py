@@ -42,6 +42,15 @@ TABLE_POLICIES = (
     TablePolicy("outbound_attempt", "system", "cascade", "Follows its durable outbound item."),
     TablePolicy("radio_power_sample", "system", "retain", "Bounded connected-radio power history."),
     TablePolicy(
+        "situation_snapshot",
+        "system",
+        "retain",
+        "Versioned handover facts; latest capability snapshots are protected.",
+    ),
+    TablePolicy(
+        "web_read_marker", "system", "preserve", "Bounded by named account and read scope."
+    ),
+    TablePolicy(
         "safety_floor_attempt", "system", "retain", "Short replay/coalescing safety window."
     ),
     TablePolicy("kv", "system", "expire", "Only entries with an elapsed expiry are removed."),
@@ -452,6 +461,7 @@ class MaintenanceService:
         federation_cutoff = now - retention.federation_history_days * DAY
         outbound_cutoff = now - retention.outbound_history_days * DAY
         radio_power_cutoff = now - retention.radio_power_days * DAY
+        situation_cutoff = now - retention.situation_snapshot_days * DAY
         return (
             CleanupRule(
                 "member_positions",
@@ -500,6 +510,15 @@ class MaintenanceService:
                 "radio_power_sample",
                 "captured_at<?",
                 (radio_power_cutoff,),
+            ),
+            CleanupRule(
+                "situation_snapshots",
+                "Situation handover snapshots",
+                "system",
+                "situation_snapshot",
+                "created_at<? AND id NOT IN ("
+                "SELECT MAX(id) FROM situation_snapshot GROUP BY capability)",
+                (situation_cutoff,),
             ),
             CleanupRule(
                 "web_login_attempts",

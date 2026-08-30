@@ -273,6 +273,128 @@ async def test_changes_require_evidence_and_clock_shift_never_creates_resolution
 
 
 @pytest.mark.asyncio
+async def test_web_viewers_keep_independent_handover_markers_and_explicit_since(tmp_path) -> None:
+    database, clock, service, _narrator = await seeded_service(tmp_path)
+    auth = WebAuthService(database, 12)
+    accounts = {}
+    passwords = {
+        "alpha": "alpha-operator-pass-42",
+        "bravo": "bravo-operator-pass-42",
+        "wallboard": "wallboard-viewer-pass-42",
+    }
+    try:
+        for username, role in (
+            ("alpha", "operator"),
+            ("bravo", "operator"),
+            ("wallboard", "viewer"),
+        ):
+            accounts[username] = await auth.create_account(
+                username,
+                username.title(),
+                role,
+                passwords[username],
+                "fixture",
+            )
+        await database.write(
+            "UPDATE web_account SET must_change=0 WHERE username IN ('alpha','bravo','wallboard')"
+        )
+        web = create_web_app(lambda: {"radio": "up"}, database, auth, situation=service)
+        alpha = TestClient(web)
+        bravo = TestClient(web)
+        wallboard = TestClient(web)
+        for username, client in (("alpha", alpha), ("bravo", bravo), ("wallboard", wallboard)):
+            response = client.post(
+                "/api/v1/auth/login",
+                json={"username": username, "password": passwords[username]},
+            )
+            assert response.status_code == 200
+
+        baseline = int(clock.now().timestamp())
+        assert alpha.get("/api/v1/sitrep").json()["change_window"]["kind"] == "first_look"
+        assert bravo.get("/api/v1/sitrep").json()["change_window"]["kind"] == "first_look"
+
+        clock.advance(60)
+        await database.write(
+            "UPDATE incident SET title='Expanded fire perimeter',updated_at=? "
+            "WHERE uid='local:one'",
+            (int(clock.now().timestamp()),),
+        )
+        alpha_changed = alpha.get("/api/v1/sitrep").json()
+        assert {(item["kind"], item["ref"]) for item in alpha_changed["changes"]} == {
+            ("changed", "I1")
+        }
+        assert alpha_changed["change_window"]["label"].startswith("Since your last look at ")
+        diverged_markers = await database.read(
+            "SELECT account_id,last_seen_id FROM web_read_marker ORDER BY account_id"
+        )
+        assert len({int(row["last_seen_id"]) for row in diverged_markers}) == 2
+
+        clock.advance(60)
+        now = int(clock.now().timestamp())
+        await database.write(
+            "INSERT INTO alert(uid,severity,headline,source,channels,raised_by,raised_at,"
+            "expires_at,ack_required) VALUES('alert:third','urgent','New evacuation zone',"
+            "'operator','[0]','fixture',?,?,1)",
+            (now, now + 3_600),
+        )
+        alpha_latest = alpha.get("/api/v1/sitrep").json()
+        bravo_latest = bravo.get("/api/v1/sitrep").json()
+        assert {(item["kind"], item["ref"]) for item in alpha_latest["changes"]} == {("new", "A3")}
+        assert {(item["kind"], item["ref"]) for item in bravo_latest["changes"]} == {
+            ("changed", "I1"),
+            ("new", "A3"),
+        }
+
+        explicit_time = datetime.fromtimestamp(baseline, UTC).isoformat()
+        explicit = alpha.get("/api/v1/sitrep", params={"since": explicit_time})
+        assert explicit.status_code == 200
+        assert explicit.json()["change_window"] == {
+            "kind": "explicit",
+            "since": baseline,
+            "anchor_at": baseline,
+            "complete": True,
+            "label": "Since requested time 2026-08-28 12:00 UTC",
+        }
+        assert {(item["kind"], item["ref"]) for item in explicit.json()["changes"]} == {
+            ("changed", "I1"),
+            ("new", "A3"),
+        }
+        assert (
+            alpha.get("/api/v1/sitrep", params={"since": "2026-08-28T12:00:00"}).status_code == 422
+        )
+        assert (
+            alpha.get(
+                "/api/v1/sitrep",
+                params={"since": datetime.fromtimestamp(now + 60, UTC).isoformat()},
+            ).status_code
+            == 422
+        )
+
+        marker_rows = await database.read(
+            "SELECT account_id,scope,last_seen_at,last_seen_id FROM web_read_marker "
+            "ORDER BY account_id"
+        )
+        before_wallboard = [dict(row) for row in marker_rows]
+        wallboard_response = wallboard.get("/api/v1/sitrep")
+        assert wallboard_response.status_code == 200
+        assert wallboard_response.json()["capability"] == "public"
+        after_wallboard = [
+            dict(row)
+            for row in await database.read(
+                "SELECT account_id,scope,last_seen_at,last_seen_id FROM web_read_marker "
+                "ORDER BY account_id"
+            )
+        ]
+        assert after_wallboard == before_wallboard
+        assert {row["account_id"] for row in after_wallboard} == {
+            int(accounts["alpha"]["id"]),
+            int(accounts["bravo"]["id"]),
+        }
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_web_and_mesh_sitrep_work_without_ai(tmp_path) -> None:
     database = Database(tmp_path / "web.db")
     await database.open()
@@ -324,6 +446,16 @@ async def test_web_and_mesh_sitrep_work_without_ai(tmp_path) -> None:
         )
         assert home_response.max_parts == 1
         assert chunk_text(home) == [home]
+        markers = await app.database.read(
+            "SELECT r.scope,r.last_seen_id FROM read_marker r "
+            "JOIN member m ON m.id=r.member_id WHERE m.mesh_id=?",
+            (sender,),
+        )
+        assert len(markers) == 1 and markers[0]["scope"] == "sitrep:member"
+        assert await app.database.read(
+            "SELECT 1 FROM situation_snapshot WHERE id=? AND capability='member'",
+            (markers[0]["last_seen_id"],),
+        )
         network_response = await app.router.dispatch(message(3, "5"))
         assert "source ID@age" in render_response(network_response)
         assert network_response.max_parts == 2

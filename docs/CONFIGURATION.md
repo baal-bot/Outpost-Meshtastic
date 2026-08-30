@@ -203,9 +203,10 @@ the expiry migration are expired on upgrade and require a fresh member share to 
 
 The remaining retention keys govern BBS/mail, authentication, digests, terminal watch history,
 provider history/cache, completed federation service/delivery history, and terminal durable
-outbound work. `radio_power_days` retains bounded connected-radio trend samples (30 days by
-default). Active incidents/events, pending federation approvals, live deliveries, identity,
-configuration, and audit evidence are not age-deleted. See
+outbound work. `radio_power_days` retains bounded connected-radio trend samples and
+`situation_snapshot_days` retains per-viewer handover baselines (both default to 30 days).
+Active incidents/events, pending federation approvals, live deliveries, identity, configuration,
+and audit evidence are not age-deleted. See
 [Data retention and storage](RETENTION.md) for the table-by-table contract and capacity estimates.
 
 ## Environment overrides

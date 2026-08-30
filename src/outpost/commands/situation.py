@@ -16,7 +16,7 @@ from outpost.router.models import (
     TuiChoice,
     TuiScreen,
 )
-from outpost.situation import BriefingCapability, SituationBriefingService
+from outpost.situation import BriefingCapability, BriefingViewer, SituationBriefingService
 from outpost.transport.models import TrafficClass
 
 PAGE_SIZE = 2
@@ -71,7 +71,11 @@ def _stored_items(snapshot: dict[str, Any], section: str) -> list[str]:
 def specs(service: SituationBriefingService) -> list[CommandSpec]:
     async def current(ctx: CommandContext, *, include_ai: bool = False) -> dict[str, Any]:
         capability = BriefingCapability.from_trust(str(ctx.member.trust))
-        return await service.snapshot(capability, include_ai=include_ai)
+        return await service.snapshot(
+            capability,
+            include_ai=include_ai,
+            viewer=BriefingViewer("member", int(ctx.member.id)),
+        )
 
     async def home(ctx: CommandContext) -> Response:
         snapshot = await current(ctx)
@@ -96,7 +100,7 @@ def specs(service: SituationBriefingService) -> list[CommandSpec]:
         return _screen(
             "sitrep-home",
             "SITREP",
-            [Line(summary)],
+            [Line(str(snapshot["change_window"]["label"])), Line(summary)],
             (
                 TuiChoice("Weather", "SITREP WEATHER"),
                 TuiChoice("Incidents", "SITREP INCIDENTS"),

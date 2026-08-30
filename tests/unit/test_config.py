@@ -307,6 +307,7 @@ def test_ai_interaction_metrics_outlive_private_content() -> None:
     config = Config()
     assert config.store.retention.ai_interaction_content_days == 30
     assert config.store.retention.ai_interaction_metrics_days == 180
+    assert config.store.retention.situation_snapshot_days == 30
     with pytest.raises(ValidationError, match="metrics_days must be at least"):
         Config.model_validate(
             {

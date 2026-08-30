@@ -190,6 +190,7 @@ store:
     federation_history_days: 30
     outbound_history_days: 30
     radio_power_days: 30
+    situation_snapshot_days: 30
   backup:
     enabled: true
     keep: 14

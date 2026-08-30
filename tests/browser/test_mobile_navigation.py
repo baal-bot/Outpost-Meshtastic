@@ -260,6 +260,14 @@ def prepare_page(
             body='{"items":[],"next_cursor":null}',
         ),
     )
+    page.route(
+        "**/api/v1/boards*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"items":[]}',
+        ),
+    )
     page.goto(dashboard_url, wait_until="domcontentloaded")
     wait_for_navigation(page)
     return page
@@ -773,10 +781,17 @@ def route_visual_content_api(page: object) -> None:
         "**/api/v1/sitrep*",
         {
             "generated_at": 2_000_000_000,
-            "capability": "Deterministic local briefing",
+            "capability": "operator",
             "digest": "browser-test-briefing",
             "items": [],
             "changes": [],
+            "change_window": {
+                "kind": "viewer",
+                "since": 1_999_996_400,
+                "anchor_at": 1_999_996_400,
+                "complete": True,
+                "label": "Since your last look at 2033-05-18 02:33 UTC",
+            },
             "sources": [],
             "sections": [],
             "ai": {"requested": False, "cached": False, "outcome": "not_requested"},

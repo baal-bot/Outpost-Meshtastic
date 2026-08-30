@@ -454,6 +454,7 @@ class RetentionConfig(StrictModel):
     federation_history_days: int = Field(default=30, ge=1, le=365)
     outbound_history_days: int = Field(default=30, ge=1, le=365)
     radio_power_days: int = Field(default=30, ge=1, le=365)
+    situation_snapshot_days: int = Field(default=30, ge=1, le=365)
 
     @model_validator(mode="after")
     def validate_ai_retention(self) -> RetentionConfig:

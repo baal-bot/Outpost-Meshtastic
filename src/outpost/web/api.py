@@ -43,7 +43,7 @@ from outpost.operator_context import (
 )
 from outpost.radio_operations import RadioOperations
 from outpost.self_check import SelfCheckService
-from outpost.situation import BriefingCapability, SituationBriefingService
+from outpost.situation import BriefingCapability, BriefingViewer, SituationBriefingService
 from outpost.store import Database
 from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.store.maintenance import MaintenanceService
@@ -2217,17 +2217,52 @@ def create_web_app(
 
     if situation is not None:
 
-        @app.get("/api/v1/sitrep")
+        @app.get("/api/v1/sitrep", response_model=None)
         async def situation_brief(
-            request: Request, ai: bool = Query(default=False)
-        ) -> dict[str, Any]:
+            request: Request,
+            ai: bool = Query(default=False),
+            since: datetime | None = None,
+        ) -> dict[str, Any] | Response:
             session = getattr(request.state, "web_session", None)
             capability = (
                 BriefingCapability.PUBLIC
                 if session is not None and session.role == "viewer"
                 else BriefingCapability.OPERATOR
             )
-            return await situation.snapshot(capability, include_ai=ai)
+            viewer = (
+                BriefingViewer("web_account", int(session.account_id))
+                if session is not None and session.role != "viewer"
+                else None
+            )
+            since_epoch = None
+            if since is not None:
+                if since.tzinfo is None:
+                    return JSONResponse(
+                        {
+                            "error": {
+                                "code": "sitrep_since_timezone_required",
+                                "message": "The since time must include a UTC offset.",
+                            }
+                        },
+                        status_code=422,
+                    )
+                since_epoch = int(since.timestamp())
+                if since_epoch > int(situation.clock.now().timestamp()):
+                    return JSONResponse(
+                        {
+                            "error": {
+                                "code": "sitrep_since_in_future",
+                                "message": "The since time cannot be in the future.",
+                            }
+                        },
+                        status_code=422,
+                    )
+            return await situation.snapshot(
+                capability,
+                include_ai=ai,
+                viewer=viewer,
+                since=since_epoch,
+            )
 
     @app.get("/api/v1/web/transport", tags=["web-transport"])
     async def web_transport(request: Request) -> dict[str, object]:

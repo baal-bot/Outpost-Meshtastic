@@ -179,6 +179,44 @@ async def test_maintenance_prunes_expired_data_preserves_pins_and_backs_up(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_maintenance_bounds_situation_versions_but_keeps_latest_capability_anchor(
+    tmp_path,
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    now = int(clock.now().timestamp())
+    old = now - 31 * 86_400
+    for capability, digest, created_at in (
+        ("public", "public-old-one", old - 2),
+        ("public", "public-old-two", old - 1),
+        ("operator", "operator-latest", old),
+        ("public", "public-latest", now),
+    ):
+        await database.write(
+            "INSERT INTO situation_snapshot(capability,digest,facts_json,created_at) "
+            "VALUES(?,?, '[]',?)",
+            (capability, digest, created_at),
+        )
+    config = Config.model_validate(
+        {"store": {"path": str(tmp_path / "outpost.db"), "backup": {"enabled": False}}}
+    )
+    service = MaintenanceService(database, BackupService(database), clock, config)
+
+    result = await service.run()
+
+    assert result.removed["situation_snapshots"] == 2
+    retained = await database.read(
+        "SELECT capability,digest FROM situation_snapshot ORDER BY capability"
+    )
+    assert [dict(row) for row in retained] == [
+        {"capability": "operator", "digest": "operator-latest"},
+        {"capability": "public", "digest": "public-latest"},
+    ]
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_maintenance_preview_storage_health_and_bounded_cleanup(tmp_path) -> None:
     database = Database(tmp_path / "outpost.db")
     await database.open()

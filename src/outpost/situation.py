@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
+import sqlite3
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from outpost.clock import Clock
 from outpost.router.models import TrustLevel
 from outpost.store import Database
 
-SNAPSHOT_NAMESPACE = "situation_snapshot"
 NARRATION_NAMESPACE = "situation_narration"
 NARRATION_FAILURE_TTL = 5 * 60
 NARRATION_SUCCESS_TTL = 24 * 60 * 60
@@ -72,6 +74,20 @@ class BriefingCapability(StrEnum):
         }[self]
 
 
+@dataclass(frozen=True)
+class BriefingViewer:
+    """A durable human identity whose own briefing cursor may advance."""
+
+    kind: Literal["member", "web_account"]
+    id: int
+
+    def __post_init__(self) -> None:
+        if self.kind not in {"member", "web_account"}:
+            raise ValueError("Unknown briefing viewer kind.")
+        if self.id < 1:
+            raise ValueError("Briefing viewer IDs must be positive.")
+
+
 class SituationNarrator(Protocol):
     async def narrate_situation(
         self, snapshot: dict[str, Any], required_refs: tuple[str, ...]
@@ -129,6 +145,13 @@ class BriefingChange:
 
     def json(self) -> dict[str, str]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class _SnapshotSelection:
+    prior: dict[str, Any] | None
+    current_id: int
+    change_window: dict[str, Any]
 
 
 def _safe_text(value: object, limit: int = 140) -> str:
@@ -207,9 +230,33 @@ class SituationBriefingService:
         self.status_provider = status_provider
         self.narrator = narrator
         self.modules = modules or (lambda: {name: True for name in ("bbs", "watch", "env", "fed")})
+        self._snapshot_lock = asyncio.Lock()
 
     async def snapshot(
-        self, capability: BriefingCapability, *, include_ai: bool = False
+        self,
+        capability: BriefingCapability,
+        *,
+        include_ai: bool = False,
+        viewer: BriefingViewer | None = None,
+        since: int | None = None,
+    ) -> dict[str, Any]:
+        if since is not None and since < 0:
+            raise ValueError("Briefing since time must be a non-negative Unix timestamp.")
+        async with self._snapshot_lock:
+            return await self._snapshot(
+                capability,
+                include_ai=include_ai,
+                viewer=viewer,
+                since=since,
+            )
+
+    async def _snapshot(
+        self,
+        capability: BriefingCapability,
+        *,
+        include_ai: bool,
+        viewer: BriefingViewer | None,
+        since: int | None,
     ) -> dict[str, Any]:
         now = int(self.clock.now().timestamp())
         items, sources = await self._collect(capability, now)
@@ -223,12 +270,20 @@ class SituationBriefingService:
         fact_digest = hashlib.sha256(
             json.dumps(digest_input, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
-        prior = await self._prior(capability)
-        if prior and prior.get("digest") == fact_digest:
+        selection = await self._select_snapshot(
+            capability,
+            fact_digest,
+            facts,
+            now,
+            viewer=viewer,
+            since=since,
+        )
+        if selection.prior and selection.prior.get("digest") == fact_digest:
             changes: list[BriefingChange] = []
         else:
-            changes = await self._changes(prior, facts)
-            await self._save_snapshot(capability, fact_digest, facts, changes, now)
+            changes = await self._changes(selection.prior, facts)
+        if viewer is not None:
+            await self._advance_marker(viewer, capability, selection.current_id, now)
         digest = hashlib.sha256(
             json.dumps(
                 {
@@ -258,6 +313,7 @@ class SituationBriefingService:
             "items": [item.json() for item in items],
             "sources": [source.json(now) for source in sources],
             "changes": [change.json() for change in changes],
+            "change_window": selection.change_window,
             "policy": {
                 "section_order": list(SECTION_ORDER),
                 "section_limits": SECTION_LIMITS,
@@ -815,21 +871,149 @@ class SituationBriefingService:
         ]
         return value
 
-    async def _prior(self, capability: BriefingCapability) -> dict[str, Any] | None:
-        rows = await self.database.read(
-            "SELECT v,updated_at FROM kv WHERE ns=? AND k=?",
-            (SNAPSHOT_NAMESPACE, capability.value),
-        )
-        if not rows:
+    @staticmethod
+    def _stored_snapshot(
+        row: Mapping[str, Any] | sqlite3.Row | None,
+    ) -> dict[str, Any] | None:
+        if row is None:
             return None
         try:
-            value = json.loads(str(rows[0]["v"]))
-        except json.JSONDecodeError:
+            facts = json.loads(str(row["facts_json"]))
+        except (KeyError, TypeError, json.JSONDecodeError):
             return None
-        if not isinstance(value, dict):
+        if not isinstance(facts, list):
             return None
-        value["updated_at"] = int(rows[0]["updated_at"])
-        return value
+        return {
+            "id": int(row["id"]),
+            "digest": str(row["digest"]),
+            "facts": facts,
+            "created_at": int(row["created_at"]),
+        }
+
+    @staticmethod
+    def _brief_time(value: int) -> str:
+        return datetime.fromtimestamp(value, UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+    @classmethod
+    def _change_window(
+        cls,
+        kind: Literal["viewer", "explicit", "previous"],
+        since: int | None,
+        prior: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        anchor_at = int(prior["created_at"]) if prior is not None else None
+        if kind == "viewer":
+            if since is None:
+                label = "First look; no prior briefing is recorded"
+            elif prior is None:
+                label = (
+                    f"Since your last look at {cls._brief_time(since)}; "
+                    "the earlier comparison snapshot is no longer retained"
+                )
+            else:
+                label = f"Since your last look at {cls._brief_time(since)}"
+        elif kind == "explicit":
+            assert since is not None
+            if prior is None:
+                label = (
+                    f"Since requested time {cls._brief_time(since)}; "
+                    "no comparison snapshot is retained at or before that time"
+                )
+            else:
+                label = f"Since requested time {cls._brief_time(since)}"
+        elif prior is None:
+            label = "First retained briefing snapshot"
+        else:
+            assert anchor_at is not None
+            label = f"Since the prior briefing snapshot at {cls._brief_time(anchor_at)}"
+        return {
+            "kind": kind if prior is not None or since is not None else "first_look",
+            "since": since,
+            "anchor_at": anchor_at,
+            "complete": prior is not None,
+            "label": label,
+        }
+
+    async def _select_snapshot(
+        self,
+        capability: BriefingCapability,
+        digest: str,
+        facts: list[dict[str, Any]],
+        now: int,
+        *,
+        viewer: BriefingViewer | None,
+        since: int | None,
+    ) -> _SnapshotSelection:
+        async with self.database.transaction() as transaction:
+            latest_rows = await transaction.read(
+                "SELECT id,digest,facts_json,created_at FROM situation_snapshot "
+                "WHERE capability=? ORDER BY id DESC LIMIT 1",
+                (capability.value,),
+            )
+            latest = self._stored_snapshot(latest_rows[0] if latest_rows else None)
+            if latest is not None and latest["digest"] == digest:
+                current = latest
+            else:
+                current_id = await transaction.write(
+                    "INSERT INTO situation_snapshot(capability,digest,facts_json,created_at) "
+                    "VALUES(?,?,?,?)",
+                    (
+                        capability.value,
+                        digest,
+                        json.dumps(facts, sort_keys=True, separators=(",", ":")),
+                        now,
+                    ),
+                )
+                current = {
+                    "id": current_id,
+                    "digest": digest,
+                    "facts": facts,
+                    "created_at": now,
+                }
+
+            marker_seen_at: int | None = None
+            if since is not None:
+                anchor_rows = await transaction.read(
+                    "SELECT id,digest,facts_json,created_at FROM situation_snapshot "
+                    "WHERE capability=? AND created_at<=? "
+                    "ORDER BY created_at DESC,id DESC LIMIT 1",
+                    (capability.value, since),
+                )
+                prior = self._stored_snapshot(anchor_rows[0] if anchor_rows else None)
+                change_window = self._change_window("explicit", since, prior)
+            elif viewer is not None:
+                scope = f"sitrep:{capability.value}"
+                if viewer.kind == "member":
+                    marker_rows = await transaction.read(
+                        "SELECT last_seen_at,last_seen_id FROM read_marker "
+                        "WHERE member_id=? AND scope=?",
+                        (viewer.id, scope),
+                    )
+                else:
+                    marker_rows = await transaction.read(
+                        "SELECT last_seen_at,last_seen_id FROM web_read_marker "
+                        "WHERE account_id=? AND scope=?",
+                        (viewer.id, scope),
+                    )
+                marker = marker_rows[0] if marker_rows else None
+                marker_seen_at = int(marker["last_seen_at"]) if marker is not None else None
+                anchor_rows = []
+                if marker is not None and marker["last_seen_id"] is not None:
+                    anchor_rows = await transaction.read(
+                        "SELECT id,digest,facts_json,created_at FROM situation_snapshot "
+                        "WHERE id=? AND capability=?",
+                        (int(marker["last_seen_id"]), capability.value),
+                    )
+                prior = self._stored_snapshot(anchor_rows[0] if anchor_rows else None)
+                change_window = self._change_window("viewer", marker_seen_at, prior)
+            else:
+                prior = latest
+                change_window = self._change_window(
+                    "previous",
+                    int(latest["created_at"]) if latest is not None else None,
+                    prior,
+                )
+        return _SnapshotSelection(prior, int(current["id"]), change_window)
 
     async def _changes(
         self,
@@ -952,24 +1136,28 @@ class SituationBriefingService:
             )
         return result
 
-    async def _save_snapshot(
+    async def _advance_marker(
         self,
+        viewer: BriefingViewer,
         capability: BriefingCapability,
-        digest: str,
-        facts: list[dict[str, Any]],
-        changes: list[BriefingChange],
+        snapshot_id: int,
         now: int,
     ) -> None:
-        value = json.dumps(
-            {"digest": digest, "facts": facts, "changes": [item.json() for item in changes]},
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        await self.database.write(
-            "INSERT INTO kv(ns,k,v,updated_at) VALUES(?,?,?,?) "
-            "ON CONFLICT(ns,k) DO UPDATE SET v=excluded.v,updated_at=excluded.updated_at",
-            (SNAPSHOT_NAMESPACE, capability.value, value, now),
-        )
+        scope = f"sitrep:{capability.value}"
+        if viewer.kind == "member":
+            await self.database.write(
+                "INSERT INTO read_marker(member_id,scope,last_seen_at,last_seen_id) "
+                "VALUES(?,?,?,?) ON CONFLICT(member_id,scope) DO UPDATE SET "
+                "last_seen_at=excluded.last_seen_at,last_seen_id=excluded.last_seen_id",
+                (viewer.id, scope, now, snapshot_id),
+            )
+        else:
+            await self.database.write(
+                "INSERT INTO web_read_marker(account_id,scope,last_seen_at,last_seen_id) "
+                "VALUES(?,?,?,?) ON CONFLICT(account_id,scope) DO UPDATE SET "
+                "last_seen_at=excluded.last_seen_at,last_seen_id=excluded.last_seen_id",
+                (viewer.id, scope, now, snapshot_id),
+            )
 
     async def _narration(
         self, snapshot: dict[str, Any], capability: BriefingCapability
