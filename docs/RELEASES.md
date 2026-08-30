@@ -5,6 +5,32 @@ complete CI workflow against the tag's exact commit and cannot package until bot
 versions pass. Every third-party action is pinned to its full commit SHA; Dependabot proposes
 reviewed pin updates each week.
 
+## Dependency lock review
+
+`requirements.lock` is the exact runtime/radio set deployed to Raspberry Pi releases. CI installs
+that set on both supported Python versions, verifies that every installed runtime distribution has
+an exact lock entry, runs the complete test suite against it, audits those pins, and performs the
+package smoke install through the same constraint file. A separate developer matrix intentionally
+tests current dependency ranges so upcoming resolver changes remain visible.
+
+Refresh the lock only in a dedicated, reviewed dependency PR or planned release update:
+
+1. resolve `.[radio]` from scratch on the supported Python versions and replace the lock with the
+   complete, sorted `name==version` runtime graph (excluding Outpost, pip, setuptools, and wheel);
+2. review upstream release notes, compatibility, and security advisories for every changed direct
+   or transitive dependency;
+3. run `python tools/check_dependency_lock.py --report-stale`, then install with
+   `pip install -c requirements.lock '.[radio]'` and run the checker again with
+   `--check-installed`;
+4. run `pip-audit --strict --no-deps --requirement requirements.lock`, the full tests on Python
+   3.12 and 3.13, and `sh deploy/smoke-package.sh`; and
+5. record the pin changes and evidence in the PR and release notes.
+
+The CI staleness report emits an annotation when a direct pin trails the newest non-yanked release
+that still satisfies the project's version range and current Python runtime. Staleness is review
+input rather than an automatic upgrade: maintainers either refresh deliberately or document why a
+known-good field pin remains in place.
+
 ## Published evidence
 
 Each GitHub release contains:

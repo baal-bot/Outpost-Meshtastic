@@ -48,9 +48,11 @@ gate so formatting drift cannot hide the later checks:
 
 ```sh
 .venv/bin/ruff format --check src tests tools/build_release_metadata.py tools/check_capabilities.py \
-  tools/check_ci_evidence.py tools/verify_release.py deploy/configure.py deploy/render_avahi.py
+  tools/check_ci_evidence.py tools/check_dependency_lock.py tools/check_mypy_ratchet.py \
+  tools/verify_release.py deploy/configure.py deploy/render_avahi.py
 .venv/bin/ruff check src tests tools/build_release_metadata.py tools/check_capabilities.py \
-  tools/check_ci_evidence.py tools/verify_release.py deploy/configure.py deploy/render_avahi.py
+  tools/check_ci_evidence.py tools/check_dependency_lock.py tools/check_mypy_ratchet.py \
+  tools/verify_release.py deploy/configure.py deploy/render_avahi.py
 .venv/bin/mypy
 .venv/bin/python tools/check_capabilities.py --check
 .venv/bin/pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json

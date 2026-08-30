@@ -14,7 +14,10 @@ if [ -z "$WHEEL" ]; then
 fi
 
 python3 -m venv "$SMOKE_DIR/venv"
-"$SMOKE_DIR/venv/bin/pip" install --no-deps "$WHEEL"
+"$SMOKE_DIR/venv/bin/pip" install --upgrade pip
+"$SMOKE_DIR/venv/bin/pip" install -c "$PROJECT_DIR/requirements.lock" "$WHEEL[radio]"
+"$SMOKE_DIR/venv/bin/pip" check
+"$SMOKE_DIR/venv/bin/python" "$PROJECT_DIR/tools/check_dependency_lock.py" --check-installed
 "$SMOKE_DIR/venv/bin/python" - "$WHEEL" <<'PY'
 import sys
 import zipfile
