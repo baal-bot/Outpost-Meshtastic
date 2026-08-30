@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -6,6 +8,8 @@ from outpost.config import Config
 from outpost.store import Database
 from outpost.store.backups import BackupService
 from outpost.store.maintenance import MaintenanceService
+from outpost.store.members import MemberRepo
+from outpost.watch.incidents import IncidentService
 from outpost.web.api import create_web_app
 
 
@@ -210,4 +214,160 @@ async def test_maintenance_preview_storage_health_and_bounded_cleanup(tmp_path) 
     assert client.get("/api/v1/maintenance/preview").status_code == 200
     denied = client.post("/api/v1/maintenance/run", json={"confirmation": "wrong"})
     assert denied.status_code == 422
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_maintenance_deletes_service_incident_and_all_child_evidence(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    member = await MemberRepo(database, clock).resolve("!00000001")
+    incidents = IncidentService(database, clock)
+    incident, _ = await incidents.create("tree blocking road 40.0 -79.0", member)
+    assert incident is not None
+    await incidents.operator_update(incident.id, "update", "Crew dispatched")
+    await incidents.operator_patch(
+        incident.id,
+        status="resolved",
+        severity=None,
+        resolution="Tree removed",
+        actor="operator",
+    )
+    assert await database.read("SELECT 1 FROM incident_origin WHERE incident_id=?", (incident.id,))
+    assert await database.read(
+        "SELECT 1 FROM incident_provenance WHERE incident_id=?", (incident.id,)
+    )
+    provenance_id = (
+        await database.read(
+            "SELECT id FROM incident_provenance WHERE incident_id=? LIMIT 1", (incident.id,)
+        )
+    )[0]["id"]
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        await database.write("DELETE FROM incident_provenance WHERE id=?", (provenance_id,))
+
+    clock.advance(31 * 86_400)
+    config = Config.model_validate(
+        {"store": {"path": str(tmp_path / "outpost.db"), "backup": {"enabled": False}}}
+    )
+    service = MaintenanceService(database, BackupService(database), clock, config)
+    result = await service.run()
+
+    assert result.removed["incidents"] == 1 and result.failures == {}
+    for table in ("incident", "incident_update", "incident_origin", "incident_provenance"):
+        assert await database.read(f'SELECT 1 FROM "{table}"') == []  # noqa: S608
+    assert await service.audit_cleanup_foreign_keys() == []
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_maintenance_deletes_merged_children_before_their_canonical_incident(
+    tmp_path,
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    member = await MemberRepo(database, clock).resolve("!00000001")
+    incidents = IncidentService(database, clock)
+    target, _ = await incidents.create("road closure at bridge 40.0000 -79.0000", member)
+    source, _ = await incidents.create(
+        "road blocked at bridge 40.0005 -79.0005", member, force=True
+    )
+    assert target is not None and source is not None
+    await incidents.merge(source.id, target.id, "operator")
+    await incidents.operator_patch(
+        target.id,
+        status="resolved",
+        severity=None,
+        resolution="Road reopened",
+        actor="operator",
+    )
+    clock.advance(31 * 86_400)
+    config = Config.model_validate(
+        {"store": {"path": str(tmp_path / "outpost.db"), "backup": {"enabled": False}}}
+    )
+
+    result = await MaintenanceService(database, BackupService(database), clock, config).run()
+
+    assert result.removed["incidents"] == 2 and result.failures == {}
+    assert await database.read("SELECT 1 FROM incident") == []
+    assert await database.read("SELECT 1 FROM incident_match_decision") == []
+    assert await database.read("SELECT 1 FROM incident_origin") == []
+    assert await database.read("SELECT 1 FROM incident_provenance") == []
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_maintenance_isolates_failed_rule_and_bounds_backups(tmp_path, monkeypatch) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    now = int(clock.now().timestamp())
+    old = now - 200 * 86_400
+    await database.write(
+        "INSERT INTO incident(uid,local_ref,type,severity,status,title,reporter_label,"
+        "origin_node,created_at,updated_at,resolved_at) "
+        "VALUES('failed-rule',1,'hazard','info','resolved','Old incident','member',"
+        "'local',?,?,?)",
+        (old, old, old),
+    )
+    await database.write(
+        "INSERT INTO message_log(direction,channel,portnum,is_direct,byte_len,created_at) "
+        "VALUES('in',0,1,1,4,?)",
+        (old,),
+    )
+    config = Config.model_validate(
+        {
+            "store": {
+                "path": str(tmp_path / "outpost.db"),
+                "backup": {"enabled": True, "keep": 2},
+            }
+        }
+    )
+    backups = BackupService(database)
+    for _ in range(4):
+        await backups.create()
+    service = MaintenanceService(database, backups, clock, config)
+    delete_batch = service._delete_batch
+
+    async def fail_incidents(rule, limit):
+        if rule.key == "incidents":
+            raise RuntimeError("simulated incident constraint")
+        return await delete_batch(rule, limit)
+
+    monkeypatch.setattr(service, "_delete_batch", fail_incidents)
+    result = await service.run()
+
+    assert result.failures == {"incidents": "RuntimeError: simulated incident constraint"}
+    assert result.removed["messages"] == 1
+    assert await database.read("SELECT 1 FROM message_log") == []
+    assert await database.read("SELECT 1 FROM incident")
+    assert len(backups.list()) <= 2
+    assert await service.due() is False
+    assert (await service.health())["status"] == "degraded"
+    assert await database.read(
+        "SELECT 1 FROM audit_log WHERE action='maintenance.rule_failed' AND target='incidents'"
+    )
+    overview = TestClient(
+        create_web_app(lambda: {"radio": "up"}, database=database, maintenance=service)
+    ).get("/api/v1/dashboard/overview")
+    assert overview.status_code == 200
+    assert overview.json()["maintenance"]["failures"] == result.failures
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_backup_leaves_no_partial_snapshot(tmp_path, monkeypatch) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    backups = BackupService(database)
+
+    async def fail_backup(destination):
+        destination.write_bytes(b"partial")
+        raise RuntimeError("simulated snapshot failure")
+
+    monkeypatch.setattr(database, "backup", fail_backup)
+    with pytest.raises(RuntimeError, match="snapshot failure"):
+        await backups.create()
+    assert list(backups.directory.glob("*")) == []
     await database.close()

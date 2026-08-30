@@ -34,11 +34,11 @@ revision on which CI runs this manifest check.
 | BBS, mail, and operator inbox | Boards, threads, posts, subscriptions, digests, private mail, moderation, and one replyable operations inbox. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `41a6c85` |
 | Community Watch | Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, delivery-accountable responder alerts, retrying zero-recipient escalation, operator conditions, bounded repeats, all-clear, and maps. | Simulated | unreleased @ `HEAD` (2026-08-29); introduced `8323143` |
 | Welfare events and check-ins | Events, reviewed solicitation, roster states, delivery-accountable HELP/OK handling, honest no-responder guidance, derived unaccounted members, and CSV export. | Simulated | unreleased @ `HEAD` (2026-08-29); introduced `04e74ca` |
-| Environmental information | Weather observations/forecasts, CAP alerts, astronomy, earthquakes, caching, provenance, maps, and waypoints. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `72763e5` |
+| Environmental information | Weather observations/forecasts, offset-safe CAP alert expiry, astronomy, earthquakes, caching, provenance, maps, and waypoints. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `72763e5` |
 | NOAA SAME / RTL-SDR | Supervised receive-only rtl_fm/samedec pipeline, county and review gates, CAP dedupe, health, and bounded restart. | Hardware-gated | unreleased @ `HEAD` (2026-08-26); introduced `764516a` |
 | Dashboard and operator access | Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, shared map controls, and an offline-capable federation topology view. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `5295868` |
 | Backup, restore, upgrade, and rollback | Online verified backups, rotation, quiesced web restore, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `df0ee14` |
-| Retention and privacy controls | Bounded retention, exact-position expiry/deletion, message limits, maintenance batches, and auditable policy changes. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `4d8af9c` |
+| Retention and privacy controls | Bounded retention, foreign-key-safe incident deletion, isolated maintenance failures, atomic rotated snapshots, exact-position expiry/deletion, message limits, and auditable policy changes. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `4d8af9c` |
 | Outpost federation | Pairing, authenticated framing, policy, board/incident sync, peer services, encrypted mail relay, signed multi-hop custody, privacy-gated topology health, receipts, pagination, and reconciliation. | Two-node field-tested | unreleased @ `HEAD` (2026-08-27); introduced `8f7219e` |
 | Meshtastic MQTT federation path | Optional radio-firmware MQTT discovery, targeted bootstrap, transport observation, and resilient pairing approvals. | Two-node field-tested | unreleased @ `HEAD` (2026-08-26); introduced `f75f8af` |
 | Local AI assistant | ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, native HailoRT Qwen3-VL provider, bounded device reacquisition, and explicit readiness state. | Hardware-gated | unreleased @ `HEAD` (2026-08-27); introduced `6b3d01a` |
@@ -153,6 +153,7 @@ Evidence:
 
 - Acceptance: [docs/PHASE4-ACCEPTANCE.md](PHASE4-ACCEPTANCE.md) — Provider, cache, CAP lifecycle, geometry, and provenance gates.
 - Automated: [tests/integration/test_weather.py](../tests/integration/test_weather.py) — Weather caching, expiry, observation/forecast labels, and safe failure.
+- Automated: [tests/integration/test_cap_alerts.py](../tests/integration/test_cap_alerts.py) — CAP lifecycle, instant-safe expiry across ISO offset forms, migration repair, and re-poll recovery.
 
 Known limitations:
 
@@ -208,7 +209,7 @@ Maturity: **Automated-tested**.
 
 Evidence:
 
-- Automated: [tests/integration/test_maintenance.py](../tests/integration/test_maintenance.py) — Bounded deletion, batching, and maintenance observability.
+- Automated: [tests/integration/test_maintenance.py](../tests/integration/test_maintenance.py) — Bounded deletion, incident graph retention, per-rule isolation, snapshot limits, and dashboard observability.
 - Automated: [tests/integration/test_member_position_retention.py](../tests/integration/test_member_position_retention.py) — Exact-position expiry, deletion, and coarse-history behavior.
 
 Known limitations:

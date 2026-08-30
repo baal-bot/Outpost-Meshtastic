@@ -3,8 +3,9 @@
 Outpost applies retention once per local day after `store.maintenance_hour`. The Backups page shows
 the exact dry-run before any deletion, including eligible rows and an approximate byte count. A
 manual run requires operator confirmation. Both scheduled and manual runs create a verified
-pre-cleanup database snapshot, delete in small committed batches, perform bounded FTS/vacuum work,
-and write an audit event.
+pre-cleanup database snapshot, immediately enforce backup rotation, delete in small committed
+batches, perform bounded FTS/vacuum work, and write an audit event. A failed rule is isolated and
+shown on the Overview and Backups pages while all independent rules continue.
 
 Active safety and delivery state is never deleted merely because it is old. Audit evidence is
 preserved for the life of the database and is included in rotated backups. Organizations that need
@@ -63,7 +64,7 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | BBS/mail | `digest_delivery_log` | Retain for `digest_days`. |
 | Watch | `pending_incident_location` | Expire at its workflow deadline. |
 | Watch | `incident` | Retain resolved, false-alarm, or expired incidents for `incident_history_days`; open/monitoring are protected. |
-| Watch | `incident_update` | Cascade with its incident. |
+| Watch | `incident_update`, `incident_origin`, `incident_provenance`, `incident_match_decision` | Cascade with their incident after the history window; provenance remains append-only while its parent exists. |
 | Watch | `alert` | Retain concluded/expired alerts; active alerts are protected. |
 | Watch | `alert_ack`, `alert_audience` | Cascade with their alert. |
 | Watch | `watch_event` | Retain closed events; open events are protected. |
@@ -90,7 +91,8 @@ cannot starve expired positions or sessions. `maintenance_max_rows` defaults to 
 remainder stays visible in the next dry-run and is picked up by a later run. FTS merging is limited
 to 16 pages and incremental vacuum to 200 free pages per run.
 
-The snapshot is created before deletion and normal backup rotation then applies. A position that
+Existing snapshots are rotated before a new atomic snapshot is created, and rotation is enforced
+again before the run completes. A position that
 has disappeared from the live database may therefore remain inside a sensitive backup until that
 snapshot rotates out. Restrict backup access and use encrypted off-device storage.
 

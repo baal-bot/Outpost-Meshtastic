@@ -11,6 +11,7 @@ if (location.protocol === "http:" && !["localhost", "127.0.0.1", "::1"].includes
 const ago = (stamp) => { const seconds = Math.max(0, (Date.now() - new Date(stamp)) / 1000); if (seconds < 60) return "now"; if (seconds < 3600) return `${Math.floor(seconds / 60)}m`; if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`; return `${Math.floor(seconds / 86400)}d`; };
 const item = (title, description, badge) => `<div class="item"><div><strong>${safe(title)}</strong><p>${safe(description || "")}</p></div><span class="badge">${safe(badge || "")}</span></div>`;
 document.querySelector("#system").insertAdjacentHTML("beforebegin", '<section id="subsystems" class="ui-card panel content-panel subsystem-panel"><div class="heading"><div><p class="eyebrow">FAILURE DOMAINS</p><h2>Subsystem health</h2></div><span id="subsystem-state" class="chip">Checking</span></div><p class="subsystem-intro">Core mesh routing fails safe. Local services and optional providers recover independently without taking the radio offline.</p><div id="subsystem-list" class="subsystem-list"><p class="ui-empty empty">Loading task health…</p></div></section>');
+document.querySelector(".hero").insertAdjacentHTML("afterend", '<section id="maintenance-warning" class="ui-notice ui-notice--danger maintenance-warning" role="alert" hidden><strong>Retention maintenance needs attention</strong><p id="maintenance-warning-detail"></p><a href="/backups.html">Review storage health</a></section>');
 document.querySelector(".kpis").insertAdjacentHTML("afterend", '<section class="panel weather-panel"><div><p id="weather-kind" class="eyebrow">LOCAL CONDITIONS</p><h2 id="weather-title">Weather</h2><p id="weather-summary">Set the Outpost location to enable weather.</p></div><div id="weather-reading" class="weather-reading"><strong>—</strong><span>Not configured</span></div><div id="weather-details" class="weather-details"></div></section>');
 document.querySelector(".weather-panel>div").insertAdjacentHTML("beforeend", '<div id="provider-health" class="provider-health"></div>');
 document.querySelector(".weather-panel").insertAdjacentHTML("afterend", '<section class="panel forecast-panel"><div class="forecast-heading"><div><p class="eyebrow">LOCAL FORECAST</p><h2>What’s ahead</h2></div><span id="forecast-meta">Loading forecast…</span></div><div id="forecast-days" class="forecast-days"></div><div id="forecast-hours" class="forecast-hours"></div></section>');
@@ -115,6 +116,13 @@ async function refresh() {
     $("heard-24h").textContent = overview.members.heard_24h;
     $("heard-7d").textContent = overview.members.heard_7d;
     $("members-total").textContent = overview.members.members_total;
+    const maintenanceWarning = $("maintenance-warning");
+    const maintenanceFailures = overview.maintenance?.failures || {};
+    maintenanceWarning.hidden = overview.maintenance?.status !== "degraded";
+    if (!maintenanceWarning.hidden) {
+      const failedRules = Object.keys(maintenanceFailures).map((key) => key.replaceAll("_", " "));
+      $("maintenance-warning-detail").textContent = `${failedRules.length} retention ${failedRules.length === 1 ? "operation needs" : "operations need"} review: ${failedRules.join(", ")}. Other maintenance work completed.`;
+    }
     const queued = Object.values(status.queues).reduce((sum, count) => sum + count, 0);
     $("queued-total").textContent = queued;
     const maxQueue = Math.max(1, ...Object.values(status.queues));

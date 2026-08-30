@@ -295,6 +295,7 @@ class RetrievalEngine:
         ]
 
     async def _weather(self) -> list[EvidenceChunk]:
+        now = self.now()
         rows = await self.database.read(
             """
             SELECT cache_key,provider,payload,fetched_at FROM env_cache
@@ -302,7 +303,6 @@ class RetrievalEngine:
             ORDER BY fetched_at DESC LIMIT 2
             """
         )
-        now = self.now()
         chunks: list[EvidenceChunk] = []
         for row in rows:
             value = json.loads(row["payload"])
@@ -335,9 +335,10 @@ class RetrievalEngine:
         alerts = await self.database.read(
             """
             SELECT identifier,event,headline,area_desc,expires_at,updated_at FROM cap_alert
-            WHERE decision='accepted' AND review_state<>'dismissed' AND expires_at>datetime('now')
-            ORDER BY updated_at DESC LIMIT 3
-            """
+            WHERE decision='accepted' AND review_state<>'dismissed' AND expires_epoch>?
+            ORDER BY updated_at DESC,id LIMIT 3
+            """,
+            (now,),
         )
         chunks.extend(
             EvidenceChunk(

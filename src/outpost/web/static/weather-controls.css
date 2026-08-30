@@ -24,3 +24,13 @@
 .seismic-list>.empty{margin:0;padding:14px 16px;background:#091512}
 body:not(.environment-page) .forecast-panel,body:not(.environment-page) .astronomy-panel,body:not(.environment-page) .seismic-panel{display:none}
 body:not(.environment-page) .weather-panel:after{content:"Open Environment →";position:absolute;right:24px;bottom:10px;color:#76a596;font-size:.58rem}.weather-panel{position:relative}
+.maintenance-warning {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 15px 18px;
+  border: 1px solid;
+  border-radius: 10px;
+}
+.maintenance-warning p { font-size: .76rem; line-height: 1.45; }
+.maintenance-warning a { width: fit-content; font-size: .72rem; font-weight: 700; text-decoration: underline; }

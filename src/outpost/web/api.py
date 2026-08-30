@@ -3460,6 +3460,11 @@ def create_web_app(
                 "members": {key: int(value or 0) for key, value in member_counts.items()},
                 "traffic_24h": traffic_items,
                 "activity": activity_items,
+                "maintenance": (
+                    await maintenance.health()
+                    if maintenance is not None
+                    else {"status": "unavailable", "completed_at": None, "failures": {}}
+                ),
             }
 
         @app.get("/api/v1/wallboard/summary")

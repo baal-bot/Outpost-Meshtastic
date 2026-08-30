@@ -96,6 +96,11 @@ TABLE_POLICIES = (
         "incident", "watch", "retain", "Terminal incidents only; active incidents protected."
     ),
     TablePolicy("incident_update", "watch", "cascade", "Follows its incident."),
+    TablePolicy("incident_origin", "watch", "cascade", "Follows its retained incident."),
+    TablePolicy("incident_provenance", "watch", "cascade", "Follows its retained incident."),
+    TablePolicy(
+        "incident_match_decision", "watch", "cascade", "Follows either referenced incident."
+    ),
     TablePolicy("alert", "watch", "retain", "Only concluded or expired alerts age out."),
     TablePolicy("alert_ack", "watch", "cascade", "Follows its alert."),
     TablePolicy("alert_audience", "watch", "cascade", "Follows its alert."),
@@ -207,6 +212,7 @@ class MaintenanceResult:
     limited: bool
     batch_rows: int
     max_rows: int
+    failures: dict[str, str]
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -279,6 +285,55 @@ class MaintenanceService:
             "SELECT value FROM runtime_setting WHERE key='maintenance.last_date'"
         )
         return not rows or json.loads(rows[0]["value"]) != local.date().isoformat()
+
+    async def health(self) -> dict[str, Any]:
+        rows = await self.database.read(
+            "SELECT value FROM runtime_setting WHERE key='maintenance.last_health'"
+        )
+        if not rows:
+            return {"status": "never_run", "completed_at": None, "failures": {}}
+        try:
+            value = json.loads(rows[0]["value"])
+        except (TypeError, json.JSONDecodeError):
+            return {
+                "status": "degraded",
+                "completed_at": None,
+                "failures": {"health_record": "Stored maintenance health is invalid."},
+            }
+        return (
+            value
+            if isinstance(value, dict)
+            else {
+                "status": "degraded",
+                "completed_at": None,
+                "failures": {"health_record": "Stored maintenance health is invalid."},
+            }
+        )
+
+    async def audit_cleanup_foreign_keys(self) -> list[str]:
+        """Return cleanup-target foreign keys without an explicit deletion policy."""
+        targets = {rule.table for rule in self._rules(int(self.clock.now().timestamp()))}
+        tables = await self.database.read(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+        trigger_rows = await self.database.read(
+            "SELECT name FROM sqlite_master WHERE type='trigger'"
+        )
+        triggers = {str(row["name"]) for row in trigger_rows}
+        managed = {("incident", "merged_into_id", "incident"): "incident_detach_merged_children"}
+        missing: list[str] = []
+        for table_row in tables:
+            table = str(table_row["name"])
+            rows = await self.database.read(f'PRAGMA foreign_key_list("{table}")')  # noqa: S608
+            for row in rows:
+                parent = str(row["table"])
+                if parent not in targets or str(row["on_delete"]).upper() != "NO ACTION":
+                    continue
+                key = (table, str(row["from"]), parent)
+                required_trigger = managed.get(key)
+                if required_trigger is None or required_trigger not in triggers:
+                    missing.append(f"{table}.{row['from']} -> {parent}")
+        return sorted(missing)
 
     def _rules(self, now: int) -> tuple[CleanupRule, ...]:
         retention = self.config.store.retention
@@ -459,9 +514,12 @@ class MaintenanceService:
                 "Terminal incident history",
                 "watch",
                 "incident",
-                "status IN ('resolved','false_alarm','expired') "
-                "AND COALESCE(resolved_at,expires_at,updated_at)<?",
-                (incident_cutoff,),
+                "(merged_into_id IS NOT NULL AND updated_at<?) OR "
+                "(status IN ('resolved','false_alarm','expired') "
+                "AND COALESCE(resolved_at,expires_at,updated_at)<? "
+                "AND NOT EXISTS (SELECT 1 FROM incident child "
+                "WHERE child.merged_into_id=incident.id))",
+                (incident_cutoff, incident_cutoff),
             ),
             CleanupRule(
                 "cap_alerts",
@@ -658,6 +716,7 @@ class MaintenanceService:
             "disk_total_bytes": disk.total,
             "growth_since": growth_since,
             "last_maintenance": last_maintenance,
+            "maintenance_health": await self.health(),
             "next_maintenance_hour": self.config.store.maintenance_hour,
             "domains": list(domains.values()),
             "cleanup": preview.as_dict(),
@@ -714,14 +773,27 @@ class MaintenanceService:
             rules = self._rules(now)
             eligible = {item.key: item.rows for item in preview.rules}
             removed = {rule.key: 0 for rule in rules}
+            failures: dict[str, str] = {}
             batch_rows = self.config.store.maintenance_batch_rows
             max_rows = self.config.store.maintenance_max_rows
 
-            # Snapshot before cleanup so a bad local policy remains recoverable.
-            if self.config.store.backup.enabled:
-                await self.backups.create()
+            undefined_foreign_keys = await self.audit_cleanup_foreign_keys()
+            if undefined_foreign_keys:
+                failures["foreign_key_policy"] = "; ".join(undefined_foreign_keys)[:500]
 
-            active = list(rules)
+            # Snapshot before cleanup so a bad local policy remains recoverable.
+            backups_removed = self.backups.rotate(self.config.store.backup.keep)
+            backup_ready = not self.config.store.backup.enabled
+            if self.config.store.backup.enabled:
+                try:
+                    await self.backups.create()
+                    backup_ready = True
+                except Exception as error:
+                    failures["backup"] = f"{type(error).__name__}: {error}"[:500]
+                finally:
+                    backups_removed += self.backups.rotate(self.config.store.backup.keep)
+
+            active = list(rules) if backup_ready else []
             total_removed = 0
             while active and total_removed < max_rows:
                 next_round: list[CleanupRule] = []
@@ -730,19 +802,34 @@ class MaintenanceService:
                     if remaining <= 0:
                         next_round.append(rule)
                         continue
-                    count = await self._delete_batch(rule, min(batch_rows, remaining))
+                    try:
+                        count = await self._delete_batch(rule, min(batch_rows, remaining))
+                    except Exception as error:
+                        failures[rule.key] = f"{type(error).__name__}: {error}"[:500]
+                        await asyncio.sleep(0)
+                        continue
                     removed[rule.key] += count
                     total_removed += count
-                    if count == batch_rows:
+                    if count > 0:
                         next_round.append(rule)
                     await asyncio.sleep(0)
                 active = next_round
 
-            # FTS merge touches at most 16 pages and vacuum at most 200 free pages.
-            await self.database.write("INSERT INTO post_fts(post_fts,rank) VALUES('merge',16)")
-            await self.database.write("PRAGMA optimize")
-            await self.database.write("PRAGMA incremental_vacuum(200)")
-            backups_removed = self.backups.rotate(self.config.store.backup.keep)
+            # FTS merge touches at most 16 pages and vacuum at most 200 free pages. Keep each
+            # operation isolated so a local optimization cannot suppress the others.
+            for key, statement in (
+                ("fts_merge", "INSERT INTO post_fts(post_fts,rank) VALUES('merge',16)"),
+                ("optimize", "PRAGMA optimize"),
+                ("vacuum", "PRAGMA incremental_vacuum(200)"),
+            ):
+                try:
+                    await self.database.write(statement)
+                except Exception as error:
+                    failures[key] = f"{type(error).__name__}: {error}"[:500]
+            try:
+                backups_removed += self.backups.rotate(self.config.store.backup.keep)
+            except Exception as error:
+                failures["backup_rotation"] = f"{type(error).__name__}: {error}"[:500]
             local_date = (
                 self.clock.now().astimezone(ZoneInfo(self.config.node.timezone)).date().isoformat()
             )
@@ -759,10 +846,32 @@ class MaintenanceService:
                 removed=removed,
                 estimated_bytes=preview.estimated_bytes,
                 backups_removed=backups_removed,
-                limited=sum(eligible.values()) > total_removed,
+                limited=sum(eligible.values()) > total_removed or bool(failures),
                 batch_rows=batch_rows,
                 max_rows=max_rows,
+                failures=failures,
             )
+            health = {
+                "status": "degraded" if failures else "healthy",
+                "completed_at": now,
+                "failures": failures,
+            }
+            await self.database.write(
+                """
+                INSERT INTO runtime_setting(key,value,updated_at)
+                VALUES('maintenance.last_health',?,?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at
+                """,
+                (json.dumps(health, separators=(",", ":")), now),
+            )
+            for key, detail in failures.items():
+                await self.database.write(
+                    """
+                    INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)
+                    VALUES(?,?,'maintenance.rule_failed',?,?,?)
+                    """,
+                    (actor_kind, actor_ref, key, detail, now),
+                )
             await self.database.write(
                 """
                 INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at)

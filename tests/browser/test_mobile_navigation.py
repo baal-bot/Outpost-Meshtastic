@@ -2495,6 +2495,45 @@ def test_overview_reports_isolated_subsystem_failure(browser: object, dashboard_
         page.close()
 
 
+def test_overview_reports_degraded_retention_maintenance(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    page.route(
+        "**/api/v1/dashboard/overview",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "traffic_24h": {},
+                    "members": {"heard_24h": 0, "heard_7d": 0, "members_total": 0},
+                    "activity": [],
+                    "maintenance": {
+                        "status": "degraded",
+                        "completed_at": 2_000_000_000,
+                        "failures": {"incidents": "IntegrityError: foreign key constraint failed"},
+                    },
+                }
+            ),
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(dashboard_url, wait_until="networkidle")
+        wait_for_navigation(page)
+        warning = page.locator("#maintenance-warning")
+        assert warning.is_visible()
+        assert "Retention maintenance needs attention" in warning.text_content()
+        assert "operation needs review: incidents" in warning.text_content()
+        assert warning.get_by_role("link", name="Review storage health").is_visible()
+        health.assert_clean()
+    finally:
+        page.close()
+
+
 def test_capability_cards_reflect_disabled_modules(browser: object, dashboard_url: str) -> None:
     page = prepare_page(browser, 1280, dashboard_url, theme="dark")
     states = {

@@ -30,8 +30,14 @@ class BackupService:
 
     async def create(self) -> Path:
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+        self.directory.mkdir(parents=True, exist_ok=True)
         destination = self.directory / f"outpost-{stamp}.db"
-        await self.database.backup(destination)
+        partial = destination.with_suffix(".db.partial")
+        try:
+            await self.database.backup(partial)
+            partial.replace(destination)
+        finally:
+            partial.unlink(missing_ok=True)
         return destination
 
     def list(self) -> list[dict[str, object]]:

@@ -215,7 +215,7 @@ description = "Welfare state transitions, zero-recipient notification outcomes, 
 [[capabilities]]
 id = "environment"
 area = "Environmental information"
-present = "Weather observations/forecasts, CAP alerts, astronomy, earthquakes, caching, provenance, maps, and waypoints."
+present = "Weather observations/forecasts, offset-safe CAP alert expiry, astronomy, earthquakes, caching, provenance, maps, and waypoints."
 maturity = "automated_tested"
 introduced_commit = "72763e5"
 limitations = [
@@ -226,7 +226,7 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-27"
+date = "2026-08-29"
 [[capabilities.evidence]]
 kind = "acceptance"
 path = "docs/PHASE4-ACCEPTANCE.md"
@@ -235,6 +235,10 @@ description = "Provider, cache, CAP lifecycle, geometry, and provenance gates."
 kind = "automated"
 path = "tests/integration/test_weather.py"
 description = "Weather caching, expiry, observation/forecast labels, and safe failure."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_cap_alerts.py"
+description = "CAP lifecycle, instant-safe expiry across ISO offset forms, migration repair, and re-poll recovery."
 
 [[capabilities]]
 id = "same_receiver"
@@ -318,7 +322,7 @@ description = "Release evidence, verified update, rollback, compromise, and revo
 [[capabilities]]
 id = "retention_privacy"
 area = "Retention and privacy controls"
-present = "Bounded retention, exact-position expiry/deletion, message limits, maintenance batches, and auditable policy changes."
+present = "Bounded retention, foreign-key-safe incident deletion, isolated maintenance failures, atomic rotated snapshots, exact-position expiry/deletion, message limits, and auditable policy changes."
 maturity = "automated_tested"
 introduced_commit = "4d8af9c"
 limitations = ["Thirty-day write-volume and SD-card wear evidence remains open."]
@@ -326,11 +330,11 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-27"
+date = "2026-08-29"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_maintenance.py"
-description = "Bounded deletion, batching, and maintenance observability."
+description = "Bounded deletion, incident graph retention, per-rule isolation, snapshot limits, and dashboard observability."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_member_position_retention.py"

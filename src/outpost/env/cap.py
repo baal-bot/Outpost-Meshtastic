@@ -61,8 +61,8 @@ class CapAlertService:
         if properties.get("certainty") == "Unlikely":
             reasons.append("certainty is Unlikely")
         try:
-            expires = datetime.fromisoformat(str(properties["expires"]).replace("Z", "+00:00"))
-            if expires <= now:
+            expires = cls._instant(properties["expires"])
+            if expires <= now.astimezone(UTC):
                 reasons.append("alert is expired")
         except (KeyError, TypeError, ValueError):
             reasons.append("expiry is missing or invalid")
@@ -72,6 +72,18 @@ class CapAlertService:
         if geometry and point and not cls._geometry_contains(geometry, point[0], point[1]):
             reasons.append("alert polygon does not contain the Outpost")
         return ("withheld" if reasons else "accepted", reasons)
+
+    @staticmethod
+    def _timestamp(value: object) -> datetime:
+        """Parse a CAP timestamp, interpreting an omitted offset as UTC."""
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed
+
+    @classmethod
+    def _instant(cls, value: object) -> datetime:
+        return cls._timestamp(value).astimezone(UTC)
 
     @staticmethod
     def _normalized_point(lat: float, lon: float) -> tuple[float, float, str]:
@@ -141,9 +153,7 @@ class CapAlertService:
         active_items: list[dict[str, object]] = []
         for item in json.loads(row["result_json"]):
             try:
-                expiry = datetime.fromisoformat(
-                    str(item["expires_at"]).replace("Z", "+00:00")
-                ).timestamp()
+                expiry = CapAlertService._instant(item["expires_at"]).timestamp()
             except (KeyError, TypeError, ValueError):
                 continue
             if expiry > now:
@@ -329,6 +339,12 @@ class CapAlertService:
                 continue
             decision, reasons = self._gate(properties, now_dt, feature.get("geometry"), (lat, lon))
             msg_type = str(properties.get("messageType") or properties.get("msgType") or "Alert")
+            expires_at = str(properties.get("expires") or now_dt.isoformat())
+            try:
+                expires_epoch = int(self._instant(expires_at).timestamp())
+            except (TypeError, ValueError):
+                # Invalid CAP timestamps are withheld by _gate and expire from review immediately.
+                expires_epoch = now
             values = (
                 identifier,
                 properties.get("sender"),
@@ -343,7 +359,8 @@ class CapAlertService:
                 properties.get("urgency"),
                 properties.get("certainty"),
                 properties.get("effective"),
-                str(properties.get("expires") or now_dt.isoformat()),
+                expires_at,
+                expires_epoch,
                 self._references_text(properties.get("references")),
                 decision,
                 json.dumps(reasons, separators=(",", ":")),
@@ -354,15 +371,16 @@ class CapAlertService:
             await self.database.write(
                 """INSERT INTO cap_alert(identifier,sender,sent_at,msg_type,status,event,headline,
                    description,area_desc,severity,urgency,certainty,effective_at,expires_at,
-                   references_text,decision,gate_reasons,raw_json,first_seen_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   expires_epoch,references_text,decision,gate_reasons,raw_json,first_seen_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(identifier) DO UPDATE SET
                    sender=excluded.sender,sent_at=excluded.sent_at,
                    msg_type=excluded.msg_type,status=excluded.status,event=excluded.event,
                    headline=excluded.headline,description=excluded.description,
                    area_desc=excluded.area_desc,severity=excluded.severity,urgency=excluded.urgency,
                    certainty=excluded.certainty,effective_at=excluded.effective_at,
-                   expires_at=excluded.expires_at,references_text=excluded.references_text,
+                   expires_at=excluded.expires_at,expires_epoch=excluded.expires_epoch,
+                   references_text=excluded.references_text,
                    decision=excluded.decision,gate_reasons=excluded.gate_reasons,
                    raw_json=excluded.raw_json,updated_at=excluded.updated_at""",
                 values,
@@ -370,9 +388,14 @@ class CapAlertService:
             counts["seen"] += 1
             counts[decision] += 1
         await self.database.write(
+            "UPDATE cap_alert SET review_state='pending' "
+            "WHERE review_state='expired' AND expires_epoch>?",
+            (now,),
+        )
+        await self.database.write(
             "UPDATE cap_alert SET review_state='expired' "
-            "WHERE review_state='pending' AND expires_at<=?",
-            (now_dt.isoformat(),),
+            "WHERE review_state='pending' AND expires_epoch<=?",
+            (now,),
         )
         self.last_poll_at, self.last_error = now, None
         return counts
@@ -426,7 +449,7 @@ class CapAlertService:
                 (value.id, cap_id),
             )
             return value.json()
-        expiry = datetime.fromisoformat(str(item["expires_at"]).replace("Z", "+00:00"))
+        expiry = self._timestamp(item["expires_at"])
         headline = (
             f"NWS {item['event']} · {item['area_desc'] or 'local area'} · until {expiry:%H:%M}"
         )

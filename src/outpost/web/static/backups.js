@@ -161,9 +161,13 @@ async function loadStorage() {
   renderDomains(body.domains || [], body.growth_since);
   renderCleanup(body.cleanup || {});
   renderPolicies(body.policies || []);
-  $("maintenance-status").textContent = body.last_maintenance
-    ? `Last scheduled maintenance: ${body.last_maintenance}. Audit evidence is preserved.`
-    : "Maintenance has not completed on this installation yet. Audit evidence is preserved.";
+  const failures = body.maintenance_health?.failures || {};
+  const failedRules = Object.keys(failures).map((key) => key.replaceAll("_", " "));
+  $("maintenance-status").textContent = failedRules.length
+    ? `Maintenance degraded: ${failedRules.join(", ")} needs review. Other rules still completed; audit evidence is preserved.`
+    : body.last_maintenance
+      ? `Last scheduled maintenance: ${body.last_maintenance}. Audit evidence is preserved.`
+      : "Maintenance has not completed on this installation yet. Audit evidence is preserved.";
 }
 
 async function loadBackups() {
@@ -274,7 +278,10 @@ $("run-maintenance").addEventListener("click", async () => {
     });
   } else {
     const removed = Object.values(body.result.removed || {}).reduce((sum, value) => sum + Number(value), 0);
-    $("maintenance-status").textContent = `${removed.toLocaleString()} records removed; the pre-cleanup snapshot is available below.`;
+    const failedRules = Object.keys(body.result.failures || {}).map((key) => key.replaceAll("_", " "));
+    $("maintenance-status").textContent = failedRules.length
+      ? `${removed.toLocaleString()} records removed; ${failedRules.join(", ")} needs review. Other rules completed.`
+      : `${removed.toLocaleString()} records removed; the pre-cleanup snapshot is available below.`;
   }
   button.textContent = "Run maintenance";
   await Promise.allSettled([loadStorage(), loadBackups()]);

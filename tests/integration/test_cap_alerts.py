@@ -1,7 +1,11 @@
+import sqlite3
 import urllib.error
+from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
+from outpost.ai.retrieval import RetrievalEngine
 from outpost.clock import VirtualClock
 from outpost.config import AirtimeConfig, Config, EnvConfig
 from outpost.env import CapAlertService
@@ -60,6 +64,115 @@ async def test_cap_gate_dedupe_and_review_inbox(tmp_path, monkeypatch) -> None:
         == "dismissed"
     )
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_cap_expiry_uses_instants_for_every_supported_iso_representation(
+    tmp_path, monkeypatch
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    representations = {
+        "negative": "2025-12-31T20:30:00-04:00",
+        "positive": "2026-01-01T05:30:00+05:00",
+        "zulu": "2026-01-01T00:30:00Z",
+        "naive": "2026-01-01T00:30:00",
+    }
+    payload = {"features": []}
+    for name, expiry in representations.items():
+        item = feature(f"cap-{name}")
+        item["properties"]["expires"] = expiry
+        payload["features"].append(item)
+
+    async def request(*args, **kwargs):
+        return payload
+
+    monkeypatch.setattr("outpost.env.cap._request_json", request)
+    service = CapAlertService(database, clock, EnvConfig())
+
+    await service.poll(40.4406, -79.9959)
+    rows = await database.read(
+        "SELECT identifier,expires_epoch,review_state FROM cap_alert ORDER BY identifier"
+    )
+    assert {int(row["expires_epoch"]) for row in rows} == {1_767_227_400}
+    assert {row["review_state"] for row in rows} == {"pending"}
+    evidence = await RetrievalEngine(database, now=lambda: int(clock.now().timestamp()))._weather()
+    assert {item.ref for item in evidence} == {
+        "wx:alert@cap-negative",
+        "wx:alert@cap-positive",
+        "wx:alert@cap-zulu",
+    }
+
+    clock.advance(1_799)
+    await service.poll(40.4406, -79.9959)
+    assert {item["review_state"] for item in await service.list()} == {"pending"}
+
+    clock.advance(1)
+    await service.poll(40.4406, -79.9959)
+    expired = await service.list(include_expired=True)
+    assert {item["review_state"] for item in expired} == {"expired"}
+    assert await service.list() == []
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_cap_repoll_revives_an_alert_whose_expiry_was_extended(tmp_path, monkeypatch) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    item = feature("cap-extended")
+    item["properties"]["expires"] = "2025-12-31T23:59:00Z"
+    payload = {"features": [item]}
+
+    async def request(*args, **kwargs):
+        return payload
+
+    monkeypatch.setattr("outpost.env.cap._request_json", request)
+    service = CapAlertService(database, clock, EnvConfig())
+
+    await service.poll(40.4406, -79.9959)
+    assert (await service.list(include_expired=True))[0]["review_state"] == "expired"
+    item["properties"]["expires"] = "2026-01-01T00:30:00-04:00"
+    await service.poll(40.4406, -79.9959)
+    revived = (await service.list())[0]
+    assert revived["review_state"] == "pending"
+    assert revived["expires_epoch"] == 1_767_241_800
+    await database.close()
+
+
+def test_cap_expiry_migration_backfills_epochs_and_repairs_live_rows(tmp_path) -> None:
+    path = tmp_path / "legacy.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE cap_alert (
+          id INTEGER PRIMARY KEY,
+          expires_at TEXT NOT NULL,
+          review_state TEXT NOT NULL,
+          decision TEXT NOT NULL
+        );
+        CREATE INDEX idx_cap_review ON cap_alert(review_state,decision,expires_at);
+        """
+    )
+    live = (datetime.now(UTC) + timedelta(hours=1)).astimezone(timezone(timedelta(hours=-4)))
+    expired = datetime.now(UTC) - timedelta(hours=1)
+    connection.executemany(
+        "INSERT INTO cap_alert(expires_at,review_state,decision) VALUES(?, 'expired','accepted')",
+        ((live.isoformat(),), (expired.isoformat().replace("+00:00", "Z"),)),
+    )
+    migration = (
+        Path(__file__).parents[2] / "src/outpost/store/migrations/0156_cap_expiry_epoch.sql"
+    ).read_text()
+
+    connection.executescript(migration)
+    rows = connection.execute(
+        "SELECT expires_epoch,review_state FROM cap_alert ORDER BY id"
+    ).fetchall()
+
+    assert rows[0][0] == int(live.timestamp()) and rows[0][1] == "pending"
+    assert rows[1][0] == int(expired.timestamp()) and rows[1][1] == "expired"
+    connection.close()
 
 
 def test_cap_gate_rejects_expired_test_and_unlikely() -> None:
