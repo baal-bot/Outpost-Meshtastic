@@ -251,6 +251,44 @@ async def test_acknowledgement_is_correlated_and_not_resent_after_restart(tmp_pa
     await restarted_db.close()
 
 
+@pytest.mark.asyncio
+async def test_ack_timeout_is_terminal_in_message_history_live_and_after_restart(tmp_path) -> None:
+    path = tmp_path / "outpost.db"
+    clock = VirtualClock()
+    database, governor, radio = await durable_governor(path, clock)
+    await radio.connect()
+    first_id = await governor.admit(OutboundItem("first", "!00000001", 0, TrafficClass.REPLY))
+    assert await governor.tick() is not None
+    clock.advance(301)
+    assert governor.outbox is not None
+    await governor.outbox.expire_ack_waits(clock.now().timestamp())
+    first = (
+        await database.read(
+            "SELECT w.state,w.outcome,m.outcome log_outcome,m.drop_reason "
+            "FROM outbound_work w JOIN message_log m ON m.outbox_id=w.id WHERE w.id=?",
+            (first_id,),
+        )
+    )[0]
+    assert tuple(first) == ("expired", "timeout", "timeout", "ack timeout")
+
+    second_id = await governor.admit(OutboundItem("second", "!00000002", 0, TrafficClass.REPLY))
+    assert await governor.tick() is not None
+    await database.close()
+    clock.advance(301)
+
+    restarted_db, restarted, _ = await durable_governor(path, clock)
+    assert await restarted.recover() == 0
+    second = (
+        await restarted_db.read(
+            "SELECT w.state,w.outcome,m.outcome,m.drop_reason "
+            "FROM outbound_work w JOIN message_log m ON m.outbox_id=w.id WHERE w.id=?",
+            (second_id,),
+        )
+    )[0]
+    assert tuple(second) == ("expired", "timeout", "timeout", "ack timeout")
+    await restarted_db.close()
+
+
 class FailingRadio(SimulatedRadioLink):
     async def _send_text(
         self, text: str, *, dest: str, channel: int, want_ack: bool, priority: int
@@ -273,6 +311,12 @@ async def test_failed_work_is_visible_and_operator_cancellable(tmp_path) -> None
     assert visible[0]["id"] == item_id
     assert visible[0]["state"] == "failed"
     assert visible[0]["attempts"] == 3
+    failed_log = (
+        await database.read(
+            "SELECT outcome,drop_reason FROM message_log WHERE outbox_id=?", (item_id,)
+        )
+    )[0]
+    assert tuple(failed_log) == ("failed", "send failed: ConnectionError")
     assert await governor.cancel_work(item_id or 0) is True
     assert (await database.read("SELECT state FROM outbound_work WHERE id=?", (item_id,)))[0][
         "state"

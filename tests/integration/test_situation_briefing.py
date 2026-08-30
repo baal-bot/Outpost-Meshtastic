@@ -189,6 +189,7 @@ async def test_snapshot_is_ordered_redacted_role_filtered_and_ai_cached(tmp_path
             "welfare",
             "weather",
             "community",
+            "delivery",
             "network",
         ]
         assert "40.4406" not in rendered and "-79.9959" not in rendered
@@ -409,7 +410,7 @@ async def test_web_and_mesh_sitrep_work_without_ai(tmp_path) -> None:
         response = client.get("/api/v1/sitrep?ai=true")
         assert response.status_code == 200
         assert response.json()["ai"]["outcome"] == "disabled"
-        assert response.json()["items"][0]["title"] == "Radio down"
+        assert any(item["title"] == "Radio down" for item in response.json()["items"])
         assert "Deterministic facts remain authoritative" in client.get("/sitrep.html").text
         assert "Sitrep" in client.get("/nav.js").text
     finally:
@@ -442,7 +443,15 @@ async def test_web_and_mesh_sitrep_work_without_ai(tmp_path) -> None:
         home = render_response(home_response)
         assert home.startswith("OUTPOST / SITREP")
         assert all(
-            label in home for label in ("Weather", "Incidents", "Welfare", "Community", "Network")
+            label in home
+            for label in (
+                "Weather",
+                "Incidents",
+                "Welfare",
+                "Community",
+                "Delivery",
+                "Network",
+            )
         )
         assert home_response.max_parts == 1
         assert chunk_text(home) == [home]

@@ -19,13 +19,22 @@ NARRATION_NAMESPACE = "situation_narration"
 NARRATION_FAILURE_TTL = 5 * 60
 NARRATION_SUCCESS_TTL = 24 * 60 * 60
 NARRATION_CACHE_MAX = 64
-SECTION_ORDER = ("alerts", "incidents", "welfare", "weather", "community", "network")
+SECTION_ORDER = (
+    "alerts",
+    "incidents",
+    "welfare",
+    "weather",
+    "community",
+    "delivery",
+    "network",
+)
 SECTION_LIMITS = {
     "alerts": 6,
     "incidents": 6,
     "welfare": 4,
     "weather": 5,
     "community": 5,
+    "delivery": 12,
     "network": 4,
 }
 STALE_AFTER = {
@@ -34,8 +43,17 @@ STALE_AFTER = {
     "welfare": 6 * 60 * 60,
     "weather": 6 * 60 * 60,
     "community": 24 * 60 * 60,
+    "delivery": 24 * 60 * 60,
     "network": 5 * 60,
 }
+DAY = 86_400
+DELIVERY_BASELINE_DAYS = 14
+DELIVERY_CURRENT_MIN = 5
+DELIVERY_BASELINE_MIN = 20
+DELIVERY_RATE_DROP_POINTS = 10.0
+SNR_CURRENT_MIN = 3
+SNR_BASELINE_MIN = 6
+SNR_DROP_DB = 6.0
 COORDINATE_PAIR = re.compile(
     r"(?<![\d.])"
     r"[+-]?(?:90(?:\.0+)?|(?:[0-8]?\d)(?:\.\d+)?)"
@@ -354,6 +372,9 @@ class SituationBriefingService:
             section_items, section_sources = await self._community(capability, now)
             items.extend(section_items)
             sources.extend(section_sources)
+        section_items, section_sources = await self._delivery(capability, now)
+        items.extend(section_items)
+        sources.extend(section_sources)
         section_items, section_sources = await self._network(now, enabled.get("fed", True))
         items.extend(section_items)
         sources.extend(section_sources)
@@ -712,6 +733,337 @@ class SituationBriefingService:
             if len(items) >= SECTION_LIMITS["community"]:
                 break
         return items, sources
+
+    async def _delivery(
+        self, capability: BriefingCapability, now: int
+    ) -> tuple[list[BriefingItem], list[BriefingSource]]:
+        """Compare confirmed delivery and receive quality with a preceding 14-day baseline."""
+        current_start = now - DAY
+        baseline_start = current_start - DELIVERY_BASELINE_DAYS * DAY
+        channel_rows = await self.database.read(
+            """
+            SELECT channel,
+              SUM(CASE WHEN created_at>=? THEN 1 ELSE 0 END) current_total,
+              SUM(CASE WHEN created_at>=? AND outcome='acked' THEN 1 ELSE 0 END) current_success,
+              SUM(CASE WHEN created_at<? THEN 1 ELSE 0 END) baseline_total,
+              SUM(CASE WHEN created_at<? AND outcome='acked' THEN 1 ELSE 0 END) baseline_success,
+              MAX(created_at) newest
+            FROM message_log INDEXED BY idx_msglog_replay_range
+            WHERE direction='out' AND channel BETWEEN 0 AND 7
+              AND created_at>=? AND created_at<?
+              AND outcome IN (
+                'acked','naked','nak','timeout','failed','dropped','rejected'
+              )
+            GROUP BY channel ORDER BY channel
+            """,
+            (
+                current_start,
+                current_start,
+                current_start,
+                current_start,
+                baseline_start,
+                now,
+            ),
+        )
+        reason_rows = await self.database.read(
+            """
+            WITH counts AS (
+              SELECT channel,COALESCE(NULLIF(drop_reason,''),outcome) reason,COUNT(*) count
+              FROM message_log INDEXED BY idx_msglog_replay_range
+              WHERE direction='out' AND channel BETWEEN 0 AND 7
+                AND created_at>=? AND created_at<?
+                AND outcome IN ('naked','nak','timeout','failed','dropped','rejected')
+              GROUP BY channel,reason
+            ), ranked AS (
+              SELECT channel,reason,count,
+                ROW_NUMBER() OVER (PARTITION BY channel ORDER BY count DESC,reason) rank
+              FROM counts
+            )
+            SELECT channel,reason,count FROM ranked WHERE rank=1 ORDER BY channel
+            """,
+            (current_start, now),
+        )
+        latency_rows = await self.database.read(
+            """
+            WITH ranked AS (
+              SELECT channel,latency_ms,
+                ROW_NUMBER() OVER (PARTITION BY channel ORDER BY latency_ms) position,
+                COUNT(*) OVER (PARTITION BY channel) sample_count
+              FROM message_log INDEXED BY idx_msglog_replay_range
+              WHERE direction='out' AND channel BETWEEN 0 AND 7 AND outcome='acked'
+                AND latency_ms IS NOT NULL AND created_at>=? AND created_at<?
+            )
+            SELECT channel,CAST(ROUND(AVG(latency_ms)) AS INTEGER) median_ms,
+                   MAX(sample_count) samples
+            FROM ranked
+            WHERE position IN ((sample_count+1)/2,(sample_count+2)/2)
+            GROUP BY channel ORDER BY channel
+            """,
+            (current_start, now),
+        )
+        snr_rows = await self.database.read(
+            """
+            SELECT m.id,m.handle,m.mesh_id,
+              SUM(CASE WHEN ml.created_at>=? THEN 1 ELSE 0 END) current_samples,
+              AVG(CASE WHEN ml.created_at>=? THEN ml.rx_snr END) current_snr,
+              SUM(CASE WHEN ml.created_at<? THEN 1 ELSE 0 END) baseline_samples,
+              AVG(CASE WHEN ml.created_at<? THEN ml.rx_snr END) baseline_snr,
+              AVG(CASE WHEN ml.created_at>=? THEN ml.rx_snr END)
+                - AVG(CASE WHEN ml.created_at<? THEN ml.rx_snr END) delta_snr,
+              MAX(ml.created_at) newest
+            FROM message_log AS ml INDEXED BY idx_msglog_replay_range
+            JOIN member m ON m.mesh_id=ml.peer_mesh_id
+            WHERE ml.direction='in' AND ml.transport='radio' AND ml.rx_snr IS NOT NULL
+              AND ml.created_at>=? AND ml.created_at<?
+              AND m.directory_state='active'
+              AND m.trust IN ('member','trusted','responder','operator')
+            GROUP BY m.id
+            ORDER BY (current_samples>=? AND baseline_samples>=?) DESC,
+                     delta_snr ASC,m.id
+            LIMIT 256
+            """,
+            (
+                current_start,
+                current_start,
+                current_start,
+                current_start,
+                current_start,
+                current_start,
+                baseline_start,
+                now,
+                SNR_CURRENT_MIN,
+                SNR_BASELINE_MIN,
+            ),
+        )
+        reasons = {int(row["channel"]): str(row["reason"]) for row in reason_rows}
+        latencies = {int(row["channel"]): int(row["median_ms"]) for row in latency_rows}
+        items: list[BriefingItem] = []
+        sources: list[BriefingSource] = []
+
+        if not channel_rows:
+            source_id = "message-log:delivery-history"
+            items.append(
+                BriefingItem(
+                    "delivery:history",
+                    "D?",
+                    "delivery",
+                    "info",
+                    "Confirmed delivery trend needs history",
+                    f"Need {DELIVERY_CURRENT_MIN} terminal outcomes in 24h and "
+                    f"{DELIVERY_BASELINE_MIN} in the preceding {DELIVERY_BASELINE_DAYS}d",
+                    "insufficient",
+                    (source_id,),
+                    "/radio.html",
+                    uncertainty="insufficient history",
+                )
+            )
+            sources.append(
+                BriefingSource(
+                    source_id,
+                    "Bounded terminal message history",
+                    None,
+                    STALE_AFTER["delivery"],
+                    "/radio.html",
+                )
+            )
+        for row in channel_rows:
+            channel = int(row["channel"])
+            current_total = int(row["current_total"] or 0)
+            current_success = int(row["current_success"] or 0)
+            baseline_total = int(row["baseline_total"] or 0)
+            baseline_success = int(row["baseline_success"] or 0)
+            observed_at = int(row["newest"])
+            source_id = f"message-log:channel:{channel}:delivery"
+            enough = (
+                current_total >= DELIVERY_CURRENT_MIN and baseline_total >= DELIVERY_BASELINE_MIN
+            )
+            if enough:
+                current_rate = current_success * 100.0 / current_total
+                baseline_rate = baseline_success * 100.0 / baseline_total
+                delta = current_rate - baseline_rate
+                degrading = delta <= -DELIVERY_RATE_DROP_POINTS
+                improving = delta >= DELIVERY_RATE_DROP_POINTS
+                median = latencies.get(channel)
+                latency = (
+                    f"median ACK {median / 1_000:.1f}s"
+                    if median is not None
+                    else "median ACK awaiting samples"
+                )
+                failure = reasons.get(channel)
+                detail = (
+                    f"24h {current_success}/{current_total} ({current_rate:.0f}%) · prior "
+                    f"{DELIVERY_BASELINE_DAYS}d {baseline_success}/{baseline_total} "
+                    f"({baseline_rate:.0f}%) · trend {delta:+.0f} points · {latency}"
+                )
+                if failure is not None:
+                    detail += f" · leading failure {_safe_text(failure, 40)}"
+                items.append(
+                    BriefingItem(
+                        f"delivery:channel:{channel}",
+                        f"D{channel}",
+                        "delivery",
+                        "caution" if degrading else "info",
+                        f"Channel {channel} confirmed delivery {current_rate:.0f}%",
+                        detail,
+                        "degrading" if degrading else "improving" if improving else "steady",
+                        (source_id,),
+                        "/radio.html",
+                        hazard=degrading,
+                    )
+                )
+            else:
+                detail = (
+                    f"24h {current_total} terminal outcomes (need {DELIVERY_CURRENT_MIN}) · "
+                    f"prior {DELIVERY_BASELINE_DAYS}d {baseline_total} "
+                    f"(need {DELIVERY_BASELINE_MIN})"
+                )
+                failure = reasons.get(channel)
+                if failure is not None:
+                    detail += f" · leading failure {_safe_text(failure, 40)}"
+                items.append(
+                    BriefingItem(
+                        f"delivery:channel:{channel}",
+                        f"D{channel}",
+                        "delivery",
+                        "info",
+                        f"Channel {channel} delivery trend needs history",
+                        detail,
+                        "insufficient",
+                        (source_id,),
+                        "/radio.html",
+                        uncertainty="insufficient history",
+                    )
+                )
+            sources.append(
+                BriefingSource(
+                    source_id,
+                    f"Terminal message history · channel {channel}",
+                    observed_at,
+                    STALE_AFTER["delivery"],
+                    "/radio.html",
+                    stale=now - observed_at > STALE_AFTER["delivery"],
+                )
+            )
+
+        qualified_snr = [
+            row
+            for row in snr_rows
+            if int(row["current_samples"] or 0) >= SNR_CURRENT_MIN
+            and int(row["baseline_samples"] or 0) >= SNR_BASELINE_MIN
+            and row["current_snr"] is not None
+            and row["baseline_snr"] is not None
+        ]
+        remaining = max(0, SECTION_LIMITS["delivery"] - len(items))
+        detailed = capability in {BriefingCapability.RESPONDER, BriefingCapability.OPERATOR}
+        if qualified_snr and remaining:
+            if detailed:
+                for row in qualified_snr[:remaining]:
+                    member_id = int(row["id"])
+                    label = str(row["handle"] or row["mesh_id"])
+                    current_snr = float(row["current_snr"])
+                    baseline_snr = float(row["baseline_snr"])
+                    delta = current_snr - baseline_snr
+                    degrading = delta <= -SNR_DROP_DB
+                    improving = delta >= SNR_DROP_DB
+                    observed_at = int(row["newest"])
+                    source_id = f"message-log:member:{member_id}:snr"
+                    items.append(
+                        BriefingItem(
+                            f"delivery:member:{member_id}",
+                            f"R{member_id}",
+                            "delivery",
+                            "caution" if degrading else "info",
+                            f"Receive path @{_safe_text(label, 20)} {current_snr:+.1f} dB",
+                            f"24h {int(row['current_samples'])} samples · prior "
+                            f"{DELIVERY_BASELINE_DAYS}d {int(row['baseline_samples'])} · "
+                            f"trend {delta:+.1f} dB",
+                            "degrading" if degrading else "improving" if improving else "steady",
+                            (source_id,),
+                            "/operator.html",
+                            hazard=degrading,
+                        )
+                    )
+                    sources.append(
+                        BriefingSource(
+                            source_id,
+                            f"Radio receive history · @{_safe_text(label, 20)}",
+                            observed_at,
+                            STALE_AFTER["delivery"],
+                            "/operator.html",
+                            stale=now - observed_at > STALE_AFTER["delivery"],
+                        )
+                    )
+            else:
+                deltas = [
+                    float(row["current_snr"]) - float(row["baseline_snr"]) for row in qualified_snr
+                ]
+                degrading_count = sum(delta <= -SNR_DROP_DB for delta in deltas)
+                worst = min(deltas)
+                observed_at = max(int(row["newest"]) for row in qualified_snr)
+                source_id = "message-log:member-snr"
+                items.append(
+                    BriefingItem(
+                        "delivery:member-snr",
+                        "DR",
+                        "delivery",
+                        "caution" if degrading_count else "info",
+                        "Member receive paths declining"
+                        if degrading_count
+                        else "Member receive paths stable",
+                        f"{len(qualified_snr)} enrolled path(s) compared · "
+                        f"worst trend {worst:+.1f} dB",
+                        "degrading" if degrading_count else "steady",
+                        (source_id,),
+                        "/radio.html",
+                        hazard=bool(degrading_count),
+                    )
+                )
+                sources.append(
+                    BriefingSource(
+                        source_id,
+                        "De-identified enrolled-radio receive trends",
+                        observed_at,
+                        STALE_AFTER["delivery"],
+                        "/radio.html",
+                        stale=now - observed_at > STALE_AFTER["delivery"],
+                    )
+                )
+        elif remaining:
+            best_current = max((int(row["current_samples"] or 0) for row in snr_rows), default=0)
+            best_baseline = max((int(row["baseline_samples"] or 0) for row in snr_rows), default=0)
+            observed_values = [int(row["newest"]) for row in snr_rows if row["newest"] is not None]
+            snr_observed_at: int | None = max(observed_values) if observed_values else None
+            source_id = "message-log:member-snr"
+            items.append(
+                BriefingItem(
+                    "delivery:member-snr",
+                    "DR",
+                    "delivery",
+                    "info",
+                    "Receive-quality trend needs history",
+                    f"No enrolled radio has {SNR_CURRENT_MIN} recent and "
+                    f"{SNR_BASELINE_MIN} baseline SNR samples · "
+                    f"best {best_current}/{best_baseline}",
+                    "insufficient",
+                    (source_id,),
+                    "/radio.html",
+                    uncertainty="insufficient history",
+                )
+            )
+            sources.append(
+                BriefingSource(
+                    source_id,
+                    "Enrolled-radio receive history",
+                    snr_observed_at,
+                    STALE_AFTER["delivery"],
+                    "/radio.html",
+                    stale=bool(
+                        snr_observed_at is not None
+                        and now - snr_observed_at > STALE_AFTER["delivery"]
+                    ),
+                )
+            )
+        return items[: SECTION_LIMITS["delivery"]], sources
 
     async def _network(
         self, now: int, federation_enabled: bool

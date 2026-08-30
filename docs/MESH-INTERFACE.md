@@ -74,10 +74,13 @@ Open the local situation brief:
 0  -> Home
 ```
 
-The SITREP home screen is one deterministic packet. Weather, incident, welfare, community, and
-network details are requested only when needed and use stable, bounded pages. Exact member/check-in
-coordinates, private mail, operator notes, and boards above the member's trust are removed before
-briefing changes or optional AI phrasing are computed.
+The SITREP home screen is one deterministic packet. Weather, incident, welfare, community,
+delivery-health, and network details are requested only when needed and use stable, bounded pages.
+Delivery health compares confirmed channel outcomes over 24 hours with the preceding 14 days;
+responder/operator views can identify enrolled receive paths whose radio SNR is degrading, while
+member views receive only a de-identified aggregate. Exact member/check-in coordinates, private
+mail, operator notes, and boards above the member's trust are removed before briefing changes or
+optional AI phrasing are computed.
 
 Open the mesh operations action center (responder or operator):
 

@@ -19,7 +19,9 @@ endpoint boundary.
 - **Watch:** incident map/list, monitoring state, alerts, acknowledgements, welfare events, and
   human-reviewed cross-Outpost incident reconciliation with origin/provenance inspection.
 - **Sitrep:** deterministic, role-filtered key facts; source IDs and ages; changes since the prior
-  snapshot; supporting-record links; and optional cached AI phrasing of the authorized facts.
+  snapshot; supporting-record links; 24-hour versus prior-14-day confirmed delivery and enrolled
+  receive-quality trends; and optional cached AI phrasing of the authorized facts. Delivery
+  comparisons remain explicitly insufficient until both time windows have enough terminal data.
 - **Environment:** separate environmental map, weather/forecast, official alerts, earthquakes,
   astronomy, editable waypoints, and the reviewed RTL-SDR/SAME inbox and receiver health.
 - **Radio:** connection state, firmware/node details, telemetry, durable outbound state and

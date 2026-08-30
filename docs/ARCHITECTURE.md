@@ -51,6 +51,10 @@ recovers interrupted `sending` work, expires stale items, retains acknowledgemen
 loads safety traffic ahead of ordinary traffic. Each completed radio attempt and its `message_log`
 row commit together through a unique outbox ID; acknowledgement routing updates both records in one
 transaction. A transport exception retries with bounded backoff and then remains operator-visible.
+Acknowledgement resolution records its latency, and an expired acknowledgement wait becomes a
+terminal timeout in both durable work and message history, including when startup performs the
+expiry. The situation briefing uses bounded 24-hour and preceding-14-day message-history windows to
+surface confirmed-delivery and enrolled-radio receive-quality degradation.
 
 Online backup supports validation and a controlled recovery coordinator: maintenance gating,
 in-flight request drain, transport/background-task quiescence, a verified pre-restore safety copy,

@@ -1,5 +1,5 @@
 import {byId as $, safeLocalHref as safeHref} from "/ui-primitives.js";
-const labels={alerts:"Authoritative alerts",incidents:"Urgent incidents",welfare:"Welfare",weather:"Forecast",community:"Community",network:"Network"};
+const labels={alerts:"Authoritative alerts",incidents:"Urgent incidents",welfare:"Welfare",weather:"Forecast",community:"Community",delivery:"Delivery health",network:"Network"};
 
 function element(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
 function timestamp(value){return new Date(Number(value)*1000).toLocaleString();}

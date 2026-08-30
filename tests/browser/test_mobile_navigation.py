@@ -873,7 +873,24 @@ def route_visual_content_api(page: object) -> None:
             "generated_at": 2_000_000_000,
             "capability": "operator",
             "digest": "browser-test-briefing",
-            "items": [],
+            "items": [
+                {
+                    "id": "delivery:channel:2",
+                    "ref": "D2",
+                    "section": "delivery",
+                    "severity": "caution",
+                    "title": "Channel 2 confirmed delivery 78%",
+                    "detail": (
+                        "24h 18/23 (78%) · prior 14d 99/100 (99%) · "
+                        "trend -21 points · median ACK 4.2s · leading failure ack timeout"
+                    ),
+                    "state": "degrading",
+                    "source_ids": ["message-log:channel:2:delivery"],
+                    "href": "/radio.html",
+                    "hazard": True,
+                    "uncertainty": None,
+                }
+            ],
             "changes": [],
             "change_window": {
                 "kind": "viewer",
@@ -882,8 +899,46 @@ def route_visual_content_api(page: object) -> None:
                 "complete": True,
                 "label": "Since your last look at 2033-05-18 02:33 UTC",
             },
-            "sources": [],
-            "sections": [],
+            "sources": [
+                {
+                    "id": "message-log:channel:2:delivery",
+                    "label": "Terminal message history · channel 2",
+                    "observed_at": 1_999_999_700,
+                    "stale_after_seconds": 86_400,
+                    "href": "/radio.html",
+                    "stale": False,
+                    "conflict": False,
+                    "age_seconds": 300,
+                    "age": "5m",
+                }
+            ],
+            "sections": [
+                {
+                    "id": "delivery",
+                    "label": "Delivery",
+                    "items": [
+                        {
+                            "id": "delivery:channel:2",
+                            "ref": "D2",
+                            "section": "delivery",
+                            "severity": "caution",
+                            "title": "Channel 2 confirmed delivery 78%",
+                            "detail": (
+                                "24h 18/23 (78%) · prior 14d 99/100 (99%) · "
+                                "trend -21 points · median ACK 4.2s · "
+                                "leading failure ack timeout"
+                            ),
+                            "state": "degrading",
+                            "source_ids": ["message-log:channel:2:delivery"],
+                            "href": "/radio.html",
+                            "hazard": True,
+                            "uncertainty": None,
+                        }
+                    ],
+                    "max_items": 12,
+                    "stale_after_seconds": 86_400,
+                }
+            ],
             "ai": {"requested": False, "cached": False, "outcome": "not_requested"},
         },
     )

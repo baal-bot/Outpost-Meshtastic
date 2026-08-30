@@ -116,9 +116,10 @@ class MessageLogRepo:
         return [MessageLogEntry(**dict(row)) for row in rows]
 
     async def resolve_ack(self, packet_id: int, outcome: str) -> bool:
+        now = int(self.clock.now().timestamp())
         async with self.database.transaction() as transaction:
             rows = await transaction.read(
-                "SELECT m.id,m.outbox_id FROM message_log m "
+                "SELECT m.id,m.outbox_id,m.created_at FROM message_log m "
                 "LEFT JOIN outbound_work w ON w.id=m.outbox_id "
                 "WHERE m.direction='out' AND m.packet_id=? "
                 "ORDER BY CASE WHEN w.state='awaiting_ack' THEN 0 ELSE 1 END,m.id DESC LIMIT 1",
@@ -126,9 +127,10 @@ class MessageLogRepo:
             )
             if not rows:
                 return False
+            latency_ms = max(0, now - int(rows[0]["created_at"])) * 1_000
             await transaction.write(
-                "UPDATE message_log SET outcome=? WHERE id=?",
-                (outcome, rows[0]["id"]),
+                "UPDATE message_log SET outcome=?,latency_ms=COALESCE(latency_ms,?) WHERE id=?",
+                (outcome, latency_ms, rows[0]["id"]),
             )
             if rows[0]["outbox_id"] is not None:
                 await transaction.write(

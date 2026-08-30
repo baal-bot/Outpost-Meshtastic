@@ -80,7 +80,14 @@ def specs(service: SituationBriefingService) -> list[CommandSpec]:
     async def home(ctx: CommandContext) -> Response:
         snapshot = await current(ctx)
         _clear_snapshots(ctx)
-        for section in ("weather", "incidents", "welfare", "community", "network"):
+        for section in (
+            "weather",
+            "incidents",
+            "welfare",
+            "community",
+            "delivery",
+            "network",
+        ):
             ctx.session.tui_snapshots[f"sitrep:{section}"] = _stored_items(snapshot, section)
         ctx.session.tui_snapshot_expires_at = service.clock.monotonic() + SNAPSHOT_SECONDS
         counts = {
@@ -94,8 +101,8 @@ def specs(service: SituationBriefingService) -> list[CommandSpec]:
             [item for item in snapshot["items"] if item["section"] == "welfare" and item["hazard"]]
         )
         summary = (
-            f"{counts['alerts']} alerts · {counts['incidents']} urgent inc · "
-            f"{welfare} welfare · {hazards} wx hazards · {len(snapshot['changes'])} changes"
+            f"{counts['alerts']} alerts · {counts['incidents']} incidents · "
+            f"{welfare} welfare · {hazards} wx · {len(snapshot['changes'])} changes"
         )
         return _screen(
             "sitrep-home",
@@ -106,6 +113,7 @@ def specs(service: SituationBriefingService) -> list[CommandSpec]:
                 TuiChoice("Incidents", "SITREP INCIDENTS"),
                 TuiChoice("Welfare", "SITREP WELFARE"),
                 TuiChoice("Community", "SITREP COMMUNITY"),
+                TuiChoice("Delivery", "SITREP DELIVERY"),
                 TuiChoice("Network", "SITREP NETWORK"),
             ),
             max_parts=1,
@@ -183,13 +191,25 @@ def specs(service: SituationBriefingService) -> list[CommandSpec]:
         section = section.casefold()
         if not section or section in {"home", "status"}:
             return await home(ctx)
-        if section in {"weather", "incidents", "welfare", "community", "network"}:
+        if section in {
+            "weather",
+            "incidents",
+            "welfare",
+            "community",
+            "delivery",
+            "network",
+        }:
             return await detail(ctx, section, page.strip())
         if section in {"ai", "summary"}:
             return await narration(ctx)
         return Response(
             ResponseKind.ERROR,
-            [Line("Use SITREP or choose Weather, Incidents, Welfare, Community, or Network.")],
+            [
+                Line(
+                    "Use SITREP or choose Weather, Incidents, Welfare, Community, "
+                    "Delivery, or Network."
+                )
+            ],
         )
 
     return [

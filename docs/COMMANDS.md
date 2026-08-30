@@ -87,9 +87,11 @@ configured channel capability, available local data, or a higher role for a sens
 ## Usage and safety notes
 
 `SITREP` is member-only and direct-message-only. Its first deterministic screen fits one radio
-packet; numbered section pages carry compact source-ID/age markers. `SITREP AI` optionally asks the
-configured model to phrase already-selected facts, but facts, ordering, and safety state never
-depend on AI.
+packet; numbered weather, incident, welfare, community, delivery, and network pages carry compact
+source-ID/age markers. Delivery compares terminal, confirmed outcomes from the last 24 hours with
+the preceding 14 days and labels a comparison insufficient until both windows have enough data.
+`SITREP AI` optionally asks the configured model to phrase already-selected facts, but facts,
+ordering, and safety state never depend on AI.
 
 `MYDATA` is a direct-message, member-only count of the records attributed to the sender.
 `FORGETPOS` and `REMOVEME` additionally require the sender's operator-verified Meshtastic PKI key

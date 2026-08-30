@@ -122,7 +122,7 @@ description = "Operator safety boundary, replay, redaction, drill, and limitatio
 [[capabilities]]
 id = "airtime_delivery"
 area = "Airtime and outbound delivery"
-present = "Durable priority queue, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, and restart recovery."
+present = "Durable priority queue, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, restart recovery, and a delivery-health briefing comparing confirmed 24-hour channel outcomes and enrolled-radio receive quality with the preceding 14 days."
 maturity = "automated_tested"
 introduced_commit = "3d65058"
 limitations = [
@@ -132,11 +132,23 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-29"
+date = "2026-08-30"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_delivery_health_briefing.py::test_delivery_health_is_healthy_then_cautions_on_durable_trends"
+description = "Confirmed-delivery and enrolled-radio SNR trends remain informational when healthy, become durable cautions when degrading, and are de-identified for public viewers."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_delivery_health_briefing.py::test_delivery_health_reports_insufficient_history_without_zero_rate"
+description = "Sparse history is reported as insufficient rather than as a misleading zero-percent delivery rate."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_durable_outbox.py::test_acknowledgement_is_correlated_and_not_resent_after_restart"
 description = "Delivery acknowledgement is correlated durably and suppresses resend after restart."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_durable_outbox.py::test_ack_timeout_is_terminal_in_message_history_live_and_after_restart"
+description = "Live and restart-time acknowledgement expiry records a terminal timeout in durable message history."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/unit/test_governor.py::test_three_alert_storm_is_bounded_and_critical_reaches_reserve"

@@ -170,6 +170,18 @@ class OutboxStore:
                 (now, "payload exceeds radio byte limit", MAX_PAYLOAD_BYTES),
             )
             await transaction.write(
+                "UPDATE message_log SET outcome='timeout',drop_reason='ack timeout' "
+                "WHERE outcome='pending' AND outbox_id IN ("
+                "SELECT id FROM outbound_work WHERE state='awaiting_ack' AND expires_at<=?)",
+                (now,),
+            )
+            await transaction.write(
+                "UPDATE outbound_work SET state='expired',outcome='timeout',"
+                "last_error='ack timeout',completed_at=? "
+                "WHERE state='awaiting_ack' AND expires_at<=?",
+                (now, now),
+            )
+            await transaction.write(
                 "UPDATE outbound_work SET state='expired',completed_at=? "
                 "WHERE state IN ('pending','held','sending','awaiting_ack') AND expires_at<=?",
                 (now, now),
@@ -246,11 +258,19 @@ class OutboxStore:
         )
 
     async def expire_ack_waits(self, now: float) -> None:
-        await self.database.write(
-            "UPDATE outbound_work SET state='expired',completed_at=? "
-            "WHERE state='awaiting_ack' AND expires_at<=?",
-            (now, now),
-        )
+        async with self.database.transaction() as transaction:
+            await transaction.write(
+                "UPDATE message_log SET outcome='timeout',drop_reason='ack timeout' "
+                "WHERE outcome='pending' AND outbox_id IN ("
+                "SELECT id FROM outbound_work WHERE state='awaiting_ack' AND expires_at<=?)",
+                (now,),
+            )
+            await transaction.write(
+                "UPDATE outbound_work SET state='expired',outcome='timeout',"
+                "last_error='ack timeout',completed_at=? "
+                "WHERE state='awaiting_ack' AND expires_at<=?",
+                (now, now),
+            )
 
     async def start_attempt(self, item_id: int, now: float, estimated_toa_ms: int) -> bool:
         async with self.database.transaction() as transaction:
@@ -306,6 +326,53 @@ class OutboxStore:
                 "WHERE outbox_id=? AND attempt_no=? AND state='started'",
                 (now, error[:240], item_id, attempts),
             )
+            if state == "failed":
+                work = (
+                    await transaction.read(
+                        "SELECT text,binary_payload,destination,channel,traffic_class,portnum "
+                        "FROM outbound_work WHERE id=?",
+                        (item_id,),
+                    )
+                )[0]
+                binary_payload = work["binary_payload"]
+                text = str(work["text"]) if binary_payload is None else None
+                payload_size = (
+                    len(bytes(binary_payload))
+                    if binary_payload is not None
+                    else len((text or "").encode())
+                )
+                attempt = (
+                    await transaction.read(
+                        "SELECT estimated_toa_ms FROM outbound_attempt "
+                        "WHERE outbox_id=? AND attempt_no=?",
+                        (item_id, attempts),
+                    )
+                )[0]
+                error_kind = error.partition(":")[0].strip() or "transport error"
+                log_id = await transaction.write(
+                    "INSERT INTO message_log(direction,peer_mesh_id,channel,portnum,is_direct,"
+                    "packet_id,text,byte_len,toa_ms,airtime_class,outcome,drop_reason,transport,"
+                    "created_at,outbox_id) VALUES('out',?,?,?,?,NULL,?,?,?,?,"
+                    "'failed',?,'mesh',?,?)",
+                    (
+                        str(work["destination"]),
+                        int(work["channel"]),
+                        int(work["portnum"] or (260 if binary_payload is not None else 1)),
+                        int(str(work["destination"]) != "^all"),
+                        text,
+                        payload_size,
+                        int(attempt["estimated_toa_ms"]),
+                        str(work["traffic_class"]),
+                        f"send failed: {error_kind[:60]}",
+                        int(now),
+                        item_id,
+                    ),
+                )
+                await transaction.write(
+                    "UPDATE outbound_attempt SET message_log_id=? "
+                    "WHERE outbox_id=? AND attempt_no=?",
+                    (log_id, item_id, attempts),
+                )
         return state, retry_at, attempts
 
     async def complete_attempt(
