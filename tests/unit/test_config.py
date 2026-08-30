@@ -40,6 +40,29 @@ def test_recovery_retention_preserves_snapshots_for_retained_releases() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "supporting_window",
+    ("watch_history_days", "outbound_history_days", "message_log_days"),
+)
+def test_incident_report_evidence_cannot_expire_before_incident(
+    supporting_window: str,
+) -> None:
+    with pytest.raises(ValidationError, match=f"{supporting_window} must be at least"):
+        Config.model_validate(
+            {
+                "store": {
+                    "retention": {
+                        "incident_history_days": 60,
+                        "watch_history_days": 60,
+                        "outbound_history_days": 60,
+                        "message_log_days": 60,
+                        supporting_window: 59,
+                    }
+                }
+            }
+        )
+
+
 def test_channel_environment_override_merges_with_integer_yaml_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

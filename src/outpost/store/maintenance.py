@@ -664,8 +664,20 @@ class MaintenanceService:
                 "system",
                 "outbound_work",
                 "state IN ('sent','acked','failed','expired','cancelled','superseded','retracted') "
-                "AND COALESCE(completed_at,expires_at)<?",
-                (outbound_cutoff,),
+                "AND COALESCE(completed_at,expires_at)<? "
+                "AND NOT EXISTS (SELECT 1 FROM alert a JOIN incident i ON i.id=a.incident_id "
+                "WHERE outbound_work.dedupe_token LIKE 'alert:'||a.id||':%') "
+                "AND NOT EXISTS (SELECT 1 FROM incident i WHERE "
+                "outbound_work.dedupe_token LIKE 'incident:'||i.id||':%') "
+                "AND NOT EXISTS (SELECT 1 FROM checkin c JOIN incident i "
+                "ON c.created_at BETWEEN i.created_at AND COALESCE(i.resolved_at,"
+                "CASE WHEN i.status='expired' THEN i.expires_at END,?) WHERE "
+                "outbound_work.dedupe_token LIKE 'checkin:'||c.id||':%') "
+                "AND id NOT IN (SELECT s.queue_item_id FROM checkin_solicitation s "
+                "JOIN watch_event e ON e.id=s.event_id JOIN incident i ON "
+                "s.queued_at BETWEEN i.created_at AND COALESCE(i.resolved_at,"
+                "CASE WHEN i.status='expired' THEN i.expires_at END,?))",
+                (outbound_cutoff, now, now),
             ),
             CleanupRule(
                 "digest_deliveries",
@@ -680,16 +692,21 @@ class MaintenanceService:
                 "Welfare check-in history",
                 "watch",
                 "checkin",
-                "created_at<?",
-                (watch_cutoff,),
+                "created_at<? AND NOT EXISTS (SELECT 1 FROM incident i WHERE "
+                "checkin.created_at BETWEEN i.created_at AND COALESCE(i.resolved_at,"
+                "CASE WHEN i.status='expired' THEN i.expires_at END,?))",
+                (watch_cutoff, now),
             ),
             CleanupRule(
                 "watch_events",
                 "Closed welfare events",
                 "watch",
                 "watch_event",
-                "closed_at IS NOT NULL AND closed_at<?",
-                (watch_cutoff,),
+                "closed_at IS NOT NULL AND closed_at<? AND NOT EXISTS ("
+                "SELECT 1 FROM incident i WHERE watch_event.opened_at<=COALESCE("
+                "i.resolved_at,CASE WHEN i.status='expired' THEN i.expires_at END,?) "
+                "AND watch_event.closed_at>=i.created_at)",
+                (watch_cutoff, now),
             ),
             CleanupRule(
                 "alerts",
@@ -697,7 +714,9 @@ class MaintenanceService:
                 "watch",
                 "alert",
                 "COALESCE(cancelled_at,all_clear_at,expires_at) IS NOT NULL "
-                "AND COALESCE(cancelled_at,all_clear_at,expires_at)<?",
+                "AND COALESCE(cancelled_at,all_clear_at,expires_at)<? "
+                "AND (incident_id IS NULL OR NOT EXISTS ("
+                "SELECT 1 FROM incident i WHERE i.id=alert.incident_id))",
                 (watch_cutoff,),
             ),
             CleanupRule(
@@ -758,9 +777,38 @@ class MaintenanceService:
                 "Packet/message history",
                 "system",
                 "message_log",
-                "created_at<? OR id IN ("
-                "SELECT id FROM message_log ORDER BY id DESC LIMIT -1 OFFSET ?)",
-                (now - retention.message_log_days * DAY, retention.message_log_max_rows),
+                "(created_at<? OR id IN ("
+                "SELECT id FROM message_log ORDER BY id DESC LIMIT -1 OFFSET ?)) "
+                "AND NOT EXISTS (SELECT 1 FROM outbound_work ow JOIN alert a "
+                "ON ow.dedupe_token LIKE 'alert:'||a.id||':%' JOIN incident i "
+                "ON i.id=a.incident_id WHERE ow.id=message_log.outbox_id) "
+                "AND NOT EXISTS (SELECT 1 FROM outbound_work ow JOIN incident i "
+                "ON ow.dedupe_token LIKE 'incident:'||i.id||':%' "
+                "WHERE ow.id=message_log.outbox_id) "
+                "AND NOT EXISTS (SELECT 1 FROM outbound_work ow JOIN checkin c "
+                "ON ow.dedupe_token LIKE 'checkin:'||c.id||':%' JOIN incident i "
+                "ON c.created_at BETWEEN i.created_at AND COALESCE(i.resolved_at,"
+                "CASE WHEN i.status='expired' THEN i.expires_at END,?) "
+                "WHERE ow.id=message_log.outbox_id) "
+                "AND NOT EXISTS (SELECT 1 FROM checkin_solicitation s JOIN incident i "
+                "ON s.queued_at BETWEEN "
+                "i.created_at AND COALESCE(i.resolved_at,"
+                "CASE WHEN i.status='expired' THEN i.expires_at END,?) "
+                "WHERE s.queue_item_id=message_log.outbox_id) "
+                "AND NOT EXISTS (SELECT 1 FROM incident i JOIN member m "
+                "ON m.id=i.reporter_id WHERE message_log.direction='in' "
+                "AND message_log.peer_mesh_id=m.mesh_id "
+                "AND message_log.created_at=i.created_at) "
+                "AND NOT EXISTS (SELECT 1 FROM incident_update u JOIN incident i "
+                "ON i.id=u.incident_id JOIN member m ON m.id=u.author_id "
+                "WHERE message_log.direction='in' AND message_log.peer_mesh_id=m.mesh_id "
+                "AND message_log.created_at=u.created_at)",
+                (
+                    now - retention.message_log_days * DAY,
+                    retention.message_log_max_rows,
+                    now,
+                    now,
+                ),
             ),
         )
 

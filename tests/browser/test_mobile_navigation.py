@@ -70,6 +70,7 @@ VISUAL_PAGES = (
     ("access", "/access.html"),
     ("backups", "/backups.html"),
     ("ai", "/ai.html"),
+    ("incident-report", "/incident-report.html?id=7"),
 )
 VISUAL_VIEWPORTS = (
     ("mobile", 390, 844),
@@ -640,6 +641,72 @@ def route_visual_content_api(page: object) -> None:
     fulfill("**/api/v1/channels*", {"items": [], "next_cursor": None})
     fulfill("**/api/v1/incidents/history*", {"items": []})
     fulfill("**/api/v1/incidents*", {"items": []})
+    fulfill(
+        "**/api/v1/incidents/7/timeline",
+        {
+            "report_version": 1,
+            "generated_at": 2_000_000_200,
+            "generated_at_iso": "2033-05-18T03:36:40Z",
+            "incident": {
+                "id": 7,
+                "local_ref": 7,
+                "title": "Tree down blocking Cedar Lane",
+                "body": "Road is closed while the crew clears the tree.",
+                "type": "road",
+                "severity": "urgent",
+                "status": "monitoring",
+                "reporter": "@alex",
+                "created_at": 2_000_000_000,
+                "resolved_at": None,
+                "resolution_note": None,
+            },
+            "change_window": {
+                "kind": "full",
+                "since": None,
+                "since_iso": None,
+                "label": "Complete retained incident record",
+            },
+            "summary": {
+                "window_event_count": 2,
+                "event_count": 2,
+                "alert_stage_count": 1,
+                "zero_recipient_stages": 1,
+                "acknowledged_count": 0,
+                "actual_airtime_ms": 0,
+            },
+            "privacy": {"coarse_precision_m": 500},
+            "timeline": [
+                {
+                    "id": "incident:7:opened",
+                    "timestamp": 2_000_000_000,
+                    "timestamp_iso": "2033-05-18T03:33:20Z",
+                    "category": "incident",
+                    "kind": "opened",
+                    "title": "Incident #7 opened",
+                    "actor": "@alex",
+                    "detail": "Tree down blocking Cedar Lane",
+                    "location": {"lat": 40.441, "lon": -79.996, "precision": "coarse"},
+                },
+                {
+                    "id": "alert:4:stage:0:empty",
+                    "timestamp": 2_000_000_060,
+                    "timestamp_iso": "2033-05-18T03:34:20Z",
+                    "category": "alert_stage",
+                    "kind": "empty_audience",
+                    "title": "Alert stage 1 reached nobody",
+                    "actor": None,
+                    "detail": "empty audience",
+                    "location": None,
+                    "stage": 1,
+                    "addressed_count": 0,
+                    "acknowledged_count": 0,
+                    "zero_recipients": True,
+                    "channels": [3],
+                    "destinations": [],
+                },
+            ],
+        },
+    )
     fulfill("**/api/v1/alerts*", {"items": []})
     fulfill("**/api/v1/events*", {"current": None})
     fulfill("**/api/v1/watch/map*", {"incidents": [], "nodes": [], "alerts": []})
@@ -845,13 +912,13 @@ def test_operator_styles_follow_static_component_contract() -> None:
     }
     assert set(json.loads(VISUAL_BASELINES.read_text())) == expected_baselines
     visual_files = {
-        "index.html" if target == "/" else target.removeprefix("/")
+        "index.html" if target == "/" else urlparse(target).path.removeprefix("/")
         for _page_name, target in VISUAL_PAGES
     }
     assert visual_files == {path.name for path in STATIC_ROOT.glob("*.html")}
 
     for _page_name, target in VISUAL_PAGES:
-        filename = "index.html" if target == "/" else target.removeprefix("/")
+        filename = "index.html" if target == "/" else urlparse(target).path.removeprefix("/")
         markup = (STATIC_ROOT / filename).read_text()
         base = markup.index("/base.css?v=1")
         layout = markup.index("/layout.css?v=1")
@@ -4388,6 +4455,128 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
             {"status": "resolved", "resolution": "Tree safely removed"},
         ]
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("width", (390, 1280))
+def test_incident_report_is_responsive_printable_and_shows_delivery_reality(
+    browser: object, dashboard_url: str, width: int
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme="night")
+    report = {
+        "report_version": 1,
+        "generated_at": 2_000_000_200,
+        "generated_at_iso": "2033-05-18T03:36:40Z",
+        "incident": {
+            "id": 7,
+            "local_ref": 7,
+            "title": "Tree down blocking Cedar Lane",
+            "body": "Road is closed while the crew clears the tree.",
+            "type": "road",
+            "severity": "urgent",
+            "status": "monitoring",
+            "reporter": "@alex",
+            "created_at": 2_000_000_000,
+        },
+        "change_window": {
+            "kind": "viewer",
+            "since": 2_000_000_060,
+            "since_iso": "2033-05-18T03:34:20Z",
+            "label": "Since your last look at 2033-05-18T03:34:20Z (inclusive)",
+        },
+        "summary": {
+            "window_event_count": 3,
+            "event_count": 3,
+            "alert_stage_count": 1,
+            "zero_recipient_stages": 1,
+            "acknowledged_count": 0,
+            "actual_airtime_ms": 842,
+        },
+        "privacy": {"coarse_precision_m": 500},
+        "timeline": [
+            {
+                "id": "incident:7:opened",
+                "timestamp": 2_000_000_000,
+                "timestamp_iso": "2033-05-18T03:33:20Z",
+                "category": "incident",
+                "kind": "opened",
+                "title": "Incident #7 opened",
+                "actor": "@alex",
+                "detail": "Tree down blocking Cedar Lane",
+                "location": {"lat": 40.441, "lon": -79.996, "precision": "coarse"},
+            },
+            {
+                "id": "alert:4:stage:0:empty",
+                "timestamp": 2_000_000_060,
+                "timestamp_iso": "2033-05-18T03:34:20Z",
+                "category": "alert_stage",
+                "kind": "empty_audience",
+                "title": "Alert stage 1 reached nobody",
+                "actor": None,
+                "detail": "empty audience",
+                "location": None,
+                "stage": 1,
+                "addressed_count": 0,
+                "acknowledged_count": 0,
+                "zero_recipients": True,
+                "channels": [3],
+                "destinations": [],
+            },
+            {
+                "id": "transmission-attempt:9",
+                "timestamp": 2_000_000_120,
+                "timestamp_iso": "2033-05-18T03:35:20Z",
+                "category": "transmission",
+                "kind": "sent",
+                "title": "Mesh transmission attempt",
+                "actor": None,
+                "detail": "sent",
+                "location": None,
+                "destination": "@bravo",
+                "channel": 3,
+                "outcome": "sent",
+                "actual_toa_ms": 842,
+                "estimated_toa_ms": 850,
+            },
+        ],
+    }
+    page.route(
+        "**/api/v1/incidents/7/handover",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(report)
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(
+            f"{dashboard_url}/incident-report.html?id=7&mode=handover", wait_until="networkidle"
+        )
+        wait_for_navigation(page)
+        page.get_by_role("heading", name="INC 7 record").wait_for()
+        page.get_by_text("Alert stage 1 reached nobody").wait_for()
+        assert "Addressed: 0" in page.locator(".timeline-item").nth(1).text_content()
+        assert "Actual ToA: 842 ms" in page.locator(".timeline-item").nth(2).text_content()
+        assert "since=2033-05-18T03%3A34%3A20Z" in page.locator("#csv-download").get_attribute(
+            "href"
+        )
+        assert "since=2033-05-18T03%3A34%3A20Z" in page.locator("#offline-download").get_attribute(
+            "href"
+        )
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        if width == 1280:
+            results = Axe().run(
+                page,
+                options={
+                    "runOnly": {
+                        "type": "tag",
+                        "values": ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"],
+                    },
+                    "resultTypes": ["violations"],
+                },
+            )
+            assert results.violations_count == 0, results.generate_report()
         health.assert_clean()
     finally:
         page.close()

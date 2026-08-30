@@ -3,5 +3,6 @@
 from .alerts import AlertService
 from .checkin import CheckinService
 from .incidents import IncidentService
+from .reports import IncidentReportService
 
-__all__ = ["AlertService", "CheckinService", "IncidentService"]
+__all__ = ["AlertService", "CheckinService", "IncidentReportService", "IncidentService"]

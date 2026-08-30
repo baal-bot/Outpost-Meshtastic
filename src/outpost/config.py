@@ -452,7 +452,7 @@ class RetentionConfig(StrictModel):
     ai_interaction_metrics_days: int = Field(default=180, ge=30, le=3_650)
     federation_service_days: int = Field(default=7, ge=1, le=90)
     federation_history_days: int = Field(default=30, ge=1, le=365)
-    outbound_history_days: int = Field(default=30, ge=1, le=365)
+    outbound_history_days: int = Field(default=30, ge=1, le=3_650)
     radio_power_days: int = Field(default=30, ge=1, le=365)
     situation_snapshot_days: int = Field(default=30, ge=1, le=365)
 
@@ -461,6 +461,17 @@ class RetentionConfig(StrictModel):
         if self.ai_interaction_metrics_days < self.ai_interaction_content_days:
             raise ValueError(
                 "ai_interaction_metrics_days must be at least ai_interaction_content_days"
+            )
+        dependencies = {
+            "watch_history_days": self.watch_history_days,
+            "outbound_history_days": self.outbound_history_days,
+            "message_log_days": self.message_log_days,
+        }
+        shorter = [name for name, days in dependencies.items() if days < self.incident_history_days]
+        if shorter:
+            raise ValueError(
+                f"{', '.join(shorter)} must be at least incident_history_days so incident "
+                "reports cannot silently lose supporting evidence"
             )
         return self
 

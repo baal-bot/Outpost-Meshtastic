@@ -151,6 +151,7 @@ class CheckinService:
             traffic_class=TrafficClass.ALERT,
             severity=Severity.URGENT,
             exclude_mesh_ids=(member.mesh_id,),
+            dedupe_token=f"checkin:{checkin_id}:help-notification",
         )
 
     async def _members_for(self, event: WatchEvent) -> list[Any]:

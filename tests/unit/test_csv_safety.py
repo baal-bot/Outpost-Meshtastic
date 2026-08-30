@@ -21,13 +21,18 @@ def test_every_csv_writer_uses_the_shared_sanitizer() -> None:
         if "csv.DictWriter" in source:
             writers.append(path.relative_to(source_root).as_posix())
             assert "csv_safe_row" in source, path
-    assert sorted(writers) == ["watch/checkin.py", "web/member_triage.py"]
+    assert sorted(writers) == [
+        "watch/checkin.py",
+        "watch/reports.py",
+        "web/member_triage.py",
+    ]
 
 
 def test_every_csv_response_is_backed_by_an_audited_writer() -> None:
     api = (Path(__file__).parents[2] / "src" / "outpost" / "web" / "api.py").read_text(
         encoding="utf-8"
     )
-    assert api.count('media_type="text/csv"') == 2
+    assert api.count('media_type="text/csv"') == 3
     assert "checkins.csv_export(event_id)" in api
+    assert "effective_incident_reports.csv_export(value)" in api
     assert "member_triage.export(member_ids" in api

@@ -19,7 +19,7 @@ policy; Outpost never silently replaces audit detail with a summary.
 | `posts_days` | 90 days | Unpinned threads; a board's `retention_days` overrides this. |
 | `mail_days` | 180 days | Local/operator mail, or sooner at its explicit expiry. |
 | `member_positions_hours` | 168 hours | Exact member POS shares. |
-| `message_log_days` / `message_log_max_rows` | 30 days / 500,000 | Packet and command telemetry; whichever limit removes a row first. |
+| `message_log_days` / `message_log_max_rows` | 30 days / 500,000 | Packet and command telemetry; whichever limit removes a row first, except evidence supporting a retained incident. |
 | `authentication_days` | 30 days | Login-attempt history; expired sessions are removed immediately. |
 | `digest_days` | 90 days | Digest-delivery history. |
 | `incident_history_days` | 30 days | Resolved, false-alarm, and expired incidents. |
@@ -30,12 +30,18 @@ policy; Outpost never silently replaces audit detail with a summary.
 | `ai_interaction_metrics_days` | 180 days | De-identified AI safety, quality, rating, timing, and token-use fields. |
 | `federation_service_days` | 7 days | Completed, failed, or expired peer-service requests/results. |
 | `federation_history_days` | 30 days | Reviewed inbox items, receipts, replay state, and terminal deliveries. |
-| `outbound_history_days` | 30 days | Terminal durable outbound work and its attempts. |
+| `outbound_history_days` | 30 days | Terminal durable outbound work and its attempts; incident-linked delivery evidence follows its incident. |
 | `radio_power_days` | 30 days | Sampled connected-radio battery history used for trend and threshold evidence. |
 | `situation_snapshot_days` | 30 days | Versioned situation facts used for per-viewer handover comparisons. |
 
 The safety-floor replay window separately uses
 `security.safety_attempt_retention_hours` (72 hours by default).
+
+`watch_history_days`, `outbound_history_days`, and `message_log_days` must each be at
+least `incident_history_days`. Startup rejects a shorter supporting window. Maintenance also
+protects incident-linked alerts, welfare context, durable delivery attempts, and measured packet
+airtime until the incident itself is eligible for deletion; this covers incidents that remain open
+longer than a nominal retention window.
 
 ## Table policy
 
@@ -50,8 +56,8 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | System/security | `web_account` | Preserve and protect named identities, roles, password/TOTP hashes, and audit continuity. |
 | System/security | `web_session` | Expire at its stored deadline. |
 | System/security | `web_login_attempt` | Retain for `authentication_days`. |
-| System/security | `message_log` | Compact by age and absolute row ceiling. |
-| System/security | `outbound_work` | Retain terminal states; pending, held, sending, and acknowledgement work is protected. |
+| System/security | `message_log` | Compact by age and absolute row ceiling; retained incident source/delivery packets are protected. |
+| System/security | `outbound_work` | Retain terminal states; live work and retained incident delivery evidence are protected. |
 | System/security | `outbound_attempt` | Cascade with `outbound_work`. |
 | System/security | `radio_power_sample` | Retain for `radio_power_days`; external-power/no-report samples are explicit nulls. |
 | System/security | `situation_snapshot` | Retain versions for `situation_snapshot_days`, always preserving the latest version per capability. |
@@ -74,10 +80,10 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | Watch | `pending_incident_location` | Expire at its workflow deadline. |
 | Watch | `incident` | Retain resolved, false-alarm, or expired incidents for `incident_history_days`; open/monitoring are protected. |
 | Watch | `incident_update`, `incident_origin`, `incident_provenance`, `incident_match_decision` | Cascade with their incident after the history window; provenance remains append-only while its parent exists. |
-| Watch | `alert` | Retain concluded/expired alerts; active alerts are protected. |
+| Watch | `alert` | Retain concluded/expired alerts; active alerts and alerts linked to a retained incident are protected. |
 | Watch | `alert_ack`, `alert_audience` | Cascade with their alert. |
-| Watch | `watch_event` | Retain closed events; open events are protected. |
-| Watch | `checkin` | Retain welfare history for `watch_history_days`. |
+| Watch | `watch_event` | Retain closed events; open events and events overlapping a retained incident are protected. |
+| Watch | `checkin` | Retain welfare history for `watch_history_days`; check-ins concurrent with a retained incident are protected as report context. |
 | Watch | `checkin_solicitation` | Cascade with its event. |
 | Environment | `env_cache`, `cap_point_cache` | Expire after `provider_cache_days`. |
 | Environment | `cap_alert`, `earthquake`, `same_event` | Retain review/history for `environment_history_days`. |

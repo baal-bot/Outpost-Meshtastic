@@ -104,7 +104,7 @@ from outpost.transport.models import InboundMessage, Severity, TrafficClass
 from outpost.transport.radio_frequency import frequency_plan
 from outpost.transport.radio_link import MeshtasticRadioLink
 from outpost.transport.supervisor import RadioSupervisor
-from outpost.watch import AlertService, CheckinService, IncidentService
+from outpost.watch import AlertService, CheckinService, IncidentReportService, IncidentService
 from outpost.watch.delivery import AudienceDelivery
 from outpost.watch.incidents import Incident
 from outpost.web.api import create_web_app
@@ -236,6 +236,12 @@ class OutpostApp:
         )
         self.alerts = AlertService(self.database, self.governor, self.clock, self.config)
         self.checkins = CheckinService(self.database, self.governor, self.clock)
+        self.incident_reports = IncidentReportService(
+            self.database,
+            self.clock,
+            self.config.store.retention,
+            coarse_precision_m=self.config.security.coarse_precision_m,
+        )
         self.weather = WeatherService(
             self.database,
             self.clock,
@@ -400,6 +406,7 @@ class OutpostApp:
             situation=self.situation,
             web_config=self.config.web,
             tile_path=self.config.store.tiles_path,
+            incident_reports=self.incident_reports,
         )
 
     def _start_background_task(
@@ -3396,6 +3403,7 @@ class OutpostApp:
             traffic_class=TrafficClass.ALERT,
             severity=Severity.URGENT,
             exclude_mesh_ids=(sender_mesh_id,),
+            dedupe_token=f"incident:{incident.id}:emergency-notification",
         )
         await self.database.write(
             "UPDATE incident SET notification_state=?,notification_count=? WHERE id=?",

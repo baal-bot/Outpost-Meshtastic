@@ -47,7 +47,7 @@ from outpost.situation import BriefingCapability, BriefingViewer, SituationBrief
 from outpost.store import Database
 from outpost.store.backups import BackupService, RestoreCoordinator
 from outpost.store.maintenance import MaintenanceService
-from outpost.watch import AlertService, CheckinService, IncidentService
+from outpost.watch import AlertService, CheckinService, IncidentReportService, IncidentService
 from outpost.web.auth import MfaChallenge, WebAuthService
 from outpost.web.member_triage import NEEDS_REVIEW_SQL, MemberTriageError, MemberTriageService
 from outpost.web.operator_inbox import OperatorInboxService
@@ -657,6 +657,7 @@ def create_web_app(
     web_config: WebConfig | None = None,
     self_check: SelfCheckService | None = None,
     tile_path: str | Path = DEFAULT_TILES_PATH,
+    incident_reports: IncidentReportService | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Outpost API",
@@ -666,6 +667,11 @@ def create_web_app(
         openapi_url=None,
     )
     effective_web_config = web_config or WebConfig()
+    effective_incident_reports = incident_reports or (
+        IncidentReportService(database, incidents.clock)
+        if database is not None and incidents is not None
+        else None
+    )
 
     def effective_modules() -> dict[str, bool]:
         if module_provider is not None:
@@ -2866,6 +2872,124 @@ def create_web_app(
                     "items": await incident_origins([value.json() for value in values]),
                     "retention_days": incidents.history_retention_days,
                 }
+
+            async def incident_report_value(
+                incident_id: int, since: datetime | None = None
+            ) -> dict[str, Any] | Response:
+                assert effective_incident_reports is not None
+                since_epoch = None
+                if since is not None:
+                    if since.tzinfo is None:
+                        return JSONResponse(
+                            {
+                                "error": {
+                                    "code": "timeline_since_timezone_required",
+                                    "message": "The since time must include a UTC offset.",
+                                }
+                            },
+                            status_code=422,
+                        )
+                    since_epoch = int(since.timestamp())
+                try:
+                    return await effective_incident_reports.build(incident_id, since=since_epoch)
+                except ValueError as error:
+                    status = 404 if "not found" in str(error).lower() else 422
+                    return JSONResponse(
+                        {"error": {"code": "incident_report_unavailable", "message": str(error)}},
+                        status_code=status,
+                    )
+
+            @app.get("/api/v1/incidents/{incident_id}/timeline", response_model=None)
+            async def incident_timeline(
+                incident_id: int, since: datetime | None = None
+            ) -> dict[str, Any] | Response:
+                return await incident_report_value(incident_id, since)
+
+            @app.get("/api/v1/incidents/{incident_id}/handover", response_model=None)
+            async def incident_handover(
+                incident_id: int, request: Request
+            ) -> dict[str, Any] | Response:
+                assert effective_incident_reports is not None
+                session = getattr(request.state, "web_session", None)
+                if session is None:
+                    return JSONResponse(
+                        {"error": {"code": "unauthorized", "message": "Sign in required."}},
+                        status_code=401,
+                    )
+                try:
+                    return await effective_incident_reports.handover(
+                        incident_id, int(session.account_id)
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {
+                            "error": {
+                                "code": "incident_report_unavailable",
+                                "message": str(error),
+                            }
+                        },
+                        status_code=404,
+                    )
+
+            @app.get("/api/v1/incidents/{incident_id}/timeline.csv", response_model=None)
+            async def incident_timeline_csv(
+                incident_id: int, since: datetime | None = None
+            ) -> Response:
+                value = await incident_report_value(incident_id, since)
+                if isinstance(value, Response):
+                    return value
+                assert effective_incident_reports is not None
+                reference = value["incident"]["local_ref"]
+                assert database is not None
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="incident.report_export",
+                    target=f"incident:{incident_id}",
+                    detail={"format": "csv", "event_count": len(value["timeline"])},
+                )
+                return Response(
+                    effective_incident_reports.csv_export(value),
+                    media_type="text/csv",
+                    headers={
+                        "Content-Disposition": (
+                            f'attachment; filename="outpost-incident-{reference}-timeline.csv"'
+                        ),
+                        "X-Outpost-Data-Classification": "coarse-operational-record",
+                        "Cache-Control": "no-store",
+                    },
+                )
+
+            @app.get("/api/v1/incidents/{incident_id}/offline.html", response_model=None)
+            async def incident_offline_html(
+                incident_id: int, since: datetime | None = None
+            ) -> Response:
+                value = await incident_report_value(incident_id, since)
+                if isinstance(value, Response):
+                    return value
+                assert effective_incident_reports is not None
+                reference = value["incident"]["local_ref"]
+                assert database is not None
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="incident.report_export",
+                    target=f"incident:{incident_id}",
+                    detail={"format": "offline_html", "event_count": len(value["timeline"])},
+                )
+                return Response(
+                    effective_incident_reports.offline_html(value),
+                    media_type="text/html",
+                    headers={
+                        "Content-Disposition": (
+                            f'attachment; filename="outpost-incident-{reference}-report.html"'
+                        ),
+                        "X-Outpost-Data-Classification": "coarse-operational-record",
+                        "Cache-Control": "no-store",
+                    },
+                )
 
             @app.get("/api/v1/watch/map")
             async def watch_map(hours_ago: int = Query(0, ge=0, le=24)) -> dict[str, Any]:
