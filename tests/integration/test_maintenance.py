@@ -237,7 +237,6 @@ async def test_maintenance_preview_storage_health_and_bounded_cleanup(tmp_path) 
     assert dict(audits[-1]) == {"actor_kind": "web", "actor_ref": "operator"}
     after = await service.storage_report()
     assert after["growth_since"] == now
-
     client = TestClient(
         create_web_app(
             lambda: {"radio": "up"},
@@ -248,6 +247,54 @@ async def test_maintenance_preview_storage_health_and_bounded_cleanup(tmp_path) 
     assert client.get("/api/v1/maintenance/preview").status_code == 200
     denied = client.post("/api/v1/maintenance/run", json={"confirmation": "wrong"})
     assert denied.status_code == 422
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_storage_report_accounts_for_every_backup_kind_and_release(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    releases = tmp_path / "releases"
+    (releases / "current").mkdir(parents=True)
+    (releases / "current" / "runtime.bin").write_bytes(b"release-bytes")
+    config = Config.model_validate(
+        {
+            "store": {
+                "path": str(tmp_path / "outpost.db"),
+                "releases_path": str(releases),
+                "backup": {"enabled": False},
+            }
+        }
+    )
+    backups = BackupService(database, config.store.backup)
+    backups.directory.mkdir()
+    artifacts = {
+        "outpost-test.db": b"scheduled",
+        "pre-upgrade-test.db": b"upgrade",
+        "pre-manual-rollback-test.db": b"rollback",
+        "pre-upgrade-test.db-wal": b"auxiliary",
+        "operator-note.txt": b"unmanaged",
+    }
+    for name, content in artifacts.items():
+        (backups.directory / name).write_bytes(content)
+    restore_jobs = backups.directory / "restore-jobs"
+    restore_jobs.mkdir()
+    (restore_jobs / "job.json").write_bytes(b"metadata")
+
+    report = await MaintenanceService(database, backups, VirtualClock(), config).storage_report()
+
+    assert report["backup_count"] == len(artifacts) + 1
+    assert report["backup_bytes"] == sum(map(len, artifacts.values())) + len(b"metadata")
+    assert set(report["backup_breakdown"]) == {
+        "scheduled",
+        "pre_upgrade",
+        "pre_rollback",
+        "auxiliary",
+        "unmanaged",
+        "restore_metadata",
+    }
+    assert report["release_count"] == 1
+    assert report["release_bytes"] == len(b"release-bytes")
     await database.close()
 
 

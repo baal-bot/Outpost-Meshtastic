@@ -768,6 +768,8 @@ def route_visual_content_api(page: object) -> None:
             "wal_bytes": 0,
             "backup_count": 0,
             "backup_bytes": 0,
+            "release_count": 0,
+            "release_bytes": 0,
             "disk_free_bytes": 1_000_000_000,
             "domains": [],
             "growth_since": None,
@@ -4512,8 +4514,25 @@ def test_backup_create_validate_and_restore_confirmation_are_functional_and_clea
     state = {"created": False}
     backup = {
         "name": "outpost-20260826-180000.db",
+        "kind": "scheduled",
+        "kind_label": "Verified backup",
         "size_bytes": 4096,
         "created_at": "2026-08-26T18:00:00Z",
+        "downloadable": True,
+        "restorable": True,
+        "removable": False,
+        "protected": False,
+    }
+    recovery = {
+        "name": "pre-upgrade-20260825.db",
+        "kind": "pre_upgrade",
+        "kind_label": "Pre-upgrade recovery",
+        "size_bytes": 2048,
+        "created_at": "2026-08-25T18:00:00Z",
+        "downloadable": True,
+        "restorable": False,
+        "removable": True,
+        "protected": False,
     }
 
     def backup_route(route: object) -> None:
@@ -4524,7 +4543,13 @@ def test_backup_create_validate_and_restore_confirmation_are_functional_and_clea
             mutations.append(("create", None))
             body = {"backup": backup}
         elif path == "/api/v1/backups":
-            body = {"items": [backup] if state["created"] else []}
+            body = {
+                "items": ([backup] if state["created"] else []) + ([recovery] if recovery else [])
+            }
+        elif path == f"/api/v1/backups/{recovery['name']}" and request.method == "DELETE":
+            mutations.append(("remove", request.post_data_json))
+            recovery.clear()
+            body = {"status": "deleted"}
         elif path.endswith("/validate"):
             mutations.append(("validate", backup["name"]))
             body = {"valid": True}
@@ -4553,6 +4578,8 @@ def test_backup_create_validate_and_restore_confirmation_are_functional_and_clea
             "wal_bytes": 4096,
             "backup_bytes": 4096,
             "backup_count": 1,
+            "release_count": 3,
+            "release_bytes": 12582912,
             "disk_free_bytes": 10737418240,
             "growth_since": 1787760000,
             "last_maintenance": "2026-08-26",
@@ -4614,10 +4641,17 @@ def test_backup_create_validate_and_restore_confirmation_are_functional_and_clea
         dialog.get_by_label("Restore confirmation").fill(phrase)
         dialog.get_by_role("button", name="Enter maintenance and restore").click()
         page.get_by_text("Restore complete").wait_for()
+        page.get_by_role("button", name="Remove").click()
+        removal = page.get_by_role("dialog", name=f"Remove {recovery['name']}?")
+        delete_phrase = f"DELETE {recovery['name']}"
+        removal.get_by_label("Removal confirmation").fill(delete_phrase)
+        removal.get_by_role("button", name="Remove snapshot").click()
+        page.get_by_text("pre-upgrade-20260825.db", exact=True).wait_for(state="detached")
 
         assert ("create", None) in mutations
         assert ("validate", backup["name"]) in mutations
         assert ("restore", {"confirmation": phrase}) in mutations
+        assert ("remove", {"confirmation": delete_phrase}) in mutations
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
     finally:

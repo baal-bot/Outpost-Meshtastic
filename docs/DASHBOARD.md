@@ -183,10 +183,13 @@ The JSON API is rooted at `/api/v1`. Important read surfaces include:
 - `/api/v1/auth/accounts`, `/api/v1/auth/sessions`, `/api/v1/auth/mfa/*`, and
   `/api/v1/auth/step-up`
 
-Backups → Live data & retention reports the live database, WAL, verified backups, available disk,
-per-domain rows/allocation, and growth since the last maintenance baseline. Its cleanup preview is
-read-only. Applying the preview requires the displayed confirmation, takes a verified snapshot
-first, and runs bounded deletion batches. See [Data retention and storage](RETENTION.md).
+Backups → Live data & retention reports the live database, WAL, every file in the backup tree,
+installed release directories, available disk, per-domain rows/allocation, and growth since the
+last maintenance baseline. Backup rows identify scheduled, upgrade, rollback, auxiliary, restore
+metadata, and unmanaged artifacts. Older removable recovery points require an administrator,
+credential step-up, and the displayed confirmation; the newest required points remain protected.
+The cleanup preview is read-only. Applying it takes a verified snapshot first and runs bounded
+deletion batches. See [Data retention and storage](RETENTION.md).
 
 `/api/v1/audit` accepts `from_time`, `until`, `actor`, `action`, `target`, `outcome`, `cursor`, and
 `limit`. Outcomes are `success`, `denied`, or `failure`; existing privileged-action writers record

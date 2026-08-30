@@ -244,6 +244,28 @@ def test_installer_executes_staging_snapshot_atomic_activation_and_service(tmp_p
     assert "systemctl stop outpost.service" in cast(Path, harness["log"]).read_text()
 
 
+def test_successful_upgrades_prune_superseded_releases_and_recovery_snapshots(
+    tmp_path: Path,
+) -> None:
+    harness = _installer_harness(tmp_path)
+    for release in ("release-01", "release-02", "release-03", "release-04"):
+        _assert_successful_install(harness, _run_install(harness, release), release)
+
+    prefix = cast(Path, harness["prefix"])
+    assert {path.name for path in (prefix / "releases").iterdir()} == {
+        "release-02",
+        "release-03",
+        "release-04",
+    }
+    assert {
+        path.name for path in (cast(Path, harness["state"]) / "backups").glob("pre-upgrade-*.db")
+    } == {
+        "pre-upgrade-release-02.db",
+        "pre-upgrade-release-03.db",
+        "pre-upgrade-release-04.db",
+    }
+
+
 def test_failed_code_only_upgrade_restores_code_without_discarding_live_data(
     tmp_path: Path,
 ) -> None:

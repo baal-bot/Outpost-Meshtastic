@@ -109,6 +109,14 @@ The rollback command verifies its compatibility plan before downtime and restore
 pre-upgrade database when the older code cannot read the live schema. See [Installation](INSTALLATION.md#roll-back)
 for the full procedure.
 
+Each upgrade creates `pre-upgrade-<release>.db`; each manual rollback creates a
+`pre-manual-rollback-*.db` safety copy. These appear by kind on the Backups page and count toward its
+reported bytes. Successful upgrades and daily maintenance keep the newest configured number of
+upgrade snapshots, expire rollback safety copies by age while preserving the newest, and retain the
+active and previous release virtualenvs plus the configured number of additional prior releases.
+This bounds `/var/lib/outpost/backups` and `/opt/outpost/releases` without removing the recovery
+points used by the active rollback plan.
+
 ## Compromise and revocation
 
 If a release, workflow credential, action pin, or build dependency may be compromised:

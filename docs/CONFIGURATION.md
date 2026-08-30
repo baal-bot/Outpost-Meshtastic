@@ -170,10 +170,19 @@ Controls SQLite path, offline tiles, maintenance hour, retention, and backup cou
 account needs write access to the database parent directory. `store.tiles_path` is the absolute
 directory containing `manifest.json` and the bounded raster hierarchy; it defaults to
 `/var/lib/outpost/.data/tiles` and may point at separate storage. Relative tile paths are rejected
-so service working-directory changes cannot silently hide the pack. Startup and the map UI report
-the distinction between missing and unreadable packs. `maintenance_batch_rows` (250) is the
+so service working-directory changes cannot silently hide the pack. `store.releases_path` identifies
+the versioned release directory for storage accounting and defaults to `/opt/outpost/releases`.
+Startup and the map UI report the distinction between missing and unreadable packs.
+`maintenance_batch_rows` (250) is the
 maximum rows deleted in one writer transaction; `maintenance_max_rows` (10,000) bounds a complete
 daily run. The engine rotates fairly across eligible domains when the run limit is reached.
+
+`store.backup.keep` bounds scheduled `outpost-*.db` snapshots. `pre_upgrade_keep` retains the newest
+recovery snapshots by release (default 3), while `pre_rollback_days` expires manual-rollback safety
+copies after the configured days but always preserves the newest one. `superseded_release_keep`
+keeps that many additional releases beyond the `current` and `previous` symlink targets (default 1).
+The Backups page inventories all regular files in the backup tree, including unmanaged artifacts,
+so its byte count reflects actual file content rather than only scheduled snapshots.
 
 `retention.member_positions_hours` controls how
 long the latest exact POS share is retained (default 168 hours, range 1–720). Each new share stores

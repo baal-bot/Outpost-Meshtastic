@@ -8,7 +8,7 @@
     <title>Backups · Outpost</title>
     <link rel="stylesheet" href="/base.css?v=1">
     <link rel="stylesheet" href="/layout.css?v=1">
-    <link rel="stylesheet" href="/backups.css">
+    <link rel="stylesheet" href="/backups.css?v=2">
     <link rel="stylesheet" href="/components.css?v=1">
   </head>
   <body>
@@ -51,7 +51,8 @@
           <div class="storage-stats">
             <article><small>LIVE DATABASE</small><strong id="storage-database">—</strong></article>
             <article><small>WRITE-AHEAD LOG</small><strong id="storage-wal">—</strong></article>
-            <article><small>VERIFIED BACKUPS</small><strong id="storage-backups">—</strong></article>
+            <article><small>BACKUP TREE</small><strong id="storage-backups">—</strong></article>
+            <article><small>INSTALLED RELEASES</small><strong id="storage-releases">—</strong></article>
             <article><small>DISK AVAILABLE</small><strong id="storage-free">—</strong></article>
           </div>
           <div class="storage-layout">
@@ -82,13 +83,13 @@
         </section>
 
         <section class="backup-stats">
-          <article><small>AVAILABLE SNAPSHOTS</small><strong id="backup-count">—</strong></article>
+          <article><small>TRACKED ARTIFACTS</small><strong id="backup-count">—</strong></article>
           <article><small>STORAGE USED</small><strong id="backup-size">—</strong></article>
           <article><small>NEWEST VERIFIED</small><strong id="backup-newest">—</strong></article>
         </section>
         <section class="ui-card panel content-panel backup-panel">
           <div class="heading">
-            <div><p class="eyebrow">SNAPSHOT LIBRARY</p><h2>Verified database backups</h2></div>
+            <div><p class="eyebrow">SNAPSHOT LIBRARY</p><h2>Backups & recovery artifacts</h2></div>
             <button id="refresh-backups">Refresh</button>
           </div>
           <div id="backup-list" class="backup-list"><p class="ui-empty empty">Loading…</p></div>
@@ -99,6 +100,6 @@
         <span>Restore operations are durably tracked across restart.</span>
       </footer>
     </div>
-    <script type="module" src="/backups.js?v=3"></script>
+    <script type="module" src="/backups.js?v=4"></script>
   </body>
 </html>

@@ -181,7 +181,14 @@ async def test_configuration_and_inventory_checks_report_specific_operator_evide
     checks = {item["name"]: item for item in report["checks"]}
     assert report["status"] == "degraded"
     assert report["safety_failures"] == 0
-    assert checks["backup_rotation"]["evidence"] == {"file_count": 2, "keep": 1}
+    assert checks["backup_rotation"]["evidence"] == {
+        "file_count": 2,
+        "scheduled_count": 2,
+        "scheduled_keep": 1,
+        "pre_upgrade_count": 0,
+        "pre_upgrade_keep": 3,
+        "pre_rollback_days": 30,
+    }
     assert checks["intent_map"]["evidence"]["error"].startswith("TypeError:")
     assert checks["configured_keys_effective"]["passed"]
     assert checks["configured_keys_effective"]["evidence"]["ineffective_keys"] == []

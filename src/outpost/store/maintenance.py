@@ -4,6 +4,7 @@ import asyncio
 import json
 import shutil
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -11,7 +12,7 @@ from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.config import Config
 
-from .backups import BackupService
+from .backups import BackupService, release_inventory
 from .database import Database
 
 DAY = 86_400
@@ -852,6 +853,13 @@ class MaintenanceService:
 
         database_path = self.database.path
         backup_items = self.backups.list()
+        backup_breakdown: dict[str, dict[str, int]] = {}
+        for item in backup_items:
+            kind = str(item["kind"])
+            values = backup_breakdown.setdefault(kind, {"count": 0, "size_bytes": 0})
+            values["count"] += 1
+            values["size_bytes"] += int(str(item["size_bytes"]))
+        releases = await asyncio.to_thread(release_inventory, Path(self.config.store.releases_path))
         disk = shutil.disk_usage(database_path.parent)
         last_rows = await self.database.read(
             "SELECT value FROM runtime_setting WHERE key='maintenance.last_date'"
@@ -873,6 +881,10 @@ class MaintenanceService:
             "shm_bytes": shm_path.stat().st_size if shm_path.exists() else 0,
             "backup_bytes": sum(int(str(item["size_bytes"])) for item in backup_items),
             "backup_count": len(backup_items),
+            "backup_breakdown": backup_breakdown,
+            "release_bytes": releases["size_bytes"],
+            "release_count": releases["count"],
+            "release_keep_prior": self.config.store.backup.superseded_release_keep,
             "disk_free_bytes": disk.free,
             "disk_total_bytes": disk.total,
             "growth_since": growth_since,

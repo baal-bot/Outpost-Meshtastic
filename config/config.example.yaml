@@ -166,6 +166,7 @@ web:
 store:
   path: "/var/lib/outpost/outpost.db"
   tiles_path: "/var/lib/outpost/.data/tiles"
+  releases_path: "/opt/outpost/releases"
   maintenance_hour: 3
   maintenance_batch_rows: 250
   maintenance_max_rows: 10000
@@ -186,4 +187,9 @@ store:
     federation_service_days: 7
     federation_history_days: 30
     outbound_history_days: 30
-  backup: {enabled: true, keep: 14}
+  backup:
+    enabled: true
+    keep: 14
+    pre_upgrade_keep: 3
+    pre_rollback_days: 30
+    superseded_release_keep: 1

@@ -399,6 +399,31 @@ if [ -n "$OLD_TARGET" ]; then
   rm -f "$PREVIOUS_LINK"
   ln -s "$OLD_TARGET" "$PREVIOUS_LINK"
 fi
+if cleanup_result=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - \
+  "$PREFIX/releases" "$CURRENT_LINK" "$PREVIOUS_LINK" <<'PY'
+import sys
+from pathlib import Path
+
+from outpost.config import load_config
+from outpost.store import Database
+from outpost.store.backups import BackupService, prune_release_directories
+
+config = load_config()
+backups = BackupService(Database(config.store.path), config.store.backup)
+backup_files = backups.rotate()
+release_dirs = prune_release_directories(
+    Path(sys.argv[1]),
+    Path(sys.argv[2]),
+    Path(sys.argv[3]),
+    config.store.backup.superseded_release_keep,
+)
+print(f"Recovery retention removed {backup_files} backup file(s) and {len(release_dirs)} release(s).")
+PY
+); then
+  echo "$cleanup_result"
+else
+  echo "Recovery retention could not be completed; the healthy release remains active." >&2
+fi
 printf '%s\n' "$RELEASE_ID" > "$PREFIX/installed-release"
 echo "Outpost $RELEASE_ID is healthy at $HEALTH_URL"
 echo "Dashboard setup token (first install): sudo outpost-setup-token show"

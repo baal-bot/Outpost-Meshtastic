@@ -153,6 +153,7 @@ async function loadStorage() {
   $("storage-database").textContent = formatSize(body.database_bytes);
   $("storage-wal").textContent = formatSize(body.wal_bytes);
   $("storage-backups").textContent = `${body.backup_count} · ${formatSize(body.backup_bytes)}`;
+  $("storage-releases").textContent = `${body.release_count} · ${formatSize(body.release_bytes)}`;
   $("storage-free").textContent = formatSize(body.disk_free_bytes);
   renderDomains(body.domains || [], body.growth_since);
   renderCleanup(body.cleanup || {});
@@ -170,22 +171,23 @@ async function loadBackups() {
   const response = await fetch("/api/v1/backups");
   const body = await response.json();
   const items = body.items;
+  const verified = items.filter((item) => (item.kind || "scheduled") === "scheduled");
   $("backup-count").textContent = items.length;
   $("backup-size").textContent = formatSize(
     items.reduce((sum, item) => sum + item.size_bytes, 0),
   );
-  $("backup-newest").textContent = items.length
-    ? new Date(items[0].created_at).toLocaleDateString()
+  $("backup-newest").textContent = verified.length
+    ? new Date(verified[0].created_at).toLocaleDateString()
     : "None";
   $("backup-list").innerHTML = items.map((item) => `
     <div class="backup-row">
-      <strong>${safe(item.name)}</strong>
+      <div><strong>${safe(item.name)}</strong><small class="backup-kind">${safe(item.kind_label || "Verified backup")}${item.protected ? " · protected" : ""}</small></div>
       <span>${formatSize(item.size_bytes)}</span>
       <span>${new Date(item.created_at).toLocaleString()}</span>
       <div class="backup-actions">
-        <a href="/api/v1/backups/${encodeURIComponent(item.name)}">Download</a>
-        <button data-validate="${safe(item.name)}">Validate</button>
-        <button class="restore" data-restore="${safe(item.name)}">Restore</button>
+        ${item.downloadable === false ? "" : `<a href="/api/v1/backups/${encodeURIComponent(item.name)}">Download</a>`}
+        ${item.restorable === false ? "" : `<button data-validate="${safe(item.name)}">Validate</button><button class="restore" data-restore="${safe(item.name)}">Restore</button>`}
+        ${item.removable ? `<button class="remove" data-remove="${safe(item.name)}">Remove</button>` : ""}
       </div>
     </div>
   `).join("") || `<p class="ui-empty empty">No backups yet.</p>`;
@@ -195,6 +197,35 @@ async function loadBackups() {
   document.querySelectorAll("[data-restore]").forEach((button) => {
     button.addEventListener("click", () => restore(button));
   });
+  document.querySelectorAll("[data-remove]").forEach((button) => {
+    button.addEventListener("click", () => removeRecovery(button));
+  });
+}
+
+async function removeRecovery(button) {
+  const name = button.dataset.remove;
+  const verification = `DELETE ${name}`;
+  const phrase = await window.OutpostUI.prompt({
+    eyebrow: "RECOVERY RETENTION",
+    title: `Remove ${name}?`,
+    message: "This permanently removes an older recovery snapshot. The newest snapshot of each recovery kind remains protected.",
+    label: "Removal confirmation",
+    verification,
+    confirmLabel: "Remove snapshot",
+    danger: true,
+  });
+  if (phrase === null) return;
+  const response = await fetch(`/api/v1/backups/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: {"content-type": "application/json", "x-csrf-token": csrfToken},
+    body: JSON.stringify({confirmation: phrase}),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    await window.OutpostUI.alert({title: "Snapshot was not removed", message: result.error?.message || "Removal failed."});
+    return;
+  }
+  await Promise.all([loadBackups(), loadStorage()]);
 }
 
 async function validate(button) {

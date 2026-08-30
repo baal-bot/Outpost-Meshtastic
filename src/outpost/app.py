@@ -332,7 +332,7 @@ class OutpostApp:
             throttle_max_seconds=auth_config.throttle_max_seconds,
         )
         self.runtime_settings = RuntimeSettings(self.database, self.config)
-        self.backups = BackupService(self.database)
+        self.backups = BackupService(self.database, self.config.store.backup)
         self.restore_coordinator = RestoreCoordinator(
             self.backups, self._restore_database, self._request_restart
         )

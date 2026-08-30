@@ -96,6 +96,27 @@ rm -f "$PREVIOUS"
 ln -s "$old" "$PREVIOUS"
 systemctl start "$SERVICE_NAME" || true
 if outpost_wait_for_health; then
+  if ! OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$old/bin/python" - \
+    "$PREFIX/releases" "$CURRENT" "$PREVIOUS" <<'PY'
+import sys
+from pathlib import Path
+
+from outpost.config import load_config
+from outpost.store import Database
+from outpost.store.backups import BackupService, prune_release_directories
+
+config = load_config()
+BackupService(Database(config.store.path), config.store.backup).rotate()
+prune_release_directories(
+    Path(sys.argv[1]),
+    Path(sys.argv[2]),
+    Path(sys.argv[3]),
+    config.store.backup.superseded_release_keep,
+)
+PY
+  then
+    echo "Rollback recovery retention could not be completed." >&2
+  fi
   echo "Rollback is healthy. Active release: $target"
   exit 0
 else

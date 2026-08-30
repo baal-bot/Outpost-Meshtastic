@@ -293,21 +293,34 @@ class SelfCheckService:
         )
 
     def _backup_rotation(self) -> CheckResult:
-        keep = self.config.store.backup.keep
+        policy = self.config.store.backup
         try:
-            count = len(self.backups.list())
+            items = self.backups.list()
         except OSError as error:
             return self._result(
                 "backup_rotation",
                 False,
                 f"Backup inventory could not be read ({type(error).__name__}).",
-                {"file_count": None, "keep": keep, "error_type": type(error).__name__},
+                {"file_count": None, "keep": policy.keep, "error_type": type(error).__name__},
             )
+        scheduled = sum(item.get("kind", "scheduled") == "scheduled" for item in items)
+        pre_upgrade = sum(item.get("kind") == "pre_upgrade" for item in items)
+        passed = scheduled <= policy.keep and pre_upgrade <= policy.pre_upgrade_keep
         return self._result(
             "backup_rotation",
-            count <= keep,
-            f"{count} backup file(s) are retained; policy allows {keep}.",
-            {"file_count": count, "keep": keep},
+            passed,
+            (
+                f"{scheduled} scheduled and {pre_upgrade} pre-upgrade snapshot(s) are retained; "
+                f"policy allows {policy.keep} and {policy.pre_upgrade_keep}."
+            ),
+            {
+                "file_count": len(items),
+                "scheduled_count": scheduled,
+                "scheduled_keep": policy.keep,
+                "pre_upgrade_count": pre_upgrade,
+                "pre_upgrade_keep": policy.pre_upgrade_keep,
+                "pre_rollback_days": policy.pre_rollback_days,
+            },
         )
 
     async def _alert_delivery_history(self, now: int) -> CheckResult:

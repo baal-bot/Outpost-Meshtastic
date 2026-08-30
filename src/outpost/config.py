@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 
 TRAFFIC_CLASSES = {"alert", "reply", "ai", "bulletin", "digest", "federation"}
 DEFAULT_TILES_PATH = "/var/lib/outpost/.data/tiles"
+DEFAULT_RELEASES_PATH = "/opt/outpost/releases"
 
 
 class StrictModel(BaseModel):
@@ -451,23 +452,36 @@ class RetentionConfig(StrictModel):
 class BackupConfig(StrictModel):
     enabled: bool = True
     keep: int = Field(default=14, ge=1)
+    pre_upgrade_keep: int = Field(default=3, ge=1, le=50)
+    pre_rollback_days: int = Field(default=30, ge=1, le=365)
+    superseded_release_keep: int = Field(default=1, ge=0, le=10)
+
+    @model_validator(mode="after")
+    def preserve_release_rollback_points(self) -> BackupConfig:
+        minimum = self.superseded_release_keep + 2
+        if self.pre_upgrade_keep < minimum:
+            raise ValueError(
+                "store.backup.pre_upgrade_keep must preserve current, previous, and prior releases"
+            )
+        return self
 
 
 class StoreConfig(StrictModel):
     path: str = "/var/lib/outpost/outpost.db"
     tiles_path: str = DEFAULT_TILES_PATH
+    releases_path: str = DEFAULT_RELEASES_PATH
     maintenance_hour: int = Field(default=3, ge=0, le=23)
     maintenance_batch_rows: int = Field(default=250, ge=25, le=2_000)
     maintenance_max_rows: int = Field(default=10_000, ge=250, le=100_000)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
 
-    @field_validator("tiles_path")
+    @field_validator("tiles_path", "releases_path")
     @classmethod
-    def absolute_tiles_path(cls, value: str) -> str:
+    def absolute_storage_path(cls, value: str) -> str:
         path = Path(value).expanduser()
         if not path.is_absolute():
-            raise ValueError("store.tiles_path must be absolute")
+            raise ValueError("persistent storage paths must be absolute")
         return str(path.resolve(strict=False))
 
 

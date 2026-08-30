@@ -82,6 +82,14 @@ The dashboard can create, validate, download, and restore backups. Rotation prot
 local copies do not protect against device loss. Periodically store a validated backup in encrypted
 off-device storage.
 
+The Backups page classifies scheduled snapshots, pre-upgrade recovery points, pre-rollback safety
+copies, restore metadata, auxiliary SQLite files, and unmanaged artifacts. All are included in its
+storage total. Daily maintenance retains `store.backup.keep` scheduled snapshots, the newest
+`pre_upgrade_keep` upgrade snapshots, and manual-rollback snapshots within `pre_rollback_days`,
+always protecting the newest recovery point of each kind. Administrators can remove older managed
+recovery snapshots from the page with a confirmation phrase; unmanaged files require deliberate
+local review. Installed release count and bytes are reported separately.
+
 Before restore, validate the exact file, understand newer data loss, notify operators, and use the
 displayed confirmation phrase. Outpost then enters visible maintenance mode, blocks and drains API,
 radio, transport, and scheduled work, creates a verified safety snapshot, restores, and restarts.
@@ -101,6 +109,8 @@ schema; code-only failures do not replace live data. It also keeps a pre-attempt
 and restores it after a failed schema rollback. HTTP, trusted-proxy, and direct-HTTPS deployments
 share one loopback probe implementation, and probe configuration errors fail before downtime. The
 verification and compromise-response procedures are in [Releases](RELEASES.md).
+After a healthy upgrade, Outpost retains the `current` and `previous` release directories plus
+`store.backup.superseded_release_keep` additional prior releases and removes older virtualenvs.
 
 ## Radio maintenance
 

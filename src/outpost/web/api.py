@@ -153,6 +153,7 @@ def step_up_path(method: str, path: str) -> bool:
     return (
         any(path.startswith(prefix) for prefix in STEP_UP_PREFIXES)
         or (path.startswith("/api/v1/backups/") and path.endswith("/restore"))
+        or (path.startswith("/api/v1/backups/") and method == "DELETE")
         or (path.startswith("/api/v1/members/") and method in {"PATCH", "DELETE"})
         or (path.startswith("/api/v1/members/") and path.endswith("/pki"))
     )
@@ -321,6 +322,10 @@ class MeshSendBody(BaseModel):
 
 
 class RestoreBody(BaseModel):
+    confirmation: str
+
+
+class BackupDeleteBody(BaseModel):
     confirmation: str
 
 
@@ -846,9 +851,9 @@ def create_web_app(
                     status_code=403,
                 )
             admin_only = path.startswith("/api/v1/auth/accounts") or (
-                request.method == "POST"
+                request.method in {"POST", "DELETE"}
                 and path.startswith("/api/v1/backups/")
-                and path.endswith("/restore")
+                and (path.endswith("/restore") or request.method == "DELETE")
             )
             if admin_only and session.role != "administrator":
                 return JSONResponse(
@@ -2683,11 +2688,31 @@ def create_web_app(
                     action="backup.create",
                     target=path.name,
                 )
-                return {"backup": backups.list()[0]}
+                return {
+                    "backup": next(item for item in backups.list() if item["name"] == path.name)
+                }
+
+            @app.delete("/api/v1/backups/{name}", response_model=None)
+            async def backup_delete(name: str, body: BackupDeleteBody) -> dict[str, str] | Response:
+                try:
+                    path = backups.remove_recovery(name, body.confirmation)
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "delete_rejected", "message": str(error)}},
+                        status_code=422,
+                    )
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="backup.recovery_delete",
+                    target=name,
+                )
+                return {"status": "deleted", "name": path.name}
 
             @app.get("/api/v1/backups/{name}", response_class=FileResponse)
             async def backup_download(name: str) -> Response:
-                path = backups.resolve(name)
+                path = backups.resolve_download(name)
                 if path is None:
                     return JSONResponse(
                         {"error": {"code": "not_found", "message": "Backup not found."}},
