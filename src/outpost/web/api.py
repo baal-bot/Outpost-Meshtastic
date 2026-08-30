@@ -21,7 +21,7 @@ from outpost.ai import AIService
 from outpost.ai.store import AIStore
 from outpost.audit import display_audit_detail, write_audit
 from outpost.bbs.admin import BBSAdmin
-from outpost.config import WebConfig
+from outpost.config import DEFAULT_TILES_PATH, WebConfig
 from outpost.env import (
     AstronomyService,
     CapAlertService,
@@ -52,6 +52,7 @@ from outpost.web.auth import MfaChallenge, WebAuthService
 from outpost.web.member_triage import NEEDS_REVIEW_SQL, MemberTriageError, MemberTriageService
 from outpost.web.operator_inbox import OperatorInboxService
 from outpost.web.settings import RuntimeSettings
+from outpost.web.tiles import absolute_tile_root, find_tile, inspect_tile_pack
 from outpost.web.transport import WebTransportMiddleware, transport_status
 
 PUBLIC_API_PATHS = frozenset(
@@ -68,7 +69,7 @@ PUBLIC_API_PREFIXES = ("/api/v1/recovery/restores/",)
 PUBLIC_NON_API_ROUTE_PATHS = frozenset(
     {
         "/tiles/manifest.json",
-        "/tiles/{zoom}/{x}/{y}.png",
+        "/tiles/{zoom}/{x}/{y}.{extension}",
         "/favicon.ico",
         "/connecttest.txt",
         "/ncsi.txt",
@@ -647,6 +648,7 @@ def create_web_app(
     situation: SituationBriefingService | None = None,
     web_config: WebConfig | None = None,
     self_check: SelfCheckService | None = None,
+    tile_path: str | Path = DEFAULT_TILES_PATH,
 ) -> FastAPI:
     app = FastAPI(
         title="Outpost API",
@@ -952,14 +954,29 @@ def create_web_app(
     async def security_headers(request: Request, call_next: Any) -> Response:
         return apply_security_headers(request, await call_next(request))
 
-    tile_root = Path(".data/tiles").resolve()
+    tile_root = absolute_tile_root(tile_path)
 
     @app.get("/tiles/manifest.json", response_model=None)
     async def tile_manifest() -> Response:
-        manifest = tile_root / "manifest.json"
-        if not manifest.is_file():
-            return Response(status_code=404)
-        return FileResponse(manifest, media_type="application/json")
+        status = inspect_tile_pack(tile_root)
+        if status.state != "ready":
+            return JSONResponse(
+                {
+                    "status": status.state,
+                    "message": (
+                        "No offline tile pack is installed."
+                        if status.state == "missing"
+                        else "The installed offline tile pack is unreadable."
+                    ),
+                },
+                status_code=404 if status.state == "missing" else 503,
+                headers={"Cache-Control": "no-store"},
+            )
+        assert status.manifest is not None
+        return JSONResponse(
+            {**status.manifest, "status": "ready"},
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/favicon.ico", include_in_schema=False, response_model=None)
     async def favicon() -> Response:
@@ -973,15 +990,16 @@ def create_web_app(
     async def captive_setup_entry() -> RedirectResponse:
         return RedirectResponse("/", status_code=307)
 
-    @app.get("/tiles/{zoom}/{x}/{y}.png", response_model=None)
-    async def tile_image(zoom: int, x: int, y: int) -> Response:
+    @app.get("/tiles/{zoom}/{x}/{y}.{extension}", response_model=None)
+    async def tile_image(zoom: int, x: int, y: int, extension: str) -> Response:
         if not (0 <= zoom <= 22 and 0 <= x < 2**zoom and 0 <= y < 2**zoom):
             return Response(status_code=404)
-        tile = tile_root / str(zoom) / str(x) / f"{y}.png"
-        if not tile.is_file():
+        match = find_tile(tile_root, zoom, x, y, extension)
+        if match is None:
             return Response(status_code=404)
+        tile, media_type = match
         return FileResponse(
-            tile, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"}
+            tile, media_type=media_type, headers={"Cache-Control": "public, max-age=86400"}
         )
 
     if auth is not None:

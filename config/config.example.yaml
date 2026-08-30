@@ -165,6 +165,7 @@ web:
     hsts_seconds: 31536000
 store:
   path: "/var/lib/outpost/outpost.db"
+  tiles_path: "/var/lib/outpost/.data/tiles"
   maintenance_hour: 3
   maintenance_batch_rows: 250
   maintenance_max_rows: 10000

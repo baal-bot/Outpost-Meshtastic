@@ -13,6 +13,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 TRAFFIC_CLASSES = {"alert", "reply", "ai", "bulletin", "digest", "federation"}
+DEFAULT_TILES_PATH = "/var/lib/outpost/.data/tiles"
 
 
 class StrictModel(BaseModel):
@@ -454,11 +455,20 @@ class BackupConfig(StrictModel):
 
 class StoreConfig(StrictModel):
     path: str = "/var/lib/outpost/outpost.db"
+    tiles_path: str = DEFAULT_TILES_PATH
     maintenance_hour: int = Field(default=3, ge=0, le=23)
     maintenance_batch_rows: int = Field(default=250, ge=25, le=2_000)
     maintenance_max_rows: int = Field(default=10_000, ge=250, le=100_000)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
+
+    @field_validator("tiles_path")
+    @classmethod
+    def absolute_tiles_path(cls, value: str) -> str:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            raise ValueError("store.tiles_path must be absolute")
+        return str(path.resolve(strict=False))
 
 
 class SecurityConfig(StrictModel):

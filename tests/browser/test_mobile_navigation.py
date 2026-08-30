@@ -408,7 +408,7 @@ def route_shared_operator_api(page: object) -> None:
             route.fulfill(
                 status=200,
                 content_type="application/json",
-                body='{"source":"browser-test"}',
+                body='{"source":"browser-test","status":"ready","tile_extension":"png"}',
             )
         else:
             route.fulfill(status=200, content_type="image/png", body=empty_png)
@@ -1757,9 +1757,9 @@ def test_shared_map_coalesces_touch_pan_and_preserves_dom_on_target_pi(
         page.close()
 
 
-@pytest.mark.parametrize("local_available", (True, False))
+@pytest.mark.parametrize("tile_pack_state", ("ready", "missing", "unreadable"))
 def test_shared_map_online_failure_uses_one_offline_fallback_state(
-    browser: object, dashboard_url: str, local_available: bool
+    browser: object, dashboard_url: str, tile_pack_state: str
 ) -> None:
     page = prepare_page(browser, 1280, dashboard_url, theme="dark")
     route_shared_operator_api(page)
@@ -1767,10 +1767,14 @@ def test_shared_map_online_failure_uses_one_offline_fallback_state(
         "https://tile.openstreetmap.org/**",
         lambda route: route.fulfill(status=503, content_type="text/plain", body="offline"),
     )
-    if not local_available:
+    if tile_pack_state != "ready":
         page.route(
             "**/tiles/manifest.json",
-            lambda route: route.fulfill(status=404, content_type="application/json", body="{}"),
+            lambda route: route.fulfill(
+                status=503 if tile_pack_state == "unreadable" else 404,
+                content_type="application/json",
+                body=json.dumps({"status": tile_pack_state}),
+            ),
         )
     try:
         page.goto(f"{dashboard_url}/environment.html", wait_until="networkidle")
@@ -1779,16 +1783,16 @@ def test_shared_map_online_failure_uses_one_offline_fallback_state(
         assert attribution.locator("a").get_attribute("href") == (
             "https://www.openstreetmap.org/copyright"
         )
-        if local_available:
+        if tile_pack_state == "ready":
             page.locator('#environment-map .outpost-map-tile[data-source="local"]').first.wait_for()
             assert "offline fallback: browser-test" in attribution.text_content()
             assert not page.locator("#environment-map .outpost-map-basemap-state").is_visible()
         else:
-            page.locator("#environment-map .outpost-map-basemap-state").wait_for()
-            assert (
-                "coordinates and markers remain active"
-                in page.locator("#environment-map .outpost-map-basemap-state").text_content()
-            )
+            basemap_state = page.locator("#environment-map .outpost-map-basemap-state")
+            basemap_state.wait_for()
+            attribution_state = "unreadable" if tile_pack_state == "unreadable" else "not installed"
+            assert f"offline tile pack: {attribution_state}" in attribution.text_content()
+            assert attribution_state.split()[-1] in basemap_state.text_content().lower()
     finally:
         page.close()
 

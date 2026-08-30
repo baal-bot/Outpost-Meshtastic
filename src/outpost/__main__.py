@@ -7,6 +7,7 @@ import uvicorn
 from outpost.app import OutpostApp
 from outpost.config import load_config
 from outpost.systemd import notify, watchdog
+from outpost.web.tiles import inspect_tile_pack
 from outpost.web.transport import uvicorn_options
 
 
@@ -30,6 +31,12 @@ def main() -> None:
         for index, policy in sorted(config.channels.items())
     ]
     print(f"Outpost effective channel policy: {channel_policy!r}", flush=True)
+    tile_pack = inspect_tile_pack(config.store.tiles_path)
+    print(
+        "Outpost offline tile pack: "
+        f"path={tile_pack.root} status={tile_pack.state} detail={tile_pack.detail}",
+        flush=True,
+    )
     server_options = uvicorn_options(config.web)
     application = OutpostApp(config)
 

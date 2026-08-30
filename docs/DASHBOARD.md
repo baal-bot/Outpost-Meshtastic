@@ -128,7 +128,9 @@ symbol changes state, preventing the shape and click-target shifts seen in the e
 OpenStreetMap is the online default. If a regional tile bundle is installed, failed online tiles
 fall back to it automatically. When neither source can provide a tile, the map explicitly reports
 that the basemap is unavailable while coordinates, markers, controls, and detail cards continue to
-work. Attribution and fallback state are rendered consistently on every map.
+work. Attribution and fallback state are rendered consistently on every map. The attribution also
+distinguishes a pack that is not installed from one whose manifest or raster data is unreadable;
+the configured absolute directory is `store.tiles_path`.
 
 Section headings share one responsive action-bar treatment. Filters come first, status follows,
 and action buttons remain in their authored primary/secondary order. The action bar wraps on

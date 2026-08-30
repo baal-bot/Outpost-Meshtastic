@@ -36,8 +36,15 @@
   function loadManifest() {
     if (!manifestPromise) {
       manifestPromise = fetch("/tiles/manifest.json", {cache: "no-store"})
-        .then(async response => response.ok ? await response.json() : null)
-        .catch(() => null);
+        .then(async response => {
+          const value = await response.json().catch(() => ({}));
+          if (response.ok) return {status: "ready", manifest: value};
+          return {
+            status: value.status === "unreadable" ? "unreadable" : "missing",
+            manifest: null,
+          };
+        })
+        .catch(() => ({status: "unreachable", manifest: null}));
     }
     return manifestPromise;
   }
@@ -123,7 +130,8 @@
     }
 
     async _updateAttribution() {
-      const manifest = await loadManifest();
+      const tilePack = await loadManifest();
+      const manifest = tilePack.manifest;
       if (this.destroyed) return;
       this.attribution.replaceChildren();
       const link = document.createElement("a");
@@ -136,10 +144,14 @@
         this.attribution.appendChild(document.createTextNode(
           ` · offline fallback: ${String(manifest.source || "local basemap")}`,
         ));
-        this.root.dataset.offlineTiles = "available";
+      } else if (tilePack.status === "unreadable") {
+        this.attribution.appendChild(document.createTextNode(" · offline tile pack: unreadable"));
+      } else if (tilePack.status === "missing") {
+        this.attribution.appendChild(document.createTextNode(" · offline tile pack: not installed"));
       } else {
-        this.root.dataset.offlineTiles = "unavailable";
+        this.attribution.appendChild(document.createTextNode(" · offline tile status unavailable"));
       }
+      this.root.dataset.offlineTiles = tilePack.status;
     }
 
     _bindEvents() {
@@ -484,15 +496,24 @@
 
     async _fallbackTile(key, image, zoom, x, y) {
       if (this.tileElements.get(key) !== image) return;
-      const manifest = await loadManifest();
-      if (manifest && image.dataset.source !== "local") {
+      const tilePack = await loadManifest();
+      const manifest = tilePack.manifest;
+      if (tilePack.status === "ready" && manifest && image.dataset.source !== "local") {
         image.dataset.source = "local";
-        image.src = `/tiles/${zoom}/${x}/${y}.png`;
+        const extension = manifest.tile_extension === "png" ? "png" : "jpg";
+        image.src = `/tiles/${zoom}/${x}/${y}.${extension}`;
         return;
       }
       image.remove();
       this.tileElements.delete(key);
       this.tileFailures += 1;
+      this.basemapState.textContent = tilePack.status === "unreadable"
+        ? "Offline tile pack unreadable · coordinates and markers remain active"
+        : tilePack.status === "missing"
+          ? "No offline tile pack installed · coordinates and markers remain active"
+          : tilePack.status === "ready"
+            ? "Tile absent from offline pack · coordinates and markers remain active"
+            : "Basemap unavailable · coordinates and markers remain active";
       this.basemapState.hidden = false;
     }
 

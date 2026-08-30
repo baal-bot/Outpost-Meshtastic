@@ -387,6 +387,7 @@ class OutpostApp:
             radio_configuration_apply=self.configure_radio,
             situation=self.situation,
             web_config=self.config.web,
+            tile_path=self.config.store.tiles_path,
         )
 
     def _start_background_task(

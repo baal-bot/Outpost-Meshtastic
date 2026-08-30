@@ -255,13 +255,18 @@ PY
     "$HAILO_VLM_MODEL_PATH" | sha256sum -c -
 fi
 METRICS_URL="$OUTPOST_LOOPBACK_BASE/metrics"
+TILE_PATH=$(OUTPOST_CONFIG="$CONFIG_DIR/config.yaml" "$RELEASE_DIR/bin/python" - <<'PY'
+from outpost.config import load_config
+print(load_config().store.tiles_path)
+PY
+)
 
-if [ ! -f "$STATE_DIR/.data/tiles/manifest.json" ] && \
+if [ ! -f "$TILE_PATH/manifest.json" ] && \
   "$RELEASE_DIR/bin/python" -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])) or {}; raise SystemExit(0 if d.get("node",{}).get("location") else 1)' "$CONFIG_DIR/config.yaml"; then
   echo "Installing bounded offline map pack for node.location"
   if "$RELEASE_DIR/bin/python" "$PROJECT_DIR/tools/build_tile_pack.py" \
-    --config "$CONFIG_DIR/config.yaml" --output "$STATE_DIR/.data/tiles"; then
-    chown -R outpost:outpost "$STATE_DIR/.data/tiles"
+    --config "$CONFIG_DIR/config.yaml"; then
+    chown -R outpost:outpost "$TILE_PATH"
   else
     echo "Offline map download failed; installation will continue with online maps." >&2
   fi

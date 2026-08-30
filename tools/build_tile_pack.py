@@ -10,11 +10,29 @@ import time
 import urllib.request
 from pathlib import Path
 
-import yaml
+from outpost.config import DEFAULT_TILES_PATH as DEFAULT_TILES_PATH_VALUE
+from outpost.config import load_config
 
+DEFAULT_TILES_PATH = Path(DEFAULT_TILES_PATH_VALUE)
 USGS_TOPO = (
     "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}"
 )
+
+
+def raster_extension(content: bytes) -> str | None:
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    return None
+
+
+def configured_output(configured: str | Path | None, explicit: Path | None) -> Path:
+    selected = explicit or (Path(configured) if configured else DEFAULT_TILES_PATH)
+    selected = selected.expanduser()
+    if not selected.is_absolute():
+        raise ValueError("offline tile output path must be absolute")
+    return selected.resolve(strict=False)
 
 
 def tile_xy(lat: float, lon: float, zoom: int) -> tuple[int, int]:
@@ -55,7 +73,7 @@ def main() -> None:
     parser.add_argument("--min-zoom", type=int, default=8)
     parser.add_argument("--max-zoom", type=int, default=14)
     parser.add_argument("--max-tiles", type=int, default=1000)
-    parser.add_argument("--output", type=Path, default=Path(".data/tiles"))
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--url-template", default=USGS_TOPO)
     parser.add_argument("--source-name", default="USGS The National Map — USGSTopo")
     parser.add_argument(
@@ -67,13 +85,18 @@ def main() -> None:
     )
     parser.add_argument("--replace", action="store_true")
     args = parser.parse_args()
+    configured_tile_path: str | None = None
     if args.config:
-        data = yaml.safe_load(args.config.read_text()) or {}
-        location = data.get("node", {}).get("location")
-        if not location:
+        config = load_config(args.config)
+        if config.node.location is None:
             parser.error(f"node.location is not configured in {args.config}")
-        args.lat = location["lat"]
-        args.lon = location["lon"]
+        args.lat = config.node.location.lat
+        args.lon = config.node.location.lon
+        configured_tile_path = config.store.tiles_path
+    try:
+        args.output = configured_output(configured_tile_path, args.output)
+    except ValueError as error:
+        parser.error(str(error))
     if args.lat is None or args.lon is None:
         parser.error("provide --config with node.location or both --lat and --lon")
     if not all(token in args.url_template for token in ("{z}", "{x}", "{y}")):
@@ -91,20 +114,40 @@ def main() -> None:
         parser.error(f"pack requires {len(tiles)} tiles; limit is {args.max_tiles}")
     args.output.mkdir(parents=True, exist_ok=True)
     downloaded = skipped = 0
+    tile_extension: str | None = None
     for index, (zoom, x, y) in enumerate(tiles, 1):
-        destination = args.output / str(zoom) / str(x) / f"{y}.png"
-        if destination.exists() and not args.replace:
+        directory = args.output / str(zoom) / str(x)
+        existing = next(
+            (
+                directory / f"{y}.{extension}"
+                for extension in ("jpg", "jpeg", "png")
+                if (directory / f"{y}.{extension}").is_file()
+            ),
+            None,
+        )
+        if existing is not None and not args.replace:
+            detected = raster_extension(existing.read_bytes()[:8])
+            if detected is None:
+                raise RuntimeError(f"existing tile {zoom}/{x}/{y} is not a raster image")
+            if tile_extension is not None and detected != tile_extension:
+                raise RuntimeError("tile pack mixes PNG and JPEG data; rebuild it with --replace")
+            tile_extension = detected
             skipped += 1
             continue
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        directory.mkdir(parents=True, exist_ok=True)
         request = urllib.request.Request(  # noqa: S310
             args.url_template.format(z=zoom, x=x, y=y),
             headers={"User-Agent": "Outpost/0.1 offline tile pack (local operator install)"},
         )
         with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
             content = response.read()
-        if not (content.startswith(b"\x89PNG") or content.startswith(b"\xff\xd8\xff")):
+        detected = raster_extension(content)
+        if detected is None:
             raise RuntimeError(f"tile {zoom}/{x}/{y} was not a raster image")
+        if tile_extension is not None and detected != tile_extension:
+            raise RuntimeError("tile source mixes PNG and JPEG data; use one consistent source")
+        tile_extension = detected
+        destination = directory / f"{y}.{detected}"
         destination.write_bytes(content)
         downloaded += 1
         if index % 25 == 0:
@@ -112,7 +155,7 @@ def main() -> None:
         time.sleep(0.03)
     south, west, north, east = bounds(args.lat, args.lon, args.radius_km)
     manifest = {
-        "version": 1,
+        "version": 2,
         "source": args.source_name,
         "attribution": args.attribution,
         "center": {"lat": args.lat, "lon": args.lon},
@@ -120,6 +163,7 @@ def main() -> None:
         "min_zoom": args.min_zoom,
         "max_zoom": args.max_zoom,
         "tile_count": len(tiles),
+        "tile_extension": tile_extension,
     }
     (args.output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"Tile pack ready: {len(tiles)} total, {downloaded} downloaded, {skipped} retained")

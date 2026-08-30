@@ -13,6 +13,16 @@ from outpost.config import Config, load_config
 
 def test_default_config_is_valid() -> None:
     assert Config().airtime.budget_percent == 8
+    assert Config().store.tiles_path == "/var/lib/outpost/.data/tiles"
+
+
+def test_tile_path_must_be_absolute_and_is_resolved(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="store.tiles_path must be absolute"):
+        Config.model_validate({"store": {"tiles_path": ".data/tiles"}})
+
+    configured = tmp_path / "pack" / ".." / "tiles"
+    config = Config.model_validate({"store": {"tiles_path": str(configured)}})
+    assert config.store.tiles_path == str(configured.resolve())
 
 
 def test_channel_environment_override_merges_with_integer_yaml_key(

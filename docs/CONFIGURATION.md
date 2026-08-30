@@ -166,10 +166,14 @@ configured proxy networks. See [Web transport and network boundary](WEB-TRANSPOR
 
 ### `store`
 
-Controls SQLite path, maintenance hour, retention, and backup count. The service account needs
-write access to the database parent directory. `maintenance_batch_rows` (250) is the maximum rows
-deleted in one writer transaction; `maintenance_max_rows` (10,000) bounds a complete daily run.
-The engine rotates fairly across eligible domains when the run limit is reached.
+Controls SQLite path, offline tiles, maintenance hour, retention, and backup count. The service
+account needs write access to the database parent directory. `store.tiles_path` is the absolute
+directory containing `manifest.json` and the bounded raster hierarchy; it defaults to
+`/var/lib/outpost/.data/tiles` and may point at separate storage. Relative tile paths are rejected
+so service working-directory changes cannot silently hide the pack. Startup and the map UI report
+the distinction between missing and unreadable packs. `maintenance_batch_rows` (250) is the
+maximum rows deleted in one writer transaction; `maintenance_max_rows` (10,000) bounds a complete
+daily run. The engine rotates fairly across eligible domains when the run limit is reached.
 
 `retention.member_positions_hours` controls how
 long the latest exact POS share is retained (default 168 hours, range 1–720). Each new share stores

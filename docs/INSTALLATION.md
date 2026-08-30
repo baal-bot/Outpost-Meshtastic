@@ -189,12 +189,15 @@ When `node.location` exists at installation, the installer seeds a bounded USGS 
 
 ```sh
 sudo -u outpost /opt/outpost/current/bin/python tools/build_tile_pack.py \
-  --config /etc/outpost/config.yaml --output /var/lib/outpost/.data/tiles
+  --config /etc/outpost/config.yaml
 ```
 
 Run that from the repository or use its absolute tool path. The tool caps radius/zoom/tile count
 and refuses bulk downloads from the standard OpenStreetMap tile server. Online OpenStreetMap is
-used interactively; the local USGS pack is the fallback.
+used interactively; the local USGS pack is the fallback. The output defaults to
+`store.tiles_path` (`/var/lib/outpost/.data/tiles` on packaged installs); set that absolute path in
+the configuration before building when tiles belong on separate storage. Startup logs the
+resolved path and whether its pack is ready, missing, or unreadable.
 
 ## Upgrade
 
