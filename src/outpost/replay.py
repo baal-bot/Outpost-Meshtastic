@@ -135,8 +135,8 @@ class ReplayRecord:
             raise ReplayError("replay message has an invalid sender mesh id")
         if self.to_mesh_id is not None and not _valid_destination(self.to_mesh_id):
             raise ReplayError("replay message has an invalid destination mesh id")
-        if not 0 <= self.channel <= 7:
-            raise ReplayError("replay message channel must be 0-7")
+        if not 0 <= self.channel <= 255:
+            raise ReplayError("replay message channel or encrypted channel hash must be 0-255")
         if not 0 <= self.portnum <= 511:
             raise ReplayError("replay message portnum must be 0-511")
         if not 0 <= self.packet_id <= 0xFFFFFFFF:
@@ -346,6 +346,11 @@ def _database_corpus(path: Path, selection: ReplaySelection) -> ReplayCorpus:
             limitations.append("At least one encrypted packet lacks its authenticated public key.")
         if any(record.text is None and record.payload is None for record in records):
             limitations.append("At least one non-text packet lacks a retained binary payload.")
+        if any(record.channel > 7 for record in records):
+            limitations.append(
+                "At least one undecoded encrypted frame retains an 8-bit channel hash; "
+                "replay cannot reproduce firmware decryption or recover its local channel index."
+            )
         if any(record.portnum == 5 and record.request_id is not None for record in records):
             limitations.append(
                 "Routing acknowledgements start without their historical outbound "
@@ -725,8 +730,15 @@ class ReplayHarness:
                 "Routing acknowledgements start without their historical outbound "
                 "correlation state."
             )
+        if any(record.channel > 7 for record in corpus.records):
+            self.limitations.append(
+                "At least one undecoded encrypted frame retains an 8-bit channel hash; "
+                "replay cannot reproduce firmware decryption or recover its local channel index."
+            )
         node_id = _choose_local_node(corpus)
-        channels = frozenset({0, *(record.channel for record in corpus.records)})
+        channels = frozenset(
+            {0, *(record.channel for record in corpus.records if record.channel <= 7)}
+        )
         self.radio = SimulatedRadioLink(
             self.clock,
             node_id=node_id,

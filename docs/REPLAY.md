@@ -49,7 +49,9 @@ Older retained rows remain replayable for text commands. Results list missing sc
 packet limitations. Routing acknowledgements cannot correlate unless their original outbound state
 is represented in scratch data. Provider results and stateful BBS/mail results can also differ from
 the historical response because replay starts from a clean store seeded only with member trust,
-handle, and reviewed PKI state.
+handle, and reviewed PKI state. Undecoded encrypted frames may retain Meshtastic's 8-bit channel
+hash instead of a local channel index; replay preserves the observation but cannot reproduce
+firmware decryption.
 
 ## Redacted bundles
 

@@ -201,6 +201,16 @@ def test_replay_rejects_unsafe_selection_bundle_and_scratch_artifacts(tmp_path) 
     with pytest.raises(ReplayError, match="is_direct must be true or false"):
         load_corpus(invalid_bundle)
 
+    value = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    value["messages"][0]["channel"] = 198
+    channel_hash_bundle = tmp_path / "channel-hash.json"
+    channel_hash_bundle.write_text(json.dumps(value), encoding="utf-8")
+    channel_hash_harness = ReplayHarness(
+        Config(), load_corpus(channel_hash_bundle), tmp_path / "channel-hash.db"
+    )
+    assert channel_hash_harness.radio.snapshot.channels == frozenset({0})
+    assert any("channel hash" in item for item in channel_hash_harness.limitations)
+
     corpus = load_corpus(FIXTURE)
     scratch = tmp_path / "scratch.db"
     Path(f"{scratch}-wal").touch()
