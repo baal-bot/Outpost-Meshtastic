@@ -616,6 +616,8 @@ CREATE TABLE kb_document (
   source_ref TEXT,
   tags       TEXT,                 -- JSON array
   pinned     INTEGER NOT NULL DEFAULT 0,
+  chunk_token_limit INTEGER NOT NULL DEFAULT 0,
+  chunk_overlap_tokens INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );

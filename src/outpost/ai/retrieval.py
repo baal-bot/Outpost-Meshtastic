@@ -112,9 +112,11 @@ def _query(question: str) -> str:
     return " OR ".join(f'"{word}"' for word in _terms(question))
 
 
-def _terms(text: str) -> tuple[str, ...]:
+def _terms(text: str, *, limit: int | None = 12) -> tuple[str, ...]:
     words = [word.casefold() for word in _WORDS.findall(text)]
-    useful = [word for word in words if word not in _STOP and len(word) > 1][:12]
+    useful = [word for word in words if word not in _STOP and len(word) > 1]
+    if limit is not None:
+        useful = useful[:limit]
     return tuple(dict.fromkeys(useful))
 
 
@@ -194,7 +196,7 @@ class RetrievalEngine:
             return []
         rows = await self.database.read(
             """
-            SELECT d.slug,c.text,d.updated_at,bm25(kb_fts) rank
+            SELECT d.slug,c.seq,c.text,d.updated_at,bm25(kb_fts) rank
             FROM kb_fts f JOIN kb_chunk c ON c.id=f.rowid
             JOIN kb_document d ON d.id=c.document_id
             WHERE kb_fts MATCH ? ORDER BY rank LIMIT 8
@@ -206,12 +208,12 @@ class RetrievalEngine:
         minimum_overlap = 1 if len(terms) < 2 else 2
         chunks: list[EvidenceChunk] = []
         for row in rows:
-            overlap = len(terms.intersection(_terms(str(row["text"]))))
+            overlap = len(terms.intersection(_terms(str(row["text"]), limit=None)))
             if overlap < minimum_overlap:
                 continue
             chunks.append(
                 EvidenceChunk(
-                    f"kb:{row['slug']}",
+                    f"kb:{row['slug']}" + (f"#{row['seq']}" if int(row["seq"]) > 1 else ""),
                     "kb",
                     str(row["text"]),
                     (

@@ -164,7 +164,9 @@ class OutpostApp:
             safety_repeat_window_seconds=self.config.security.safety_repeat_window_seconds,
         )
         self.router = Router(self.config, members, sessions, limiter)
-        self.ai_store = AIStore(self.database)
+        self.ai_store = AIStore(
+            self.database, evidence_tokens=self.config.ai.budget.evidence_tokens
+        )
         provider_config = (
             self.config.ai
             if self.config.modules.ai.enabled
@@ -720,6 +722,7 @@ class OutpostApp:
 
     async def startup(self) -> None:
         await self.database.open()
+        await self.ai_store.rechunk_stale_documents()
         await self.radio_configuration.initialize()
         if self.config.modules.fed.enabled:
             try:

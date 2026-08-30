@@ -87,7 +87,16 @@ function renderKnowledge() {
     const row = element("article", "knowledge-row");
     const header = element("header");
     const title = element("div");
-    title.append(element("h3", "", document.title), element("code", "", `src: kb:${document.slug}`));
+    const status = document.retrievable
+      ? `${document.chunk_count} ${document.chunk_count === 1 ? "chunk" : "chunks"} · retrievable`
+      : `${document.chunk_count} ${document.chunk_count === 1 ? "chunk" : "chunks"} · unavailable to ASK`;
+    const statusNode = element("span", "knowledge-status", status);
+    statusNode.dataset.retrievable = String(Boolean(document.retrievable));
+    title.append(
+      element("h3", "", document.title),
+      element("code", "", `src: kb:${document.slug}`),
+      statusNode,
+    );
     const actions = element("div", "knowledge-actions");
     const edit = element("button", "", "Edit");
     edit.type = "button";
@@ -98,6 +107,7 @@ function renderKnowledge() {
     actions.append(edit, remove);
     header.append(title, actions);
     row.append(header, element("p", "", document.body));
+    if (document.warning) row.append(element("p", "knowledge-warning", document.warning));
     list.append(row);
   }
 }
@@ -233,11 +243,12 @@ $("knowledge-form").addEventListener("submit", async (event) => {
     body: $("knowledge-body").value,
   };
   try {
-    await body(await mutation(id ? `/api/v1/ai/kb/${id}` : "/api/v1/ai/kb", {
+    const result = await body(await mutation(id ? `/api/v1/ai/kb/${id}` : "/api/v1/ai/kb", {
       method: id ? "PATCH" : "POST",
       body: JSON.stringify(payload),
     }));
     resetKnowledgeForm();
+    $("knowledge-message").textContent = result.warning || `Saved as ${result.chunk_count} retrievable ${result.chunk_count === 1 ? "chunk" : "chunks"}.`;
     await loadKnowledge();
   } catch (error) {
     $("knowledge-message").textContent = error.message;

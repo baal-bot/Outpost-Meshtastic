@@ -6,7 +6,11 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from outpost.ai.budget import EvidenceChunk, conservative_tokens
+from outpost.ai.budget import (
+    SEARCH_KB_RESULT_TOKENS,
+    EvidenceChunk,
+    conservative_tokens,
+)
 from outpost.ai.providers.models import ToolDefinition
 from outpost.ai.retrieval import RetrievalEngine
 from outpost.router.models import TrustLevel
@@ -111,7 +115,12 @@ class ReadOnlyToolCatalogue:
             "find_member", "Find directory facts; never returns position.", FindMemberInput, 100
         ),
         ReadTool("node_status", "Read local radio and queue status.", NoArgsInput, 100),
-        ReadTool("search_kb", "Search operator-verified local knowledge.", SearchKBInput, 180),
+        ReadTool(
+            "search_kb",
+            "Search operator-verified local knowledge.",
+            SearchKBInput,
+            SEARCH_KB_RESULT_TOKENS,
+        ),
         ReadTool("list_commands", "List commands from the live registry.", ListCommandsInput, 140),
     )
 
@@ -150,7 +159,7 @@ class ReadOnlyToolCatalogue:
             line = f"[{chunk.ref}] {chunk.text}"
             tokens = conservative_tokens(line)
             if used + tokens > tool.max_result_tokens:
-                break
+                continue
             accepted.append(chunk)
             lines.append(line)
             used += tokens

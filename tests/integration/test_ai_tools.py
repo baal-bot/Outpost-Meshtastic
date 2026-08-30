@@ -6,6 +6,7 @@ import pytest
 
 from outpost.ai.budget import conservative_tokens
 from outpost.ai.retrieval import RetrievalEngine
+from outpost.ai.store import AIStore
 from outpost.ai.tools import ReadOnlyToolCatalogue, ToolValidationError
 from outpost.clock import VirtualClock
 from outpost.store import Database
@@ -90,4 +91,39 @@ async def test_find_member_tool_never_returns_position(tmp_path) -> None:
 
     assert "dana" in result.content
     assert all(value not in result.content.casefold() for value in ("40.1", "-75.2", "lat", "lon"))
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_search_kb_tool_returns_late_chunk_from_large_document(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    members = MemberRepo(database, clock)
+    asker = await members.resolve("!00000001")
+    store = AIStore(database)
+    saved = await store.save_document(
+        title="Evacuation procedure",
+        body=(
+            "Routine preparedness background and supply inventory. " * 75
+            + "The reunification checkpoint is Cedar Valley Library on Oak Road."
+        ),
+    )
+    catalogue = ReadOnlyToolCatalogue(
+        RetrievalEngine(database, now=lambda: int(clock.now().timestamp()))
+    )
+
+    result = await catalogue.invoke(
+        "search_kb",
+        {"query": "reunification checkpoint Cedar Valley", "limit": 5},
+        asker,
+        SimpleNamespace(),
+    )
+
+    assert saved.chunk_count > 1
+    assert result.content != "NO_RESULTS"
+    assert "Cedar Valley Library" in result.content
+    assert result.chunks[0].ref.startswith("kb:evacuation-procedure")
+    tool = next(item for item in catalogue.TOOLS if item.name == "search_kb")
+    assert conservative_tokens(result.content) <= tool.max_result_tokens
     await database.close()

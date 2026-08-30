@@ -370,6 +370,16 @@ class AIService:
             await self._log(answer, question, member, channel, ())
             self._record_request(answer, channel)
             return answer
+        if grounded and not pack.chunks:
+            answer = AIAnswer(
+                "[AI] Local info is indexed but unavailable within the current AI budget. "
+                "Ask the operator.",
+                "evidence_budget_empty",
+                primary,
+            )
+            await self._log(answer, question, member, channel, ())
+            self._record_request(answer, channel)
+            return answer
         prompt = f"{pack.text}\n\nQUESTION\n{plan.question}" if pack.text else plan.question
         try:
             response = await asyncio.wait_for(

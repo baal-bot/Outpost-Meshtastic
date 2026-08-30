@@ -35,6 +35,8 @@
 .knowledge-row header, .interaction-row header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .knowledge-row h3, .interaction-row h3 { margin: 0; font-size: .8rem; }
 .knowledge-row code, .interaction-meta { color: var(--ui-text-muted); font-size: .59rem; }
+.knowledge-status { display: block; margin-top: 5px; color: var(--ui-success-text); font: 600 .59rem ui-monospace, monospace; }
+.knowledge-status[data-retrievable="false"], .knowledge-warning { color: var(--ui-warning-text); }
 .knowledge-row p, .interaction-row p { margin: 9px 0 0; color: var(--ui-text-muted); font-size: .69rem; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
 .knowledge-actions, .interaction-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .knowledge-actions button, .interaction-actions button { min-height: 30px; padding: 5px 8px; font-size: .59rem; }

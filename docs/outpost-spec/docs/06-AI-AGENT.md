@@ -277,6 +277,12 @@ the operator's contact, the emergency disclaimer, and placeholder entries for lo
 **REQ-AI-028** — Board posts **MAY** be promoted into the KB by the operator with one action
 ("this answer is canonical"), which pins it and gives it KB half-life.
 
+**REQ-AI-028a** — KB documents **MUST** be split into ordered, overlapping chunks whose
+maximum size is derived from both the configured evidence allocation and the `search_kb`
+result limit. The dashboard **MUST** show the chunk count and whether every chunk is
+retrievable. A budget change **MUST** cause existing documents to be re-chunked before the
+assistant starts serving requests.
+
 ---
 
 ## 5. Token budget

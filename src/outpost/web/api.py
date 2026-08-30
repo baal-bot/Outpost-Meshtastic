@@ -2152,20 +2152,20 @@ def create_web_app(
             @app.post("/api/v1/ai/kb", response_model=None)
             async def ai_kb_create(body: KBDocumentBody) -> dict[str, Any] | Response:
                 try:
-                    document_id = await ai_store.save_document(**body.model_dump())
+                    result = await ai_store.save_document(**body.model_dump())
                 except ValueError as error:
                     return JSONResponse(
                         {"error": {"code": "invalid_kb", "message": str(error)}},
                         status_code=422,
                     )
-                return {"id": document_id}
+                return result.as_dict()
 
             @app.patch("/api/v1/ai/kb/{document_id}", response_model=None)
             async def ai_kb_update(
                 document_id: int, body: KBDocumentBody
             ) -> dict[str, Any] | Response:
                 try:
-                    updated = await ai_store.save_document(
+                    result = await ai_store.save_document(
                         **body.model_dump(), document_id=document_id
                     )
                 except ValueError as error:
@@ -2173,7 +2173,7 @@ def create_web_app(
                         {"error": {"code": "invalid_kb", "message": str(error)}},
                         status_code=422,
                     )
-                return {"id": updated}
+                return result.as_dict()
 
             @app.delete("/api/v1/ai/kb/{document_id}", response_model=None)
             async def ai_kb_delete(document_id: int) -> dict[str, Any] | Response:
@@ -2198,13 +2198,13 @@ def create_web_app(
                 interaction_id: int, body: AIPromoteBody
             ) -> dict[str, Any] | Response:
                 try:
-                    document_id = await ai_store.promote_interaction(interaction_id, body.title)
+                    result = await ai_store.promote_interaction(interaction_id, body.title)
                 except ValueError as error:
                     return JSONResponse(
                         {"error": {"code": "invalid_promotion", "message": str(error)}},
                         status_code=422,
                     )
-                return {"document_id": document_id}
+                return {"document_id": result.document_id}
 
             @app.get("/api/v1/ai/refusal-rules")
             async def ai_refusal_rules() -> dict[str, Any]:

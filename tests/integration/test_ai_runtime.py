@@ -14,7 +14,7 @@ from outpost.ai.providers.models import (
     ProviderState,
 )
 from outpost.ai.retrieval import RetrievalEngine
-from outpost.ai.store import AIStore
+from outpost.ai.store import AIStore, kb_chunk_token_limit
 from outpost.app import OutpostApp
 from outpost.clock import VirtualClock
 from outpost.config import Config
@@ -220,6 +220,70 @@ async def test_invalid_model_format_falls_back_to_cited_evidence(ai_runtime) -> 
 
 
 @pytest.mark.asyncio
+async def test_large_knowledge_document_is_chunked_and_retrieved(ai_runtime) -> None:
+    service, provider, store, member, _clock = ai_runtime
+    body = (
+        "Preparation notes cover radios, flashlights, batteries, and drinking water. " * 70
+        + "Evacuation assembly point is North Ridge School beside the blue water tower. "
+        + "Families should register at the east entrance before boarding buses."
+    )
+
+    saved = await store.save_document(title="Wildfire procedure", body=body)
+
+    assert saved.chunk_count > 1
+    assert saved.retrievable is True
+    assert saved.warning is None
+    rows = await store.database.read(
+        "SELECT seq,text,token_count FROM kb_chunk WHERE document_id=? ORDER BY seq",
+        (saved.document_id,),
+    )
+    assert [row["seq"] for row in rows] == list(range(1, len(rows) + 1))
+    assert all(row["token_count"] <= kb_chunk_token_limit(820) for row in rows)
+    first_body = str(rows[0]["text"]).split(": ", 1)[1]
+    second_body = str(rows[1]["text"]).split(": ", 1)[1]
+    assert " ".join(first_body.split()[-4:]) in second_body
+
+    answer = await service.answer("Where is the evacuation assembly point?", member, -1, Registry())
+
+    assert answer.grounded is True
+    assert answer.outcome == "extractive_fallback"
+    assert "North Ridge School" in provider.calls[-1].messages[-1].content
+    interaction = (await store.interactions())[0]
+    assert any(ref.startswith("kb:wildfire-procedure") for ref in interaction["evidence_refs"])
+
+
+@pytest.mark.asyncio
+async def test_knowledge_store_rechunks_migrated_documents_and_reports_status(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    store = AIStore(database)
+
+    stale = await database.read("SELECT COUNT(*) count FROM kb_document WHERE chunk_token_limit=0")
+    assert stale[0]["count"] > 0
+    assert await store.rechunk_stale_documents() == stale[0]["count"]
+    assert await store.rechunk_stale_documents() == 0
+    assert all(item["retrievable"] for item in await store.documents())
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_knowledge_store_warns_when_retrieval_budget_cannot_fit_document(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    store = AIStore(database, evidence_tokens=0)
+
+    saved = await store.save_document(title="Procedure", body="A verified local procedure.")
+
+    assert saved.chunk_count == 1
+    assert saved.retrievable is False
+    assert "too small" in (saved.warning or "")
+    document = next(item for item in await store.documents() if item["id"] == saved.document_id)
+    assert document["retrievable"] is False
+    assert document["warning"]
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_no_evidence_and_howto_paths_need_no_inference(ai_runtime) -> None:
     service, provider, _store, member, _clock = ai_runtime
 
@@ -230,6 +294,29 @@ async def test_no_evidence_and_howto_paths_need_no_inference(ai_runtime) -> None
     assert "No local info" in missing.text
     assert howto.outcome == "deterministic"
     assert howto.text == "[AI] Use POST <board> <text>."
+    assert provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_indexed_evidence_that_cannot_fit_is_reported_without_inference(ai_runtime) -> None:
+    service, provider, store, member, _clock = ai_runtime
+    service.config = service.config.model_copy(
+        update={
+            "ai": service.config.ai.model_copy(
+                update={
+                    "budget": service.config.ai.budget.model_copy(update={"evidence_tokens": 0})
+                }
+            )
+        }
+    )
+    await store.save_document(
+        title="Shelter procedure", body="The shelter is at the county library."
+    )
+
+    answer = await service.answer("Where is the shelter?", member, -1, Registry())
+
+    assert answer.outcome == "evidence_budget_empty"
+    assert "indexed but unavailable" in answer.text
     assert provider.calls == []
 
 
@@ -257,8 +344,14 @@ async def test_operator_api_exposes_status_knowledge_review_and_dry_run(ai_runti
     )
     assert created.status_code == 200
     document_id = created.json()["id"]
+    assert created.json()["chunk_count"] == 1
+    assert created.json()["retrievable"] is True
+    assert created.json()["warning"] is None
     documents = client.get("/api/v1/ai/kb").json()["items"]
-    assert any(item["id"] == document_id for item in documents)
+    created_document = next(item for item in documents if item["id"] == document_id)
+    assert created_document["chunk_count"] == 1
+    assert created_document["retrievable"] is True
+    assert "max_chunk_tokens" not in created_document
     assert (
         client.post(
             "/api/v1/ai/refusal-rules",
