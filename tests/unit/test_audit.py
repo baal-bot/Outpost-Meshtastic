@@ -12,11 +12,13 @@ def test_audit_detail_redacts_nested_and_plain_text_secrets() -> None:
             "safe": "visible",
             "settings": {"api_key": "private", "label": "retained"},
             "items": [{"password": "hidden"}],
+            "radio": {"psk": "generated-channel-key"},
         }
     )
 
     assert json.loads(encoded or "{}") == {
         "items": [{"password": "[REDACTED]"}],
+        "radio": {"psk": "[REDACTED]"},
         "safe": "visible",
         "settings": {"api_key": "[REDACTED]", "label": "retained"},
     }

@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 from copy import deepcopy
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
 from outpost.clock import VirtualClock
 from outpost.config import Config
-from outpost.radio_configuration import RadioConfigurationError, RadioConfigurationManager
+from outpost.radio_configuration import (
+    RadioConfigurationError,
+    RadioConfigurationManager,
+    _redacted_change,
+)
 from outpost.store import Database
 from outpost.transport.radio_frequency import frequency_plan, regional_duty_cycle_percent
+from outpost.web.api import create_web_app
 
 
 def radio_state() -> dict[str, Any]:
@@ -74,6 +82,7 @@ class FakeRadio:
         self.behavior = behavior
         self.refreshes = 0
         self.restores = 0
+        self.generated_psk = base64.b64encode(bytes.fromhex("d7" * 32)).decode()
         self.configure_started = asyncio.Event()
         self.release_configure = asyncio.Event()
         self.release_configure.set()
@@ -109,6 +118,21 @@ class FakeRadio:
                 channel = self.state["channels"][values["channel"]]
                 channel["uplink_enabled"] = values["uplink_enabled"]
                 channel["downlink_enabled"] = values["downlink_enabled"]
+            elif section == "channel":
+                channel = self.state["channels"][values["index"]]
+                for key in (
+                    "role",
+                    "name",
+                    "uplink_enabled",
+                    "downlink_enabled",
+                    "position_precision",
+                    "muted",
+                ):
+                    channel[key] = values[key]
+                channel["psk"] = "AES-256"
+                result = deepcopy(self.state)
+                result["generated_psk"] = self.generated_psk
+                return result
         return deepcopy(self.state)
 
     async def restore_configuration(
@@ -151,6 +175,103 @@ def test_regional_duty_cycle_matches_firmware_profiles() -> None:
     assert regional_duty_cycle_percent("EU_866") == 2.5
     assert regional_duty_cycle_percent("UA_868") == 1
     assert regional_duty_cycle_percent("future_region") is None
+
+
+@pytest.mark.parametrize("field", ("psk", "password"))
+def test_radio_change_redaction_covers_secret_fields(field: str) -> None:
+    assert _redacted_change({field: "private-value", "safe": "retained"}) == {
+        field: "replacement provided",
+        "safe": "retained",
+    }
+    assert _redacted_change({field: ""}) == {field: "clear requested"}
+    assert _redacted_change({field: None}) == {field: None}
+
+
+def generated_channel_change() -> dict[str, object]:
+    return {
+        "channel": {
+            "index": 0,
+            "role": "PRIMARY",
+            "name": "Outpost",
+            "psk": None,
+            "generate_psk": True,
+            "uplink_enabled": False,
+            "downlink_enabled": False,
+            "position_precision": 0,
+            "muted": False,
+        }
+    }
+
+
+async def persisted_radio_configuration(database: Database) -> str:
+    operation = await database.read(
+        "SELECT key,value,updated_at FROM runtime_setting WHERE key='radio.configuration.operation'"
+    )
+    audit = await database.read(
+        "SELECT actor_kind,actor_ref,action,target,detail,created_at,outcome FROM audit_log"
+    )
+    return json.dumps(
+        {
+            "operation": [dict(row) for row in operation],
+            "audit": [dict(row) for row in audit],
+        },
+        sort_keys=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_generated_channel_psk_is_returned_once_and_never_persisted(tmp_path) -> None:
+    service, radio, database = await manager(tmp_path)
+    client = TestClient(
+        create_web_app(
+            lambda: {"radio": "up"},
+            database,
+            radio_configuration_preflight=service.preflight,
+            radio_configuration_apply=service.apply,
+        )
+    )
+    change = generated_channel_change()
+
+    reviewed = client.post("/api/v1/radio/config/preflight", json=change)
+    assert reviewed.status_code == 200
+    assert radio.generated_psk not in reviewed.text
+    assert radio.generated_psk not in await persisted_radio_configuration(database)
+
+    applied = client.put(
+        "/api/v1/radio/config",
+        json={"preflight_id": reviewed.json()["id"], **change},
+    )
+    assert applied.status_code == 200
+    assert applied.json()["generated_psk"] == radio.generated_psk
+    assert radio.generated_psk not in await persisted_radio_configuration(database)
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_generated_channel_psk_is_not_persisted_when_reconnect_fails(tmp_path) -> None:
+    service, radio, database = await manager(tmp_path, "timeout")
+    client = TestClient(
+        create_web_app(
+            lambda: {"radio": "up"},
+            database,
+            radio_configuration_preflight=service.preflight,
+            radio_configuration_apply=service.apply,
+        )
+    )
+    change = generated_channel_change()
+
+    reviewed = client.post("/api/v1/radio/config/preflight", json=change)
+    assert reviewed.status_code == 200
+    assert radio.generated_psk not in await persisted_radio_configuration(database)
+    failed = client.put(
+        "/api/v1/radio/config",
+        json={"preflight_id": reviewed.json()["id"], **change},
+    )
+
+    assert failed.status_code == 409
+    assert radio.generated_psk not in failed.text
+    assert radio.generated_psk not in await persisted_radio_configuration(database)
+    await database.close()
 
 
 @pytest.mark.asyncio
