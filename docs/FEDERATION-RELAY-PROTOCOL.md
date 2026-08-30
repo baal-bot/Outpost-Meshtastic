@@ -27,9 +27,15 @@ radio and power-loss qualification still remain.
   size, hop limit, and route. Meshtastic channel encryption protects the carrier only according to
   the radios' channel configuration. Use the `opaque` scope only for ciphertext produced by a
   higher-level protocol; the dashboard does not create arbitrary opaque envelopes.
-- A signing key first seen directly from its paired origin is trusted. A new origin key learned
-  through a multi-hop relay is quarantined until the destination operator verifies and trusts or
-  rejects its fingerprint. A changed or rejected origin key fails closed.
+- A signing key first seen directly from its paired origin is trusted. A key learned through a
+  different peer is recorded only as a candidate: it never becomes the authoritative pin, and its
+  envelope is quarantined until the destination operator verifies and uses or rejects it.
+- A key that differs from an existing pin is quarantined and creates an operator-inbox decision
+  naming both fingerprints and their presenting peers. A changed or rejected key therefore fails
+  closed without becoming an unrecoverable denial.
+- A planned rotation carries a successor key proof signed by the previously trusted key. The proof
+  binds the origin node ID and successor public key, allowing a peer with the predecessor pin to
+  advance it without weakening first-contact rules.
 
 ## Signed core and wire envelope
 
@@ -43,6 +49,7 @@ radio and power-loss qualification still remain.
 | `payload` | 1–800 encoded bytes | Origin signature; confidentiality only for `opaque` ciphertext |
 | `envelope_id` | First 128 bits of SHA-256 over canonical signed core | Recomputed at every receiver |
 | `origin_public_key`, `origin_signature` | 32-byte Ed25519 key, 64-byte signature | Verified before durable acceptance |
+| `rotation_from_public_key`, `rotation_signature` | Optional 32-byte predecessor and 64-byte successor proof | Previous trusted key signs the origin ID and successor key |
 | `route` | Unique node IDs, beginning at origin and ending at sender | Immediate-peer HMAC and local append-only audit |
 
 Unknown fields, malformed bounds, exhausted routes, loops, expired/future messages, bad signatures,
@@ -71,6 +78,22 @@ The queue records whether the selected next hop was the direct destination or an
 whether an inbound transfer arrived through observed LoRa or MQTT. All frames still pass through
 the global airtime governor.
 
+### Origin-key recovery and rotation
+
+Origin-key changes require a current step-up session. In **Federation → Signed store-and-forward**,
+an operator can compare a quarantined candidate with the origin out of band, then **Use candidate**
+to replace the pin or **Reject candidate** to retain the denial. **Forget pin** removes only the
+authoritative pin; retained envelopes and append-only audit events remain, and the next direct
+origin proof can establish the key again. These actions record both a relay event and a general
+audit-log entry.
+
+For a planned change, the origin operator uses **Rotate local key** while the previous private key
+is still available. New envelopes carry its signed successor proof, so peers holding the previous
+trusted fingerprint update automatically. After identity loss or reinstallation, no predecessor
+signature exists; the first new envelope is quarantined and each destination operator must verify
+and explicitly use the candidate. The operator inbox contains the old and new fingerprints and the
+peer that presented each.
+
 ## Resource controls
 
 Relay is disabled for every peer by default. Each paired peer has an independent policy containing:
@@ -92,7 +115,7 @@ On **Federation → Signed store-and-forward**:
 
 1. Enable only the necessary scopes for a paired peer and set conservative quotas.
 2. Create a small test request and inspect its direct/relay selection and custody route.
-3. Verify any observed multi-hop origin fingerprint out of band before choosing **Trust**.
+3. Verify any observed multi-hop origin fingerprint out of band before choosing **Use candidate**.
 4. Pause a peer policy to stop new transfers through it. Pause an item to hold that one envelope.
 5. Purge a payload when its operational need ends; the action is irreversible from the dashboard.
 6. Review the custody queue, relay events, general audit log, and message-log LoRa/MQTT observations
@@ -104,6 +127,7 @@ durable metadata remains available for audit and duplicate suppression.
 ## Verification
 
 `tests/integration/test_federation_relay.py` creates independent A, B, and C databases and exercises
-A→B→C partition custody, direct-path preference, quarantined origin keys, propagated receipts,
-duplicate deliveries, dropped-ACK recovery, clock skew, signature tampering, loops, rate limits,
-pause/resume/purge controls, the operator API, and append-only event enforcement.
+A→B→C partition custody, direct-path preference, forged-pin resistance, identity-regeneration
+recovery, signed successor rotation, propagated receipts, duplicate deliveries, dropped-ACK
+recovery, clock skew, signature tampering, loops, rate limits, pause/resume/purge controls, the
+step-up-protected operator API, and append-only event enforcement.

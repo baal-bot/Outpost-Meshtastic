@@ -655,6 +655,12 @@ def route_visual_content_api(page: object) -> None:
             "queue": [],
             "policies": [],
             "origins": [],
+            "identity": {
+                "fingerprint": "a" * 64,
+                "rotation_from_fingerprint": None,
+                "rotated_at": None,
+                "rotated_by": None,
+            },
         },
     )
 
@@ -1071,6 +1077,99 @@ def test_federation_topology_requires_shared_location_and_incident_opt_in(
         detail.locator("#topology-share").check()
         detail.get_by_role("button", name="Save location policy").click()
         assert "Latitude and longitude are required" in detail.text_content()
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_federation_origin_key_recovery_and_rotation_controls(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    mutations: list[tuple[str, dict[str, object]]] = []
+    pinned = "b" * 64
+    candidate = "c" * 64
+
+    def relay_api(route: object) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        if request.method == "GET":
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "summary": {"counts": {"quarantined": 1}, "stored_bytes": 64},
+                        "queue": [],
+                        "policies": [],
+                        "identity": {"fingerprint": "a" * 64},
+                        "origins": [
+                            {
+                                "origin_node": "!aaaaaaaa",
+                                "fingerprint": pinned,
+                                "state": "trusted",
+                                "observed_from": "!aaaaaaaa",
+                                "first_seen_at": 1,
+                                "candidates": [
+                                    {
+                                        "fingerprint": candidate,
+                                        "state": "observed",
+                                        "first_seen_at": 2,
+                                        "last_seen_at": 3,
+                                        "observation_count": 2,
+                                        "last_observed_from": "!bbbbbbbb",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+            )
+        elif path.endswith("/identity/rotate"):
+            mutations.append(("rotate", {}))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"fingerprint": "d" * 64, "rotation_from_fingerprint": "a" * 64}),
+            )
+        else:
+            mutations.append(("origin", request.post_data_json))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"origin_node": "!aaaaaaaa", **request.post_data_json}),
+            )
+
+    page.route("**/api/v1/federation/relay**", relay_api)
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/federation.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        assert "Candidate cccccccccccccccc" in page.locator("#relay-origins").text_content()
+        page.locator("[data-origin-replace]").click()
+        dialog = page.get_by_role("dialog", name="Use origin-key candidate?")
+        with page.expect_request(
+            lambda request: (
+                request.method == "PATCH" and "/federation/relay/origins/" in request.url
+            )
+        ):
+            dialog.get_by_role("button", name="Use candidate").click()
+        page.wait_for_function("() => !document.querySelector('dialog[open]')")
+        assert ("origin", {"state": "replace", "fingerprint": candidate}) in mutations
+
+        page.get_by_role("button", name="Rotate local key").click()
+        with page.expect_request(
+            lambda request: request.method == "POST" and request.url.endswith("/identity/rotate")
+        ):
+            page.get_by_role("dialog", name="Rotate the local relay identity?").get_by_role(
+                "button", name="Rotate identity"
+            ).click()
+        result = page.get_by_role("dialog", name="Relay identity rotated")
+        result.get_by_role("button", name="Close").click()
+        assert ("rotate", {}) in mutations
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
     finally:
         page.close()

@@ -595,6 +595,12 @@ async def test_totp_recovery_step_up_and_named_audit_actor(
         json={"trust": "member", "reason": "Identity verified in person"},
     )
     assert protected.status_code == 428
+    relay_key_recovery = client.patch(
+        "/api/v1/federation/relay/origins/!aaaaaaaa",
+        headers={"x-csrf-token": csrf},
+        json={"state": "forget"},
+    )
+    assert relay_key_recovery.status_code == 428
     stepped = client.post(
         "/api/v1/auth/step-up",
         headers={"x-csrf-token": csrf},

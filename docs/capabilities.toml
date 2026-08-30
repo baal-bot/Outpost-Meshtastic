@@ -351,7 +351,7 @@ description = "Exact-position expiry, deletion, and coarse-history behavior."
 [[capabilities]]
 id = "federation"
 area = "Outpost federation"
-present = "Pairing, authenticated framing, policy, board/incident sync, peer services, encrypted mail relay, signed multi-hop custody, privacy-gated topology health, receipts, pagination, and reconciliation."
+present = "Pairing, authenticated framing, policy, board/incident sync, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, privacy-gated topology health, receipts, pagination, and reconciliation."
 maturity = "two_node_field_tested"
 introduced_commit = "8f7219e"
 limitations = [
@@ -364,7 +364,7 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-27"
+date = "2026-08-29"
 [[capabilities.evidence]]
 kind = "field"
 path = "docs/FEDERATION-ACCEPTANCE-BACKLOG.md"
@@ -380,7 +380,7 @@ description = "Origin-aware partition/reconnect conflict reconciliation and huma
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_federation_relay.py"
-description = "Signed three-node custody, direct-path selection, duplicate/reconnect safety, malicious-input rejection, quotas, receipts, and operator controls."
+description = "Signed three-node custody, forged-pin resistance, reinstall recovery, successor rotation, duplicate/reconnect safety, quotas, receipts, and operator controls."
 [[capabilities.evidence]]
 kind = "operations"
 path = "docs/FEDERATION-RELAY-PROTOCOL.md"

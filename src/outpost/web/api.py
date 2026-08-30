@@ -464,7 +464,8 @@ class FederationRelayActionBody(BaseModel):
 
 
 class FederationRelayOriginBody(BaseModel):
-    state: Literal["trusted", "rejected"]
+    state: Literal["trusted", "rejected", "forget", "replace", "reject_candidate"]
+    fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class FederationTopologyPolicyBody(BaseModel):
@@ -697,6 +698,8 @@ def create_web_app(
             or path.startswith("/api/v1/federation/peers")
             or path.startswith("/api/v1/federation/mqtt")
             or path.startswith("/api/v1/federation/origins")
+            or path.startswith("/api/v1/federation/relay/origins")
+            or path.startswith("/api/v1/federation/relay/identity")
             or path.startswith("/api/v1/config/watch")
             or path.startswith("/api/v1/ai")
             or path.startswith("/api/v1/alerts")
@@ -1356,6 +1359,7 @@ def create_web_app(
                     "queue": await federation_relay.queue(),
                     "policies": [policy.json() for policy in await federation_relay.policies()],
                     "origins": await federation_relay.origins(),
+                    "identity": await federation_relay.identity_status(),
                 }
 
             @app.post("/api/v1/federation/relay", response_model=None)
@@ -1402,7 +1406,10 @@ def create_web_app(
             ) -> dict[str, str] | Response:
                 try:
                     await federation_relay.review_origin(
-                        origin_node.lower(), body.state, current_actor()
+                        origin_node.lower(),
+                        body.state,
+                        current_actor(),
+                        fingerprint=body.fingerprint,
                     )
                 except ValueError as error:
                     return JSONResponse(
@@ -1410,6 +1417,16 @@ def create_web_app(
                         status_code=409,
                     )
                 return {"origin_node": origin_node.lower(), "state": body.state}
+
+            @app.post("/api/v1/federation/relay/identity/rotate", response_model=None)
+            async def federation_relay_rotate_identity() -> dict[str, Any] | Response:
+                try:
+                    return await federation_relay.rotate_identity(current_actor())
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "relay_identity_failed", "message": str(error)}},
+                        status_code=409,
+                    )
 
             @app.patch("/api/v1/federation/relay/{envelope_id}", response_model=None)
             async def federation_relay_action(

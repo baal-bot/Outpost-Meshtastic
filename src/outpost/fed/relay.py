@@ -23,6 +23,7 @@ MAX_PAYLOAD_BYTES = 800
 MAX_LIFETIME_SECONDS = 7 * 86_400
 CLOCK_SKEW_SECONDS = 300
 ACTIVE_STATES = ("queued", "quarantined", "paused", "forwarding", "forwarded")
+ROTATION_CONTEXT = b"outpost-relay-origin-key-rotation-v1\x00"
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,7 @@ class FederationRelayService:
         "payload",
     }
     WIRE_KEYS = CORE_KEYS | {"envelope_id", "origin_public_key", "origin_signature", "route"}
+    ROTATION_KEYS = {"rotation_from_public_key", "rotation_signature"}
 
     def __init__(self, database: Database, peers: FederationPeerService, clock: Clock) -> None:
         self.database, self.peers, self.clock = database, peers, clock
@@ -107,15 +109,91 @@ class FederationRelayService:
         rows = await self.database.read("SELECT public_key FROM fed_relay_identity WHERE id=1")
         return bytes(rows[0]["public_key"])
 
-    async def _identity(self) -> tuple[Ed25519PrivateKey, bytes]:
+    async def _identity(
+        self,
+    ) -> tuple[Ed25519PrivateKey, bytes, bytes | None, bytes | None]:
         await self.initialize()
         rows = await self.database.read(
-            "SELECT private_key,public_key FROM fed_relay_identity WHERE id=1"
+            "SELECT private_key,public_key,rotation_from_public_key,rotation_signature "
+            "FROM fed_relay_identity WHERE id=1"
         )
         return (
             Ed25519PrivateKey.from_private_bytes(bytes(rows[0]["private_key"])),
             bytes(rows[0]["public_key"]),
+            (
+                bytes(rows[0]["rotation_from_public_key"])
+                if rows[0]["rotation_from_public_key"] is not None
+                else None
+            ),
+            (
+                bytes(rows[0]["rotation_signature"])
+                if rows[0]["rotation_signature"] is not None
+                else None
+            ),
         )
+
+    @staticmethod
+    def _rotation_message(origin: str, successor_public_key: bytes) -> bytes:
+        return ROTATION_CONTEXT + origin.lower().encode("ascii") + successor_public_key
+
+    async def identity_status(self) -> dict[str, Any]:
+        await self.initialize()
+        rows = await self.database.read(
+            "SELECT public_key,rotation_from_public_key,rotated_at,rotated_by "
+            "FROM fed_relay_identity WHERE id=1"
+        )
+        row = rows[0]
+        return {
+            "fingerprint": self._fingerprint(bytes(row["public_key"])),
+            "rotation_from_fingerprint": (
+                self._fingerprint(bytes(row["rotation_from_public_key"]))
+                if row["rotation_from_public_key"] is not None
+                else None
+            ),
+            "rotated_at": int(row["rotated_at"]) if row["rotated_at"] is not None else None,
+            "rotated_by": str(row["rotated_by"]) if row["rotated_by"] is not None else None,
+        }
+
+    async def rotate_identity(self, actor: str) -> dict[str, Any]:
+        origin = self._local_id()
+        previous_private, previous_public, _, _ = await self._identity()
+        successor_private = Ed25519PrivateKey.generate()
+        successor_public = self._public_bytes(successor_private.public_key())
+        signature = previous_private.sign(self._rotation_message(origin, successor_public))
+        now = int(self.clock.now().timestamp())
+        detail = {
+            "origin": origin,
+            "previous_fingerprint": self._fingerprint(previous_public),
+            "successor_fingerprint": self._fingerprint(successor_public),
+        }
+        async with self.database.transaction() as transaction:
+            await transaction.write(
+                "UPDATE fed_relay_identity SET private_key=?,public_key=?,"
+                "rotation_from_public_key=?,rotation_signature=?,rotated_at=?,rotated_by=? "
+                "WHERE id=1",
+                (
+                    self._private_bytes(successor_private),
+                    successor_public,
+                    previous_public,
+                    signature,
+                    now,
+                    actor[:160],
+                ),
+            )
+            await self._event(
+                transaction, None, None, "local_origin_key_rotated", detail, now, actor
+            )
+            await transaction.write(
+                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                "VALUES('web',?,'federation.relay_origin_rotate',?,?,?)",
+                (
+                    actor[:160],
+                    origin,
+                    json.dumps(detail, separators=(",", ":"), sort_keys=True),
+                    now,
+                ),
+            )
+        return await self.identity_status()
 
     @staticmethod
     async def _event(
@@ -303,14 +381,15 @@ class FederationRelayService:
         }
         encoded = self._core_bytes(core)
         envelope_id = self._envelope_id(encoded)
-        private, public = await self._identity()
+        private, public, rotation_from, rotation_signature = await self._identity()
         signature = private.sign(encoded)
         try:
             await self.database.write(
                 "INSERT INTO fed_relay_envelope(envelope_id,direction,origin_node,"
                 "destination_node,scope,idempotency_key,created_at,expires_at,hop_limit,"
                 "payload_cbor,payload_bytes,origin_public_key,origin_signature,route_json,state,"
-                "stored_at,updated_at) VALUES(?,'origin',?,?,?,?,?,?,?,?,?,?,?,?, 'queued',?,?)",
+                "rotation_from_public_key,rotation_signature,stored_at,updated_at) "
+                "VALUES(?,'origin',?,?,?,?,?,?,?,?,?,?,?,?, 'queued',?,?,?,?)",
                 (
                     envelope_id,
                     origin,
@@ -325,6 +404,8 @@ class FederationRelayService:
                     public,
                     signature,
                     json.dumps([origin], separators=(",", ":")),
+                    rotation_from,
+                    rotation_signature,
                     now,
                     now,
                 ),
@@ -352,7 +433,11 @@ class FederationRelayService:
 
     @staticmethod
     def _core_from_wire(value: dict[str, Any]) -> dict[str, Any]:
-        if set(value) != FederationRelayService.WIRE_KEYS:
+        keys = set(value)
+        if keys not in {
+            frozenset(FederationRelayService.WIRE_KEYS),
+            frozenset(FederationRelayService.WIRE_KEYS | FederationRelayService.ROTATION_KEYS),
+        }:
             raise ValueError("relay envelope has missing or unknown fields")
         return {key: value[key] for key in FederationRelayService.CORE_KEYS}
 
@@ -364,7 +449,7 @@ class FederationRelayService:
         if not rows:
             raise ValueError("relay envelope not found or payload was purged")
         row = rows[0]
-        return {
+        value = {
             "envelope_id": str(row["envelope_id"]),
             "origin": str(row["origin_node"]),
             "destination": str(row["destination_node"]),
@@ -378,6 +463,10 @@ class FederationRelayService:
             "origin_signature": bytes(row["origin_signature"]),
             "route": json.loads(str(row["route_json"])),
         }
+        if row["rotation_from_public_key"] is not None:
+            value["rotation_from_public_key"] = bytes(row["rotation_from_public_key"])
+            value["rotation_signature"] = bytes(row["rotation_signature"])
+        return value
 
     async def _reject(self, peer_id: int | None, reason: str, now: int) -> None:
         if peer_id is not None:
@@ -389,6 +478,103 @@ class FederationRelayService:
             )
         await self._event(
             self.database, None, peer_id, "rejected", {"reason": reason}, now, "federation"
+        )
+
+    async def _observe_origin_candidate(
+        self,
+        transaction: Transaction,
+        *,
+        origin: str,
+        public_key: bytes,
+        peer_id: int,
+        presented_by: str,
+        now: int,
+        pinned_fingerprint: str | None,
+        pinned_presented_by: str | None,
+    ) -> str:
+        fingerprint = self._fingerprint(public_key)
+        rows = await transaction.read(
+            "SELECT state FROM fed_relay_origin_candidate WHERE origin_node=? AND fingerprint=?",
+            (origin, fingerprint),
+        )
+        if rows:
+            await transaction.write(
+                "UPDATE fed_relay_origin_candidate SET last_observed_from_peer_id=?,"
+                "last_seen_at=?,observation_count=observation_count+1 "
+                "WHERE origin_node=? AND fingerprint=?",
+                (peer_id, now, origin, fingerprint),
+            )
+            return str(rows[0]["state"])
+        await transaction.write(
+            "INSERT INTO fed_relay_origin_candidate(origin_node,public_key,fingerprint,state,"
+            "first_observed_from_peer_id,last_observed_from_peer_id,first_seen_at,last_seen_at) "
+            "VALUES(?,?,?,'observed',?,?,?,?)",
+            (origin, public_key, fingerprint, peer_id, peer_id, now, now),
+        )
+        detail = {
+            "origin": origin,
+            "pinned_fingerprint": pinned_fingerprint,
+            "pinned_presented_by": pinned_presented_by,
+            "candidate_fingerprint": fingerprint,
+            "candidate_presented_by": presented_by,
+        }
+        await self._event(
+            transaction, None, peer_id, "origin_key_candidate", detail, now, "federation"
+        )
+        body = (
+            f"Origin {origin} presented key {fingerprint} through peer {presented_by}. "
+            + (
+                f"The current pin is {pinned_fingerprint}, first presented by "
+                f"{pinned_presented_by or 'an unavailable peer'}. "
+                if pinned_fingerprint
+                else "No authoritative direct-origin key is pinned. "
+            )
+            + "The envelope is quarantined. Verify the fingerprints out of band, then "
+            "replace or reject the candidate in Federation."
+        )
+        await transaction.write(
+            "INSERT OR IGNORE INTO mail(uid,from_label,to_label,subject,body,created_at,state,"
+            "expires_at,conversation_key,message_kind,mail_direction,participant_handle,"
+            "operator_actor) VALUES(?,?,?,?,?,?,'delivered',?,?,'system','local','outpost',"
+            "'system:relay')",
+            (
+                f"relay-origin-key:{origin}:{fingerprint}",
+                "outpost",
+                "operator",
+                "Federation origin key needs review",
+                body,
+                now,
+                now + 30 * 86_400,
+                f"system:relay-origin-key:{origin}:{fingerprint}",
+            ),
+        )
+        return "observed"
+
+    async def _promote_origin_envelopes(
+        self, transaction: Transaction, origin: str, public_key: bytes, now: int
+    ) -> None:
+        await transaction.write(
+            "UPDATE fed_relay_envelope SET state=CASE WHEN destination_node=? "
+            "THEN 'delivered' ELSE 'queued' END,updated_at=?,last_error=NULL "
+            "WHERE origin_node=? AND origin_public_key=? AND state='quarantined' "
+            "AND expires_at>?",
+            (self._local_id(), now, origin, public_key, now),
+        )
+        await transaction.write(
+            "UPDATE fed_relay_origin_candidate SET state='trusted',"
+            "reviewed_at=COALESCE(reviewed_at,?),"
+            "reviewed_by=COALESCE(reviewed_by,'cryptographic-or-direct-proof') "
+            "WHERE origin_node=? AND public_key=?",
+            (now, origin, public_key),
+        )
+        await transaction.write(
+            "UPDATE mail SET operator_read_at=COALESCE(operator_read_at,?),archived_at=? "
+            "WHERE conversation_key=?",
+            (
+                now,
+                now,
+                f"system:relay-origin-key:{origin}:{self._fingerprint(public_key)}",
+            ),
         )
 
     async def accept(
@@ -446,6 +632,20 @@ class FederationRelayService:
                 raise ValueError("relay hop limit is exhausted before destination")
             public_key = wire_bytes(value["origin_public_key"], "origin_public_key", length=32)
             signature = wire_bytes(value["origin_signature"], "origin_signature", length=64)
+            rotation_from: bytes | None = None
+            rotation_signature: bytes | None = None
+            if self.ROTATION_KEYS <= set(value):
+                rotation_from = wire_bytes(
+                    value["rotation_from_public_key"],
+                    "rotation_from_public_key",
+                    length=32,
+                )
+                rotation_signature = wire_bytes(
+                    value["rotation_signature"], "rotation_signature", length=64
+                )
+                Ed25519PublicKey.from_public_bytes(rotation_from).verify(
+                    rotation_signature, self._rotation_message(origin, public_key)
+                )
             core_bytes = self._core_bytes(core)
             envelope_id = self._envelope_id(core_bytes)
             if str(value["envelope_id"]) != envelope_id:
@@ -453,7 +653,7 @@ class FederationRelayService:
             Ed25519PublicKey.from_public_bytes(public_key).verify(signature, core_bytes)
         except (InvalidSignature, KeyError, OverflowError, TypeError, ValueError) as error:
             reason = (
-                "relay origin signature failed"
+                "relay origin signature or rotation proof failed"
                 if isinstance(error, InvalidSignature)
                 else str(error)
             )
@@ -479,34 +679,11 @@ class FederationRelayService:
                     (origin, destination, key),
                 )
                 origin_keys = await transaction.read(
-                    "SELECT public_key,state FROM fed_relay_origin_key WHERE origin_node=?",
+                    "SELECT k.public_key,k.fingerprint,k.state,k.observed_from_peer_id,"
+                    "p.mesh_id observed_from FROM fed_relay_origin_key k LEFT JOIN fed_peer p "
+                    "ON p.id=k.observed_from_peer_id WHERE k.origin_node=?",
                     (origin,),
                 )
-                if conflict:
-                    denial = "relay idempotency identity conflicts with retained envelope"
-                elif origin_keys and bytes(origin_keys[0]["public_key"]) != public_key:
-                    denial = "relay origin key changed"
-                elif origin_keys and str(origin_keys[0]["state"]) == "rejected":
-                    denial = "relay origin key is rejected"
-                else:
-                    trusted = sender_mesh_id.lower() == origin
-                    if origin_keys:
-                        trusted = trusted or str(origin_keys[0]["state"]) == "trusted"
-                    else:
-                        await transaction.write(
-                            "INSERT INTO fed_relay_origin_key(origin_node,public_key,fingerprint,"
-                            "state,observed_from_peer_id,first_seen_at) VALUES(?,?,?,?,?,?)",
-                            (
-                                origin,
-                                public_key,
-                                self._fingerprint(public_key),
-                                "trusted" if trusted else "observed",
-                                peer.id,
-                                stamp,
-                            ),
-                        )
-                    if not trusted:
-                        state = "quarantined"
                 usage = await transaction.read(
                     "SELECT accepted,forwarded FROM fed_relay_usage WHERE peer_id=? "
                     "AND window_start=?",
@@ -519,22 +696,135 @@ class FederationRelayService:
                     "AND payload_cbor IS NOT NULL AND expires_at>?",
                     (peer.id, stamp),
                 )
-                if denial is None and used_rate >= policy.rate_per_hour:
+                if conflict:
+                    denial = "relay idempotency identity conflicts with retained envelope"
+                elif used_rate >= policy.rate_per_hour:
                     denial = "relay peer hourly rate exceeded"
-                elif denial is None and int(storage[0]["count"]) >= policy.max_stored_items:
+                elif int(storage[0]["count"]) >= policy.max_stored_items:
                     denial = "relay peer item storage quota exceeded"
-                elif (
-                    denial is None
-                    and int(storage[0]["bytes"]) + len(payload) > policy.max_stored_bytes
-                ):
+                elif int(storage[0]["bytes"]) + len(payload) > policy.max_stored_bytes:
                     denial = "relay peer byte storage quota exceeded"
+                else:
+                    direct_origin = sender_mesh_id.lower() == origin
+                    if origin_keys:
+                        pinned = origin_keys[0]
+                        pinned_key = bytes(pinned["public_key"])
+                        pinned_state = str(pinned["state"])
+                        if pinned_key == public_key:
+                            if pinned_state == "rejected":
+                                denial = "relay origin key is rejected"
+                            elif direct_origin:
+                                await transaction.write(
+                                    "UPDATE fed_relay_origin_key SET state='trusted',"
+                                    "observed_from_peer_id=?,reviewed_at=?,"
+                                    "reviewed_by='direct-origin-proof' WHERE origin_node=?",
+                                    (peer.id, stamp, origin),
+                                )
+                                await self._promote_origin_envelopes(
+                                    transaction, origin, public_key, stamp
+                                )
+                            elif pinned_state != "trusted":
+                                state = "quarantined"
+                        elif (
+                            pinned_state == "trusted"
+                            and rotation_from == pinned_key
+                            and rotation_signature is not None
+                        ):
+                            previous_fingerprint = str(pinned["fingerprint"])
+                            successor_fingerprint = self._fingerprint(public_key)
+                            await transaction.write(
+                                "UPDATE fed_relay_origin_key SET public_key=?,fingerprint=?,"
+                                "state='trusted',observed_from_peer_id=?,reviewed_at=?,"
+                                "reviewed_by='signed-key-rotation' WHERE origin_node=?",
+                                (public_key, successor_fingerprint, peer.id, stamp, origin),
+                            )
+                            await self._promote_origin_envelopes(
+                                transaction, origin, public_key, stamp
+                            )
+                            await self._event(
+                                transaction,
+                                envelope_id,
+                                peer.id,
+                                "origin_key_rotated",
+                                {
+                                    "origin": origin,
+                                    "previous_fingerprint": previous_fingerprint,
+                                    "successor_fingerprint": successor_fingerprint,
+                                    "presented_by": sender_mesh_id.lower(),
+                                },
+                                stamp,
+                                "federation",
+                            )
+                        else:
+                            candidate_state = await self._observe_origin_candidate(
+                                transaction,
+                                origin=origin,
+                                public_key=public_key,
+                                peer_id=peer.id,
+                                presented_by=sender_mesh_id.lower(),
+                                now=stamp,
+                                pinned_fingerprint=str(pinned["fingerprint"]),
+                                pinned_presented_by=(
+                                    str(pinned["observed_from"])
+                                    if pinned["observed_from"] is not None
+                                    else None
+                                ),
+                            )
+                            if candidate_state == "rejected":
+                                denial = "relay origin key candidate is rejected"
+                            else:
+                                state = "quarantined"
+                    else:
+                        candidate = await transaction.read(
+                            "SELECT state FROM fed_relay_origin_candidate "
+                            "WHERE origin_node=? AND fingerprint=?",
+                            (origin, self._fingerprint(public_key)),
+                        )
+                        if direct_origin and not (
+                            candidate and str(candidate[0]["state"]) == "rejected"
+                        ):
+                            await transaction.write(
+                                "INSERT INTO fed_relay_origin_key(origin_node,public_key,"
+                                "fingerprint,state,observed_from_peer_id,first_seen_at,"
+                                "reviewed_at,reviewed_by) VALUES(?,?,?,'trusted',?,?,?,?)",
+                                (
+                                    origin,
+                                    public_key,
+                                    self._fingerprint(public_key),
+                                    peer.id,
+                                    stamp,
+                                    stamp,
+                                    "direct-origin-proof",
+                                ),
+                            )
+                            await self._promote_origin_envelopes(
+                                transaction, origin, public_key, stamp
+                            )
+                        elif direct_origin:
+                            denial = "relay origin key candidate is rejected"
+                        else:
+                            candidate_state = await self._observe_origin_candidate(
+                                transaction,
+                                origin=origin,
+                                public_key=public_key,
+                                peer_id=peer.id,
+                                presented_by=sender_mesh_id.lower(),
+                                now=stamp,
+                                pinned_fingerprint=None,
+                                pinned_presented_by=None,
+                            )
+                            if candidate_state == "rejected":
+                                denial = "relay origin key candidate is rejected"
+                            else:
+                                state = "quarantined"
                 if denial is None:
                     await transaction.write(
                         "INSERT INTO fed_relay_envelope(envelope_id,direction,origin_node,"
                         "destination_node,scope,idempotency_key,created_at,expires_at,hop_limit,"
                         "payload_cbor,payload_bytes,origin_public_key,origin_signature,route_json,"
-                        "state,received_from_peer_id,received_transport,stored_at,updated_at) "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        "state,received_from_peer_id,received_transport,"
+                        "rotation_from_public_key,rotation_signature,stored_at,updated_at) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             envelope_id,
                             direction,
@@ -553,6 +843,8 @@ class FederationRelayService:
                             state,
                             peer.id,
                             transport,
+                            rotation_from,
+                            rotation_signature,
                             stamp,
                             stamp,
                         ),
@@ -611,56 +903,175 @@ class FederationRelayService:
             value.pop("payload_cbor", None)
             value.pop("origin_public_key", None)
             value.pop("origin_signature", None)
+            value.pop("rotation_from_public_key", None)
+            value.pop("rotation_signature", None)
             value["route"] = json.loads(str(value.pop("route_json")))
             values.append(value)
         return values
 
     async def origins(self) -> list[dict[str, Any]]:
-        return [
-            dict(row)
-            for row in await self.database.read(
-                "SELECT origin_node,fingerprint,state,first_seen_at,reviewed_at,reviewed_by "
-                "FROM fed_relay_origin_key ORDER BY first_seen_at DESC"
-            )
-        ]
+        pins = await self.database.read(
+            "SELECT k.origin_node,k.fingerprint,k.state,k.first_seen_at,k.reviewed_at,"
+            "k.reviewed_by,p.mesh_id observed_from FROM fed_relay_origin_key k "
+            "LEFT JOIN fed_peer p ON p.id=k.observed_from_peer_id"
+        )
+        candidates = await self.database.read(
+            "SELECT c.origin_node,c.fingerprint,c.state,c.first_seen_at,c.last_seen_at,"
+            "c.observation_count,c.reviewed_at,c.reviewed_by,"
+            "first_peer.mesh_id first_observed_from,last_peer.mesh_id last_observed_from "
+            "FROM fed_relay_origin_candidate c "
+            "LEFT JOIN fed_peer first_peer ON first_peer.id=c.first_observed_from_peer_id "
+            "LEFT JOIN fed_peer last_peer ON last_peer.id=c.last_observed_from_peer_id "
+            "ORDER BY c.last_seen_at DESC"
+        )
+        by_origin: dict[str, list[dict[str, Any]]] = {}
+        for row in candidates:
+            value = dict(row)
+            by_origin.setdefault(str(value.pop("origin_node")), []).append(value)
+        values: dict[str, dict[str, Any]] = {}
+        for row in pins:
+            value = dict(row)
+            value["candidates"] = by_origin.pop(str(value["origin_node"]), [])
+            values[str(value["origin_node"])] = value
+        for origin, observed in by_origin.items():
+            values[origin] = {
+                "origin_node": origin,
+                "fingerprint": None,
+                "state": "unverified",
+                "first_seen_at": min(int(item["first_seen_at"]) for item in observed),
+                "reviewed_at": None,
+                "reviewed_by": None,
+                "observed_from": None,
+                "candidates": observed,
+            }
+        return sorted(
+            values.values(),
+            key=lambda value: max(
+                [int(value["first_seen_at"])]
+                + [int(item["last_seen_at"]) for item in value["candidates"]]
+            ),
+            reverse=True,
+        )
 
-    async def review_origin(self, origin_node: str, state: str, actor: str) -> None:
-        if state not in {"trusted", "rejected"}:
-            raise ValueError("relay origin review must trust or reject")
+    async def review_origin(
+        self, origin_node: str, state: str, actor: str, *, fingerprint: str | None = None
+    ) -> None:
+        if state not in {"trusted", "rejected", "forget", "replace", "reject_candidate"}:
+            raise ValueError("unsupported relay origin review action")
+        if not NODE_ID.fullmatch(origin_node):
+            raise ValueError("invalid relay origin node ID")
+        if state in {"replace", "reject_candidate"} and not fingerprint:
+            raise ValueError("candidate fingerprint is required")
         now = int(self.clock.now().timestamp())
         async with self.database.transaction() as transaction:
-            found = await transaction.read(
-                "SELECT origin_node FROM fed_relay_origin_key WHERE origin_node=?", (origin_node,)
+            pins = await transaction.read(
+                "SELECT public_key,fingerprint,state FROM fed_relay_origin_key WHERE origin_node=?",
+                (origin_node,),
             )
-            if not found:
-                raise ValueError("relay origin key not found")
-            await transaction.write(
-                "UPDATE fed_relay_origin_key SET state=?,reviewed_at=?,reviewed_by=? "
-                "WHERE origin_node=?",
-                (state, now, actor[:160], origin_node),
-            )
-            if state == "trusted":
+            detail: dict[str, Any] = {"origin": origin_node, "state": state}
+            if state in {"trusted", "rejected"}:
+                if not pins:
+                    raise ValueError("relay origin key not found")
                 await transaction.write(
-                    "UPDATE fed_relay_envelope SET state=CASE WHEN destination_node=? "
-                    "THEN 'delivered' ELSE 'queued' END,updated_at=? "
-                    "WHERE origin_node=? AND state='quarantined' AND expires_at>?",
-                    (self._local_id(), now, origin_node, now),
+                    "UPDATE fed_relay_origin_key SET state=?,reviewed_at=?,reviewed_by=? "
+                    "WHERE origin_node=?",
+                    (state, now, actor[:160], origin_node),
+                )
+                pinned_key = bytes(pins[0]["public_key"])
+                detail["fingerprint"] = str(pins[0]["fingerprint"])
+                if state == "trusted":
+                    await self._promote_origin_envelopes(transaction, origin_node, pinned_key, now)
+                else:
+                    await transaction.write(
+                        "UPDATE fed_relay_envelope SET state='rejected',updated_at=?,"
+                        "last_error='origin rejected by operator' WHERE origin_node=? "
+                        "AND origin_public_key=? AND state='quarantined'",
+                        (now, origin_node, pinned_key),
+                    )
+            elif state == "forget":
+                if not pins:
+                    raise ValueError("relay origin key not found")
+                detail["forgotten_fingerprint"] = str(pins[0]["fingerprint"])
+                await transaction.write(
+                    "DELETE FROM fed_relay_origin_key WHERE origin_node=?", (origin_node,)
                 )
             else:
+                candidates = await transaction.read(
+                    "SELECT public_key,fingerprint,state,last_observed_from_peer_id,first_seen_at "
+                    "FROM fed_relay_origin_candidate WHERE origin_node=? AND fingerprint=?",
+                    (origin_node, fingerprint),
+                )
+                if not candidates:
+                    raise ValueError("relay origin key candidate not found")
+                candidate = candidates[0]
+                candidate_key = bytes(candidate["public_key"])
+                detail["candidate_fingerprint"] = str(candidate["fingerprint"])
+                if state == "replace":
+                    detail["replaced_fingerprint"] = str(pins[0]["fingerprint"]) if pins else None
+                    await transaction.write(
+                        "INSERT INTO fed_relay_origin_key(origin_node,public_key,fingerprint,"
+                        "state,observed_from_peer_id,first_seen_at,reviewed_at,reviewed_by) "
+                        "VALUES(?,?,?,'trusted',?,?,?,?) ON CONFLICT(origin_node) DO UPDATE SET "
+                        "public_key=excluded.public_key,fingerprint=excluded.fingerprint,"
+                        "state='trusted',observed_from_peer_id=excluded.observed_from_peer_id,"
+                        "reviewed_at=excluded.reviewed_at,reviewed_by=excluded.reviewed_by",
+                        (
+                            origin_node,
+                            candidate_key,
+                            str(candidate["fingerprint"]),
+                            candidate["last_observed_from_peer_id"],
+                            int(candidate["first_seen_at"]),
+                            now,
+                            actor[:160],
+                        ),
+                    )
+                    await transaction.write(
+                        "UPDATE fed_relay_origin_candidate SET state='trusted',reviewed_at=?,"
+                        "reviewed_by=? WHERE origin_node=? AND fingerprint=?",
+                        (now, actor[:160], origin_node, fingerprint),
+                    )
+                    await self._promote_origin_envelopes(
+                        transaction, origin_node, candidate_key, now
+                    )
+                else:
+                    await transaction.write(
+                        "UPDATE fed_relay_origin_candidate SET state='rejected',reviewed_at=?,"
+                        "reviewed_by=? WHERE origin_node=? AND fingerprint=?",
+                        (now, actor[:160], origin_node, fingerprint),
+                    )
+                    await transaction.write(
+                        "UPDATE fed_relay_envelope SET state='rejected',updated_at=?,"
+                        "last_error='origin key candidate rejected by operator' "
+                        "WHERE origin_node=? AND origin_public_key=? AND state='quarantined'",
+                        (now, origin_node, candidate_key),
+                    )
                 await transaction.write(
-                    "UPDATE fed_relay_envelope SET state='rejected',updated_at=?,"
-                    "last_error='origin rejected by operator' "
-                    "WHERE origin_node=? AND state='quarantined'",
-                    (now, origin_node),
+                    "UPDATE mail SET operator_read_at=COALESCE(operator_read_at,?),archived_at=? "
+                    "WHERE conversation_key=?",
+                    (
+                        now,
+                        now,
+                        f"system:relay-origin-key:{origin_node}:{fingerprint}",
+                    ),
                 )
             await self._event(
                 transaction,
                 None,
                 None,
                 "origin_reviewed",
-                {"origin": origin_node, "state": state},
+                detail,
                 now,
                 actor,
+            )
+            await transaction.write(
+                "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
+                "VALUES('web',?,'federation.relay_origin_review',?,?,?)",
+                (
+                    actor[:160],
+                    origin_node,
+                    json.dumps(detail, separators=(",", ":"), sort_keys=True),
+                    now,
+                ),
             )
 
     async def item_action(self, envelope_id: str, action: str, actor: str) -> None:
