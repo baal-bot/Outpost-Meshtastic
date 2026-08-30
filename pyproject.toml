@@ -95,4 +95,4 @@ ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = ["outpost.ai.providers.hailo_vlm"]
-disable_error_code = ["import-untyped"]
+disable_error_code = ["import-not-found", "import-untyped"]

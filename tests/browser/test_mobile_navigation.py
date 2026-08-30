@@ -57,6 +57,9 @@ VISUAL_PREVIEW_SIZE = (64, 48)
 VISUAL_MEAN_DELTA_LIMIT = 2.5
 VISUAL_CHANNEL_DELTA = 16
 VISUAL_CHANGED_RATIO_LIMIT = 0.03
+# Chromium's x64 and ARM64 daylight rasterization differs slightly on this dense radio table.
+# Keep the exception narrower than the 5.07 nearest-distinct-page distance measured by the guard.
+VISUAL_MEAN_DELTA_OVERRIDES = {"radio/desktop/daylight": 2.75}
 VISUAL_PAGES = (
     ("overview", "/"),
     ("members", "/operator.html"),
@@ -169,8 +172,9 @@ def assert_visual_signature(
     deltas = [abs(left - right) for left, right in zip(current_bytes, expected_bytes, strict=True)]
     mean_delta = sum(deltas) / len(deltas)
     changed_ratio = sum(delta > VISUAL_CHANNEL_DELTA for delta in deltas) / len(deltas)
-    assert mean_delta <= VISUAL_MEAN_DELTA_LIMIT, (
-        f"{key}: mean screenshot delta {mean_delta:.2f} exceeds {VISUAL_MEAN_DELTA_LIMIT}"
+    mean_limit = VISUAL_MEAN_DELTA_OVERRIDES.get(key, VISUAL_MEAN_DELTA_LIMIT)
+    assert mean_delta <= mean_limit, (
+        f"{key}: mean screenshot delta {mean_delta:.2f} exceeds {mean_limit}"
     )
     assert changed_ratio <= VISUAL_CHANGED_RATIO_LIMIT, (
         f"{key}: {changed_ratio:.1%} of screenshot channels changed materially"
