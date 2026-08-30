@@ -3,8 +3,12 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any, Protocol
+
+from prometheus_client import Counter
 
 from outpost.config import AIHailoVLMConfig
 
@@ -35,6 +39,11 @@ class VLMRuntime(Protocol):
 
 RuntimeFactory = Callable[[Path, bool], VLMRuntime]
 Sleep = Callable[[float], Awaitable[None]]
+
+HAILO_GENERATIONS_OUTLIVED_CALLER = Counter(
+    "outpost_hailo_generations_outlived_caller_total",
+    "Hailo VLM generations that kept running after their caller was cancelled",
+)
 
 
 class _HailoRuntime:
@@ -130,11 +139,26 @@ class HailoVLMProvider:
         self._close_timeout_s = max(0.001, close_timeout_s)
         self._sleep = sleep
         self._runtime: VLMRuntime | None = None
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="outpost-hailo-vlm")
+        self._closed = False
         self._load_lock = asyncio.Lock()
         self._request_lock = asyncio.Lock()
 
+    def _load_runtime(self) -> VLMRuntime:
+        """Construct and publish the device handle on the serialized hardware worker."""
+        if self._closed:
+            raise ProviderUnavailable("hailo_vlm: provider is closed")
+        if self._runtime is None:
+            self._runtime = self._runtime_factory(
+                self.endpoint.model_path,
+                self.endpoint.optimize_memory_on_device,
+            )
+        return self._runtime
+
     async def _ensure_runtime(self) -> VLMRuntime:
         async with self._load_lock:
+            if self._closed:
+                raise ProviderUnavailable("hailo_vlm: provider is closed")
             if self._runtime is not None:
                 return self._runtime
             if not self.endpoint.model_path.is_file():
@@ -142,12 +166,10 @@ class HailoVLMProvider:
             last_error: Exception | None = None
             for attempt in range(self._load_attempts):
                 try:
-                    self._runtime = await asyncio.to_thread(
-                        self._runtime_factory,
-                        self.endpoint.model_path,
-                        self.endpoint.optimize_memory_on_device,
-                    )
-                    return self._runtime
+                    # Assignment happens inside the worker. If this coroutine is
+                    # cancelled during construction, the handle is still published
+                    # for the next request (or queued close) instead of being leaked.
+                    return await asyncio.wrap_future(self._executor.submit(self._load_runtime))
                 except ProviderUnavailable:
                     raise
                 except Exception as exc:
@@ -186,14 +208,24 @@ class HailoVLMProvider:
         started = time.perf_counter()
         async with self._request_lock:
             runtime = await self._ensure_runtime()
-            try:
-                content, prompt_tokens, output_tokens = await asyncio.to_thread(
+            worker = self._executor.submit(
+                partial(
                     runtime.generate,
                     req.messages,
                     max_output_tokens=min(req.max_output_tokens, self.max_output_tokens),
                     temperature=req.temperature,
                     timeout_ms=max(1, round(self.timeout_s * 1000)),
                 )
+            )
+            try:
+                content, prompt_tokens, output_tokens = await asyncio.wrap_future(worker)
+            except asyncio.CancelledError:
+                # A queued operation can still be abandoned. A running native
+                # generation cannot be interrupted, but the one-worker executor
+                # keeps every subsequent request behind it until it finishes.
+                if not worker.cancel() and not worker.done():
+                    HAILO_GENERATIONS_OUTLIVED_CALLER.inc()
+                raise
             except Exception as exc:
                 raise ProviderUnavailable(f"hailo_vlm: {type(exc).__name__}") from exc
         return ChatResponse(
@@ -208,23 +240,35 @@ class HailoVLMProvider:
     async def warm(self) -> None:
         await self._ensure_runtime()
 
+    def _close_runtime(self) -> None:
+        runtime, self._runtime = self._runtime, None
+        if runtime is not None:
+            runtime.close()
+
     async def close(self) -> None:
         async with self._request_lock:
             async with self._load_lock:
-                runtime, self._runtime = self._runtime, None
-                if runtime is not None:
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.to_thread(runtime.close), timeout=self._close_timeout_s
-                        )
-                    except TimeoutError as exc:
-                        raise ProviderUnavailable(
-                            "hailo_vlm: timed out releasing the Hailo device"
-                        ) from exc
-                    except Exception as exc:
-                        raise ProviderUnavailable(
-                            f"hailo_vlm: device release failed ({type(exc).__name__})"
-                        ) from exc
+                if self._closed:
+                    return
+                self._closed = True
+                try:
+                    worker = self._executor.submit(self._close_runtime)
+                    await asyncio.wait_for(
+                        asyncio.shield(asyncio.wrap_future(worker)),
+                        timeout=self._close_timeout_s,
+                    )
+                except TimeoutError as exc:
+                    raise ProviderUnavailable(
+                        "hailo_vlm: timed out releasing the Hailo device"
+                    ) from exc
+                except Exception as exc:
+                    raise ProviderUnavailable(
+                        f"hailo_vlm: device release failed ({type(exc).__name__})"
+                    ) from exc
+                finally:
+                    # wait=False keeps shutdown bounded; already-submitted device
+                    # work and the queued release still complete in order.
+                    self._executor.shutdown(wait=False, cancel_futures=False)
 
 
 def _strip_generation_markers(content: str) -> str:

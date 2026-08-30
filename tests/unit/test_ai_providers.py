@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 
 import httpx
 import pytest
 
 from outpost.ai import ChatMessage, ChatRequest, create_provider
-from outpost.ai.providers.hailo_vlm import HailoVLMProvider, _HailoRuntime
+from outpost.ai.providers.hailo_vlm import (
+    HAILO_GENERATIONS_OUTLIVED_CALLER,
+    HailoVLMProvider,
+    _HailoRuntime,
+)
 from outpost.ai.providers.models import ProviderState, ProviderUnavailable
 from outpost.config import AIConfig, AIHailoVLMConfig
 
@@ -161,6 +166,108 @@ async def test_hailo_vlm_loads_compiled_model_and_serialises_native_chat(tmp_pat
     assert runtime.peak_active == 1
     await provider.close()
     assert runtime.closed
+
+
+@pytest.mark.asyncio
+async def test_hailo_vlm_timeout_keeps_native_generations_serialised(tmp_path) -> None:
+    class BlockingRuntime(FakeVLMRuntime):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        def generate(
+            self,
+            messages: tuple[ChatMessage, ...],
+            *,
+            max_output_tokens: int,
+            temperature: float,
+            timeout_ms: int,
+        ) -> tuple[str, int, int]:
+            self.active += 1
+            self.peak_active = max(self.peak_active, self.active)
+            self.started.set()
+            self.release.wait(timeout=1)
+            self.calls.append((messages, max_output_tokens, temperature, timeout_ms))
+            self.active -= 1
+            return "Native Hailo answer", 12, 3
+
+    model = tmp_path / "Qwen3-VL-2B-Instruct.hef"
+    model.write_bytes(b"test HEF")
+    runtime = BlockingRuntime()
+    factory_calls = 0
+
+    def factory(_path: object, _optimize: object) -> BlockingRuntime:
+        nonlocal factory_calls
+        factory_calls += 1
+        return runtime
+
+    provider = HailoVLMProvider(
+        AIHailoVLMConfig(model_path=model),
+        "Qwen3-VL-2B-Instruct",
+        45,
+        64,
+        runtime_factory=factory,
+    )
+    before = HAILO_GENERATIONS_OUTLIVED_CALLER._value.get()
+    request = ChatRequest(messages=(ChatMessage(role="user", content="first"),))
+
+    timed_out = asyncio.create_task(asyncio.wait_for(provider.chat(request), timeout=0.05))
+    assert await asyncio.to_thread(runtime.started.wait, 1)
+    with pytest.raises(TimeoutError):
+        await timed_out
+    second = asyncio.create_task(
+        provider.chat(ChatRequest(messages=(ChatMessage(role="user", content="second"),)))
+    )
+    await asyncio.sleep(0.02)
+
+    assert runtime.peak_active == 1
+    assert factory_calls == 1
+    assert HAILO_GENERATIONS_OUTLIVED_CALLER._value.get() == before + 1
+
+    runtime.release.set()
+    response = await asyncio.wait_for(second, timeout=1)
+    assert response.content == "Native Hailo answer"
+    assert runtime.peak_active == 1
+    assert [call[0][0].content for call in runtime.calls] == ["first", "second"]
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_hailo_vlm_cancelled_load_publishes_one_runtime(tmp_path) -> None:
+    model = tmp_path / "Qwen3-VL-2B-Instruct.hef"
+    model.write_bytes(b"test HEF")
+    runtime = FakeVLMRuntime()
+    factory_started = threading.Event()
+    release_factory = threading.Event()
+    factory_calls = 0
+
+    def factory(_path: object, _optimize: object) -> FakeVLMRuntime:
+        nonlocal factory_calls
+        factory_calls += 1
+        factory_started.set()
+        release_factory.wait(timeout=1)
+        return runtime
+
+    provider = HailoVLMProvider(
+        AIHailoVLMConfig(model_path=model),
+        "Qwen3-VL-2B-Instruct",
+        45,
+        64,
+        runtime_factory=factory,
+    )
+    first = asyncio.create_task(provider.warm())
+    assert await asyncio.to_thread(factory_started.wait, 1)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    second = asyncio.create_task(provider.warm())
+    release_factory.set()
+    await asyncio.wait_for(second, timeout=1)
+
+    assert factory_calls == 1
+    await provider.close()
 
 
 @pytest.mark.asyncio
