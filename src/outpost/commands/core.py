@@ -197,6 +197,7 @@ def _menu_screen(ctx: CommandContext, topic: str) -> Response:
                 ("I'm OK", "OK", "OK", ("ok", "safe")),
                 ("I need help", "MENU HELPME", "HELPME", ("help me",)),
                 ("Current roster", "ROSTER", "ROSTER", ("roster",)),
+                ("Practice drill preference", "DRILLS", "DRILLS", ("drills", "practice")),
             ],
         )
     if topic == "RESPONDER":

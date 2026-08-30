@@ -16,8 +16,12 @@ from outpost.store import Database
 from outpost.store.members import MemberRepo
 from outpost.transport.chunker import chunk_text
 from outpost.transport.models import InboundMessage
+from outpost.watch import CheckinService
 from outpost.web.api import create_web_app
 from outpost.web.auth import WebAuthService
+from tests.support.application import production_governor
+
+pytestmark = pytest.mark.production_wiring
 
 
 class FixtureNarrator:
@@ -38,6 +42,45 @@ class FailedNarrator:
     ) -> tuple[str | None, str]:
         del snapshot, required_refs
         raise TimeoutError("fixture provider timeout")
+
+
+@pytest.mark.asyncio
+async def test_situation_briefing_keeps_drill_group_informational_until_real_help(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock(epoch=datetime(2026, 8, 28, 12, tzinfo=UTC))
+    members = MemberRepo(database, clock)
+    medic = await members.resolve("!00000001")
+    medic = await members.claim_handle(medic.mesh_id, "medic")
+    other = await members.resolve("!00000002")
+    await members.claim_handle(other.mesh_id, "other")
+    await database.write(
+        "UPDATE member SET trust='responder' WHERE id IN (?,?)", (medic.id, other.id)
+    )
+    checkins = CheckinService(database, production_governor(database, clock), clock)
+    group = await checkins.create_group("Medical", "medical", "web:operator")
+    await checkins.set_group_members(group["id"], [medic.id], "web:operator")
+    await checkins.open_event(
+        "Medical practice",
+        "responders",
+        "schedule:1",
+        event_kind="drill",
+        responder_group_id=group["id"],
+    )
+    situation = SituationBriefingService(database, clock, lambda: {"radio": "up"})
+
+    snapshot = await situation.snapshot(BriefingCapability.RESPONDER)
+    welfare = next(item for item in snapshot["items"] if item["section"] == "welfare")
+    assert welfare["severity"] == "info" and welfare["hazard"] is False
+    assert welfare["state"] == "drill"
+    assert welfare["detail"].startswith("DRILL · 0 need help · 1 unaccounted")
+
+    await checkins.checkin(medic, "need_help", "This is a real injury")
+    assert any("REAL HELP during DRILL" in item.text for item in checkins.governor.queued_items())
+    urgent = await situation.snapshot(BriefingCapability.RESPONDER)
+    welfare = next(item for item in urgent["items"] if item["section"] == "welfare")
+    assert welfare["severity"] == "urgent" and welfare["hazard"] is True
+    await database.close()
 
 
 async def seeded_service(

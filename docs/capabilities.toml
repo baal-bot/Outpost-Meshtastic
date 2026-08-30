@@ -251,7 +251,7 @@ description = "Reconnect rejects stale/concurrent incident edits while preservin
 [[capabilities]]
 id = "welfare"
 area = "Welfare events and check-ins"
-present = "Events, reviewed solicitation, roster states, delivery-accountable HELP/OK handling, honest no-responder guidance, derived unaccounted members, and CSV export."
+present = "Events, recurring opt-in drills with reviewed airtime ceilings, named responder groups, readiness history, roster states, delivery-accountable HELP/OK handling, honest no-responder guidance, derived unaccounted members, and CSV export."
 maturity = "simulated"
 introduced_commit = "04e74ca"
 limitations = ["A real participant exercise and timing evidence remain part of the Phase 3 tabletop."]
@@ -272,6 +272,18 @@ description = "Member-facing OK, HELPME, roster, and event lifecycle through the
 kind = "automated"
 path = "tests/integration/test_watch_checkin.py::test_need_help_reports_zero_when_requester_is_only_responder"
 description = "HELP reports zero notified responders when the requester is the only eligible responder."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_watch_checkin.py::test_recurring_drill_enforces_opt_out_ceiling_and_reports_participation"
+description = "Recurring drills remain marked, honor member opt-outs, enforce the reviewed send ceiling, and retain participation results."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_watch_checkin.py::test_scheduled_drill_suppresses_for_real_event_quiet_hours_and_roster_growth"
+description = "Scheduled practice yields to real events and quiet hours and stops when its roster outgrows operator approval."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_mobile_navigation.py::test_welfare_drill_schedule_preview_groups_and_readiness_are_functional"
+description = "Mobile and desktop operator flows cover responder groups, exact-message/airtime preview, scheduling, and readiness reporting."
 
 [[capabilities]]
 id = "environment"

@@ -203,3 +203,278 @@ async def test_need_help_reports_zero_when_requester_is_only_responder(tmp_path)
     assert system_mail["state"] == "failed"
     assert "No recipient was reached" in system_mail["body"]
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_responder_groups_are_role_bounded_and_target_welfare_rosters(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    members = MemberRepo(database, clock)
+    responder = await members.resolve("!00000001")
+    responder = await members.claim_handle(responder.mesh_id, "medic")
+    ordinary = await members.resolve("!00000002")
+    ordinary = await members.claim_handle(ordinary.mesh_id, "neighbor")
+    await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
+    service = CheckinService(database, production_governor(database, clock), clock)
+
+    group = await service.create_group("Medical", "medical", "web:operator")
+    with pytest.raises(ValueError, match="only responder or operator"):
+        await service.set_group_members(group["id"], [ordinary.id], "web:operator")
+    await service.set_group_members(group["id"], [responder.id], "web:operator")
+    event = await service.open_event(
+        "Medical accountability",
+        "responders",
+        "web:operator",
+        responder_group_id=group["id"],
+    )
+
+    assert [row["mesh_id"] for row in await service.roster(event.id)] == [responder.mesh_id]
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_recurring_drill_enforces_opt_out_ceiling_and_reports_participation(
+    tmp_path,
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    clock.advance(10 * 60 * 60)
+    governor = production_governor(database, clock)
+    members = MemberRepo(database, clock)
+    participant = await members.resolve("!00000001")
+    participant = await members.claim_handle(participant.mesh_id, "participant")
+    opted_out = await members.resolve("!00000002")
+    opted_out = await members.claim_handle(opted_out.mesh_id, "optedout")
+    service = CheckinService(database, governor, clock)
+    await service.set_drill_participation(opted_out.id, False)
+
+    preview = await service.schedule_preview("Saturday readiness", "all")
+    assert preview["recipient_count"] == 1
+    assert preview["message"].startswith("DRILL — Outpost welfare check")
+    schedule = await service.create_schedule(
+        "Saturday readiness",
+        "weekly",
+        5,
+        "10:00",
+        "all",
+        "web:operator",
+        preview_token=preview["preview_token"],
+    )
+    now = int(clock.now().timestamp())
+    await database.write("UPDATE welfare_schedule SET next_run_at=? WHERE id=?", (now, schedule.id))
+
+    assert await service.run_due_schedules() == [{"schedule_id": schedule.id, "outcome": "started"}]
+    event = await service.current_event()
+    assert event is not None and event.event_kind == "drill"
+    assert event.auto_close_at == now + 120 * 60
+    assert [row["mesh_id"] for row in await service.roster(event.id)] == [participant.mesh_id]
+    assert len(governor.queued_items()) == 1
+    assert governor.queued_items()[0].text.startswith("DRILL —")
+    assert "HELPME always reports real need" in governor.queued_items()[0].text
+
+    await service.checkin(participant, "ok", "Practice response")
+    report = await service.participation_report()
+    assert report["nets"][0]["response_rate"] == 100.0
+    assert report["never_responded"] == []
+    assert report["not_heard_since_last_net"] == []
+    assert report["runs"][0]["outcome"] == "started"
+
+    real = await service.open_event("Actual flood", "all", "web:operator")
+    assert real.event_kind == "real"
+    assert (await service.by_id(event.id)).closed_at is not None  # type: ignore[union-attr]
+    assert opted_out.mesh_id in [row["mesh_id"] for row in await service.roster(real.id)]
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_scheduled_drill_suppresses_for_real_event_quiet_hours_and_roster_growth(
+    tmp_path,
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    clock.advance(10 * 60 * 60)
+    governor = production_governor(database, clock)
+    members = MemberRepo(database, clock)
+    first = await members.resolve("!00000001")
+    await members.claim_handle(first.mesh_id, "first")
+    service = CheckinService(database, governor, clock)
+    night_preview = await service.schedule_preview("Night drill", "all")
+    with pytest.raises(ValueError, match="quiet hours"):
+        await service.create_schedule(
+            "Night drill",
+            "weekly",
+            5,
+            "23:00",
+            "all",
+            "web:operator",
+            preview_token=night_preview["preview_token"],
+        )
+    preview = await service.schedule_preview("Bounded drill", "all")
+    schedule = await service.create_schedule(
+        "Bounded drill",
+        "weekly",
+        5,
+        "10:00",
+        "all",
+        "web:operator",
+        preview_token=preview["preview_token"],
+    )
+    real = await service.open_event("Actual incident", "all", "web:operator")
+    now = int(clock.now().timestamp())
+    await database.write("UPDATE welfare_schedule SET next_run_at=? WHERE id=?", (now, schedule.id))
+    result = await service.run_due_schedules()
+    assert result == [{"schedule_id": schedule.id, "outcome": "suppressed_real_event"}]
+    assert (await service.current_event()).id == real.id  # type: ignore[union-attr]
+    await service.close_event(real.id)
+
+    clock.advance(1)
+    now = int(clock.now().timestamp())
+    governor.config.quiet_hours.start = "09:00"
+    governor.config.quiet_hours.end = "11:00"
+    await database.write("UPDATE welfare_schedule SET next_run_at=? WHERE id=?", (now, schedule.id))
+    assert await service.run_due_schedules() == [
+        {"schedule_id": schedule.id, "outcome": "suppressed_quiet_hours"}
+    ]
+    governor.config.quiet_hours.start = "22:00"
+    governor.config.quiet_hours.end = "06:00"
+
+    second = await members.resolve("!00000002")
+    await members.claim_handle(second.mesh_id, "second")
+    clock.advance(1)
+    now = int(clock.now().timestamp())
+    await database.write("UPDATE welfare_schedule SET next_run_at=? WHERE id=?", (now, schedule.id))
+    result = await service.run_due_schedules()
+    assert result == [{"schedule_id": schedule.id, "outcome": "suppressed_airtime_growth"}]
+    assert await service.current_event() is None
+    run = (
+        await database.read(
+            "SELECT outcome,recipient_count FROM welfare_schedule_run ORDER BY id DESC LIMIT 1"
+        )
+    )[0]
+    assert dict(run) == {"outcome": "suppressed_airtime_growth", "recipient_count": 2}
+    assert governor.queued_items() == []
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_operator_api_manages_groups_schedules_and_drill_report(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    clock = VirtualClock()
+    clock.advance(10 * 60 * 60)
+    members = MemberRepo(database, clock)
+    responder = await members.resolve("!00000001")
+    responder = await members.claim_handle(responder.mesh_id, "medic")
+    await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
+    service = CheckinService(database, production_governor(database, clock), clock)
+    client = TestClient(
+        create_web_app(lambda: {"radio": "up"}, database=database, checkins=service)
+    )
+
+    created_group = client.post(
+        "/api/v1/responder-groups", json={"name": "Medical", "response_type": "medical"}
+    )
+    assert created_group.status_code == 200
+    group_id = created_group.json()["id"]
+    assigned = client.put(
+        f"/api/v1/responder-groups/{group_id}/members",
+        json={"member_ids": [responder.id]},
+    )
+    assert assigned.status_code == 200
+    assert assigned.json()["members"][0]["handle"] == "medic"
+
+    preview = client.post(
+        "/api/v1/welfare-schedules/preview",
+        json={
+            "name": "Medic practice",
+            "cadence": "weekly",
+            "day_of_period": 5,
+            "local_time": "10:00",
+            "roster_policy": "responders",
+            "responder_group_id": group_id,
+            "window_minutes": 120,
+        },
+    )
+    assert preview.status_code == 200
+    assert preview.json()["recipient_count"] == 1
+    assert preview.json()["message"].startswith("DRILL —")
+    created_schedule = client.post(
+        "/api/v1/welfare-schedules",
+        json={
+            "name": "Medic practice",
+            "cadence": "weekly",
+            "day_of_period": 5,
+            "local_time": "10:00",
+            "roster_policy": "responders",
+            "responder_group_id": group_id,
+            "window_minutes": 120,
+            "suppress_if_real_event": True,
+            "preview_token": preview.json()["preview_token"],
+        },
+    )
+    assert created_schedule.status_code == 200
+    schedule = created_schedule.json()
+    assert schedule["recipient_limit"] == 1
+    assert schedule["airtime_limit_seconds"] > 0
+    assert schedule["timezone"] == "UTC" and schedule["next_run_local"].endswith("UTC")
+    assert client.get("/api/v1/welfare-schedules").json()["items"][0]["id"] == schedule["id"]
+    assert client.get("/api/v1/welfare-report").json()["nets"] == []
+
+    stale_preview = client.post(
+        "/api/v1/welfare-schedules/preview",
+        json={
+            "name": "All-member practice",
+            "cadence": "weekly",
+            "day_of_period": 5,
+            "local_time": "10:00",
+            "roster_policy": "all",
+            "window_minutes": 120,
+        },
+    ).json()
+    newcomer = await members.resolve("!00000002")
+    await members.claim_handle(newcomer.mesh_id, "newcomer")
+    changed = client.post(
+        "/api/v1/welfare-schedules",
+        json={
+            "name": "All-member practice",
+            "cadence": "weekly",
+            "day_of_period": 5,
+            "local_time": "10:00",
+            "roster_policy": "all",
+            "window_minutes": 120,
+            "preview_token": stale_preview["preview_token"],
+        },
+    )
+    assert changed.status_code == 409
+    assert changed.json()["error"]["code"] == "schedule_preview_changed"
+
+    assert client.delete(f"/api/v1/responder-groups/{group_id}").status_code == 200
+    paused = client.get("/api/v1/welfare-schedules").json()["items"][0]
+    assert paused["enabled"] is False
+    assert paused["responder_group_id"] is None
+    assert paused["last_outcome"] == "group_removed"
+    denied_resume = client.patch(
+        f"/api/v1/welfare-schedules/{schedule['id']}", json={"enabled": True}
+    )
+    assert denied_resume.status_code == 422
+    assert client.delete(f"/api/v1/welfare-schedules/{schedule['id']}").status_code == 200
+    assert client.get("/api/v1/welfare-schedules").json()["items"] == []
+
+    audit_actions = {
+        row["action"]
+        for row in await database.read(
+            "SELECT action FROM audit_log WHERE action LIKE 'responder_group.%' "
+            "OR action LIKE 'welfare_schedule.%'"
+        )
+    }
+    assert audit_actions == {
+        "responder_group.create",
+        "responder_group.delete",
+        "responder_group.members",
+        "welfare_schedule.create",
+        "welfare_schedule.delete",
+    }
+    await database.close()

@@ -112,6 +112,10 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | Watch | `watch_event` | Retain closed events; open events and events overlapping a retained incident are protected. |
 | Watch | `checkin` | Retain welfare history for `watch_history_days`; check-ins concurrent with a retained incident are protected as report context. |
 | Watch | `checkin_solicitation` | Cascade with its event. |
+| Watch | `responder_group`, `responder_group_member` | Preserve operator-managed responder audiences; membership follows its group. |
+| Watch | `welfare_schedule` | Preserve active recurring policy; retain removed policy while referenced drill records remain. |
+| Watch | `welfare_event_roster` | Cascade with its retained drill event. |
+| Watch | `welfare_schedule_run` | Retain drill execution and suppression history for `watch_history_days`. |
 | Environment | `env_cache`, `cap_point_cache` | Expire after `provider_cache_days`. |
 | Environment | `cap_alert`, `earthquake`, `same_event` | Retain review/history for `environment_history_days`. |
 | Environment | `waypoint` | Preserve operator-managed reference data. |

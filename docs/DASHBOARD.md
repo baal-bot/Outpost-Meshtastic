@@ -16,8 +16,10 @@ endpoint boundary.
 - **BBS and Mail:** boards, threads, moderation, and a conversation-based operations inbox with
   member/system identity, route previews, delivery state, search, unread state, archiving, and
   verified member-removal review against the active generated retention policy.
-- **Watch:** incident map/list, monitoring state, alerts, acknowledgements, welfare events, and
-  human-reviewed cross-Outpost incident reconciliation with origin/provenance inspection.
+- **Watch:** incident map/list, monitoring state, alerts, acknowledgements, welfare events,
+  recurring practice nets with hard reviewed send ceilings, responder-group management,
+  participation readiness reports, and human-reviewed cross-Outpost incident reconciliation with
+  origin/provenance inspection.
 - **Sitrep:** deterministic, role-filtered key facts; source IDs and ages; changes since the prior
   snapshot; supporting-record links; 24-hour versus prior-14-day confirmed delivery and enrolled
   receive-quality trends; and optional cached AI phrasing of the authorized facts. Delivery

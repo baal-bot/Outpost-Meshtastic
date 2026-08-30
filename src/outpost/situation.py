@@ -531,22 +531,46 @@ class SituationBriefingService:
         self, capability: BriefingCapability, now: int
     ) -> tuple[list[BriefingItem], list[BriefingSource]]:
         events = await self.database.read(
-            "SELECT id,name,opened_at,roster_policy FROM watch_event "
+            "SELECT id,name,opened_at,roster_policy,event_kind,responder_group_id "
+            "FROM watch_event "
             "WHERE closed_at IS NULL ORDER BY id DESC LIMIT 1"
         )
         if not events:
             return [], []
         event = events[0]
         event_id = int(event["id"])
-        if event["roster_policy"] == "responders":
+        drill = event["event_kind"] == "drill"
+        params: tuple[object, ...]
+        if drill:
+            roster_from = (
+                "welfare_event_roster r JOIN member m ON m.id=r.member_id "
+                "LEFT JOIN latest l ON l.member_id=m.id AND l.n=1"
+            )
+            member_filter = "r.event_id=?"
+            params = (event_id, event_id)
+        elif event["responder_group_id"] is not None:
+            roster_from = "member m LEFT JOIN latest l ON l.member_id=m.id AND l.n=1"
+            member_filter = (
+                "m.trust IN ('responder','operator') AND EXISTS ("
+                "SELECT 1 FROM responder_group_member gm WHERE gm.member_id=m.id "
+                "AND gm.group_id=?)"
+            )
+            params = (event_id, int(event["responder_group_id"]))
+        elif event["roster_policy"] == "responders":
+            roster_from = "member m LEFT JOIN latest l ON l.member_id=m.id AND l.n=1"
             member_filter = "m.trust IN ('responder','operator')"
+            params = (event_id,)
         elif event["roster_policy"] == "subscribed":
+            roster_from = "member m LEFT JOIN latest l ON l.member_id=m.id AND l.n=1"
             member_filter = (
                 "m.trust IN ('member','trusted','responder','operator') "
                 "AND json_extract(m.prefs,'$.roster')=1"
             )
+            params = (event_id,)
         else:
+            roster_from = "member m LEFT JOIN latest l ON l.member_id=m.id AND l.n=1"
             member_filter = "m.trust IN ('member','trusted','responder','operator')"
+            params = (event_id,)
         rows = await self.database.read(
             f"""
             WITH latest AS (
@@ -555,11 +579,11 @@ class SituationBriefingService:
               FROM checkin WHERE event_id=?
             )
             SELECT m.id,m.handle,COALESCE(l.status,'unaccounted') status,l.created_at
-            FROM member m LEFT JOIN latest l ON l.member_id=m.id AND l.n=1
+            FROM {roster_from}
             WHERE {member_filter}
             ORDER BY COALESCE(m.handle,printf('member-%d',m.id))
             """,  # noqa: S608 -- the filter is selected from fixed literals above.
-            (event_id,),
+            params,
         )
         counts = {name: 0 for name in ("ok", "need_help", "evacuated", "unaccounted")}
         names: list[str] = []
@@ -580,17 +604,22 @@ class SituationBriefingService:
         title = (
             _safe_text(event["name"], 80)
             if capability is not BriefingCapability.PUBLIC
+            else "Active welfare drill"
+            if drill
             else "Active welfare event"
         )
         detail = (
-            f"{counts['need_help']} need help · {counts['unaccounted']} unaccounted · "
+            f"{'DRILL · ' if drill else ''}{counts['need_help']} need help · "
+            f"{counts['unaccounted']} unaccounted · "
             f"{counts['ok']} OK · {counts['evacuated']} evacuated"
         )
         if names:
             detail += f" · attention: {', '.join(names)}"
         source_id = f"welfare:{event_id}"
         severity = (
-            "urgent" if counts["need_help"] else "caution" if counts["unaccounted"] else "info"
+            "urgent"
+            if counts["need_help"]
+            else ("info" if drill else "caution" if counts["unaccounted"] else "info")
         )
         return [
             BriefingItem(
@@ -600,10 +629,14 @@ class SituationBriefingService:
                 severity,
                 title,
                 detail,
-                "attention" if overdue else "accounted",
+                "attention"
+                if counts["need_help"]
+                else "drill"
+                if drill
+                else ("attention" if overdue else "accounted"),
                 (source_id,),
                 f"/watch.html?event={event_id}",
-                hazard=bool(overdue),
+                hazard=bool(counts["need_help"] if drill else overdue),
                 uncertainty="stale roster" if stale else None,
             )
         ], [

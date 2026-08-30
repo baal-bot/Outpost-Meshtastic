@@ -36,6 +36,7 @@ configured channel capability, available local data, or a higher role for a sens
 | `DELMAIL`<br>Aliases: `DM` | `DELMAIL <n>` | Guest | General | reply | Changes state |
 | `DISPUTE` | `DISPUTE <inc> [note]` · flag concern | Guest | Incident report | reply | Changes state |
 | `DIST`<br>Aliases: `DISTANCE` | `DIST <waypoint>` · range and bearing | Guest | General | reply | Read-only |
+| `DRILLS` | `DRILLS ON\|OFF` · practice welfare participation | Member | General | reply | Changes state |
 | `EVENT` | `EVENT OPEN <policy> <name>\|CLOSE` | Responder | Alert | reply | Changes state |
 | `FC`<br>Aliases: `FORECAST` | `FC [1-5] [-long]` · local forecast | Guest | General | reply | Read-only |
 | `FORGETPOS`<br>Aliases: `DELPOS` | `FORGETPOS` · delete my exact position | Member | General | reply | Changes state |

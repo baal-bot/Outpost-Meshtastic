@@ -373,11 +373,43 @@ class AlertCancelBody(BaseModel):
 class EventCreateBody(BaseModel):
     name: str
     roster_policy: Literal["all", "responders", "subscribed"] = "all"
+    responder_group_id: int | None = Field(default=None, gt=0)
 
 
 class EventSolicitBody(BaseModel):
     confirmation: str
     airtime_confirmation: bool = False
+
+
+class ResponderGroupCreateBody(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    response_type: Literal[
+        "general", "medical", "fire", "search", "logistics", "communications", "public_safety"
+    ] = "general"
+
+
+class ResponderGroupMembersBody(BaseModel):
+    member_ids: list[int] = Field(default_factory=list, max_length=200)
+
+
+class WelfareSchedulePreviewBody(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    cadence: Literal["weekly", "biweekly", "monthly"]
+    day_of_period: int = Field(ge=0, le=28)
+    local_time: str = Field(min_length=5, max_length=5)
+    roster_policy: Literal["all", "responders", "subscribed"] = "all"
+    responder_group_id: int | None = Field(default=None, gt=0)
+    window_minutes: int = Field(default=120, ge=30, le=1440)
+
+
+class WelfareScheduleCreateBody(WelfareSchedulePreviewBody):
+    suppress_if_real_event: bool = True
+    airtime_confirmation: bool = False
+    preview_token: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class WelfareScheduleStateBody(BaseModel):
+    enabled: bool
 
 
 class WaypointBody(BaseModel):
@@ -3549,6 +3581,222 @@ def create_web_app(
 
         if checkins is not None:
 
+            @app.get("/api/v1/responder-groups")
+            async def responder_group_list() -> dict[str, Any]:
+                return {
+                    "items": await checkins.groups(),
+                    "eligible_members": await checkins.responder_candidates(),
+                }
+
+            @app.post("/api/v1/responder-groups", response_model=None)
+            async def responder_group_create(
+                body: ResponderGroupCreateBody,
+            ) -> dict[str, Any] | Response:
+                try:
+                    value = await checkins.create_group(
+                        body.name, body.response_type, current_actor()
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_responder_group", "message": str(error)}},
+                        status_code=422,
+                    )
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="responder_group.create",
+                    target=f"responder_group:{value['id']}",
+                    detail={"name": value["name"], "response_type": value["response_type"]},
+                )
+                return value
+
+            @app.put("/api/v1/responder-groups/{group_id}/members", response_model=None)
+            async def responder_group_members(
+                group_id: int, body: ResponderGroupMembersBody
+            ) -> dict[str, Any] | Response:
+                try:
+                    value = await checkins.set_group_members(
+                        group_id, body.member_ids, current_actor()
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_group_members", "message": str(error)}},
+                        status_code=422,
+                    )
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="responder_group.members",
+                    target=f"responder_group:{group_id}",
+                    detail={"member_count": len(value["members"])},
+                )
+                return value
+
+            @app.delete("/api/v1/responder-groups/{group_id}", response_model=None)
+            async def responder_group_delete(group_id: int) -> dict[str, str] | Response:
+                try:
+                    await checkins.delete_group(group_id)
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "group_in_use", "message": str(error)}},
+                        status_code=422,
+                    )
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="responder_group.delete",
+                    target=f"responder_group:{group_id}",
+                )
+                return {"status": "deleted"}
+
+            @app.get("/api/v1/welfare-schedules")
+            async def welfare_schedule_list() -> dict[str, Any]:
+                return {
+                    "items": [checkins.schedule_json(value) for value in await checkins.schedules()]
+                }
+
+            @app.post("/api/v1/welfare-schedules/preview", response_model=None)
+            async def welfare_schedule_preview(
+                body: WelfareSchedulePreviewBody,
+            ) -> dict[str, Any] | Response:
+                try:
+                    return await checkins.schedule_preview(
+                        body.name,
+                        body.roster_policy,
+                        body.responder_group_id,
+                        cadence=body.cadence,
+                        day_of_period=body.day_of_period,
+                        local_time=body.local_time,
+                        window_minutes=body.window_minutes,
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_schedule", "message": str(error)}},
+                        status_code=422,
+                    )
+
+            @app.post("/api/v1/welfare-schedules", response_model=None)
+            async def welfare_schedule_create(
+                body: WelfareScheduleCreateBody,
+            ) -> dict[str, Any] | Response:
+                try:
+                    preview = await checkins.schedule_preview(
+                        body.name,
+                        body.roster_policy,
+                        body.responder_group_id,
+                        cadence=body.cadence,
+                        day_of_period=body.day_of_period,
+                        local_time=body.local_time,
+                        window_minutes=body.window_minutes,
+                    )
+                    if body.preview_token != preview["preview_token"]:
+                        return JSONResponse(
+                            {
+                                "error": {
+                                    "code": "schedule_preview_changed",
+                                    "message": (
+                                        "The drill audience or airtime changed. Review the updated "
+                                        "preview before saving."
+                                    ),
+                                },
+                                "preview": preview,
+                            },
+                            status_code=409,
+                        )
+                    if (
+                        preview["airtime"]["requires_confirmation"]
+                        and not body.airtime_confirmation
+                    ):
+                        return JSONResponse(
+                            {
+                                "error": {
+                                    "code": "airtime_confirmation_required",
+                                    "message": (
+                                        "This drill schedule crosses an airtime constraint. "
+                                        "Review and confirm its hard send ceiling."
+                                    ),
+                                },
+                                "preview": preview,
+                            },
+                            status_code=409,
+                        )
+                    value = await checkins.create_schedule(
+                        body.name,
+                        body.cadence,
+                        body.day_of_period,
+                        body.local_time,
+                        body.roster_policy,
+                        current_actor(),
+                        responder_group_id=body.responder_group_id,
+                        window_minutes=body.window_minutes,
+                        suppress_if_real_event=body.suppress_if_real_event,
+                        airtime_confirmation=body.airtime_confirmation,
+                        preview_token=body.preview_token,
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_schedule", "message": str(error)}},
+                        status_code=422,
+                    )
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="welfare_schedule.create",
+                    target=f"welfare_schedule:{value.id}",
+                    detail={
+                        "recipient_limit": value.recipient_limit,
+                        "airtime_limit_ms": value.airtime_limit_ms,
+                    },
+                )
+                return checkins.schedule_json(value)
+
+            @app.patch("/api/v1/welfare-schedules/{schedule_id}", response_model=None)
+            async def welfare_schedule_state(
+                schedule_id: int, body: WelfareScheduleStateBody
+            ) -> dict[str, Any] | Response:
+                try:
+                    value = await checkins.set_schedule_enabled(schedule_id, body.enabled)
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_schedule_state", "message": str(error)}},
+                        status_code=422,
+                    )
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="welfare_schedule.state",
+                    target=f"welfare_schedule:{schedule_id}",
+                    detail={"enabled": body.enabled},
+                )
+                return checkins.schedule_json(value)
+
+            @app.delete("/api/v1/welfare-schedules/{schedule_id}", response_model=None)
+            async def welfare_schedule_delete(schedule_id: int) -> dict[str, str] | Response:
+                try:
+                    await checkins.delete_schedule(schedule_id)
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "not_found", "message": str(error)}},
+                        status_code=404,
+                    )
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="welfare_schedule.delete",
+                    target=f"welfare_schedule:{schedule_id}",
+                )
+                return {"status": "deleted"}
+
+            @app.get("/api/v1/welfare-report")
+            async def welfare_report() -> dict[str, Any]:
+                return await checkins.participation_report()
+
             @app.get("/api/v1/events")
             async def event_list() -> dict[str, Any]:
                 values = await checkins.events()
@@ -3562,7 +3810,10 @@ def create_web_app(
             async def event_create(body: EventCreateBody) -> dict[str, Any] | Response:
                 try:
                     value = await checkins.open_event(
-                        body.name, body.roster_policy, current_actor()
+                        body.name,
+                        body.roster_policy,
+                        current_actor(),
+                        responder_group_id=body.responder_group_id,
                     )
                 except ValueError as error:
                     return JSONResponse(

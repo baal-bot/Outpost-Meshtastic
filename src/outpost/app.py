@@ -177,6 +177,7 @@ class OutpostApp:
             outbox=OutboxStore(self.database),
             power_config=self.config.radio.power,
             power_observer=self.radio_power.observe,
+            timezone=self.config.node.timezone,
         )
         self.radio_operations = RadioOperations(
             self.database,
@@ -242,7 +243,9 @@ class OutpostApp:
             self.config.watch.dedupe_window_minutes,
         )
         self.alerts = AlertService(self.database, self.governor, self.clock, self.config)
-        self.checkins = CheckinService(self.database, self.governor, self.clock)
+        self.checkins = CheckinService(
+            self.database, self.governor, self.clock, self.config.node.timezone
+        )
         self.incident_reports = IncidentReportService(
             self.database,
             self.clock,
@@ -3002,6 +3005,7 @@ class OutpostApp:
             if self.config.modules.watch.enabled:
                 await self.alerts.advance_due()
                 await self.incidents.expire_due()
+                await self.checkins.run_due_schedules()
             self._task_progress("watch-scheduler")
             await self.clock.sleep(15)
 

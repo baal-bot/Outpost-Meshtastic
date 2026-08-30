@@ -288,6 +288,7 @@ def test_mutating_command_typos_never_execute_across_trust_levels(tmp_path) -> N
         "CONFIRM",
         "DELMAIL",
         "DISPUTE",
+        "DRILLS",
         "EVENT",
         "FORGETPOS",
         "HELPME",

@@ -52,6 +52,7 @@ def production_governor(
     airtime: AirtimeConfig | None = None,
     preset: str = "LONG_FAST",
     region: str | None = None,
+    timezone: str = "UTC",
 ) -> AirtimeGovernor:
     """Construct the governor exactly as OutpostApp does, including its durable outbox."""
     return AirtimeGovernor(
@@ -61,4 +62,5 @@ def production_governor(
         preset=preset,
         region=region,
         outbox=OutboxStore(database),
+        timezone=timezone,
     )

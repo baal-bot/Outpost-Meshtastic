@@ -36,7 +36,8 @@ hardware, revision, limitation, and roadmap evidence.
 - Bulletin boards, threaded posts, subscriptions, search, digests, private mail, and an audited
   operator operations inbox
 - Incident reporting, confirmations, disputes, responder alerts, and map operations
-- Welfare events, check-ins, reviewed solicitation, rosters, and CSV export
+- Welfare events, recurring opt-in drills, responder groups, readiness reports, reviewed
+  solicitation, rosters, and CSV export
 - Weather, forecasts, CAP alerts, astronomy, earthquakes, member positions, and waypoints
 - Responsive dashboards for operations, radio, members, BBS, mail, environment, federation, and
   named operator access

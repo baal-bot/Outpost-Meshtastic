@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import time
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from outpost.clock import Clock
 from outpost.config import AirtimeConfig, RadioPowerConfig
@@ -128,8 +129,10 @@ class AirtimeGovernor:
         outbox: OutboxStore | None = None,
         power_config: RadioPowerConfig | None = None,
         power_observer: Callable[[int | None], Awaitable[None]] | None = None,
+        timezone: str = "UTC",
     ) -> None:
         self.link, self.config, self.clock = link, config, clock
+        self.timezone = ZoneInfo(timezone)
         self.outbox = outbox
         self.power_config = power_config or RadioPowerConfig()
         self.power_observer = power_observer
@@ -726,7 +729,7 @@ class AirtimeGovernor:
     def _quiet(self, cls: TrafficClass) -> bool:
         if cls.value not in self.config.quiet_hours.classes or cls == TrafficClass.ALERT:
             return False
-        current = self.clock.now().time().replace(tzinfo=None)
+        current = self.clock.now().astimezone(self.timezone).time().replace(tzinfo=None)
         # QuietHours validates these before startup; retaining a safe fallback here keeps a
         # post-startup mutation from taking down the dispatch loop.
         try:

@@ -189,6 +189,13 @@ Review welfare recipients before sending; only actual members should be eligible
 professional dispatch. Close test events. For alerts, verify severity, linked incident, channels,
 escalation stages, and acknowledgement threshold before approval.
 
+Recurring welfare drills are configured on the Watch page. Preview the exact `DRILL` message,
+recipient identities, and airtime before saving. That preview becomes a hard ceiling: a larger or
+more expensive future roster suppresses the run for operator review. Practice nets close after
+their response window, yield to real watch events and local quiet hours, and retain response rate,
+never-responded members, and nodes not heard since the prior net. Members can send `DRILLS OFF`
+without leaving real welfare rosters. `HELPME` always reports real need, including during a drill.
+
 ## SAME receiver operations
 
 The Environment page is the normal receiver console. `listening` means both decoder processes are

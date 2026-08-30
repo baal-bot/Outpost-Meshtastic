@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import cast
+
 from outpost.router.models import (
     ChannelUse,
     CommandContext,
+    CommandHandler,
     CommandSpec,
     Line,
     Response,
@@ -17,9 +20,10 @@ def specs(service: CheckinService) -> list[CommandSpec]:
     async def ok(ctx: CommandContext) -> Response:
         result = await service.checkin(ctx.member, "ok", ctx.args.strip())
         now = service.clock.now().strftime("%H:%M")
+        marker = " DRILL" if (result.get("event") or {}).get("event_kind") == "drill" else ""
         return Response(
             ResponseKind.ACK,
-            [Line(f"✓ ok {now}. {result['checked_in']}/{result['total']} in.")],
+            [Line(f"✓{marker} ok {now}. {result['checked_in']}/{result['total']} in.")],
         )
 
     async def helpme(ctx: CommandContext) -> Response:
@@ -49,11 +53,12 @@ def specs(service: CheckinService) -> list[CommandSpec]:
             return Response(ResponseKind.DETAIL, [Line("No open watch event.")])
         value = await service.summary(event.id)
         counts = value["counts"]
+        marker = "DRILL · " if event.event_kind == "drill" else ""
         return Response(
             ResponseKind.LISTING,
             [
                 Line(
-                    f'Event "{event.name}": {counts["ok"]} ok · '
+                    f'{marker}Event "{event.name}": {counts["ok"]} ok · '
                     f"{counts['need_help']} help · {counts['unaccounted']} unaccounted. "
                     "ROSTER? for names."
                 )
@@ -65,7 +70,8 @@ def specs(service: CheckinService) -> list[CommandSpec]:
         if event is None:
             return Response(ResponseKind.DETAIL, [Line("No open watch event.")])
         value = await service.summary(event.id)
-        lines = [Line(f'Event "{event.name}" roster')]
+        marker = "DRILL · " if event.event_kind == "drill" else ""
+        lines = [Line(f'{marker}Event "{event.name}" roster')]
         lines.extend(
             Line(f"{row['handle'] or row['mesh_id']} · {row['status']}") for row in value["items"]
         )
@@ -96,6 +102,27 @@ def specs(service: CheckinService) -> list[CommandSpec]:
         return Response(
             ResponseKind.ERROR,
             [Line("EVENT OPEN <policy> <name>, or EVENT CLOSE.")],
+        )
+
+    async def drills(ctx: CommandContext) -> Response:
+        value = ctx.args.strip().upper()
+        if not value:
+            enabled = await service.drill_participation(ctx.member.id)
+            return Response(
+                ResponseKind.DETAIL,
+                [Line(f"Practice welfare drills: {'on' if enabled else 'off'} · DRILLS ON|OFF")],
+            )
+        if value not in {"ON", "OFF"}:
+            return Response(ResponseKind.ERROR, [Line("DRILLS ON or DRILLS OFF.")])
+        enabled = await service.set_drill_participation(ctx.member.id, value == "ON")
+        detail = (
+            "You may receive practice welfare requests."
+            if enabled
+            else ("Practice requests stopped; real welfare checks are unchanged.")
+        )
+        return Response(
+            ResponseKind.ACK,
+            [Line(f"✓ Practice welfare drills {'on' if enabled else 'off'}. {detail}")],
         )
 
     base = dict(
@@ -140,6 +167,18 @@ def specs(service: CheckinService) -> list[CommandSpec]:
             handler=roster_names,
             mutates=False,
             **base,
+        ),
+        CommandSpec(
+            "DRILLS",
+            (),
+            module="watch",
+            min_trust=TrustLevel.MEMBER,
+            airtime_class=TrafficClass.REPLY,
+            max_parts=3,
+            rate_key="commands",
+            help_short="DRILLS ON|OFF · practice welfare participation",
+            handler=cast(CommandHandler, drills),
+            mutates=True,
         ),
         CommandSpec(
             "EVENT",

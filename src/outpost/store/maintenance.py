@@ -139,6 +139,11 @@ TABLE_POLICIES = (
     TablePolicy("watch_event", "watch", "retain", "Closed events only; open events protected."),
     TablePolicy("checkin", "watch", "retain", "Welfare history retention.", True),
     TablePolicy("checkin_solicitation", "watch", "cascade", "Follows its watch event."),
+    TablePolicy("responder_group", "watch", "preserve", "Operator-managed responder audiences."),
+    TablePolicy("responder_group_member", "watch", "cascade", "Follows its responder group."),
+    TablePolicy("welfare_schedule", "watch", "retain", "Active policy or retained drill history."),
+    TablePolicy("welfare_event_roster", "watch", "cascade", "Follows its watch event."),
+    TablePolicy("welfare_schedule_run", "watch", "retain", "Bounded drill execution history."),
     TablePolicy("env_cache", "environment", "expire", "Short provider cache retention."),
     TablePolicy("cap_point_cache", "environment", "expire", "Short provider cache retention."),
     TablePolicy("cap_alert", "environment", "retain", "CAP review/history retention."),
@@ -705,6 +710,14 @@ class MaintenanceService:
                 (watch_cutoff, now),
             ),
             CleanupRule(
+                "welfare_schedule_runs",
+                "Recurring welfare drill execution history",
+                "watch",
+                "welfare_schedule_run",
+                "processed_at<?",
+                (watch_cutoff,),
+            ),
+            CleanupRule(
                 "watch_events",
                 "Closed welfare events",
                 "watch",
@@ -714,6 +727,15 @@ class MaintenanceService:
                 "i.resolved_at,CASE WHEN i.status='expired' THEN i.expires_at END,?) "
                 "AND watch_event.closed_at>=i.created_at)",
                 (watch_cutoff, now),
+            ),
+            CleanupRule(
+                "welfare_schedules",
+                "Archived recurring welfare drill policy",
+                "watch",
+                "welfare_schedule",
+                "archived_at IS NOT NULL AND archived_at<? AND NOT EXISTS ("
+                "SELECT 1 FROM watch_event e WHERE e.schedule_id=welfare_schedule.id)",
+                (watch_cutoff,),
             ),
             CleanupRule(
                 "alerts",

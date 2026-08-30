@@ -113,6 +113,14 @@ async def test_welfare_commands_cover_event_lifecycle_rosters_and_member_text(tm
     await app.router.members.claim_handle(first.mesh_id, "alex")
     await app.router.members.claim_handle(second.mesh_id, "sam")
     try:
+        drills_off = await app.router.dispatch(inbound(9, "DRILLS OFF", first.mesh_id))
+        assert render_response(drills_off) == (
+            "✓ Practice welfare drills off. Practice requests stopped; "
+            "real welfare checks are unchanged."
+        )
+        drills_status = await app.router.dispatch(inbound(91, "DRILLS", first.mesh_id))
+        assert render_response(drills_status) == "Practice welfare drills: off · DRILLS ON|OFF"
+        await app.router.dispatch(inbound(92, "DRILLS ON", first.mesh_id))
         ok = await app.router.dispatch(inbound(10, "OK home safe", first.mesh_id))
         assert "✓ ok" in render_response(ok) and "0/0 in." in render_response(ok)
         help_without_event = await app.router.dispatch(

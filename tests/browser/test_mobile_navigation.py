@@ -273,6 +273,28 @@ def prepare_page(
         ),
     )
     page.route(
+        "**/api/v1/responder-groups*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"items":[],"eligible_members":[]}',
+        ),
+    )
+    page.route(
+        "**/api/v1/welfare-schedules*",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body='{"items":[]}'
+        ),
+    )
+    page.route(
+        "**/api/v1/welfare-report",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=('{"nets":[],"never_responded":[],"not_heard_since_last_net":[],"runs":[]}'),
+        ),
+    )
+    page.route(
         "**/api/v1/boards*",
         lambda route: route.fulfill(
             status=200,
@@ -724,6 +746,84 @@ def route_visual_content_api(page: object) -> None:
     )
     fulfill("**/api/v1/alerts*", {"items": []})
     fulfill("**/api/v1/events*", {"current": None})
+    fulfill(
+        "**/api/v1/responder-groups*",
+        {
+            "items": [
+                {
+                    "id": 1,
+                    "name": "Medical",
+                    "response_type": "medical",
+                    "member_count": 1,
+                    "members": [
+                        {
+                            "id": 8,
+                            "mesh_id": "!00000008",
+                            "handle": "medic",
+                            "trust": "responder",
+                        }
+                    ],
+                }
+            ],
+            "eligible_members": [
+                {
+                    "id": 8,
+                    "mesh_id": "!00000008",
+                    "handle": "medic",
+                    "trust": "responder",
+                }
+            ],
+        },
+    )
+    fulfill(
+        "**/api/v1/welfare-schedules*",
+        {
+            "items": [
+                {
+                    "id": 1,
+                    "name": "Saturday readiness",
+                    "cadence": "weekly",
+                    "day_of_period": 5,
+                    "local_time": "10:00",
+                    "roster_policy": "responders",
+                    "responder_group_id": 1,
+                    "window_minutes": 120,
+                    "suppress_if_real_event": True,
+                    "recipient_limit": 1,
+                    "airtime_limit_seconds": 1.28,
+                    "enabled": True,
+                    "next_run_at": 2_000_100_000,
+                    "last_run_at": 2_000_000_000,
+                    "last_outcome": "started",
+                }
+            ]
+        },
+    )
+    fulfill(
+        "**/api/v1/welfare-report",
+        {
+            "nets": [
+                {
+                    "id": 4,
+                    "name": "Saturday readiness",
+                    "opened_at": 2_000_000_000,
+                    "roster_count": 5,
+                    "response_count": 4,
+                    "response_rate": 80.0,
+                }
+            ],
+            "never_responded": [
+                {
+                    "id": 9,
+                    "mesh_id": "!00000009",
+                    "handle": "newmember",
+                    "trust": "member",
+                }
+            ],
+            "not_heard_since_last_net": [],
+            "runs": [],
+        },
+    )
     fulfill("**/api/v1/watch/map*", {"incidents": [], "nodes": [], "alerts": []})
 
     fulfill(
@@ -4652,6 +4752,301 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
             {"status": "resolved", "resolution": "Tree safely removed"},
         ]
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("width", (390, 1280))
+def test_welfare_drill_schedule_preview_groups_and_readiness_are_functional(
+    browser: object, dashboard_url: str, width: int
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    mutations: list[tuple[str, dict[str, object]]] = []
+
+    def schedule_route(route: object) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        if path.endswith("/preview"):
+            mutations.append(("preview", request.post_data_json))
+            body = {
+                "recipient_count": 1,
+                "recipients": [
+                    {
+                        "member_id": 8,
+                        "mesh_id": "!00000008",
+                        "handle": "medic",
+                        "trust": "responder",
+                    }
+                ],
+                "message": (
+                    'DRILL — Outpost welfare check: "Medic practice". '
+                    "Reply OK [note]. HELPME always reports real need."
+                ),
+                "airtime": {
+                    "recipient_count": 1,
+                    "per_copy_seconds": 1.2,
+                    "total_seconds": 1.2,
+                    "part_count": 1,
+                    "requires_confirmation": False,
+                    "displacement": "",
+                },
+                "preview_token": "a" * 64,
+            }
+        elif request.method == "POST":
+            mutations.append(("schedule", request.post_data_json))
+            body = {
+                "id": 2,
+                "name": "Medic practice",
+                "next_run_at": 2_000_200_000,
+                "next_run_local": "2033-05-20 07:06 EDT",
+            }
+        else:
+            body = {"items": []}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    def groups_route(route: object) -> None:
+        request = route.request
+        if request.method == "PUT":
+            mutations.append(("members", request.post_data_json))
+            body = {
+                "id": 1,
+                "name": "Medical",
+                "response_type": "medical",
+                "member_count": 1,
+                "members": [
+                    {
+                        "id": 8,
+                        "mesh_id": "!00000008",
+                        "handle": "medic",
+                        "trust": "responder",
+                    }
+                ],
+            }
+        else:
+            body = {
+                "items": [
+                    {
+                        "id": 1,
+                        "name": "Medical",
+                        "response_type": "medical",
+                        "member_count": 1,
+                        "members": [
+                            {
+                                "id": 8,
+                                "mesh_id": "!00000008",
+                                "handle": "medic",
+                                "trust": "responder",
+                            }
+                        ],
+                    }
+                ],
+                "eligible_members": [
+                    {
+                        "id": 8,
+                        "mesh_id": "!00000008",
+                        "handle": "medic",
+                        "trust": "responder",
+                    }
+                ],
+            }
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    def event_route(route: object) -> None:
+        path = urlparse(route.request.url).path
+        if path.endswith("/roster"):
+            body = {
+                "event": {"id": 4, "name": "Practice net", "event_kind": "drill"},
+                "counts": {"ok": 0, "need_help": 0, "evacuated": 0, "unaccounted": 1},
+                "items": [
+                    {
+                        "mesh_id": "!00000008",
+                        "handle": "medic",
+                        "status": "unaccounted",
+                        "note": None,
+                    }
+                ],
+            }
+        elif path.endswith("/solicitation-preview"):
+            body = {
+                "recipients": [],
+                "message": 'DRILL — Outpost welfare check: "Practice net".',
+                "airtime": {
+                    "recipient_count": 0,
+                    "per_copy_seconds": 1.2,
+                    "total_seconds": 0,
+                    "part_count": 1,
+                    "costing_preset": "LONG_FAST",
+                    "requires_confirmation": False,
+                },
+            }
+        else:
+            body = {
+                "current": {
+                    "id": 4,
+                    "name": "Practice net",
+                    "opened_at": 2_000_000_000,
+                    "closed_at": None,
+                    "opened_by": "schedule:1",
+                    "roster_policy": "responders",
+                    "event_kind": "drill",
+                    "responder_group_id": 1,
+                    "schedule_id": 1,
+                    "scheduled_for": 2_000_000_000,
+                    "auto_close_at": 2_000_007_200,
+                }
+            }
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/api/v1/welfare-schedules**", schedule_route)
+    page.route("**/api/v1/responder-groups**", groups_route)
+    page.route("**/api/v1/events**", event_route)
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/watch.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.get_by_role("heading", name="Welfare drill schedule").wait_for()
+        assert page.get_by_text("Practice drill", exact=True).is_visible()
+        page.locator("#drill-name").fill("Medic practice")
+        page.locator("#drill-policy").select_option("responders")
+        assert page.locator("#drill-group-label").is_visible()
+        page.locator("#drill-group").select_option("1")
+        page.get_by_role("button", name="Preview airtime").click()
+        page.get_by_text("1 recipient · 1.20s hard ceiling").wait_for()
+        assert "DRILL — Outpost welfare check" in page.locator("#drill-preview").text_content()
+        page.get_by_role("button", name="Save reviewed schedule").click()
+        page.get_by_text("Schedule saved. Next run").wait_for()
+
+        page.get_by_text("Assign responders").click()
+        page.get_by_role("button", name="Save membership").click()
+        page.get_by_text("Saved 1 responder assignment").wait_for()
+        assert mutations[0] == (
+            "preview",
+            {
+                "name": "Medic practice",
+                "cadence": "weekly",
+                "day_of_period": 0,
+                "local_time": "10:00",
+                "roster_policy": "responders",
+                "responder_group_id": 1,
+                "window_minutes": 120,
+                "suppress_if_real_event": True,
+                "airtime_confirmation": False,
+            },
+        )
+        assert mutations[1][0] == "schedule"
+        assert mutations[1][1]["suppress_if_real_event"] is True
+        assert mutations[2] == ("members", {"member_ids": [8]})
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        if VISUAL_ARTIFACT_DIR:
+            Path(VISUAL_ARTIFACT_DIR).mkdir(parents=True, exist_ok=True)
+            page.locator(".drill-operations").screenshot(
+                path=str(Path(VISUAL_ARTIFACT_DIR) / f"welfare-drills-{width}.png"),
+                animations="disabled",
+            )
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_welfare_schedule_requires_a_fresh_preview_when_the_audience_changes(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    state = {"previews": 0, "saves": 0}
+
+    def schedule_route(route: object) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        if path.endswith("/preview"):
+            state["previews"] += 1
+            token = ("a" if state["previews"] == 1 else "b") * 64
+            body = {
+                "recipient_count": 1,
+                "recipients": [
+                    {
+                        "member_id": 8,
+                        "mesh_id": "!00000008",
+                        "handle": "medic",
+                        "trust": "responder",
+                    }
+                ],
+                "message": 'DRILL — Outpost welfare check: "Fresh preview".',
+                "airtime": {
+                    "recipient_count": 1,
+                    "per_copy_seconds": 1.2,
+                    "total_seconds": 1.2,
+                    "part_count": 1,
+                    "requires_confirmation": False,
+                    "displacement": "",
+                },
+                "preview_token": token,
+            }
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+            return
+        if request.method == "POST":
+            state["saves"] += 1
+            if state["saves"] == 1:
+                route.fulfill(
+                    status=409,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "error": {
+                                "code": "schedule_preview_changed",
+                                "message": "The drill audience or airtime changed.",
+                            }
+                        }
+                    ),
+                )
+                return
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "id": 2,
+                        "name": "Fresh preview",
+                        "next_run_at": 2_000_200_000,
+                        "next_run_local": "2033-05-20 07:06 EDT",
+                    }
+                ),
+            )
+            return
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"items": []}),
+        )
+
+    page.route("**/api/v1/welfare-schedules**", schedule_route)
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/watch.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.locator("#drill-name").fill("Fresh preview")
+        page.get_by_role("button", name="Preview airtime").click()
+        page.get_by_role("button", name="Save reviewed schedule").click()
+        page.get_by_text("Preview the current hard ceiling again").wait_for()
+        assert page.locator("#save-drill").is_disabled()
+        assert state["saves"] == 1
+
+        page.get_by_role("button", name="Preview airtime").click()
+        page.get_by_role("button", name="Save reviewed schedule").click()
+        page.get_by_text("Schedule saved. Next run").wait_for()
+        assert state == {"previews": 2, "saves": 2}
+        assert len(health.failed_api_responses) == 1
+        assert health.failed_api_responses[0].startswith("409 ")
+        health.failed_api_responses.clear()
+        expected_conflicts = [
+            message for message in health.console_errors if "409 (Conflict)" in message
+        ]
+        assert len(expected_conflicts) == 1
+        health.console_errors.remove(expected_conflicts[0])
         health.assert_clean()
     finally:
         page.close()

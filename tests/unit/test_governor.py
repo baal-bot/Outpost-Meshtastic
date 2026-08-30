@@ -170,6 +170,27 @@ async def test_user_reply_continues_while_federation_waits_through_quiet_hours()
 
 
 @pytest.mark.asyncio
+async def test_quiet_hours_use_configured_local_timezone() -> None:
+    clock = VirtualClock(epoch=datetime(2026, 1, 2, 7, tzinfo=UTC))
+    link = SimulatedRadioLink()
+    await link.connect()
+    governor = AirtimeGovernor(
+        link,
+        AirtimeConfig(min_gap_s=0),
+        clock,
+        timezone="America/New_York",
+    )
+    digest = OutboundItem("practice", "!peer", 0, TrafficClass.DIGEST)
+    governor.enqueue(digest)
+
+    assert await governor.tick() is None
+    clock.advance(4 * 60 * 60)
+    daytime = OutboundItem("daytime practice", "!peer", 0, TrafficClass.DIGEST)
+    governor.enqueue(daytime)
+    assert await governor.tick() is daytime
+
+
+@pytest.mark.asyncio
 async def test_alerts_are_severity_ordered_and_fifo_within_severity() -> None:
     clock, link = VirtualClock(), SimulatedRadioLink()
     await link.connect()

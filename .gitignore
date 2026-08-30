@@ -8,6 +8,7 @@ __pycache__/
 .ruff_cache/
 .coverage
 coverage.json
+production-coverage.json
 htmlcov/
 build/
 dist/
