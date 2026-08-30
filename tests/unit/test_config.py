@@ -8,11 +8,75 @@ from pydantic import BaseModel, ValidationError
 
 import outpost.config as config_module
 from outpost.app import OutpostApp
-from outpost.config import Config
+from outpost.config import Config, load_config
 
 
 def test_default_config_is_valid() -> None:
     assert Config().airtime.budget_percent == 8
+
+
+def test_channel_environment_override_merges_with_integer_yaml_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "channels:\n"
+        "  3:\n"
+        "    name: Emergency\n"
+        "    ai: true\n"
+        "    bbs: full\n"
+        "    alerts: true\n"
+        "    accept_reports: false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OUTPOST__CHANNELS__3__NAME", "Renamed")
+
+    config = load_config(path)
+
+    assert config.channels[3].name == "Renamed"
+    assert config.channels[3].ai is True
+    assert config.channels[3].bbs == "full"
+    assert config.channels[3].accept_reports is False
+    assert config.environment_overrides == ("channels.3.name",)
+
+
+def test_channel_environment_override_can_create_absent_channel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("channels: {}\n", encoding="utf-8")
+    monkeypatch.setenv("OUTPOST__CHANNELS__4__NAME", "Operations")
+
+    config = load_config(path)
+
+    assert set(config.channels) == {4}
+    assert config.channels[4].name == "Operations"
+    assert config.channels[4].accept_reports is True
+
+
+def test_environment_override_rejects_non_mapping_path_with_variable_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("web:\n  port: 8080\n", encoding="utf-8")
+    monkeypatch.setenv("OUTPOST__WEB__PORT__X", "1")
+
+    with pytest.raises(
+        ValueError, match=r"OUTPOST__WEB__PORT__X cannot descend through non-mapping web.port"
+    ):
+        load_config(path)
+
+
+def test_string_environment_override_is_not_json_coerced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("OUTPOST__NODE__NAME", "true")
+
+    config = load_config(path)
+
+    assert config.node.name == "true"
 
 
 @pytest.mark.parametrize("timezone", ["Not/AZone", "America/New York", ""])

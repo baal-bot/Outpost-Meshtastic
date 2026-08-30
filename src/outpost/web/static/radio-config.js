@@ -25,6 +25,7 @@ function configMarkup() {
     <div class="heading radio-config-heading"><div><p class="eyebrow">RADIO CONFIGURATION</p><h2>Meshtastic radio</h2></div><button id="radio-config-toggle" class="ui-button small-button" type="button">Configure radio</button></div>
     <p class="radio-config-intro">Purpose-built controls for an Outpost-connected node. Changes are written to the radio and may briefly restart its connection.</p>
     <div id="radio-config-summary" class="radio-config-summary" aria-live="polite"><span>Loading radio configuration…</span></div>
+    <div class="radio-policy-overview"><strong>Effective Outpost channel policy</strong><div id="radio-policy-table" class="radio-policy-table"><span>Loading channel policy…</span></div></div>
     <div id="radio-config-operation" class="radio-config-operation" aria-live="polite" hidden></div>
     <div id="radio-config-workspace" class="radio-config-workspace" hidden>
       <div id="radio-config-warnings" class="radio-config-warnings" hidden></div>
@@ -84,8 +85,29 @@ export async function initRadioConfigurator({api}) {
     checked("radio-mqtt-downlink", channel?.downlink_enabled);
   }
 
+  function renderOutpostPolicies(policies) {
+    const table = byId("radio-policy-table");
+    table.replaceChildren();
+    if (!policies?.length) {
+      const empty = document.createElement("span");
+      empty.textContent = "No channel policies configured; commands on active radio slots are rejected.";
+      table.append(empty);
+      return;
+    }
+    for (const policy of policies) {
+      const row = document.createElement("article");
+      const name = document.createElement("b");
+      name.textContent = `CH ${policy.index} · ${policy.name}`;
+      const detail = document.createElement("span");
+      detail.textContent = `BBS ${policy.bbs.replaceAll("_", " ")} · reports ${policy.accept_reports ? "accepted" : "off"} · alerts ${policy.alerts ? "on" : "off"} · AI ${policy.ai ? "on" : "off"}`;
+      row.append(name, detail);
+      table.append(row);
+    }
+  }
+
   function render(next) {
     state = next;
+    renderOutpostPolicies(state?.outpost_channel_policies || []);
     const summary = byId("radio-config-summary");
     if (!state?.available) {
       summary.innerHTML = "<span class=\"radio-config-offline\">Radio configuration unavailable while the link is down.</span>";

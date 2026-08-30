@@ -12,6 +12,24 @@ from outpost.web.transport import uvicorn_options
 
 def main() -> None:
     config = load_config()
+    if config.environment_overrides:
+        print(
+            "Outpost configuration overridden by environment: "
+            + ", ".join(config.environment_overrides),
+            flush=True,
+        )
+    channel_policy = [
+        {
+            "channel": index,
+            "name": policy.name,
+            "bbs": policy.bbs,
+            "ai": policy.ai,
+            "alerts": policy.alerts,
+            "accept_reports": policy.accept_reports,
+        }
+        for index, policy in sorted(config.channels.items())
+    ]
+    print(f"Outpost effective channel policy: {channel_policy!r}", flush=True)
     server_options = uvicorn_options(config.web)
     application = OutpostApp(config)
 

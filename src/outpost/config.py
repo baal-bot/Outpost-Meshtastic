@@ -6,11 +6,11 @@ import re
 from datetime import time
 from ipaddress import ip_network
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 TRAFFIC_CLASSES = {"alert", "reply", "ai", "bulletin", "digest", "federation"}
 
@@ -533,6 +533,8 @@ class WatchConfig(StrictModel):
 
 
 class Config(StrictModel):
+    _environment_overrides: tuple[str, ...] = PrivateAttr(default=())
+
     node: NodeConfig = Field(default_factory=NodeConfig)
     radio: RadioConfig = Field(default_factory=RadioConfig)
     airtime: AirtimeConfig = Field(default_factory=AirtimeConfig)
@@ -561,19 +563,85 @@ class Config(StrictModel):
                 raise ValueError(f"ai.{self.ai.provider}.base_url is required when AI is enabled")
         return self
 
+    @property
+    def environment_overrides(self) -> tuple[str, ...]:
+        return self._environment_overrides
 
-def _env_overlay(data: dict[str, object], prefix: str = "OUTPOST__") -> None:
-    for key, value in os.environ.items():
-        if not key.startswith(prefix):
+
+_MISSING = object()
+
+
+def _default_at_path(path: tuple[str, ...]) -> object:
+    current: object = Config().model_dump(mode="python")
+    for index, part in enumerate(path):
+        if index == 1 and path[0] == "channels":
+            current = ChannelConfig(name="").model_dump(mode="python")
             continue
-        path = key[len(prefix) :].lower().split("__")
-        target = data
-        for part in path[:-1]:
-            target = target.setdefault(part, {})  # type: ignore[assignment]
+        if not isinstance(current, dict):
+            return _MISSING
+        current = current.get(part, _MISSING)
+        if current is _MISSING:
+            return _MISSING
+    return current
+
+
+def _overlay_key(
+    target: dict[object, object], raw: str, parent: tuple[str, ...], variable: str
+) -> object:
+    if parent == ("channels",):
         try:
-            target[path[-1]] = json.loads(value)
-        except json.JSONDecodeError:
-            target[path[-1]] = value
+            numeric = int(raw)
+        except ValueError:
+            return raw
+        matches: list[object] = []
+        for key in target:
+            if key == numeric or key == raw:
+                matches.append(key)
+        if len(matches) > 1:
+            raise ValueError(f"{variable} matches duplicate channel keys {raw!r}")
+        return matches[0] if matches else numeric
+    matches = [key for key in target if str(key).lower() == raw]
+    if len(matches) > 1:
+        raise ValueError(f"{variable} matches duplicate configuration key {raw!r}")
+    return matches[0] if matches else raw
+
+
+def _env_overlay(data: dict[str, object], prefix: str = "OUTPOST__") -> tuple[str, ...]:
+    overridden: list[str] = []
+    for variable, value in sorted(os.environ.items()):
+        if not variable.startswith(prefix):
+            continue
+        path = tuple(variable[len(prefix) :].lower().split("__"))
+        if not path or any(not part for part in path):
+            raise ValueError(f"{variable} has an empty configuration path component")
+        target = cast(dict[object, object], data)
+        parent: tuple[str, ...] = ()
+        for raw in path[:-1]:
+            if not isinstance(target, dict):
+                location = ".".join(parent) or "configuration root"
+                raise ValueError(f"{variable} cannot descend through non-mapping {location}")
+            key = _overlay_key(target, raw, parent, variable)
+            child = target.get(key, _MISSING)
+            if child is _MISSING:
+                child = {}
+                target[key] = child
+            elif not isinstance(child, dict):
+                location = ".".join((*parent, raw))
+                raise ValueError(f"{variable} cannot descend through non-mapping {location}")
+            target = child
+            parent = (*parent, raw)
+        leaf = _overlay_key(target, path[-1], parent, variable)
+        existing = target.get(leaf, _MISSING)
+        expected = _default_at_path(path)
+        if isinstance(existing, str) or isinstance(expected, str):
+            target[leaf] = value
+        else:
+            try:
+                target[leaf] = json.loads(value)
+            except json.JSONDecodeError:
+                target[leaf] = value
+        overridden.append(".".join(path))
+    return tuple(overridden)
 
 
 def load_config(path: str | Path | None = None) -> Config:
@@ -584,5 +652,7 @@ def load_config(path: str | Path | None = None) -> Config:
     data = yaml.safe_load(source.read_text()) if source.exists() else {}
     if not isinstance(data, dict):
         raise ValueError(f"config root must be a mapping: {source}")
-    _env_overlay(data)
-    return Config.model_validate(data)
+    overrides = _env_overlay(data)
+    config = Config.model_validate(data)
+    config._environment_overrides = overrides
+    return config
