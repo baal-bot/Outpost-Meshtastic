@@ -55,6 +55,7 @@ class SameMessage:
     event_code: str
     event_name: str
     location_codes: list[str]
+    matched_locations: list[dict[str, str]]
     purge_minutes: int
     issued_day: int
     issued_time: str
@@ -117,8 +118,7 @@ class SameService:
         if purge_remainder > 59 or not (purge_hours or purge_remainder):
             raise ValueError("invalid SAME purge time")
         purge_minutes = purge_hours * 60 + purge_remainder
-        configured = set(self.config.county_codes)
-        relevant = bool(configured.intersection(locations)) or "000000" in locations
+        matched_locations = self._configured_location_matches(self.config.county_codes, locations)
         issued = self._issued_at(
             int(match.group("day")), match.group("time"), self.clock.now().astimezone(UTC)
         )
@@ -128,12 +128,13 @@ class SameService:
             event_code=event,
             event_name=EVENTS.get(event, f"SAME event {event}"),
             location_codes=locations,
+            matched_locations=matched_locations,
             purge_minutes=purge_minutes,
             issued_day=int(match.group("day")),
             issued_time=match.group("time"),
             callsign=match.group("callsign").strip(),
             is_test=event in TEST_CODES,
-            relevant=relevant,
+            relevant=bool(matched_locations),
             significance=self._significance(event),
             issued_at=int(issued.timestamp()),
             expires_at=int((issued + timedelta(minutes=purge_minutes)).timestamp()),
@@ -143,13 +144,63 @@ class SameService:
     def _normalized_event(value: str) -> str:
         return re.sub(r"[^a-z0-9]", "", value.lower())
 
+    @staticmethod
+    def _locations_overlap(first: str, second: str) -> bool:
+        if any(len(value) != 6 or not value.isdigit() for value in (first, second)):
+            return False
+        if first == "000000" or second == "000000":
+            return first == second
+        if first[1:] != second[1:]:
+            return False
+        return first[0] == "0" or second[0] == "0" or first[0] == second[0]
+
+    @classmethod
+    def _configured_location_matches(
+        cls, configured_codes: list[str], received_codes: list[str]
+    ) -> list[dict[str, str]]:
+        matches: list[dict[str, str]] = []
+        for received in received_codes:
+            if received == "000000":
+                matches.append(
+                    {
+                        "configured_code": "automatic",
+                        "received_code": received,
+                        "subdivision": "0",
+                        "scope": "national",
+                    }
+                )
+                continue
+            for configured in configured_codes:
+                if cls._locations_overlap(configured, received):
+                    matches.append(
+                        {
+                            "configured_code": configured,
+                            "received_code": received,
+                            "subdivision": received[0],
+                            "scope": "county",
+                        }
+                    )
+        return matches
+
+    @staticmethod
+    def _match_reasons(message: SameMessage) -> list[str]:
+        reasons = []
+        for match in message.matched_locations:
+            if match["scope"] == "national":
+                reasons.append("national SAME location 000000")
+            else:
+                reasons.append(
+                    f"matched configured SAME {match['configured_code']} via received "
+                    f"subdivision {match['subdivision']} ({match['received_code']})"
+                )
+        return reasons
+
     async def _matching_cap(self, message: SameMessage) -> dict[str, Any] | None:
         rows = await self.database.read(
             "SELECT id,event,expires_at,review_state,linked_alert_id,raw_json FROM cap_alert "
             "WHERE decision='accepted' AND review_state IN ('pending','approved')"
         )
         expected_event = self._normalized_event(message.event_name)
-        locations = set(message.location_codes)
         for row in rows:
             try:
                 expires = datetime.fromisoformat(
@@ -173,7 +224,11 @@ class SameService:
                 and self._normalized_event(str(row["event"])) != expected_event
             ):
                 continue
-            if not locations.intersection(cap_locations):
+            if not any(
+                self._locations_overlap(location, cap_location)
+                for location in message.location_codes
+                for cap_location in cap_locations
+            ):
                 continue
             if abs(int(expires) - message.expires_at) <= CAP_EXPIRY_TOLERANCE_SECONDS:
                 return dict(row)
@@ -183,18 +238,19 @@ class SameService:
     def _gate(
         message: SameMessage, cap: dict[str, Any] | None, now: int
     ) -> tuple[str, str, list[str]]:
+        match_reasons = SameService._match_reasons(message)
         if message.is_test:
-            return "log_only", "logged", ["test or demonstration event"]
+            return "log_only", "logged", ["test or demonstration event", *match_reasons]
         if not message.relevant:
             return "withheld", "logged", ["outside configured SAME counties"]
         if message.expires_at <= now:
-            return "withheld", "expired", ["SAME message is expired"]
+            return "withheld", "expired", ["SAME message is expired", *match_reasons]
         if message.issued_at > now + 5 * 60:
-            return "withheld", "logged", ["SAME issue time is in the future"]
+            return "withheld", "logged", ["SAME issue time is in the future", *match_reasons]
         if cap is not None:
             state = "approved" if cap.get("linked_alert_id") is not None else "duplicate"
-            return "duplicate", state, [f"matched NWS CAP record {cap['id']}"]
-        return "accepted", "pending", []
+            return "duplicate", state, [f"matched NWS CAP record {cap['id']}", *match_reasons]
+        return "accepted", "pending", match_reasons
 
     async def ingest(self, text: str) -> tuple[SameMessage, bool]:
         value = self.parse(text)
@@ -208,16 +264,17 @@ class SameService:
             if not existing:
                 await transaction.write(
                     """INSERT INTO same_event(header,originator,event_code,event_name,
-                       location_codes,
+                       location_codes,matched_locations,
                        purge_minutes,issued_day,issued_time,callsign,is_test,relevant,received_at,
                        expires_at,decision,gate_reasons,review_state,cap_alert_id,linked_alert_id)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         value.header,
                         value.originator,
                         value.event_code,
                         value.event_name,
                         json.dumps(value.location_codes, separators=(",", ":")),
+                        json.dumps(value.matched_locations, separators=(",", ":")),
                         value.purge_minutes,
                         value.issued_day,
                         value.issued_time,
@@ -237,27 +294,51 @@ class SameService:
         return value, not existing
 
     async def list(self, *, include_expired: bool = False) -> list[dict[str, Any]]:
+        await self.reconcile_cap_duplicates()
         now = int(self.clock.now().timestamp())
         await self.database.write(
             "UPDATE same_event SET review_state='expired' "
-            "WHERE review_state='pending' AND expires_at<=?",
+            "WHERE review_state IN ('pending','duplicate') AND expires_at<=?",
             (now,),
         )
-        where = "" if include_expired else "WHERE review_state!='expired'"
         rows = await self.database.read(
-            f"SELECT * FROM same_event {where} ORDER BY received_at DESC LIMIT 100"  # noqa: S608
+            "SELECT same_event.*,cap_alert.identifier AS cap_identifier,"
+            "cap_alert.event AS cap_event,cap_alert.decision AS cap_decision,"
+            "cap_alert.review_state AS cap_review_state,"
+            "cap_alert.linked_alert_id AS cap_linked_alert_id "
+            "FROM same_event LEFT JOIN cap_alert ON cap_alert.id=same_event.cap_alert_id "
+            "WHERE ? OR same_event.review_state!='expired' "
+            "ORDER BY same_event.received_at DESC LIMIT 100",
+            (int(include_expired),),
         )
         values: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row)
             item["location_codes"] = json.loads(item["location_codes"])
+            item["matched_locations"] = json.loads(item["matched_locations"])
             item["gate_reasons"] = json.loads(item["gate_reasons"])
+            cap_fields = {
+                "identifier": item.pop("cap_identifier"),
+                "event": item.pop("cap_event"),
+                "decision": item.pop("cap_decision"),
+                "review_state": item.pop("cap_review_state"),
+                "linked_alert_id": item.pop("cap_linked_alert_id"),
+            }
+            if item["cap_alert_id"] is not None:
+                item["cap_correlation"] = {
+                    "id": item["cap_alert_id"],
+                    **cap_fields,
+                    "review_state": cap_fields["review_state"] or "missing",
+                }
+            else:
+                item["cap_correlation"] = None
             values.append(item)
         return values
 
     async def dismiss(self, same_id: int) -> None:
         rows = await self.database.read(
-            "SELECT id FROM same_event WHERE id=? AND review_state='pending'", (same_id,)
+            "SELECT id FROM same_event WHERE id=? AND review_state IN ('pending','duplicate')",
+            (same_id,),
         )
         if not rows:
             raise ValueError("SAME event is not pending review.")
@@ -267,8 +348,8 @@ class SameService:
 
     async def approve(self, same_id: int, alerts: AlertService) -> dict[str, Any]:
         rows = await self.database.read(
-            "SELECT * FROM same_event WHERE id=? AND decision='accepted' "
-            "AND review_state='pending' AND is_test=0 AND relevant=1",
+            "SELECT * FROM same_event WHERE id=? AND decision IN ('accepted','duplicate') "
+            "AND review_state IN ('pending','duplicate') AND is_test=0 AND relevant=1",
             (same_id,),
         )
         if not rows:
@@ -284,7 +365,12 @@ class SameService:
                 (
                     cap["id"],
                     linked_id,
-                    json.dumps([f"matched approved NWS CAP record {cap['id']}"]),
+                    json.dumps(
+                        [
+                            f"matched approved NWS CAP record {cap['id']}",
+                            *self._match_reasons(message),
+                        ]
+                    ),
                     same_id,
                 ),
             )
@@ -307,8 +393,8 @@ class SameService:
         )
         async with self.database.transaction() as transaction:
             await transaction.write(
-                "UPDATE same_event SET review_state='approved',linked_alert_id=?,cap_alert_id=? "
-                "WHERE id=?",
+                "UPDATE same_event SET decision='accepted',review_state='approved',"
+                "linked_alert_id=?,cap_alert_id=? WHERE id=?",
                 (alert.id, cap["id"] if cap is not None else None, same_id),
             )
             if cap is not None:
@@ -325,19 +411,65 @@ class SameService:
             "AND review_state IN ('pending','approved','duplicate')"
         )
         reconciled = 0
+        now = int(self.clock.now().timestamp())
         for row in rows:
             message = self.parse(str(row["header"]))
+            if row["review_state"] == "duplicate" and int(row["expires_at"]) <= now:
+                await self.database.write(
+                    "UPDATE same_event SET review_state='expired',gate_reasons=? WHERE id=?",
+                    (
+                        json.dumps(
+                            [
+                                "SAME message expired while deferred by CAP",
+                                *self._match_reasons(message),
+                            ]
+                        ),
+                        row["id"],
+                    ),
+                )
+                reconciled += 1
+                continue
             cap = await self._matching_cap(message)
             if cap is None:
+                if row["decision"] == "duplicate" and row["linked_alert_id"] is None:
+                    suppressor = row["cap_alert_id"]
+                    await self.database.write(
+                        "UPDATE same_event SET decision='accepted',review_state='pending',"
+                        "gate_reasons=? WHERE id=?",
+                        (
+                            json.dumps(
+                                [
+                                    f"CAP record {suppressor} no longer suppresses this message",
+                                    *self._match_reasons(message),
+                                ]
+                            ),
+                            row["id"],
+                        ),
+                    )
+                    reconciled += 1
                 continue
             same_alert = row["linked_alert_id"]
             cap_alert = cap.get("linked_alert_id")
             if same_alert is not None and cap_alert is None:
-                await self.database.write(
-                    "UPDATE cap_alert SET review_state='approved',linked_alert_id=?,"
-                    "updated_at=unixepoch() WHERE id=? AND review_state='pending'",
-                    (same_alert, cap["id"]),
-                )
+                async with self.database.transaction() as transaction:
+                    await transaction.write(
+                        "UPDATE cap_alert SET review_state='approved',linked_alert_id=?,"
+                        "updated_at=unixepoch() WHERE id=? AND review_state='pending'",
+                        (same_alert, cap["id"]),
+                    )
+                    await transaction.write(
+                        "UPDATE same_event SET cap_alert_id=?,gate_reasons=? WHERE id=?",
+                        (
+                            cap["id"],
+                            json.dumps(
+                                [
+                                    f"linked NWS CAP record {cap['id']} to SAME alert",
+                                    *self._match_reasons(message),
+                                ]
+                            ),
+                            row["id"],
+                        ),
+                    )
             elif cap_alert is not None and same_alert is None:
                 await self.database.write(
                     "UPDATE same_event SET decision='duplicate',review_state='approved',"
@@ -345,7 +477,12 @@ class SameService:
                     (
                         cap["id"],
                         cap_alert,
-                        json.dumps([f"matched approved NWS CAP record {cap['id']}"]),
+                        json.dumps(
+                            [
+                                f"matched approved NWS CAP record {cap['id']}",
+                                *self._match_reasons(message),
+                            ]
+                        ),
                         row["id"],
                     ),
                 )
@@ -355,7 +492,12 @@ class SameService:
                     "cap_alert_id=?,gate_reasons=? WHERE id=?",
                     (
                         cap["id"],
-                        json.dumps([f"matched pending NWS CAP record {cap['id']}"]),
+                        json.dumps(
+                            [
+                                f"matched pending NWS CAP record {cap['id']}",
+                                *self._match_reasons(message),
+                            ]
+                        ),
                         row["id"],
                     ),
                 )

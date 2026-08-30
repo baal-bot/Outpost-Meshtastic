@@ -149,7 +149,9 @@ rtl_eeprom 2>&1 | sed -n '/Serial number/p'
 Set `env.same.frequency_mhz` to the strongest local NWR channel and add the six-digit SAME codes
 for the installation's counties. The first digit is the SAME county subdivision (normally `0`),
 followed by the two-digit state FIPS and three-digit county FIPS. Confirm codes and transmitter
-coverage with official NOAA/NWS material; do not guess a code.
+coverage with official NOAA/NWS material; do not guess a code. A configured whole-county code
+(`P=0`) also matches received subdivision codes `1` through `9`. Configure a non-zero `P` only to
+narrow subdivision-specific messages; whole-county warnings remain relevant to that subdivision.
 
 After restart, Environment → NOAA Weather Radio · SAME shows frequency, signal, last decode, and
 restart count. These receive-only acceptance commands do not send mesh traffic:

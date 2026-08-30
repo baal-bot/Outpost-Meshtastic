@@ -121,7 +121,7 @@ radius, and review magnitude are bounded.
 |---|---|
 | `enabled` | Starts the receiver only when this and `modules.env.enabled` are true. |
 | `frequency_mhz` | One of the seven NWR channels from 162.400 through 162.550 MHz. |
-| `county_codes` | Six-digit SAME location codes; required when enabled. `000000` national messages are always relevant. |
+| `county_codes` | Six-digit `PSSCCC` SAME location codes; required when enabled. A `P` of `0` selects the whole county and matches subdivisions `1`–`9`; a non-zero `P` narrows subdivision-only messages. Whole-county messages still apply to a configured subdivision. `000000` national messages are always relevant. |
 | `device` | Prefer the RTL-SDR serial printed by `rtl_eeprom`, not an unstable device index. |
 | `sample_rate` | Decoder PCM rate; 48,000 is the tested default. |
 | `oversampling` | `rtl_fm` demodulation oversampling; 4 is the tested default. |

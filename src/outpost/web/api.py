@@ -2259,7 +2259,7 @@ def create_web_app(
                         ((operator_read_at IS NULL AND mail_direction<>'out')
                          OR state IN ('failed','undeliverable'))) actionable,
                      (SELECT COUNT(*) FROM same_event
-                      WHERE review_state='pending') same_pending,
+                      WHERE review_state IN ('pending','duplicate')) same_pending,
                      (SELECT COUNT(*) FROM member
                       WHERE directory_state='active' AND
                         {NEEDS_REVIEW_SQL}) member_key_reviews,
@@ -3208,6 +3208,8 @@ def create_web_app(
                 async def environment_alert_dismiss(cap_id: int) -> dict[str, str] | Response:
                     try:
                         await cap_alerts.dismiss(cap_id, current_actor_ref())
+                        if same_events is not None:
+                            await same_events.reconcile_cap_duplicates()
                     except ValueError as error:
                         return JSONResponse(
                             {"error": {"code": "not_pending", "message": str(error)}},

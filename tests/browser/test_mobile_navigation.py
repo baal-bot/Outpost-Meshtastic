@@ -4349,7 +4349,7 @@ def test_environment_waypoint_create_and_map_card_are_functional_and_browser_cle
     route_shared_operator_api(page)
     mutations: list[dict[str, object]] = []
     waypoints: list[dict[str, object]] = []
-    same_state = {"review_state": "pending"}
+    same_state = {"review_state": "duplicate"}
 
     def environment_route(route: object) -> None:
         request = route.request
@@ -4383,7 +4383,12 @@ def test_environment_waypoint_create_and_map_card_are_functional_and_browser_cle
                         "location_codes": ["042003"],
                         "callsign": "KPBZ/NWS",
                         "received_at": 2_000_000_000,
-                        "gate_reasons": [],
+                        "gate_reasons": ["matched pending NWS CAP record 12"],
+                        "cap_correlation": {
+                            "id": 12,
+                            "event": "Tornado Warning",
+                            "review_state": "pending",
+                        },
                         "review_state": same_state["review_state"],
                     }
                 ],
@@ -4484,6 +4489,9 @@ def test_environment_waypoint_create_and_map_card_are_functional_and_browser_cle
         card.get_by_role("button", name="Close").click()
         page.locator('[data-marker-id="quake-us7000test"]').click()
         card.get_by_role("heading", name="M3.2 · 12 km north of Pittsburgh").wait_for()
+        assert (
+            "CAP #12 · Tornado Warning · pending" in page.locator("#same-event-list").text_content()
+        )
         page.get_by_role("button", name="Approve alert").click()
         page.get_by_label("Broadcast confirmation").fill("BROADCAST SAME 9")
         page.get_by_role("button", name="Queue warning").click()
