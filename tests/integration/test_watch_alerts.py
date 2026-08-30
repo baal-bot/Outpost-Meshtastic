@@ -31,6 +31,14 @@ async def test_identical_alert_submissions_coalesce_transactionally(tmp_path) ->
     await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
     service = AlertService(database, governor, clock, config)
 
+    preview = await service.airtime_preview("urgent", "Bridge closed", [3])
+    rendered_bytes = len(service.render("urgent", "Bridge closed").encode())
+    assert preview["recipient_count"] == 1
+    assert preview["channel_count"] == 1
+    assert preview["transmission_count"] == 1
+    assert preview["per_copy_seconds"] == pytest.approx(governor.estimate_toa(rendered_bytes))
+    assert preview["total_seconds"] == pytest.approx(preview["per_copy_seconds"])
+
     first, duplicate = await asyncio.gather(
         service.raise_alert("urgent", "Bridge closed", "web:operator", channels=[3]),
         service.raise_alert("urgent", "Bridge closed", "web:operator", channels=[3]),

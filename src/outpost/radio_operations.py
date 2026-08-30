@@ -188,7 +188,8 @@ class RadioOperations:
             await self._audit("queue.cancel", f"queue:{item_id}", None)
         return cancelled
 
-    async def send(self, text: str, destination: str, channel: int, traffic_class: str) -> int:
+    @staticmethod
+    def _validate_send(text: str, destination: str, channel: int, traffic_class: str) -> str:
         if not text.strip() or len(text.encode()) > 200:
             raise ValueError("Message must be 1-200 UTF-8 bytes.")
         if destination != "^all" and not MESH_ID.fullmatch(destination):
@@ -197,9 +198,22 @@ class RadioOperations:
             raise ValueError("Channel must be 0-7.")
         if traffic_class not in {"reply", "bulletin", "alert"}:
             raise ValueError("Traffic class must be reply, bulletin, or alert.")
+        return text.strip()
+
+    def estimate(
+        self, text: str, destination: str, channel: int, traffic_class: str
+    ) -> dict[str, object]:
+        message = self._validate_send(text, destination, channel, traffic_class)
+        return self.governor.estimate_text(
+            message,
+            traffic_class=TrafficClass(traffic_class),
+        )
+
+    async def send(self, text: str, destination: str, channel: int, traffic_class: str) -> int:
+        message = self._validate_send(text, destination, channel, traffic_class)
         item_id = await self.governor.admit(
             OutboundItem(
-                text=text.strip(),
+                text=message,
                 dest=destination,
                 channel=channel,
                 traffic_class=TrafficClass(traffic_class),

@@ -319,6 +319,7 @@ class MeshSendBody(BaseModel):
     destination: str
     channel: int = 0
     traffic_class: str = "reply"
+    airtime_confirmation: bool = False
 
 
 class RestoreBody(BaseModel):
@@ -357,6 +358,7 @@ class AlertCreateBody(BaseModel):
     lat: float | None = Field(default=None, ge=-90, le=90)
     lon: float | None = Field(default=None, ge=-180, le=180)
     radius_km: float = Field(default=1.0, ge=0.1, le=100)
+    airtime_confirmation: bool = False
 
 
 class AlertCancelBody(BaseModel):
@@ -370,6 +372,7 @@ class EventCreateBody(BaseModel):
 
 class EventSolicitBody(BaseModel):
     confirmation: str
+    airtime_confirmation: bool = False
 
 
 class WaypointBody(BaseModel):
@@ -3092,10 +3095,38 @@ def create_web_app(
                     ]
                 }
 
+            @app.post("/api/v1/alerts/estimate", response_model=None)
+            async def alert_estimate(body: AlertCreateBody) -> dict[str, object] | Response:
+                try:
+                    await require_active_radio_channels(body.channels)
+                    return await alerts.airtime_preview(body.severity, body.headline, body.channels)
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_alert", "message": str(error)}},
+                        status_code=422,
+                    )
+
             @app.post("/api/v1/alerts", response_model=None)
             async def alert_create(body: AlertCreateBody) -> dict[str, Any] | Response:
                 try:
                     await require_active_radio_channels(body.channels)
+                    estimate = await alerts.airtime_preview(
+                        body.severity, body.headline, body.channels
+                    )
+                    if estimate["requires_confirmation"] and not body.airtime_confirmation:
+                        return JSONResponse(
+                            {
+                                "error": {
+                                    "code": "airtime_confirmation_required",
+                                    "message": (
+                                        "This alert would cross an airtime constraint. "
+                                        "Review its displacement and confirm explicitly."
+                                    ),
+                                },
+                                "airtime": estimate,
+                            },
+                            status_code=409,
+                        )
                     value = await alerts.raise_alert(
                         body.severity,
                         body.headline,
@@ -3381,6 +3412,7 @@ def create_web_app(
             ) -> dict[str, Any] | Response:
                 try:
                     recipients = await checkins.solicitation_preview(event_id)
+                    airtime = await checkins.solicitation_airtime(event_id, recipients)
                 except ValueError as error:
                     return JSONResponse(
                         {"error": {"code": "not_found", "message": str(error)}},
@@ -3393,6 +3425,7 @@ def create_web_app(
                     "message": checkins.solicitation_message(event)
                     if (event := await checkins.by_id(event_id))
                     else "",
+                    "airtime": airtime,
                 }
 
             @app.post("/api/v1/events/{event_id}/solicit", response_model=None)
@@ -3410,6 +3443,21 @@ def create_web_app(
                         status_code=422,
                     )
                 try:
+                    estimate = await checkins.solicitation_airtime(event_id)
+                    if estimate["requires_confirmation"] and not body.airtime_confirmation:
+                        return JSONResponse(
+                            {
+                                "error": {
+                                    "code": "airtime_confirmation_required",
+                                    "message": (
+                                        "This welfare batch would cross an airtime constraint. "
+                                        "Review its displacement and confirm explicitly."
+                                    ),
+                                },
+                                "airtime": estimate,
+                            },
+                            status_code=409,
+                        )
                     result = await checkins.solicit(event_id)
                 except ValueError as error:
                     return JSONResponse(
@@ -4294,10 +4342,40 @@ def create_web_app(
             async def mesh_power() -> dict[str, Any]:
                 return await radio_operations.power()
 
+            @app.post("/api/v1/mesh/estimate", response_model=None)
+            async def mesh_estimate(body: MeshSendBody) -> dict[str, object] | Response:
+                try:
+                    await require_active_radio_channels([body.channel])
+                    return radio_operations.estimate(
+                        body.text, body.destination, body.channel, body.traffic_class
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "estimate_rejected", "message": str(error)}},
+                        status_code=422,
+                    )
+
             @app.post("/api/v1/mesh/send", response_model=None)
             async def mesh_send(body: MeshSendBody) -> dict[str, int] | Response:
                 try:
                     await require_active_radio_channels([body.channel])
+                    estimate = radio_operations.estimate(
+                        body.text, body.destination, body.channel, body.traffic_class
+                    )
+                    if estimate["requires_confirmation"] and not body.airtime_confirmation:
+                        return JSONResponse(
+                            {
+                                "error": {
+                                    "code": "airtime_confirmation_required",
+                                    "message": (
+                                        "This message would cross an airtime constraint. "
+                                        "Review its displacement and confirm explicitly."
+                                    ),
+                                },
+                                "airtime": estimate,
+                            },
+                            status_code=409,
+                        )
                     item_id = await radio_operations.send(
                         body.text, body.destination, body.channel, body.traffic_class
                     )

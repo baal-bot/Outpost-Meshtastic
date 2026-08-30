@@ -1,13 +1,16 @@
 import csv
 import io
+from dataclasses import replace
 
 import pytest
+from fastapi.testclient import TestClient
 
 from outpost.clock import VirtualClock
 from outpost.store import Database
 from outpost.store.members import MemberRepo
 from outpost.transport.models import TrafficClass
 from outpost.watch import CheckinService, IncidentService
+from outpost.web.api import create_web_app
 from tests.support.application import production_governor
 
 pytestmark = pytest.mark.production_wiring
@@ -130,8 +133,38 @@ async def test_solicitation_is_direct_digest_and_only_once_per_member(tmp_path) 
     await members.resolve("!00000002")  # Discovered guest must never receive this message.
     service = CheckinService(database, governor, clock)
     event = await service.open_event("Ice storm", "all", "operator")
+    multibyte_message = service.solicitation_message(replace(event, name="🚨" * 80))
+    assert len(multibyte_message.encode()) <= 231
+    assert multibyte_message.endswith("Reply OK [note] or HELPME [note].")
 
-    result = await service.solicit(event.id)
+    preview = await service.solicitation_airtime(event.id)
+    assert preview["recipient_count"] == 1
+    assert preview["transmission_count"] == 1
+    assert preview["total_seconds"] == pytest.approx(preview["per_copy_seconds"])
+
+    client = TestClient(
+        create_web_app(lambda: {"radio": "up"}, database=database, checkins=service)
+    )
+    api_preview = client.get(f"/api/v1/events/{event.id}/solicitation-preview")
+    assert api_preview.status_code == 200
+    assert api_preview.json()["airtime"]["recipient_count"] == 1
+    governor.channel_utilisation = governor.config.utilisation_ceiling
+    constrained = client.post(
+        f"/api/v1/events/{event.id}/solicit",
+        json={"confirmation": f"QUEUE {event.id}"},
+    )
+    assert constrained.status_code == 409
+    assert constrained.json()["airtime"]["breach_codes"] == ["utilisation_ceiling"]
+    confirmed = client.post(
+        f"/api/v1/events/{event.id}/solicit",
+        json={
+            "confirmation": f"QUEUE {event.id}",
+            "airtime_confirmation": True,
+        },
+    )
+    assert confirmed.status_code == 200
+    result = confirmed.json()
+    governor.channel_utilisation = None
 
     assert result["recipient_count"] == 1
     queued = governor.queued_items()

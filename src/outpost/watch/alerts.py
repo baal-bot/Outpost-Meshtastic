@@ -68,6 +68,41 @@ class AlertService:
     def _policy(self, severity: str) -> EscalationPolicy:
         return cast(EscalationPolicy, getattr(self.config.watch.escalation, severity))
 
+    async def airtime_preview(
+        self, severity: str, headline: str, channels: list[int] | None = None
+    ) -> dict[str, object]:
+        if severity not in {"caution", "urgent", "critical"}:
+            raise ValueError("Alert severity must be caution, urgent, or critical.")
+        headline = headline.strip()
+        if not headline or len(headline.encode()) > 140:
+            raise ValueError("Alert headline must be 1-140 UTF-8 bytes.")
+        policy = self._policy(severity)
+        if not policy.stages:
+            raise ValueError("Alert escalation policy must contain at least one stage.")
+        selected = channels or sorted(
+            {channel for stage in policy.stages for channel in stage.channels}
+        )
+        selected = sorted(set(selected))
+        if any(channel not in self.config.channels for channel in selected):
+            raise ValueError("Alert channel is not configured.")
+        stage = policy.stages[0]
+        destinations = await self.notifier.destinations(stage.notify)
+        estimate = self.governor.estimate_text(
+            self.render(severity, headline),
+            traffic_class=TrafficClass.ALERT,
+            severity=Severity(severity),
+            copies=len(destinations) * len(selected),
+        )
+        estimate.update(
+            {
+                "recipient_count": len(destinations),
+                "channel_count": len(selected),
+                "channels": selected,
+                "audience": stage.notify,
+            }
+        )
+        return estimate
+
     async def operational_json(self, alert: Alert) -> dict[str, Any]:
         value = alert.json()
         policy = self._policy(alert.severity)

@@ -12,11 +12,87 @@ let queueFilterKey = "";
 let queueHistoryExpanded = false;
 let queueMeta = { counts: {}, total: 0, retention_days: 30 };
 let sendInFlight = false;
+let sendEstimate = null;
+let estimateSequence = 0;
+let estimateTimer = null;
 
 $("send-channel").disabled = true;
 $("send-form").querySelector("button").disabled = true;
 
 const api = createApiClient(() => csrfToken);
+
+const sendAirtime = document.createElement("small");
+sendAirtime.id = "send-airtime";
+sendAirtime.textContent = "0 / 200 UTF-8 bytes · enter a message to estimate airtime.";
+$("send-form").insertBefore(sendAirtime, $("send-channel-state"));
+
+function seconds(value) {
+  return `${Number(value || 0).toFixed(2)}s`;
+}
+
+function sendEstimatePayload(airtimeConfirmation = false) {
+  return {
+    text: $("send-text").value,
+    destination: $("send-destination").value,
+    channel: Number($("send-channel").value),
+    traffic_class: $("send-class").value,
+    airtime_confirmation: airtimeConfirmation,
+  };
+}
+
+function renderSendEstimate(estimate) {
+  const byteCount = new TextEncoder().encode($("send-text").value).length;
+  if (!estimate) {
+    sendAirtime.textContent = `${byteCount} / 200 UTF-8 bytes · ${
+      byteCount ? "airtime estimate unavailable." : "enter a message to estimate airtime."
+    }`;
+    sendAirtime.classList.toggle("history-warning", byteCount > 200);
+    return;
+  }
+  const remaining = estimate.budget?.remaining_after_seconds;
+  const cost = `${seconds(estimate.total_seconds)} · ${estimate.part_count} part${
+    estimate.part_count === 1 ? "" : "s"
+  } · ${estimate.costing_preset}`;
+  const budget = remaining == null ? "" : ` · ${seconds(remaining)} normal budget remains`;
+  const warning = estimate.requires_confirmation
+    ? ` · CONFIRMATION REQUIRED: ${estimate.displacement}`
+    : "";
+  sendAirtime.textContent = `${byteCount} / 200 UTF-8 bytes · ${cost}${budget}${warning}`;
+  sendAirtime.classList.toggle("history-warning", estimate.requires_confirmation);
+}
+
+async function refreshSendEstimate() {
+  const sequence = ++estimateSequence;
+  const byteCount = new TextEncoder().encode($("send-text").value).length;
+  if (!byteCount || byteCount > 200 || $("send-channel").disabled) {
+    sendEstimate = null;
+    renderSendEstimate(null);
+    return null;
+  }
+  try {
+    const response = await api("/api/v1/mesh/estimate", {
+      method: "POST",
+      body: JSON.stringify(sendEstimatePayload()),
+    });
+    const body = await response.json();
+    if (sequence !== estimateSequence) return sendEstimate;
+    sendEstimate = response.ok ? body : null;
+    renderSendEstimate(sendEstimate);
+    return sendEstimate;
+  } catch {
+    if (sequence === estimateSequence) {
+      sendEstimate = null;
+      renderSendEstimate(null);
+    }
+    return null;
+  }
+}
+
+function scheduleSendEstimate() {
+  clearTimeout(estimateTimer);
+  renderSendEstimate(null);
+  estimateTimer = setTimeout(refreshSendEstimate, 180);
+}
 
 const activeQueueStates = new Set(["pending", "held", "sending", "awaiting_ack"]);
 const terminalQueueStates = new Set([
@@ -237,6 +313,7 @@ function renderChannelMap(channelMap) {
   )
     ? priorHistory
     : "";
+  if (!sendEstimate && $("send-text").value) scheduleSendEstimate();
 }
 
 function messageQuery(cursor) {
@@ -535,22 +612,44 @@ $("send-form").addEventListener("submit", async (event) => {
   button.textContent = "Queueing…";
   $("send-result").textContent = "";
   try {
-    const response = await api("/api/v1/mesh/send", {
+    const estimate = await refreshSendEstimate();
+    let airtimeConfirmation = false;
+    if (estimate?.requires_confirmation) {
+      airtimeConfirmation = await window.OutpostUI.confirm({
+        title: "Cross airtime constraint?",
+        message: `${seconds(estimate.total_seconds)} for ${estimate.transmission_count} transmission. ${estimate.displacement}`,
+        confirmLabel: "Queue despite constraint",
+        danger: true,
+      });
+      if (!airtimeConfirmation) return;
+    }
+    let response = await api("/api/v1/mesh/send", {
       method: "POST",
-      body: JSON.stringify({
-        text: $("send-text").value,
-        destination: $("send-destination").value,
-        channel: Number($("send-channel").value),
-        traffic_class: $("send-class").value,
-      }),
+      body: JSON.stringify(sendEstimatePayload(airtimeConfirmation)),
     });
-    const body = await response.json();
+    let body = await response.json();
+    if (response.status === 409 && body.airtime?.requires_confirmation) {
+      const confirmed = await window.OutpostUI.confirm({
+        title: "Airtime state changed",
+        message: `${seconds(body.airtime.total_seconds)} now crosses a constraint. ${body.airtime.displacement}`,
+        confirmLabel: "Queue despite constraint",
+        danger: true,
+      });
+      if (!confirmed) return;
+      response = await api("/api/v1/mesh/send", {
+        method: "POST",
+        body: JSON.stringify(sendEstimatePayload(true)),
+      });
+      body = await response.json();
+    }
     if (!response.ok) {
       $("send-result").textContent = body.error.message;
       return;
     }
     $("send-result").textContent = `Queued as item #${body.queue_id}`;
     $("send-text").value = "";
+    sendEstimate = null;
+    renderSendEstimate(null);
     await refresh();
   } catch (error) {
     $("send-result").textContent = error?.message || "Message could not be queued.";
@@ -560,6 +659,10 @@ $("send-form").addEventListener("submit", async (event) => {
     button.disabled = $("send-channel").disabled;
   }
 });
+
+for (const id of ["send-text", "send-destination", "send-channel", "send-class"]) {
+  $(id).addEventListener(id === "send-text" ? "input" : "change", scheduleSendEstimate);
+}
 
 installInboundHealthCard();
 installPowerCard();

@@ -602,6 +602,9 @@ def route_visual_content_api(page: object) -> None:
             ],
         },
     )
+    # Keep dashboard background fetches deterministic even when a page navigation
+    # overlaps route registration in the full browser matrix.
+    fulfill("**/api/v1/channels*", {"items": [], "next_cursor": None})
     fulfill("**/api/v1/incidents/history*", {"items": []})
     fulfill("**/api/v1/incidents*", {"items": []})
     fulfill("**/api/v1/alerts*", {"items": []})
@@ -4904,5 +4907,87 @@ def test_access_workspace_enrolls_mfa_and_creates_named_account(
             "current_password": "operator-current-password-42",
             "new_password": "operator-replacement-password-42",
         }
+    finally:
+        page.close()
+
+
+def test_compose_forms_show_authoritative_airtime_forecasts(
+    browser: object, dashboard_url: str
+) -> None:
+    estimate = {
+        "payload_bytes": 12,
+        "part_count": 1,
+        "parts": [{"number": 1, "payload_bytes": 12, "seconds": 0.42}],
+        "copies": 1,
+        "transmission_count": 1,
+        "per_copy_seconds": 0.42,
+        "total_seconds": 0.42,
+        "traffic_class": "bulletin",
+        "severity": "info",
+        "reported_preset": "LONG_FAST",
+        "costing_preset": "LONG_FAST",
+        "region": "US",
+        "budget": {"remaining_after_seconds": 119.58},
+        "class_budget": {},
+        "utilisation": {},
+        "breach_codes": [],
+        "breaches": [],
+        "requires_confirmation": False,
+        "displacement": "",
+    }
+
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    page.route(
+        "**/api/v1/mesh/estimate",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(estimate)
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/radio.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.locator("#send-text").fill("Field update")
+        page.get_by_text("0.42s · 1 part · LONG_FAST", exact=False).wait_for()
+        page.get_by_text("119.58s normal budget remains", exact=False).wait_for()
+        health.assert_clean()
+    finally:
+        page.close()
+
+    alert_estimate = {
+        **estimate,
+        "payload_bytes": 35,
+        "copies": 4,
+        "transmission_count": 4,
+        "per_copy_seconds": 0.55,
+        "total_seconds": 2.2,
+        "traffic_class": "alert",
+        "severity": "urgent",
+        "recipient_count": 4,
+        "channel_count": 1,
+        "channels": [0],
+        "audience": "responders",
+    }
+    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    page.route(
+        "**/api/v1/alerts/estimate",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(alert_estimate),
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/watch.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.locator("#alert-headline").fill("Bridge closed")
+        page.get_by_text("0.55s each · 4 recipients × 1 channel", exact=False).wait_for()
+        page.get_by_text("2.20s batch · 1 part · LONG_FAST", exact=False).wait_for()
+        health.assert_clean()
     finally:
         page.close()

@@ -4,7 +4,7 @@ const renderOperationsBase=render;
 render=()=>{renderOperationsBase();$("alert-list").innerHTML=alertItems.map(a=>{const next=a.next_action,nextTime=a.next_escalation_at?new Date(a.next_escalation_at*1000):null,acks=a.acknowledgements||[],progress=a.ack_required?Math.min(100,a.ack_count/a.ack_required*100):100,failed=a.delivery_state&&a.delivery_state!=="delivered";return `<article class="active-alert operations-alert ${safe(a.severity)}"><header><div><strong>${safe(a.severity.toUpperCase())}${a.incident_ref?` · INC ${a.incident_ref}`:""}</strong><span class="stage-pill">STAGE ${a.escalation_stage}/${a.stage_total}</span></div><span>ACK ${a.ack_count}/${a.ack_required||"—"}</span></header><p>${safe(a.headline)}</p>${failed?`<p class="delivery-failure">No recipient reached · ${safe(a.delivery_state.replace("_"," "))}. This stage is paused and will retry.</p>`:""}<div class="ack-progress"><i style="width:${progress}%"></i></div><div class="operation-grid"><div><small>NEXT ACTION</small><b>${next?`${safe(next.notify)} · ch ${next.channels.map(safe).join(", ")}`:"Escalation stopped"}</b><span>${nextTime?nextTime.toLocaleString():"No action scheduled"}</span></div><div><small>ACKNOWLEDGEMENTS</small><b>${acks.length?acks.map(value=>safe(value.handle?`@${value.handle}`:value.mesh_id)).join(", "):"None received"}</b><span>${acks.length?`Latest ${new Date(acks.at(-1).acked_at*1000).toLocaleString()}`:"Waiting for responders"}</span></div></div><footer><span>${a.broadcast_count} queued transmission${a.broadcast_count===1?"":"s"}</span><div>${a.next_escalation_at?`<button data-halt-alert="${a.id}">Stop escalation</button>`:""}<button data-cancel-alert="${a.id}">Issue all clear</button></div></footer></article>`;}).join("")||'<p class="ui-empty empty">No active alerts.</p>';document.querySelectorAll("[data-halt-alert]").forEach(button=>button.onclick=async()=>{if(!await window.OutpostUI.confirm({title:"Stop alert escalation?",message:"Future escalation steps will stop. Transmissions already queued through the airtime governor are unaffected.",confirmLabel:"Stop escalation",danger:true}))return;await api(`/api/v1/alerts/${button.dataset.haltAlert}/halt`,{method:"POST"});notify("Alert escalation stopped.");await refresh();});document.querySelectorAll("[data-cancel-alert]").forEach(button=>button.onclick=async()=>{const resolution=await window.OutpostUI.prompt({title:"Issue all clear?",message:"The resolution is sent through the airtime governor and closes this active alert.",label:"All-clear message",multiline:true,confirmLabel:"Queue all clear"});if(!resolution)return;await api(`/api/v1/alerts/${button.dataset.cancelAlert}/cancel`,{method:"POST",body:JSON.stringify({resolution})});notify("All clear queued and alert closed.");await refresh();});};
 const renderRepeatBase=render;
 render=()=>{renderRepeatBase();document.querySelectorAll(".operations-alert").forEach((card,index)=>{const alert=alertItems[index],next=alert?.next_action;if(!alert||(alert.repeat_count===0&&!next?.repeat))return;const nextLabel=card.querySelector(".operation-grid div:first-child b"),summary=card.querySelector("footer > span");if(next?.repeat&&nextLabel)nextLabel.prepend("Repeat · ");if(summary)summary.textContent=`${alert.broadcast_count} queued transmission${alert.broadcast_count===1?"":"s"} · repeats ${alert.repeat_count}/${alert.repeat_max} · ${alert.repeat_remaining} remaining`;});};
-let csrfToken="",items=[],mapItems=[],mapNodes=[],mapAlerts=[],mapQuakes=[],alertItems=[],eventState=null,rosterState=null,solicitationPreview=null,mapMaxZoom=19,mapInitialized=false,alertSubmissionInFlight=false;
+let csrfToken="",items=[],mapItems=[],mapNodes=[],mapAlerts=[],mapQuakes=[],alertItems=[],eventState=null,rosterState=null,solicitationPreview=null,mapMaxZoom=19,mapInitialized=false,alertSubmissionInFlight=false,alertEstimate=null,alertEstimateTimer=null,alertEstimateSequence=0;
 const sourceHealth=new Map();
 const sourceLabels={incidents:"Incidents",alerts:"Active alerts",welfare:"Welfare roster",map:"Situational map",channels:"Radio channels",history:"Incident history"};
 const readApi=async(url)=>{try{const response=await api(url),body=await response.json().catch(()=>({}));return {ok:response.ok,status:response.status,body,error:response.ok?null:body.error?.message||`HTTP ${response.status}`};}catch(error){return {ok:false,status:0,body:{},error:error?.message||"Network request failed"};}};
@@ -29,6 +29,44 @@ function showQuakeDetail(value){watchMapController.select(`quake-${value.id}`);c
 const notify=(message)=>{const notice=$("watch-notice");notice.textContent=message;notice.hidden=false;notice.scrollIntoView({behavior:"smooth",block:"nearest"});};
 const request=createApiClient(()=>csrfToken);
 const api=async(url,options={})=>{const response=await request(url,options);if(response.ok&&/\/api\/v1\/incidents\/\d+\/updates$/.test(url)){const body=JSON.parse(options.body||"{}");notify(body.kind==="ack"?"Incident acknowledged · status changed to MONITORING.":"Incident update recorded.");}return response;};
+const alertAirtime=document.createElement("span");
+alertAirtime.id="alert-airtime";
+alertAirtime.textContent="Enter a headline to estimate airtime.";
+$("alert-bytes").after(alertAirtime);
+const airtimeSeconds=value=>`${Number(value||0).toFixed(2)}s`;
+function alertPayload(airtimeConfirmation=false){
+  const payload={severity:$("alert-severity").value,headline:$("alert-headline").value,channels:[Number($("alert-channel").value)],radius_km:Number($("alert-radius").value),airtime_confirmation:airtimeConfirmation},reference=$("alert-incident").value,lat=$("alert-lat").value,lon=$("alert-lon").value;
+  if(reference)payload.incident_ref=Number(reference);
+  if(lat&&lon){payload.lat=Number(lat);payload.lon=Number(lon);}
+  return payload;
+}
+function renderAlertEstimate(estimate){
+  const byteCount=new TextEncoder().encode($("alert-headline").value).length;
+  $("alert-bytes").textContent=`${byteCount} / 140 UTF-8 bytes`;
+  if(!estimate){alertAirtime.textContent=byteCount?"Airtime estimate unavailable.":"Enter a headline to estimate airtime.";alertAirtime.classList.remove("history-warning");return;}
+  const recipients=`${estimate.recipient_count} recipient${estimate.recipient_count===1?"":"s"} × ${estimate.channel_count} channel${estimate.channel_count===1?"":"s"}`;
+  alertAirtime.textContent=`${airtimeSeconds(estimate.per_copy_seconds)} each · ${recipients} · ${airtimeSeconds(estimate.total_seconds)} batch · ${estimate.part_count} part${estimate.part_count===1?"":"s"} · ${estimate.costing_preset}${estimate.requires_confirmation?` · CONFIRMATION REQUIRED: ${estimate.displacement}`:""}`;
+  alertAirtime.classList.toggle("history-warning",estimate.requires_confirmation);
+}
+async function refreshAlertEstimate(){
+  const sequence=++alertEstimateSequence,byteCount=new TextEncoder().encode($("alert-headline").value).length;
+  if(!byteCount||byteCount>140||$("alert-channel").disabled){alertEstimate=null;renderAlertEstimate(null);return null;}
+  try{const response=await api("/api/v1/alerts/estimate",{method:"POST",body:JSON.stringify(alertPayload())}),body=await response.json();if(sequence!==alertEstimateSequence)return alertEstimate;alertEstimate=response.ok?body:null;renderAlertEstimate(alertEstimate);return alertEstimate;}catch{if(sequence===alertEstimateSequence){alertEstimate=null;renderAlertEstimate(null);}return null;}
+}
+function scheduleAlertEstimate(){clearTimeout(alertEstimateTimer);renderAlertEstimate(null);alertEstimateTimer=setTimeout(refreshAlertEstimate,180);}
+for(const id of ["alert-headline","alert-severity","alert-channel"]){$(id).addEventListener(id==="alert-headline"?"input":"change",scheduleAlertEstimate);}
+$("alert-form").addEventListener("submit",async event=>{
+  event.preventDefault();event.stopImmediatePropagation();if(alertSubmissionInFlight)return;alertSubmissionInFlight=true;
+  const button=event.currentTarget.querySelector(".alert-submit button"),label=button.textContent;button.disabled=true;button.textContent="Queueing alert…";$("alert-result").textContent="Validating recipients and airtime…";
+  try{
+    const estimate=await refreshAlertEstimate();let confirmed=false;
+    if(estimate?.requires_confirmation){confirmed=await window.OutpostUI.confirm({title:"Cross airtime constraint?",message:`${airtimeSeconds(estimate.total_seconds)} across ${estimate.transmission_count} transmission(s). ${estimate.displacement}`,confirmLabel:"Raise alert despite constraint",danger:true});if(!confirmed)return;}
+    let response=await api("/api/v1/alerts",{method:"POST",body:JSON.stringify(alertPayload(confirmed))}),body=await response.json();
+    if(response.status===409&&body.airtime?.requires_confirmation){confirmed=await window.OutpostUI.confirm({title:"Airtime state changed",message:`${airtimeSeconds(body.airtime.total_seconds)} now crosses a constraint. ${body.airtime.displacement}`,confirmLabel:"Raise alert despite constraint",danger:true});if(!confirmed)return;response=await api("/api/v1/alerts",{method:"POST",body:JSON.stringify(alertPayload(true))});body=await response.json();}
+    $("alert-result").textContent=response.ok?body.coalesced?`Alert #${body.id} was already queued; no duplicate schedule was created.`:body.last_delivery_count?`Alert #${body.id} recorded · ${body.last_delivery_count} transmission${body.last_delivery_count===1?"":"s"} queued.`:`Alert #${body.id} recorded, but no recipient was reached. Operator review required.`:body.error?.message||"Alert rejected.";
+    if(response.ok){$("alert-headline").value="";alertEstimate=null;renderAlertEstimate(null);await refresh();}
+  }catch(error){$("alert-result").textContent=error?.message||"Alert submission failed.";}finally{alertSubmissionInFlight=false;button.textContent=label;button.disabled=$("alert-channel").disabled;}
+});
 function renderAlertChannels(channelMap){
   const select=$('alert-channel'),prior=select.value,active=channelMap.items.filter(channel=>channel.active),remembered=channelMap.items.filter(channel=>channel.last_verified_active),choices=channelMap.available?active:channelMap.stale?remembered:[];
   select.replaceChildren();
@@ -42,6 +80,7 @@ function renderAlertChannels(channelMap){
   const state=$('alert-channel-state');
   state.textContent=channelMap.available?`${active.length} active radio channel${active.length===1?'':'s'}.`:channelMap.stale?'Last verified channel map shown; broadcasting is disabled while the radio is disconnected.':'No verified radio channel map; broadcasting is disabled.';
   state.classList.toggle('history-warning',!channelMap.available);
+  if(!alertEstimate&&$("alert-headline").value)scheduleAlertEstimate();
 }
 async function refreshQuakeMap(){const response=await api("/api/v1/environment/earthquakes");if(!response.ok)return;mapQuakes=(await response.json()).items||[];renderMap();const pending=mapQuakes.filter(value=>value.review_state==="pending");$("quake-review-list").innerHTML=pending.map(value=>`<article class="quake-review-card"><div class="magnitude">M<strong>${Number(value.magnitude).toFixed(1)}</strong></div><div><h3>${safe(value.place)}</h3><p>${Number(value.distance_km).toFixed(0)} km away · ${safe(value.bearing_deg)}° · ${Number(value.depth_km).toFixed(1)} km deep</p></div><div><button data-quake-approve="${value.id}">Review & broadcast</button><button class="secondary" data-quake-dismiss="${value.id}">Dismiss</button></div></article>`).join("")||'<p class="ui-empty empty">No earthquakes pending review.</p>';document.querySelectorAll("[data-quake-dismiss]").forEach(button=>button.onclick=async()=>{await api(`/api/v1/environment/earthquakes/${button.dataset.quakeDismiss}/dismiss`,{method:"POST"});await refreshQuakeMap();});document.querySelectorAll("[data-quake-approve]").forEach(button=>button.onclick=async()=>{const phrase=`QUAKE ${button.dataset.quakeApprove}`;if(await window.OutpostUI.prompt({title:"Broadcast earthquake alert?",message:"This queues a USGS-sourced alert through the airtime governor.",label:"Broadcast confirmation",verification:phrase,confirmLabel:"Queue alert",danger:true})!==phrase)return;const response=await api(`/api/v1/environment/earthquakes/${button.dataset.quakeApprove}/approve`,{method:"POST"}),body=await response.json();notify(response.ok?`Earthquake alert #${body.id} queued.`:body.error?.message||"Could not approve earthquake alert.");await Promise.all([refreshQuakeMap(),refresh()]);});}$("layer-quakes").onchange=renderMap;$("refresh-quakes").onclick=async()=>{$("refresh-quakes").disabled=true;const response=await api("/api/v1/environment/earthquakes/refresh",{method:"POST"}),body=await response.json();notify(response.ok?`USGS poll complete · ${body.nearby} nearby event(s).`:body.error?.message||"USGS poll failed.");$("refresh-quakes").disabled=false;await refreshQuakeMap();};
 async function refreshAlertDelivery(){const response=await fetch("/api/v1/status");if(!response.ok)return;const value=(await response.json()).alert_delivery||{},delayed=(value.throttled||0)+(value.budget_delays||0)+(value.utilisation_delays||0)+(value.hard_stops||0),state=value.dropped?"attention":delayed?"delayed":"clear";$("alert-delivery").className=`alert-delivery ${state}`;$("alert-delivery").innerHTML=`<span class="delivery-state"><i></i>${value.queued||0} queued · ${value.sent||0} sent</span><span>${delayed} delayed by airtime safety · ${value.dropped||0} dropped</span>`;}
@@ -178,6 +217,24 @@ async function refreshIncidentHistory(){
   $("incident-history-retention").textContent=`${body.retention_days||30}-day retention`;
   renderIncidentHistory();
 }
+const renderWelfareAirtimeBase=renderWelfare;
+renderWelfare=()=>{
+  renderWelfareAirtimeBase();
+  const estimate=solicitationPreview?.airtime,review=$("solicitation-review"),approve=$("approve-solicitation");
+  if(!estimate||!review)return;
+  const summary=document.createElement("div");summary.className="solicitation-message";
+  const label=document.createElement("small");label.textContent="AIRTIME FORECAST";
+  const detail=document.createElement("p");detail.textContent=`${airtimeSeconds(estimate.per_copy_seconds)} per recipient · ${estimate.recipient_count} recipient${estimate.recipient_count===1?"":"s"} · ${airtimeSeconds(estimate.total_seconds)} batch · ${estimate.part_count} part${estimate.part_count===1?"":"s"} each · ${estimate.costing_preset}${estimate.requires_confirmation?` · CONFIRMATION REQUIRED: ${estimate.displacement}`:""}`;
+  summary.append(label,detail);summary.classList.toggle("history-warning",estimate.requires_confirmation);review.firstElementChild?.after(summary);
+  if(!approve)return;
+  approve.onclick=async()=>{
+    const phrase=`QUEUE ${eventState.id}`,warning=estimate.requires_confirmation?` ${estimate.displacement}`:"",confirmation=await window.OutpostUI.prompt({title:"Queue welfare requests?",message:`This queues ${estimate.recipient_count} direct message(s). Airtime is ${airtimeSeconds(estimate.per_copy_seconds)} each and ${airtimeSeconds(estimate.total_seconds)} total.${warning}`,label:"Queue confirmation",verification:phrase,confirmLabel:"Queue direct messages",danger:estimate.requires_confirmation});
+    if(confirmation!==phrase)return;approve.disabled=true;
+    let response=await api(`/api/v1/events/${eventState.id}/solicit`,{method:"POST",body:JSON.stringify({confirmation,airtime_confirmation:estimate.requires_confirmation})}),body=await response.json();
+    if(response.status===409&&body.airtime?.requires_confirmation){const changed=await window.OutpostUI.prompt({title:"Airtime state changed",message:`The batch now costs ${airtimeSeconds(body.airtime.total_seconds)} and crosses a constraint. ${body.airtime.displacement}`,label:"Queue confirmation",verification:phrase,confirmLabel:"Queue despite constraint",danger:true});if(changed!==phrase){approve.disabled=false;return;}response=await api(`/api/v1/events/${eventState.id}/solicit`,{method:"POST",body:JSON.stringify({confirmation:changed,airtime_confirmation:true})});body=await response.json();}
+    $("event-result").textContent=response.ok?`Queued ${body.recipient_count} welfare check-in request(s).`:body.error?.message||"Could not queue requests.";await refresh();
+  };
+};
 const refreshWithHistoryBase=refresh;
 refresh=async()=>{await Promise.all([refreshWithHistoryBase(),refreshIncidentHistory()]);};
 $("layer-incidents").onchange=renderMap;$("layer-nodes").onchange=renderMap;let scrubTimer;$("map-time").oninput=()=>{const timeline=$("map-time"),hours=24-Number(timeline.value),progress=(Number(timeline.value)-Number(timeline.min))/(Number(timeline.max)-Number(timeline.min))*100;timeline.style.setProperty("--timeline-progress",`${progress}%`);$("map-time-label").textContent=hours?`${hours}h ago`:"Now";clearTimeout(scrubTimer);scrubTimer=setTimeout(refresh,180);};

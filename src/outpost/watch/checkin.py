@@ -10,8 +10,10 @@ from outpost.clock import Clock
 from outpost.csv_safety import csv_safe_row
 from outpost.store import Database
 from outpost.store.members import Member
+from outpost.transport.chunker import truncate_utf8
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.models import Severity, TrafficClass
+from outpost.transport.toa import MAX_PAYLOAD_BYTES
 
 from .delivery import AudienceDelivery, AudienceNotifier
 
@@ -37,8 +39,11 @@ class CheckinService:
 
     @staticmethod
     def solicitation_message(event: WatchEvent) -> str:
-        name = event.name[:60]
-        return f'Outpost welfare check: "{name}". Reply OK [note] or HELPME [note].'
+        prefix = 'Outpost welfare check: "'
+        suffix = '". Reply OK [note] or HELPME [note].'
+        name_budget = MAX_PAYLOAD_BYTES - len((prefix + suffix).encode())
+        name = truncate_utf8(event.name, name_budget)
+        return f"{prefix}{name}{suffix}"
 
     async def open_event(self, name: str, policy: str, actor: str) -> WatchEvent:
         name = name.strip()
@@ -221,6 +226,23 @@ class CheckinService:
             for row in roster
             if row["status"] == "unaccounted" and row["id"] not in sent_ids
         ]
+
+    async def solicitation_airtime(
+        self, event_id: int, recipients: list[dict[str, Any]] | None = None
+    ) -> dict[str, object]:
+        event = await self.by_id(event_id)
+        if event is None or event.closed_at is not None:
+            raise ValueError("No open event.")
+        selected = (
+            recipients if recipients is not None else await self.solicitation_preview(event_id)
+        )
+        estimate = self.governor.estimate_text(
+            self.solicitation_message(event),
+            traffic_class=TrafficClass.DIGEST,
+            copies=len(selected),
+        )
+        estimate.update({"recipient_count": len(selected), "channel_count": 1, "channels": [0]})
+        return estimate
 
     async def solicit(self, event_id: int) -> dict[str, Any]:
         async with self._solicitation_lock:

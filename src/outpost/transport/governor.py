@@ -134,6 +134,7 @@ class AirtimeGovernor:
         self.power_config = power_config or RadioPowerConfig()
         self.power_observer = power_observer
         self.battery_level: int | None = None
+        self.channel_utilisation: float | None = None
         self.reported_preset = ""
         self.preset = ""
         self.region = "unknown"
@@ -209,6 +210,139 @@ class AirtimeGovernor:
 
     def estimate_toa(self, payload_bytes: int, *, portnum: int = 1) -> float:
         return toa(payload_bytes, self._toa_preset, portnum=portnum)
+
+    def estimate_payloads(
+        self,
+        payload_bytes: list[int],
+        *,
+        traffic_class: TrafficClass,
+        severity: Severity = Severity.INFO,
+        copies: int = 1,
+        portnum: int = 1,
+    ) -> dict[str, object]:
+        """Forecast a batch using the exact model and rolling state used at dispatch."""
+        if not payload_bytes or any(size < 1 or size > MAX_PAYLOAD_BYTES for size in payload_bytes):
+            raise ValueError(f"Each message part must be 1-{MAX_PAYLOAD_BYTES} UTF-8 bytes.")
+        if copies < 0:
+            raise ValueError("Transmission copies cannot be negative.")
+        part_seconds = [self.estimate_toa(size, portnum=portnum) for size in payload_bytes]
+        per_copy_seconds = sum(part_seconds)
+        total_seconds = per_copy_seconds * copies
+        budget_seconds = 3_600 * self.budget_percent / 100
+        reserve_seconds = 3_600 * self.reserve_percent / 100
+        total_budget_seconds = budget_seconds + reserve_seconds
+        used_seconds = self.used_airtime
+        class_used_seconds = self.class_airtime(traffic_class)
+        class_ceiling_seconds = budget_seconds * self.config.class_shares.get(
+            traffic_class.value, 0.0
+        )
+        projected_seconds = used_seconds + total_seconds
+        projected_class_seconds = class_used_seconds + total_seconds
+        critical = traffic_class == TrafficClass.ALERT and severity == Severity.CRITICAL
+        breaches: list[dict[str, object]] = []
+        if total_seconds > 0 and projected_seconds > budget_seconds:
+            detail = (
+                "This critical alert will consume emergency reserve."
+                if critical and projected_seconds <= total_budget_seconds
+                else "The batch exceeds the rolling one-hour airtime allowance."
+            )
+            breaches.append(
+                {
+                    "code": "hourly_budget",
+                    "label": "One-hour budget",
+                    "detail": detail,
+                    "ceiling_seconds": total_budget_seconds if critical else budget_seconds,
+                    "projected_seconds": projected_seconds,
+                }
+            )
+        if total_seconds > 0 and not critical and projected_class_seconds > class_ceiling_seconds:
+            breaches.append(
+                {
+                    "code": "class_share",
+                    "label": f"{traffic_class.value.title()} class share",
+                    "detail": (
+                        "This work will wait behind traffic already using this class share."
+                    ),
+                    "ceiling_seconds": class_ceiling_seconds,
+                    "projected_seconds": projected_class_seconds,
+                }
+            )
+        projected_utilisation = None
+        if self.channel_utilisation is not None:
+            projected_utilisation = self.channel_utilisation + total_seconds / 36
+            if total_seconds > 0 and projected_utilisation > self.config.utilisation_ceiling:
+                breaches.append(
+                    {
+                        "code": "utilisation_ceiling",
+                        "label": "Channel utilisation ceiling",
+                        "detail": (
+                            "The governor will pause non-alert traffic while the channel is busy."
+                        ),
+                        "ceiling_percent": self.config.utilisation_ceiling,
+                        "projected_percent": projected_utilisation,
+                    }
+                )
+        reserve_used_before = max(0.0, used_seconds - budget_seconds)
+        reserve_used_after = max(0.0, projected_seconds - budget_seconds)
+        breach_codes = [str(breach["code"]) for breach in breaches]
+        return {
+            "payload_bytes": sum(payload_bytes),
+            "part_count": len(payload_bytes),
+            "parts": [
+                {"number": index, "payload_bytes": size, "seconds": seconds}
+                for index, (size, seconds) in enumerate(
+                    zip(payload_bytes, part_seconds, strict=True), 1
+                )
+            ],
+            "copies": copies,
+            "transmission_count": len(payload_bytes) * copies,
+            "per_copy_seconds": per_copy_seconds,
+            "total_seconds": total_seconds,
+            "traffic_class": traffic_class.value,
+            "severity": severity.value,
+            "reported_preset": self.reported_preset,
+            "costing_preset": self.preset,
+            "region": self.region,
+            "budget": {
+                "used_seconds": used_seconds,
+                "projected_seconds": projected_seconds,
+                "normal_ceiling_seconds": budget_seconds,
+                "reserve_seconds": reserve_seconds,
+                "total_ceiling_seconds": total_budget_seconds,
+                "remaining_before_seconds": max(0.0, budget_seconds - used_seconds),
+                "remaining_after_seconds": max(0.0, budget_seconds - projected_seconds),
+                "reserve_used_before_seconds": reserve_used_before,
+                "reserve_used_after_seconds": reserve_used_after,
+            },
+            "class_budget": {
+                "used_seconds": class_used_seconds,
+                "projected_seconds": projected_class_seconds,
+                "ceiling_seconds": class_ceiling_seconds,
+                "exempt": critical,
+            },
+            "utilisation": {
+                "current_percent": self.channel_utilisation,
+                "projected_percent": projected_utilisation,
+                "ceiling_percent": self.config.utilisation_ceiling,
+            },
+            "breach_codes": breach_codes,
+            "breaches": breaches,
+            "requires_confirmation": bool(breaches),
+            "displacement": " ".join(str(breach["detail"]) for breach in breaches),
+        }
+
+    def estimate_text(
+        self,
+        text: str,
+        *,
+        traffic_class: TrafficClass,
+        severity: Severity = Severity.INFO,
+        copies: int = 1,
+    ) -> dict[str, object]:
+        payload = text.strip().encode()
+        return self.estimate_payloads(
+            [len(payload)], traffic_class=traffic_class, severity=severity, copies=copies
+        )
 
     @property
     def durable(self) -> bool:
@@ -666,6 +800,7 @@ class AirtimeGovernor:
         if self.link.state != LinkState.UP or now < self._next_tx_at:
             return None
         telemetry = await self.link.local_telemetry()
+        self.channel_utilisation = telemetry.channel_utilisation
         CHANNEL_UTIL.set(telemetry.channel_utilisation / 100)
         AIR_UTIL_TX.set(telemetry.air_util_tx / 100)
         self.battery_level = normalize_battery_level(telemetry.battery_level)

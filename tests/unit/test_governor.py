@@ -46,6 +46,64 @@ def test_governor_tracks_live_preset_and_regional_ceiling() -> None:
     assert governor.profile_warnings == ()
 
 
+def test_airtime_preview_uses_dispatch_model_and_real_preset() -> None:
+    clock = VirtualClock()
+    governor = AirtimeGovernor(
+        SimulatedRadioLink(), AirtimeConfig(), clock, preset="LONG_FAST", region="US"
+    )
+
+    preview = governor.estimate_payloads([12, 100], traffic_class=TrafficClass.REPLY, copies=3)
+
+    assert preview["part_count"] == 2
+    assert preview["transmission_count"] == 6
+    assert preview["per_copy_seconds"] == pytest.approx(
+        governor.estimate_toa(12) + governor.estimate_toa(100)
+    )
+    assert preview["total_seconds"] == pytest.approx(preview["per_copy_seconds"] * 3)
+    long_fast_cost = preview["total_seconds"]
+
+    governor.sync_radio_profile("SHORT_FAST", "US")
+    faster = governor.estimate_payloads([12, 100], traffic_class=TrafficClass.REPLY, copies=3)
+    assert faster["costing_preset"] == "SHORT_FAST"
+    assert faster["total_seconds"] < long_fast_cost
+
+
+def test_airtime_preview_identifies_class_and_utilisation_displacement() -> None:
+    shares = {**AirtimeConfig().class_shares, "reply": 0.0}
+    governor = AirtimeGovernor(
+        SimulatedRadioLink(),
+        AirtimeConfig(class_shares=shares),
+        VirtualClock(),
+        region="US",
+    )
+    governor.channel_utilisation = governor.config.utilisation_ceiling
+
+    preview = governor.estimate_text("field update", traffic_class=TrafficClass.REPLY)
+
+    assert preview["requires_confirmation"] is True
+    assert set(preview["breach_codes"]) == {"class_share", "utilisation_ceiling"}
+    assert preview["class_budget"]["projected_seconds"] > 0
+    assert preview["utilisation"]["projected_percent"] > governor.config.utilisation_ceiling
+
+
+def test_critical_preview_makes_emergency_reserve_use_explicit() -> None:
+    clock = VirtualClock()
+    governor = AirtimeGovernor(SimulatedRadioLink(), AirtimeConfig(), clock, region="US")
+    cost = governor.estimate_toa(len(b"evacuate"))
+    normal_budget = 3_600 * governor.budget_percent / 100
+    governor.history.append(
+        (clock.monotonic(), normal_budget - cost / 2, TrafficClass.REPLY, Severity.INFO)
+    )
+
+    preview = governor.estimate_text(
+        "evacuate", traffic_class=TrafficClass.ALERT, severity=Severity.CRITICAL
+    )
+
+    assert preview["breach_codes"] == ["hourly_budget"]
+    assert preview["class_budget"]["exempt"] is True
+    assert preview["budget"]["reserve_used_after_seconds"] > 0
+
+
 def test_unknown_radio_profile_costs_conservatively_and_unknown_region_pauses() -> None:
     governor = AirtimeGovernor(
         SimulatedRadioLink(),

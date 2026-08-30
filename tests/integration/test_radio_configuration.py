@@ -9,6 +9,7 @@ from outpost.config import Config
 from outpost.fed import FederationPeerService
 from outpost.radio_operations import RadioOperations
 from outpost.store import Database
+from outpost.store.members import MemberRepo
 from outpost.watch import AlertService
 from outpost.web.api import create_web_app
 from outpost.web.auth import WebAuthService
@@ -74,6 +75,8 @@ async def test_live_channel_map_includes_all_slots_history_and_revalidates_sends
         }
     )
     governor = production_governor(database, clock, airtime=config.airtime)
+    responder = await MemberRepo(database, clock).resolve("!00000002")
+    await database.write("UPDATE member SET trust='responder' WHERE id=?", (responder.id,))
     operations = RadioOperations(database, governor, clock)
     alerts = AlertService(database, governor, clock, config)
     radio_state = {"radio": "up"}
@@ -129,6 +132,21 @@ async def test_live_channel_map_includes_all_slots_history_and_revalidates_sends
         },
     )
     assert sent.status_code == 200
+    estimated = client.post(
+        "/api/v1/mesh/estimate",
+        json={
+            "text": "Team move",
+            "destination": "^all",
+            "channel": 7,
+            "traffic_class": "bulletin",
+        },
+    )
+    assert estimated.status_code == 200
+    assert estimated.json()["total_seconds"] == pytest.approx(
+        governor.estimate_toa(len(b"Team move"))
+    )
+    assert estimated.json()["payload_bytes"] == 9
+    assert estimated.json()["part_count"] == 1
     raised = client.post(
         "/api/v1/alerts",
         json={"severity": "caution", "headline": "Bridge inspection", "channels": [7]},
@@ -143,6 +161,48 @@ async def test_live_channel_map_includes_all_slots_history_and_revalidates_sends
     assert duplicate.json()["coalesced"] is True
     assert len(await database.read("SELECT 1 FROM alert")) == 1
     assert await database.read("SELECT 1 FROM audit_log WHERE action='alert.raise_coalesced'")
+
+    governor.channel_utilisation = config.airtime.utilisation_ceiling
+    constrained = client.post(
+        "/api/v1/mesh/send",
+        json={
+            "text": "Constraint confirmation",
+            "destination": "^all",
+            "channel": 7,
+            "traffic_class": "bulletin",
+        },
+    )
+    assert constrained.status_code == 409
+    assert constrained.json()["error"]["code"] == "airtime_confirmation_required"
+    assert constrained.json()["airtime"]["breach_codes"] == ["utilisation_ceiling"]
+    confirmed = client.post(
+        "/api/v1/mesh/send",
+        json={
+            "text": "Constraint confirmation",
+            "destination": "^all",
+            "channel": 7,
+            "traffic_class": "bulletin",
+            "airtime_confirmation": True,
+        },
+    )
+    assert confirmed.status_code == 200
+    constrained_alert = client.post(
+        "/api/v1/alerts",
+        json={"severity": "urgent", "headline": "Constraint alert", "channels": [7]},
+    )
+    assert constrained_alert.status_code == 409
+    assert constrained_alert.json()["airtime"]["recipient_count"] == 1
+    confirmed_alert = client.post(
+        "/api/v1/alerts",
+        json={
+            "severity": "urgent",
+            "headline": "Constraint alert",
+            "channels": [7],
+            "airtime_confirmation": True,
+        },
+    )
+    assert confirmed_alert.status_code == 200
+    governor.channel_utilisation = None
 
     channels[7]["role"] = "DISABLED"
     rejected_send = client.post(

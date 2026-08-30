@@ -483,5 +483,22 @@
 .subsystem-task p { margin: 8px 0 5px; color: var(--ui-text-muted); font-size: .66rem; overflow-wrap: anywhere; }
 .subsystem-task.degraded p,
 .subsystem-task.critical p { color: var(--ui-text); }
+#send-airtime {
+  display: block;
+  margin-top: 8px;
+  color: var(--ui-text-muted);
+  overflow-wrap: anywhere;
+}
+.alert-submit { flex-wrap: wrap; gap: 8px; }
+.alert-submit button { order: 2; }
+#alert-bytes { order: 1; }
+#alert-airtime {
+  order: 3;
+  flex: 1 0 100%;
+  overflow-wrap: anywhere;
+}
+#send-airtime.history-warning,
+#alert-airtime.history-warning { color: var(--ui-warning-text); }
+.solicitation-message.history-warning { border-color: var(--ui-warning-border); }
 @media(max-width:1000px) { .subsystem-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media(max-width:620px) { .subsystem-list { grid-template-columns: 1fr; } }
