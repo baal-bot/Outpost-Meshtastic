@@ -97,14 +97,15 @@ retried without requiring a timestamp change. Correct the YAML or regex and reru
 The provider is one of `hailo_vlm`, `hailo`, `llamacpp`, `ollama`, `openai_compat`, or `null`.
 `hailo_vlm` loads its compiled HEF from `ai.hailo_vlm.model_path`; production models belong under
 `/var/lib/outpost/models`. HTTP providers have a base URL, configured context fallback,
-tool-capability flag, and optional API-key environment-variable name. A selected provider context
-below 1,600 tokens is invalid.
+and optional API-key environment-variable name. A selected provider context below 1,600 tokens is
+invalid.
 
-Runtime bounds include a 45-second timeout, concurrency of one, queue depth of three, at most two
-tool rounds, a 220-token output ceiling, keep-warm policy, and circuit breaker.
-The token budget reserves system, tool, evidence, history, question, output, and at least 15%
-safety-margin allocations. The future dashboard may tune bounded values but cannot remove safety,
-grounding, attribution, or emergency clauses.
+Runtime bounds include a 45-second timeout, concurrency of one, queue depth of three, a 220-token
+output ceiling, keep-warm policy, and circuit breaker. The token budget reserves system, evidence,
+history, question, output, and at least 15% safety-margin allocations. Retrieval is selected and
+permission-filtered by Outpost before one synthesis request; providers are not offered callable
+tools. The future dashboard may tune bounded values but cannot remove safety, grounding,
+attribution, or emergency clauses.
 
 `openai_compat` is an explicit external-data choice. Put its secret only in the environment named
 by `api_key_env`; never place a credential in `base_url` or commit it. See [Local AI](AI.md) for
@@ -217,8 +218,8 @@ following pre-release keys were removed because they never had a runtime consume
 
 - `airtime.broadcast_max_per_hour`, `airtime.coalesce_window_s`
 - `router.page_sizes` (response sizes remain command-specific; `page_ttl_minutes` is configurable)
-- `ai.max_tool_rounds`, `ai.cold_placeholder_enabled`, `ai.cold_placeholder_threshold_s`, and
-  `ai.embeddings.*`
+- `ai.max_tool_rounds`, `ai.budget.tool_tokens`, HTTP-provider `supports_tools`,
+  `ai.cold_placeholder_enabled`, `ai.cold_placeholder_threshold_s`, and `ai.embeddings.*`
 - `security.handle_change_per_hours`, `security.handle_reserve_days`
 - `mail.notify_window_hours`, `watch.self_resolve_hours`
 - `fed.mqtt.discovery_enabled`, `fed.mqtt.server`, `fed.mqtt.port`, `fed.mqtt.topic_root`

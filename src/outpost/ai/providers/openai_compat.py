@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
@@ -17,7 +16,6 @@ from .models import (
     ProviderHealth,
     ProviderState,
     ProviderUnavailable,
-    ToolCall,
 )
 
 
@@ -63,7 +61,6 @@ class OpenAICompatProvider(HTTPProvider):
     async def capabilities(self) -> Capabilities:
         return Capabilities(
             context_tokens=self.endpoint.context_tokens,
-            supports_tools=self.endpoint.supports_tools,
             supports_streaming=True,
             max_output_tokens=self.max_output_tokens,
             source="configured",
@@ -78,14 +75,11 @@ class OpenAICompatProvider(HTTPProvider):
             "max_tokens": min(req.max_output_tokens, self.max_output_tokens),
             "temperature": req.temperature,
         }
-        if req.tools:
-            payload["tools"] = self._tool_payload(req.tools)
         started = time.perf_counter()
         first_token: int | None = None
         content: list[str] = []
         usage: dict[str, Any] = {}
         finish_reason: str | None = None
-        calls: dict[int, dict[str, Any]] = {}
         timings: dict[str, Any] = {}
         try:
             async with self.client.stream("POST", "/v1/chat/completions", json=payload) as response:
@@ -111,7 +105,6 @@ class OpenAICompatProvider(HTTPProvider):
                         if first_token is None:
                             first_token = self._elapsed_ms(started)
                         content.append(chunk)
-                    self._collect_tool_deltas(calls, delta.get("tool_calls"))
         except httpx.HTTPError as exc:
             raise ProviderUnavailable(f"{self.name}: {type(exc).__name__}") from exc
         return ChatResponse(
@@ -123,39 +116,7 @@ class OpenAICompatProvider(HTTPProvider):
             generation_tokens_per_s=_number(timings.get("predicted_per_second")),
             prompt_tokens_per_s=_number(timings.get("prompt_per_second")),
             finish_reason=finish_reason,
-            tool_calls=tuple(self._finish_tool_calls(calls)),
         )
-
-    @staticmethod
-    def _collect_tool_deltas(target: dict[int, dict[str, Any]], raw: Any) -> None:
-        if not isinstance(raw, list):
-            return
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            index = item.get("index", 0)
-            if not isinstance(index, int):
-                continue
-            function = item.get("function", {})
-            if not isinstance(function, dict):
-                continue
-            value = target.setdefault(index, {"name": "", "arguments": ""})
-            if function.get("name"):
-                value["name"] += str(function["name"])
-            if function.get("arguments"):
-                value["arguments"] += str(function["arguments"])
-
-    @staticmethod
-    def _finish_tool_calls(raw: dict[int, dict[str, Any]]) -> list[ToolCall]:
-        result: list[ToolCall] = []
-        for item in raw.values():
-            try:
-                arguments = json.loads(item["arguments"] or "{}")
-            except json.JSONDecodeError:
-                arguments = {}
-            if item["name"] and isinstance(arguments, dict):
-                result.append(ToolCall(name=item["name"], arguments=arguments))
-        return result
 
     async def warm(self) -> None:
         await self.chat(

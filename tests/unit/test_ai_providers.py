@@ -94,7 +94,6 @@ async def test_hailo_keeps_its_non_openai_wire_format_isolated() -> None:
     assert health.state is ProviderState.DEGRADED
     assert "not pulled" in health.detail
     assert capabilities.context_tokens == 2048
-    assert not capabilities.supports_tools
     response = await provider.chat(
         ChatRequest(messages=(ChatMessage(role="user", content="line one\nline two"),))
     )
@@ -153,7 +152,6 @@ async def test_hailo_vlm_loads_compiled_model_and_serialises_native_chat(tmp_pat
 
     assert health.state is ProviderState.HEALTHY
     assert health.models == ("Qwen3-VL-2B-Instruct",)
-    assert not capabilities.supports_tools
     assert not capabilities.supports_streaming
     assert response.content == "Native Hailo answer"
     assert response.prompt_tokens == 12
@@ -426,7 +424,7 @@ def test_native_hailo_vlm_clears_context_and_builds_structured_prompt() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_compat_normalises_sse_usage_and_tool_calls() -> None:
+async def test_openai_compat_normalises_sse_usage() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/models":
             return httpx.Response(200, json={"data": [{"id": "edge-model"}]})

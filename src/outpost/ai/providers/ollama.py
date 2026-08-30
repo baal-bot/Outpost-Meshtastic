@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
@@ -17,7 +16,6 @@ from .models import (
     ProviderHealth,
     ProviderState,
     ProviderUnavailable,
-    ToolCall,
 )
 
 
@@ -80,7 +78,6 @@ class OllamaProvider(HTTPProvider):
             pass
         return Capabilities(
             context_tokens=context,
-            supports_tools=self.endpoint.supports_tools,
             supports_streaming=True,
             max_output_tokens=self.max_output_tokens,
             idle_unloads=True,
@@ -97,13 +94,10 @@ class OllamaProvider(HTTPProvider):
                 "temperature": req.temperature,
             },
         }
-        if req.tools:
-            payload["tools"] = self._tool_payload(req.tools)
         started = time.perf_counter()
         first_token: int | None = None
         content: list[str] = []
         final: dict[str, Any] = {}
-        calls: list[ToolCall] = []
         try:
             async with self.client.stream("POST", "/api/chat", json=payload) as response:
                 response.raise_for_status()
@@ -117,24 +111,6 @@ class OllamaProvider(HTTPProvider):
                         if first_token is None:
                             first_token = self._elapsed_ms(started)
                         content.append(chunk)
-                    raw_calls = message.get("tool_calls", [])
-                    if isinstance(raw_calls, list):
-                        for call in raw_calls:
-                            if not isinstance(call, dict):
-                                continue
-                            function = call.get("function", {})
-                            if not isinstance(function, dict) or not function.get("name"):
-                                continue
-                            arguments = function.get("arguments", {})
-                            if isinstance(arguments, str):
-                                try:
-                                    arguments = json.loads(arguments)
-                                except json.JSONDecodeError:
-                                    arguments = {}
-                            if isinstance(arguments, dict):
-                                calls.append(
-                                    ToolCall(name=str(function["name"]), arguments=arguments)
-                                )
         except httpx.HTTPError as exc:
             raise ProviderUnavailable(f"{self.name}: {type(exc).__name__}") from exc
         return ChatResponse(
@@ -150,7 +126,6 @@ class OllamaProvider(HTTPProvider):
                 final.get("prompt_eval_count"), final.get("prompt_eval_duration")
             ),
             finish_reason=str(final.get("done_reason") or "stop"),
-            tool_calls=tuple(calls),
         )
 
     def _message_payload(self, messages: tuple[ChatMessage, ...]) -> list[dict[str, Any]]:

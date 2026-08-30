@@ -21,7 +21,6 @@ class NullProvider:
     async def capabilities(self) -> Capabilities:
         return Capabilities(
             context_tokens=2048,
-            supports_tools=False,
             supports_streaming=False,
             max_output_tokens=220,
         )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,7 +33,6 @@ class ProviderHealth(ProviderModel):
 
 class Capabilities(ProviderModel):
     context_tokens: int = Field(ge=1)
-    supports_tools: bool
     supports_streaming: bool
     max_output_tokens: int = Field(ge=1)
     idle_unloads: bool = False
@@ -41,27 +40,14 @@ class Capabilities(ProviderModel):
 
 
 class ChatMessage(ProviderModel):
-    role: Literal["system", "user", "assistant", "tool"]
+    role: Literal["system", "user", "assistant"]
     content: str
-    tool_name: str | None = None
-
-
-class ToolDefinition(ProviderModel):
-    name: str
-    description: str
-    parameters: dict[str, Any]
-
-
-class ToolCall(ProviderModel):
-    name: str
-    arguments: dict[str, Any]
 
 
 class ChatRequest(ProviderModel):
     messages: tuple[ChatMessage, ...]
     max_output_tokens: int = Field(default=220, ge=1)
     temperature: float = Field(default=0.1, ge=0, le=2)
-    tools: tuple[ToolDefinition, ...] = ()
 
 
 class ChatResponse(ProviderModel):
@@ -73,7 +59,6 @@ class ChatResponse(ProviderModel):
     generation_tokens_per_s: float | None = Field(default=None, ge=0)
     prompt_tokens_per_s: float | None = Field(default=None, ge=0)
     finish_reason: str | None = None
-    tool_calls: tuple[ToolCall, ...] = ()
 
 
 class InferenceProvider(Protocol):

@@ -50,7 +50,6 @@ class HailoProvider(OllamaProvider):
     async def capabilities(self) -> Capabilities:
         return Capabilities(
             context_tokens=self.endpoint.context_tokens,
-            supports_tools=self.endpoint.supports_tools,
             supports_streaming=True,
             max_output_tokens=self.max_output_tokens,
             idle_unloads=True,

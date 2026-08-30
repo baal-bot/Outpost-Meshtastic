@@ -336,6 +336,8 @@ def test_invalid_ai_runtime_policy_is_rejected(ai: dict[str, object]) -> None:
         {"ai": {"cold_placeholder_threshold_s": 15}},
         {"ai": {"embeddings": {"enabled": False}}},
         {"ai": {"max_tool_rounds": 2}},
+        {"ai": {"budget": {"tool_tokens": 160}}},
+        {"ai": {"ollama": {"supports_tools": True}}},
         {"security": {"handle_change_per_hours": 24}},
         {"security": {"handle_reserve_days": 30}},
         {"fed": {"mqtt": {"discovery_enabled": False}}},

@@ -5,6 +5,11 @@ Outpost's assistant is a constrained, retrieval-grounded radio service, not a ge
 knowledge base, and the operator review console are implemented. Enable the module only after the
 configured provider passes the guarded evaluation on its target hardware.
 
+The server classifies each question and selects authorized, read-only evidence before inference.
+The model receives one bounded synthesis request; it cannot initiate database queries or choose a
+second retrieval round. This keeps authorization in deterministic application code and gives the
+native Hailo path the same behavior as HTTP providers.
+
 ## Provider choices
 
 | Provider | Endpoint | Data boundary |
@@ -17,9 +22,9 @@ configured provider passes the guarded evaluation on its target hardware.
 | `null` | No endpoint | Deterministic unavailable response |
 
 All adapters return one internal response shape with context capability, prompt/output token
-counts, time to first token, total latency, throughput where reported, finish reason, and tool
-calls. Provider wire formats do not leak into the agent. Configured context is used only when the
-backend cannot report it; values below 1,600 tokens are rejected.
+counts, time to first token, total latency, throughput where reported, and finish reason. Provider
+wire formats do not leak into the agent. Configured context is used only when the backend cannot
+report it; values below 1,600 tokens are rejected.
 
 `openai_compat` is always treated as external even if an operator points it at a private endpoint.
 Its credential is read from the configured environment-variable name and never belongs in YAML.
@@ -121,7 +126,8 @@ errors, qualifying the model behind Outpost's deterministic guards and evidence-
 
 - AI is off in the example configuration and always off on channel 0 by default.
 - AI never receives mail, exact member positions, or operator notes.
-- It has read-only tools and cannot create, broadcast, escalate, or cancel alerts.
+- Permission-filtered retrieval is selected by application code; model-controlled tools are not
+  exposed. AI cannot create, broadcast, escalate, or cancel alerts.
 - Grounded answers use `[AI]`; narrowly allowed ungrounded answers use `[AI?]`.
 - Provider failure never stops BBS, mail, Watch, or radio routing. When AI is readiness-required,
   it does mark the deployment health gate degraded until the provider recovers.

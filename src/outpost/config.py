@@ -221,7 +221,6 @@ class ModulesConfig(StrictModel):
 class AIProviderEndpoint(StrictModel):
     base_url: str = ""
     context_tokens: int = Field(default=2048, ge=256)
-    supports_tools: bool = False
     api_key_env: str = Field(default="", pattern=r"^[A-Z][A-Z0-9_]*$|^$")
 
 
@@ -233,7 +232,6 @@ class AIHailoVLMConfig(StrictModel):
 
 class AIBudgetConfig(StrictModel):
     system_tokens: int = Field(default=240, ge=64, le=260)
-    tool_tokens: int = Field(default=160, ge=0, le=512)
     evidence_tokens: int = Field(default=820, ge=0, le=4096)
     history_tokens: int = Field(default=200, ge=0, le=512)
     question_tokens: int = Field(default=110, ge=32, le=512)
@@ -272,17 +270,17 @@ class AIConfig(StrictModel):
     )
     llamacpp: AIProviderEndpoint = Field(
         default_factory=lambda: AIProviderEndpoint(
-            base_url="http://127.0.0.1:8080", context_tokens=4096, supports_tools=True
+            base_url="http://127.0.0.1:8080", context_tokens=4096
         )
     )
     ollama: AIProviderEndpoint = Field(
         default_factory=lambda: AIProviderEndpoint(
-            base_url="http://127.0.0.1:11434", context_tokens=4096, supports_tools=True
+            base_url="http://127.0.0.1:11434", context_tokens=4096
         )
     )
     openai_compat: AIProviderEndpoint = Field(
         default_factory=lambda: AIProviderEndpoint(
-            context_tokens=4096, supports_tools=True, api_key_env="OUTPOST_AI_API_KEY"
+            context_tokens=4096, api_key_env="OUTPOST_AI_API_KEY"
         )
     )
 

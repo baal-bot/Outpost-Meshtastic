@@ -43,7 +43,6 @@ class FakeProvider:
     async def capabilities(self) -> Capabilities:
         return Capabilities(
             context_tokens=2048,
-            supports_tools=False,
             supports_streaming=True,
             max_output_tokens=220,
         )
@@ -191,6 +190,7 @@ async def test_prefilter_refuses_without_calling_provider_and_logs_reason(ai_run
     interactions = await store.interactions()
     assert interactions[0]["outcome"] == "refused"
     assert interactions[0]["refusal_reason"] == "medical_dosing"
+    assert "tools_called" not in interactions[0]
 
 
 @pytest.mark.asyncio

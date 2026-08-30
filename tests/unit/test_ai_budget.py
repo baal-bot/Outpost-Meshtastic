@@ -15,7 +15,6 @@ def test_default_plan_never_encroaches_on_output_or_margin() -> None:
     budgeter = TokenBudgeter(AIBudgetConfig(), 2048)
     plan = budgeter.plan(
         system="local grounded assistant " * 20,
-        tools="tool schema " * 20,
         history=("old turn " * 100, "new turn " * 100, "latest turn " * 100),
         question="question " * 100,
     )
@@ -33,7 +32,6 @@ def test_smaller_context_shrinks_evidence_first() -> None:
     config = AIBudgetConfig()
     prompt = {
         "system": "s" * 600,
-        "tools": "t" * 400,
         "history": ("h" * 300, "i" * 300),
         "question": "q" * 300,
     }

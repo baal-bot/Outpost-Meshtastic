@@ -17,7 +17,6 @@ from .models import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
-    ProviderError,
     ProviderHealth,
     ProviderState,
     ProviderUnavailable,
@@ -195,7 +194,6 @@ class HailoVLMProvider:
     async def capabilities(self) -> Capabilities:
         return Capabilities(
             context_tokens=self.endpoint.context_tokens,
-            supports_tools=False,
             supports_streaming=False,
             max_output_tokens=self.max_output_tokens,
             idle_unloads=False,
@@ -203,8 +201,6 @@ class HailoVLMProvider:
         )
 
     async def chat(self, req: ChatRequest) -> ChatResponse:
-        if req.tools:
-            raise ProviderError("hailo_vlm does not support tool calls")
         started = time.perf_counter()
         async with self._request_lock:
             runtime = await self._ensure_runtime()

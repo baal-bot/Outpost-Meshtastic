@@ -7,11 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any
 
-from outpost.ai.budget import (
-    EVIDENCE_PREAMBLE,
-    SEARCH_KB_RESULT_TOKENS,
-    conservative_tokens,
-)
+from outpost.ai.budget import EVIDENCE_PREAMBLE, conservative_tokens
 from outpost.audit import write_audit
 from outpost.config import AIBudgetConfig
 from outpost.store import Database
@@ -21,16 +17,10 @@ _CHUNK_OVERLAP_TARGET_TOKENS = 24
 
 
 def kb_chunk_token_limit(evidence_tokens: int) -> int:
-    """Largest chunk text that fits both normal evidence and search_kb output."""
+    """Largest chunk text that fits the normal retrieval evidence budget."""
     reference_tokens = conservative_tokens(f"[kb:{'x' * _MAX_KB_SLUG_LENGTH}] ")
     evidence_overhead = conservative_tokens(EVIDENCE_PREAMBLE + "\n") + reference_tokens
-    return max(
-        0,
-        min(
-            evidence_tokens - evidence_overhead,
-            SEARCH_KB_RESULT_TOKENS - reference_tokens,
-        ),
-    )
+    return max(0, evidence_tokens - evidence_overhead)
 
 
 def _chunk_overlap_tokens(title: str, token_limit: int) -> int:
@@ -185,11 +175,11 @@ class AIStore:
         return await self.database.write(
             """
             INSERT INTO ai_interaction(
-              member_id,channel,question,question_class,provider,model,tools_called,
-              evidence_refs,rejected_evidence_refs,evidence_rejection_reason,
+              member_id,channel,question,question_class,provider,model,evidence_refs,
+              rejected_evidence_refs,evidence_rejection_reason,
               answer,grounded,refused,refusal_reason,outcome,
               prompt_tokens,output_tokens,ttft_ms,total_ms,created_at
-            ) VALUES(?,?,?,?,?,?,'[]',?,?,?,?,?,?,?,?,?,?,?,?,unixepoch())
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,unixepoch())
             """,
             (
                 record.member_id,
@@ -227,7 +217,7 @@ class AIStore:
             value = dict(raw)
             value["evidence_refs"] = json.loads(value["evidence_refs"])
             value["rejected_evidence_refs"] = json.loads(value["rejected_evidence_refs"])
-            value["tools_called"] = json.loads(value["tools_called"])
+            value.pop("tools_called", None)  # Legacy schema column; tools were never reachable.
             values.append(value)
         return values
 

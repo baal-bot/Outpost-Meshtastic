@@ -77,17 +77,3 @@ class HTTPProvider:
     @staticmethod
     def _elapsed_ms(started: float) -> int:
         return max(0, round((time.perf_counter() - started) * 1000))
-
-    @staticmethod
-    def _tool_payload(tools: tuple[Any, ...]) -> list[dict[str, Any]]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.parameters,
-                },
-            }
-            for tool in tools
-        ]

@@ -58,7 +58,6 @@ ai:
   required_for_readiness: true
   budget:
     system_tokens: 240
-    tool_tokens: 160
     evidence_tokens: 820
     history_tokens: 200
     question_tokens: 110
@@ -68,10 +67,10 @@ ai:
   circuit_breaker: {failures: 5, window_minutes: 10, open_minutes: 15}
   persona_addendum: ""
   hailo_vlm: {model_path: "/var/lib/outpost/models/Qwen3-VL-2B-Instruct.hef", context_tokens: 2048, optimize_memory_on_device: true}
-  hailo: {base_url: "http://127.0.0.1:8000", context_tokens: 2048, supports_tools: false}
-  llamacpp: {base_url: "http://127.0.0.1:8080", context_tokens: 4096, supports_tools: true}
-  ollama: {base_url: "http://127.0.0.1:11434", context_tokens: 4096, supports_tools: true}
-  openai_compat: {base_url: "", context_tokens: 4096, supports_tools: true, api_key_env: "OUTPOST_AI_API_KEY"}
+  hailo: {base_url: "http://127.0.0.1:8000", context_tokens: 2048}
+  llamacpp: {base_url: "http://127.0.0.1:8080", context_tokens: 4096}
+  ollama: {base_url: "http://127.0.0.1:11434", context_tokens: 4096}
+  openai_compat: {base_url: "", context_tokens: 4096, api_key_env: "OUTPOST_AI_API_KEY"}
 env:
   user_agent: "Outpost/0.1 (operator: operator@example.org)"
   refresh_minutes: 15
