@@ -29,6 +29,7 @@ revision on which CI runs this manifest check.
 | --- | --- | --- | --- |
 | Meshtastic transport | Serial, TCP, and BLE links; reconnect, liveness supervision, inbound backpressure, and radio status. | Single-node field-tested | unreleased @ `HEAD` (2026-08-27); introduced `04e74ca` |
 | Command routing | Guided capability-aware DM screens, mutation-safe tolerant commands, globally reserved disabled-feature vocabulary, contextual composition, recovery, channel parsing, paging, trust/module gates, PKI-bound elevated actions, and bounded inbound workers. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `04e74ca` |
+| Recorded traffic replay and drills | Bounded query-only traffic selection, virtual-time production routing, scratch persistence, simulated RF/MQTT egress, comparable per-message decisions, redacted bundles, and an unmistakable drill dashboard. | Automated-tested | unreleased @ `HEAD` (2026-08-30); introduced `b58facb` |
 | Airtime and outbound delivery | Durable priority queue, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, and restart recovery. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `3d65058` |
 | Identity and member directory | Handles, social trust, reviewed Meshtastic PKI fingerprints, conflict demotion, explicit key rotation, recently-heard radio discovery, exact-position controls, and operator triage. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `8accdf3` |
 | BBS, mail, and operator inbox | Boards, threads, posts, subscriptions, digests, private mail, moderation, and one replyable operations inbox. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `41a6c85` |
@@ -74,6 +75,23 @@ Evidence:
 Known limitations:
 
 - The full handheld/firmware/preset matrix is not field-qualified.
+
+### Recorded traffic replay and drills
+
+Maturity: **Automated-tested**.
+
+Evidence:
+
+- Automated: [tests/integration/test_replay.py::test_database_replay_is_deterministic_and_never_mutates_source](../tests/integration/test_replay.py) — Two complete runs produce identical decisions while the source database hash remains unchanged.
+- Automated: [tests/integration/test_replay.py::test_export_pseudonymises_identity_coarsens_position_and_strips_secrets](../tests/integration/test_replay.py) — Export pseudonymizes identifiers, coarsens positions, strips payloads and keys, and writes a private file.
+- Automated: [tests/integration/test_replay.py::test_committed_corpus_runs_in_ci_and_drill_mode_is_publicly_unmistakable](../tests/integration/test_replay.py) — The committed corpus traverses the application graph and exposes the simulated boundary through runtime status and situation briefing.
+- Operations: [docs/REPLAY.md](REPLAY.md) — Operator safety boundary, replay, redaction, drill, and limitation guidance.
+
+Known limitations:
+
+- Replay begins with clean domain state seeded only with retained member identity and trust, so historical BBS, mail, and incident dependencies are not reconstructed.
+- Environment and AI provider access is disabled by default and provider-backed results differ unless an operator explicitly opts in.
+- Automated and local dashboard exercise evidence does not replace a facilitated operator drill on target hardware.
 
 ### Airtime and outbound delivery
 

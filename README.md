@@ -24,7 +24,7 @@ The database schema, API, command grammar, and federation protocol are not stabl
 publishes a compatibility policy and a 1.0 release.
 
 <!-- capability-summary:start -->
-Capability evidence snapshot (2026-08-30): 16 tracked — Automated-tested 9, Simulated 2, Single-node field-tested 1, Two-node field-tested 2, Hardware-gated 2. No capability is marked production-ready. See [Features and maturity](docs/FEATURES.md) for test, field,
+Capability evidence snapshot (2026-08-30): 17 tracked — Automated-tested 10, Simulated 2, Single-node field-tested 1, Two-node field-tested 2, Hardware-gated 2. No capability is marked production-ready. See [Features and maturity](docs/FEATURES.md) for test, field,
 hardware, revision, limitation, and roadmap evidence.
 <!-- capability-summary:end -->
 

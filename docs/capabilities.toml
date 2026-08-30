@@ -87,6 +87,39 @@ path = "tests/integration/test_mesh_pki_trust.py::test_elevated_mesh_commands_re
 description = "Elevated commands require reviewed direct PKI and reject replayed authenticated packets."
 
 [[capabilities]]
+id = "recorded_traffic_replay"
+area = "Recorded traffic replay and drills"
+present = "Bounded query-only traffic selection, virtual-time production routing, scratch persistence, simulated RF/MQTT egress, comparable per-message decisions, redacted bundles, and an unmistakable drill dashboard."
+maturity = "automated_tested"
+introduced_commit = "b58facb"
+limitations = [
+  "Replay begins with clean domain state seeded only with retained member identity and trust, so historical BBS, mail, and incident dependencies are not reconstructed.",
+  "Environment and AI provider access is disabled by default and provider-backed results differ unless an operator explicitly opts in.",
+  "Automated and local dashboard exercise evidence does not replace a facilitated operator drill on target hardware.",
+]
+roadmap = []
+[capabilities.verification]
+release = "unreleased"
+commit = "HEAD"
+date = "2026-08-30"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_replay.py::test_database_replay_is_deterministic_and_never_mutates_source"
+description = "Two complete runs produce identical decisions while the source database hash remains unchanged."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_replay.py::test_export_pseudonymises_identity_coarsens_position_and_strips_secrets"
+description = "Export pseudonymizes identifiers, coarsens positions, strips payloads and keys, and writes a private file."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_replay.py::test_committed_corpus_runs_in_ci_and_drill_mode_is_publicly_unmistakable"
+description = "The committed corpus traverses the application graph and exposes the simulated boundary through runtime status and situation briefing."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/REPLAY.md"
+description = "Operator safety boundary, replay, redaction, drill, and limitation guidance."
+
+[[capabilities]]
 id = "airtime_delivery"
 area = "Airtime and outbound delivery"
 present = "Durable priority queue, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, and restart recovery."
