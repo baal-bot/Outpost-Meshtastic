@@ -873,6 +873,45 @@ def test_safety_readiness_failure_is_persistent_actionable_and_rerunnable(
         page.close()
 
 
+def test_configuration_readiness_failure_is_visible_without_an_inbox_claim(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url)
+    degraded = {
+        "status": "degraded",
+        "safety_failures": 0,
+        "checks": [
+            {
+                "name": "intent_map",
+                "severity": "configuration",
+                "passed": False,
+                "title": "The tolerant command map parsed cleanly",
+                "detail": "Loaded 0 mappings, rejected 1; invalid regex.",
+                "impact": "Natural-language aliases may stop routing.",
+                "remediation": "Correct router.intents_file and rerun readiness.",
+            }
+        ],
+    }
+    try:
+        page.route(
+            "**/api/v1/dashboard/poll",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=dashboard_poll_body(readiness=degraded),
+            ),
+        )
+        page.reload(wait_until="domcontentloaded")
+        banner = page.locator("aside.readiness-banner")
+        banner.wait_for(state="visible")
+        assert "READINESS DEGRADED" in banner.text_content()
+        assert "tolerant command map" in banner.text_content()
+        assert banner.get_by_role("link", name="Open operator inbox").count() == 0
+        assert banner.get_by_role("button", name="Run readiness check").is_visible()
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("theme", THEMES)
 def test_operator_pages_pass_wcag_axe_rules(
     browser: object, dashboard_url: str, theme: str

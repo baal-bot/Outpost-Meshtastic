@@ -2757,6 +2757,7 @@ class OutpostApp:
             "subsystems_healthy": self.background_tasks_healthy(),
             "task_failure": self._fatal_task_error,
             "readiness": self.self_check.snapshot(),
+            "intents": self.router.intents.status(),
             "recovery": self.restore_coordinator.maintenance_status(),
             "tasks": {name: dict(health) for name, health in self._task_health.items()},
             "inbound": {

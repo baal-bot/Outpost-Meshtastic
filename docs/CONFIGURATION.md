@@ -22,7 +22,9 @@ settings saved in the dashboard should be reviewed alongside the file.
 - `name`: instance name such as `Pittsburgh Outpost`.
 - `short_name`: 1–4 UTF-8 bytes.
 - `operator_contact`: public operational contact.
-- `timezone`: IANA zone such as `America/New_York`.
+- `timezone`: installed IANA zone such as `America/New_York`; the appliance requires the operating
+  system `tzdata` package and rejects unknown zones at startup.
+- `locale`: `ll` or `ll_CC` form such as `en` or `en_US`.
 - `units`: `metric` or `imperial`.
 - `location`: optional `{lat, lon}` for maps and providers.
 - `disclaimer`: safety text included where appropriate.
@@ -82,6 +84,13 @@ surfaces and do not depend on the BBS flag.
 The governor enforces an Outpost-originated budget, reserve, channel-utilization ceiling, minimum
 gap, multipart pacing, queue capacity, and traffic-class shares. Budget plus reserve may not exceed
 20% and must stay below the utilization ceiling. Conservative settings protect other mesh users.
+
+### `router`
+
+`intents_file` is the operator-authored tolerant-language map. Missing or unparseable files and
+malformed entries start the service visibly degraded; diagnostics report `ready`, `empty`,
+`partial`, `rejected_all`, `error`, or `missing` with content-safe entry reasons. Failed reads are
+retried without requiring a timestamp change. Correct the YAML or regex and rerun readiness.
 
 ### `ai`
 

@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import time
 from ipaddress import ip_network
 from pathlib import Path
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 TRAFFIC_CLASSES = {"alert", "reply", "ai", "bulletin", "digest", "federation"}
 
@@ -23,6 +25,8 @@ class Location(StrictModel):
 
 
 class NodeConfig(StrictModel):
+    model_config = ConfigDict(extra="forbid", validate_default=True)
+
     name: str = "Outpost"
     short_name: str = "CRO"
     operator_contact: str = "ray@example.org"
@@ -32,6 +36,28 @@ class NodeConfig(StrictModel):
     units: Literal["metric", "imperial"] = "metric"
     location: Location | None = None
     disclaimer: str = "Community system. Not 911."
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            if not available_timezones():
+                raise ValueError(
+                    "node.timezone cannot be validated because IANA tzdata is not installed"
+                ) from error
+            raise ValueError(
+                f"node.timezone is not a valid installed IANA zone: {value}"
+            ) from error
+        return value
+
+    @field_validator("locale")
+    @classmethod
+    def validate_locale(cls, value: str) -> str:
+        if re.fullmatch(r"[a-z]{2,3}(?:_[A-Z]{2})?", value) is None:
+            raise ValueError("node.locale must use ll or ll_CC form, for example en_US")
+        return value
 
     @model_validator(mode="after")
     def validate_short_name(self) -> NodeConfig:

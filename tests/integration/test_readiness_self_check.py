@@ -145,7 +145,6 @@ async def test_configuration_and_inventory_checks_report_specific_operator_evide
     intents.write_text("not: a-list\n", encoding="utf-8")
     config = Config.model_validate(
         {
-            "node": {"timezone": "Not/A_Real_Zone"},
             "store": {
                 "path": str(tmp_path / "outpost.db"),
                 "backup": {"keep": 1},
@@ -153,6 +152,9 @@ async def test_configuration_and_inventory_checks_report_specific_operator_evide
             "router": {"intents_file": str(intents)},
         }
     )
+    # Assignment validation is intentionally bypassed to exercise the runtime
+    # readiness defense independently from strict startup validation.
+    config.node.timezone = "Not/A_Real_Zone"
     database = Database(config.store.path)
     await database.open()
     clock = VirtualClock()

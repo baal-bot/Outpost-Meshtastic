@@ -40,6 +40,17 @@ def test_health_is_minimal_and_status_has_detail() -> None:
                 "gps": {"lat": 40.0, "lon": -80.0},
             },
             "ai": {"provider": "hailo_vlm", "model": "Qwen3-VL-2B-Instruct"},
+            "intents": {
+                "path": "/etc/outpost/intents.yaml",
+                "exists": True,
+                "loaded": 3,
+                "rejected": 1,
+                "builtin": 15,
+                "state": "partial",
+                "error": None,
+                "issues": [{"index": 4, "reason": "invalid regex"}],
+                "patterns": ["must not leave loopback"],
+            },
         }
     )
     client = TestClient(app)
@@ -82,6 +93,17 @@ def test_health_is_minimal_and_status_has_detail() -> None:
         "preset": "LONG_FAST",
         "channels": [0, 2],
     }
+    assert diagnostics.json()["intents"] == {
+        "path": "/etc/outpost/intents.yaml",
+        "exists": True,
+        "loaded": 3,
+        "rejected": 1,
+        "builtin": 15,
+        "state": "partial",
+        "error": None,
+        "issues": [{"index": 4, "reason": "invalid regex"}],
+    }
+    assert "must not leave loopback" not in diagnostics.text
     assert "gps" not in str(diagnostics.json())
     assert "queues" not in diagnostics.json()
 

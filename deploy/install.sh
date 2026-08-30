@@ -51,6 +51,8 @@ for command in python3 getent groupadd useradd usermod install systemctl udevadm
 done
 python3 -c 'import sys; raise SystemExit(not ((3, 12) <= sys.version_info < (3, 14)))' || \
   fail "Python 3.12 or 3.13 is required"
+python3 -c 'from zoneinfo import ZoneInfo; ZoneInfo("UTC")' || \
+  fail "IANA timezone data is required; install the tzdata operating-system package"
 python3 -m venv --help >/dev/null 2>&1 || fail "Python venv support is missing; install python3-venv"
 case "$MDNS_ENABLED" in 0|1) ;; *) fail "OUTPOST_MDNS must be 0 or 1" ;; esac
 case "$ALLOW_UNVERIFIED_CI" in

@@ -1374,6 +1374,17 @@ def create_web_app(
             for name, provider in providers.items()
             if isinstance(provider, dict)
         }
+        intents = status.get("intents", {})
+        safe_intents = (
+            {
+                key: value
+                for key, value in intents.items()
+                if key
+                in {"path", "exists", "loaded", "rejected", "builtin", "state", "error", "issues"}
+            }
+            if isinstance(intents, dict)
+            else {}
+        )
         return {
             "radio": status.get("radio", "unknown"),
             "radio_config": safe_radio_config,
@@ -1383,6 +1394,7 @@ def create_web_app(
             "ai": safe_ai,
             "same_receiver": safe_receiver,
             "providers": safe_providers,
+            "intents": safe_intents,
             "readiness": (
                 await self_check.latest()
                 if self_check is not None

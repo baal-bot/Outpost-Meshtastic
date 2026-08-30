@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import UTC, datetime
 
@@ -14,6 +15,31 @@ from outpost.watch.incidents import IncidentService
 from outpost.web.api import create_web_app
 
 pytestmark = pytest.mark.production_wiring
+
+
+@pytest.mark.asyncio
+async def test_maintenance_due_date_is_stable_across_dst_fall_back(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    config = Config.model_validate(
+        {
+            "node": {"timezone": "America/New_York"},
+            "store": {"maintenance_hour": 1},
+        }
+    )
+    clock = VirtualClock(epoch=datetime(2026, 11, 1, 4, 30, tzinfo=UTC))
+    service = MaintenanceService(database, BackupService(database), clock, config)
+
+    assert await service.due() is False  # 00:30 EDT
+    clock.advance(3_600)
+    assert await service.due() is True  # 01:30 EDT
+    await database.write(
+        "INSERT INTO runtime_setting(key,value,updated_at) VALUES(?,?,?)",
+        ("maintenance.last_date", json.dumps("2026-11-01"), int(clock.now().timestamp())),
+    )
+    clock.advance(3_600)
+    assert await service.due() is False  # 01:30 EST, same local date
+    await database.close()
 
 
 @pytest.mark.asyncio

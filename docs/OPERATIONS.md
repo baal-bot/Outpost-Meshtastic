@@ -25,6 +25,10 @@ The minimal health endpoint and systemd watchdog reflect core offline progress. 
 and restartable-local failures remain visible in the authenticated dashboard and loopback-only
 diagnostics while the core continues serving mesh traffic.
 
+Diagnostics include content-safe tolerant-intent health: file existence, state, loaded/rejected
+counts, and indexed rejection reasons. A non-ready intent map also appears in the persistent
+readiness banner. The configured patterns and member message content are not included.
+
 Prometheus metrics use canonical `/metrics`; `/metrics/` and `HEAD` behave consistently. The field
 default, `web.metrics_access: authenticated`, requires an Operator or Administrator browser
 session. For a Prometheus process running on the Outpost itself, select the narrower scrape mode:

@@ -532,13 +532,9 @@ window.addEventListener("outpost:mail-updated", refreshOperationsInboxBadge);
 
 function renderReadinessBanner(report) {
   document.querySelector(".readiness-banner")?.remove();
-  if (
-    document.body.dataset.operatorRole === "viewer"
-    || Number(report?.safety_failures || 0) < 1
-  ) return;
-  const failed = (report.checks || []).find(check => (
-    check.severity === "safety" && check.passed === false
-  ));
+  if (document.body.dataset.operatorRole === "viewer") return;
+  const failures = (report?.checks || []).filter(check => check.passed === false);
+  const failed = failures.find(check => check.severity === "safety") || failures[0];
   const main = document.querySelector("main");
   if (!main || !failed) return;
   const banner = document.createElement("aside");
@@ -547,7 +543,9 @@ function renderReadinessBanner(report) {
   const copy = document.createElement("div");
   const eyebrow = document.createElement("p");
   eyebrow.className = "eyebrow";
-  eyebrow.textContent = "SAFETY READINESS FAILED";
+  eyebrow.textContent = failed.severity === "safety"
+    ? "SAFETY READINESS FAILED"
+    : "READINESS DEGRADED";
   const title = document.createElement("b");
   title.textContent = failed.title;
   const detail = document.createElement("span");
@@ -556,9 +554,12 @@ function renderReadinessBanner(report) {
   remediation.textContent = failed.remediation;
   copy.append(eyebrow, title, detail, remediation);
   const actions = document.createElement("div");
-  const mail = document.createElement("a");
-  mail.href = "/mail.html";
-  mail.textContent = "Open operator inbox";
+  if (failed.severity === "safety") {
+    const mail = document.createElement("a");
+    mail.href = "/mail.html";
+    mail.textContent = "Open operator inbox";
+    actions.append(mail);
+  }
   const run = document.createElement("button");
   run.type = "button";
   run.textContent = "Run readiness check";
@@ -581,7 +582,7 @@ function renderReadinessBanner(report) {
       run.disabled = false;
     }
   });
-  actions.append(mail, run);
+  actions.append(run);
   banner.append(copy, actions);
   main.prepend(banner);
 }

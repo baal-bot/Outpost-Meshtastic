@@ -443,10 +443,16 @@ store:
 - `airtime.budget_percent + airtime.emergency_reserve_percent > 20.0`
 - `airtime.budget_percent + airtime.emergency_reserve_percent >= airtime.utilisation_ceiling`
 - invalid `airtime.quiet_hours` times or class names
+- an unknown `node.timezone`, unavailable host IANA timezone database, or malformed `node.locale`
 - channel indices outside 0–7, or a channel index absent from the radio's configuration
 - an AI provider with no reachable base URL when `modules.ai.enabled`
 - `env.user_agent` still containing `CHANGE-ME` when `modules.env.enabled` (REQ-WX-005)
 - any path the process cannot write
+
+The tolerant intent map is validated during startup. A missing/unreadable file, malformed YAML,
+invalid entry, or invalid regular expression **MUST** produce indexed warnings and a persistent
+degraded-readiness state while built-in exact intents remain available. Transient read/parse
+failure **MUST NOT** be cached as a successful timestamp.
 
 **REQ-ARCH-018** — A subset of config (airtime budgets and class shares, channel policy,
 quiet hours, retention, escalation policy, AI persona addendum, intents table) **MUST** be

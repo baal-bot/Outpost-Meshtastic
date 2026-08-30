@@ -15,6 +15,30 @@ def test_default_config_is_valid() -> None:
     assert Config().airtime.budget_percent == 8
 
 
+@pytest.mark.parametrize("timezone", ["Not/AZone", "America/New York", ""])
+def test_invalid_node_timezone_is_rejected_at_config_load(timezone: str) -> None:
+    with pytest.raises(ValidationError, match="node.timezone is not a valid installed IANA zone"):
+        Config.model_validate({"node": {"timezone": timezone}})
+
+
+def test_missing_host_tzdata_has_a_distinct_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing_zone(_: str) -> None:
+        raise config_module.ZoneInfoNotFoundError("tzdata unavailable")
+
+    monkeypatch.setattr(config_module, "ZoneInfo", missing_zone)
+    monkeypatch.setattr(config_module, "available_timezones", lambda: set())
+    with pytest.raises(ValidationError, match="IANA tzdata is not installed"):
+        Config()
+
+
+@pytest.mark.parametrize("locale", ["en-US", "english", "EN_us", "en_US.UTF-8"])
+def test_unsupported_node_locale_format_is_rejected(locale: str) -> None:
+    with pytest.raises(ValidationError, match="node.locale must use ll or ll_CC"):
+        Config.model_validate({"node": {"locale": locale}})
+
+
 @pytest.mark.parametrize(
     "airtime",
     [

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
-from prometheus_client import Counter
+from prometheus_client import Counter, Gauge
 
 from .models import TrustLevel
 from .registry import CommandRegistry
@@ -21,6 +22,17 @@ TOLERANT_REJECTIONS = Counter(
     "Command inputs not automatically corrected for safety",
     ("reason", "command"),
 )
+INTENT_LOAD_ATTEMPTS = Counter(
+    "outpost_router_intent_load_attempts_total",
+    "Configured tolerant-intent map load attempts",
+    ("outcome",),
+)
+INTENT_CONFIGURED_ENTRIES = Gauge(
+    "outpost_router_intent_configured_entries",
+    "Configured tolerant-intent entries in the most recent load",
+    ("result",),
+)
+LOGGER = logging.getLogger(__name__)
 
 BUILTIN_INTENTS = (
     (r"^(?:help|menu|commands|what can you do)\??$", "MENU"),
@@ -82,24 +94,44 @@ class IntentResolver:
         self._configured_rejected = 0
         self._load_error: str | None = None
         self._exists = False
+        self._state = "unloaded"
+        self._issues: tuple[dict[str, object], ...] = ()
+        self._last_warnings: frozenset[tuple[int | None, str]] = frozenset()
+
+    def _warn(self, issues: list[dict[str, object]]) -> None:
+        current: frozenset[tuple[int | None, str]] = frozenset(
+            (
+                index if isinstance(index := issue.get("index"), int) else None,
+                str(issue["reason"]),
+            )
+            for issue in issues
+        )
+        for index, reason in sorted(
+            current - self._last_warnings,
+            key=lambda value: (-1 if value[0] is None else value[0], value[1]),
+        ):
+            entry = "file" if index is None else f"entry {index}"
+            LOGGER.warning("Intent map %s %s rejected: %s", self.path, entry, reason)
+        self._last_warnings = current
 
     def _reload(self) -> None:
         try:
             mtime_ns = self.path.stat().st_mtime_ns
         except OSError:
             mtime_ns = -1
-        if self._patterns and mtime_ns == self._mtime_ns:
+        if self._patterns and self._load_error is None and mtime_ns == self._mtime_ns:
             return
-        configured: list[tuple[str, str]] = []
+        configured: list[tuple[int, str, str]] = []
         rejected = 0
         error: str | None = None
+        issues: list[dict[str, object]] = []
         self._exists = mtime_ns >= 0
         if mtime_ns >= 0:
             try:
                 payload = yaml.safe_load(self.path.read_text(encoding="utf-8")) or []
                 if not isinstance(payload, list):
                     raise TypeError("intent map must contain a list")
-                for item in payload:
+                for index, item in enumerate(payload, start=1):
                     pattern = item.get("pattern") if isinstance(item, dict) else None
                     command = item.get("command") if isinstance(item, dict) else None
                     if (
@@ -108,27 +140,45 @@ class IntentResolver:
                         and isinstance(command, str)
                         and command.strip()
                     ):
-                        configured.append((pattern, command))
+                        configured.append((index, pattern, command))
                     else:
                         rejected += 1
-            except OSError:
+                        reason = (
+                            "entry must be a mapping"
+                            if not isinstance(item, dict)
+                            else "pattern and command must be non-empty strings"
+                        )
+                        issues.append({"index": index, "reason": reason})
+            except OSError as exc:
                 configured = []
-                error = "OSError: configured intent map could not be read"
-            except TypeError:
+                reason = exc.strerror or "I/O error"
+                error = f"OSError: configured intent map could not be read ({reason})"
+                issues.append({"index": None, "reason": error})
+            except TypeError as exc:
                 configured = []
-                error = "TypeError: intent map must contain a list"
-            except (UnicodeError, ValueError, yaml.YAMLError) as exc:
+                error = f"TypeError: {exc}"
+                issues.append({"index": None, "reason": error})
+            except yaml.YAMLError as exc:
+                configured = []
+                mark = getattr(exc, "problem_mark", None)
+                location = f" at line {mark.line + 1}" if mark is not None else ""
+                error = f"{type(exc).__name__}: configured intent map could not be parsed{location}"
+                issues.append({"index": None, "reason": error})
+            except (UnicodeError, ValueError) as exc:
                 configured = []
                 error = f"{type(exc).__name__}: configured intent map could not be parsed"
+                issues.append({"index": None, "reason": error})
         else:
             error = "configured intent map was not found"
+            issues.append({"index": None, "reason": error})
         patterns: list[tuple[re.Pattern[str], str]] = []
         loaded = 0
-        for pattern, command in configured:
+        for index, pattern, command in configured:
             try:
                 patterns.append((re.compile(pattern, re.IGNORECASE), command))
-            except re.error:
+            except re.error as exc:
                 rejected += 1
+                issues.append({"index": index, "reason": f"invalid regex: {exc.msg}"})
                 continue
             loaded += 1
         for pattern, command in BUILTIN_INTENTS:
@@ -136,11 +186,30 @@ class IntentResolver:
                 patterns.append((re.compile(pattern, re.IGNORECASE), command))
             except re.error:
                 continue
+        if not self._exists:
+            state = "missing"
+        elif error is not None:
+            state = "error"
+        elif loaded and rejected:
+            state = "partial"
+        elif rejected:
+            state = "rejected_all"
+        elif loaded:
+            state = "ready"
+        else:
+            state = "empty"
+        issues.sort(key=lambda item: index if isinstance(index := item.get("index"), int) else -1)
         self._patterns = tuple(patterns)
-        self._mtime_ns = mtime_ns
+        self._mtime_ns = mtime_ns if error is None else None
         self._configured_loaded = loaded
         self._configured_rejected = rejected
         self._load_error = error
+        self._state = state
+        self._issues = tuple(issues)
+        self._warn(issues)
+        INTENT_LOAD_ATTEMPTS.labels(state).inc()
+        INTENT_CONFIGURED_ENTRIES.labels("loaded").set(loaded)
+        INTENT_CONFIGURED_ENTRIES.labels("rejected").set(rejected)
 
     def status(self) -> dict[str, object]:
         """Return content-safe parse evidence for readiness diagnostics."""
@@ -151,7 +220,9 @@ class IntentResolver:
             "loaded": self._configured_loaded,
             "rejected": self._configured_rejected,
             "builtin": len(BUILTIN_INTENTS),
+            "state": self._state,
             "error": self._load_error,
+            "issues": list(self._issues),
         }
 
     @staticmethod
