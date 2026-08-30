@@ -169,13 +169,18 @@ const dialogParts = {
   confirm: applicationDialog.querySelector("#application-dialog-confirm"),
 };
 let dialogState = null;
+const dialogQueue = [];
+
+function defaultDialogValue(state) {
+  return state.kind === "confirm" ? false : null;
+}
 
 function settleDialog(value) {
-  if (!dialogState) return;
-  const resolve = dialogState.resolve;
-  dialogState = null;
+  const state = dialogState;
+  if (!state || state.settling) return;
+  state.settling = true;
+  state.value = value;
   applicationDialog.close();
-  resolve(value);
 }
 
 applicationDialog.querySelector("form").addEventListener("submit", event => {
@@ -201,15 +206,18 @@ applicationDialog.querySelector("form").addEventListener("submit", event => {
 });
 dialogParts.cancel.addEventListener("click", () => settleDialog(dialogState?.kind === "confirm" ? false : null));
 applicationDialog.addEventListener("close", () => {
-  if (!dialogState) return;
-  const value = dialogState.kind === "confirm" ? false : null;
-  const resolve = dialogState.resolve;
+  const state = dialogState;
+  if (!state) return;
   dialogState = null;
-  resolve(value);
+  state.resolve(state.settling ? state.value : defaultDialogValue(state));
+  showNextDialog();
 });
 
-function openApplicationDialog(options) {
-  if (dialogState) settleDialog(dialogState.kind === "confirm" ? false : null);
+function showNextDialog() {
+  if (dialogState || applicationDialog.open) return;
+  const next = dialogQueue.shift();
+  if (!next) return;
+  const {options, resolve} = next;
   dialogParts.eyebrow.textContent = options.eyebrow || "OPERATOR CONFIRMATION";
   dialogParts.title.textContent = options.title;
   dialogParts.message.textContent = options.message || "";
@@ -228,14 +236,21 @@ function openApplicationDialog(options) {
   field.value = options.defaultValue || "";
   if (!options.multiline) field.type = options.type || "text";
   field.autocomplete = options.autocomplete || "off";
+  const state = {...options, resolve, settling: false, value: null};
+  dialogState = state;
+  applicationDialog.showModal();
+  window.requestAnimationFrame(() => {
+    if (dialogState !== state || !applicationDialog.open) return;
+    if (options.kind === "prompt") field.focus();
+    else if (options.danger && options.kind !== "alert") dialogParts.cancel.focus();
+    else dialogParts.confirm.focus();
+  });
+}
+
+function openApplicationDialog(options) {
   return new Promise(resolve => {
-    dialogState = {...options, resolve};
-    applicationDialog.showModal();
-    window.requestAnimationFrame(() => {
-      if (options.kind === "prompt") field.focus();
-      else if (options.danger && options.kind !== "alert") dialogParts.cancel.focus();
-      else dialogParts.confirm.focus();
-    });
+    dialogQueue.push({options, resolve});
+    showNextDialog();
   });
 }
 

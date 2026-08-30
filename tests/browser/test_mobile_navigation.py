@@ -966,6 +966,32 @@ def test_shared_dialogs_manage_focus_escape_validation_and_live_regions(
         prompt.get_by_role("textbox", name="Confirmation").fill("APPROVE")
         prompt.get_by_role("button", name="Continue").click()
         page.wait_for_function("() => window.promptResult === 'APPROVE'")
+
+        page.evaluate(
+            """() => {
+              window.dialogSequence = null;
+              (async () => {
+                const prompted = await window.OutpostUI.prompt({
+                  title: 'Name this radio', label: 'Call sign'
+                });
+                const confirmed = await window.OutpostUI.confirm({
+                  title: 'Use this call sign?', message: prompted
+                });
+                window.dialogSequence = {prompted, confirmed};
+              })();
+            }"""
+        )
+        first = page.get_by_role("dialog", name="Name this radio")
+        first.get_by_role("textbox", name="Call sign").fill("Relay Seven")
+        first.get_by_role("button", name="Continue").click()
+        second = page.get_by_role("dialog", name="Use this call sign?")
+        second.wait_for(state="visible")
+        second.get_by_role("button", name="Continue").click()
+        page.wait_for_function("() => window.dialogSequence !== null")
+        assert page.evaluate("window.dialogSequence") == {
+            "prompted": "Relay Seven",
+            "confirmed": True,
+        }
         assert page.locator("#backup-result").get_attribute("role") == "status"
         assert page.locator("#settings-error").get_attribute("role") == "alert"
     finally:
@@ -4289,9 +4315,18 @@ def test_access_workspace_enrolls_mfa_and_creates_named_account(
             radio["account_display_name"] = "Pittsburgh Operator"
         route.fulfill(status=200, content_type="application/json", body=json.dumps(accounts[0]))
 
+    def password_route(route: object) -> None:
+        mutations.append(("password", route.request.post_data_json))
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"ok":true,"reauthenticate":true}',
+        )
+
     page.route("**/api/v1/auth/sessions", sessions)
     page.route("**/api/v1/auth/accounts", account_route)
     page.route("**/api/v1/auth/accounts/1/radio", radio_link_route)
+    page.route("**/api/v1/auth/password", password_route)
     page.route(
         "**/api/v1/auth/mfa/begin",
         lambda route: route.fulfill(
@@ -4344,5 +4379,19 @@ def test_access_workspace_enrolls_mfa_and_creates_named_account(
         assert any(action == "create" for action, _ in mutations)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
+
+        page.get_by_role("button", name="Change my password").click()
+        current = page.get_by_role("dialog", name="Confirm your current password")
+        current.get_by_label("Current password").fill("operator-current-password-42")
+        current.get_by_role("button", name="Continue").click()
+        replacement = page.get_by_role("dialog", name="Choose a new password")
+        replacement.wait_for(state="visible")
+        replacement.get_by_label("New password").fill("operator-replacement-password-42")
+        with page.expect_request("**/api/v1/auth/password") as password_request:
+            replacement.get_by_role("button", name="Change password").click()
+        assert password_request.value.post_data_json == {
+            "current_password": "operator-current-password-42",
+            "new_password": "operator-replacement-password-42",
+        }
     finally:
         page.close()
