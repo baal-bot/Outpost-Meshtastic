@@ -1,24 +1,12 @@
-import("/nav.js");
-
-const $ = id => document.getElementById(id);
-const safe = value => String(value ?? "").replace(
-  /[&<>'"]/g,
-  character => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"})[character],
-);
+import "/nav.js";
+import {byId as $, createApiClient, escapeHtml as safe} from "/ui-primitives.js";
 let csrf = "";
 let selectedKey = null;
 let conversations = [];
 let peers = [];
 let searchTimer = null;
 
-const api = (url, options = {}) => fetch(url, {
-  ...options,
-  headers: {
-    ...(options.body ? {"content-type": "application/json"} : {}),
-    ...(options.method && options.method !== "GET" ? {"x-csrf-token": csrf} : {}),
-    ...options.headers,
-  },
-});
+const api = createApiClient(() => csrf);
 
 function date(value) {
   return value ? new Date(value).toLocaleString() : "Not recorded";

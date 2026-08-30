@@ -1,6 +1,7 @@
 import {initTheme} from "/theme.js";
 import "/a11y.js";
 import {scheduler} from "/refresh-scheduler.js";
+import {escapeHtml, safeLocalHref} from "/ui-primitives.js";
 
 initTheme();
 const nativeFetch = window.fetch.bind(window);
@@ -143,14 +144,15 @@ const links = [
   ["/#activity", "◫", "Activity"],
   ["/#system", "⚙", "System"],
   ["/ai.html", "✦", "AI"],
-  ["/api/docs", "◇", "API"],
 ];
 const navigation = document.querySelector(".rail nav");
 if (navigation) {
   navigation.id = "primary-navigation";
   navigation.setAttribute("aria-label", "Primary navigation");
   navigation.innerHTML = links.map(([href, icon, label]) => {
-    return `<a href="${href}" aria-label="${label}" title="${label}"><i aria-hidden="true">${icon}</i><span>${label}</span></a>`;
+    return `<a href="${escapeHtml(safeLocalHref(href))}" aria-label="${escapeHtml(label)}" ` +
+      `title="${escapeHtml(label)}"><i aria-hidden="true">${escapeHtml(icon)}</i>` +
+      `<span>${escapeHtml(label)}</span></a>`;
   }).join("");
 }
 
@@ -312,7 +314,11 @@ function applyModuleState() {
     banner = document.createElement("section");
     banner.className = "module-disabled-banner";
     banner.setAttribute("role", "status");
-    banner.innerHTML = `<div><p class="eyebrow">MODULE DISABLED</p><h2>${moduleNames[pageModule]} is offline</h2></div><p>Its commands, background work, federation exchange, and API are inactive. Enable <code>modules.${pageModule}.enabled</code> in the Outpost configuration and restart the service.</p>`;
+    banner.innerHTML = `<div><p class="eyebrow">MODULE DISABLED</p><h2>` +
+      `${escapeHtml(moduleNames[pageModule])} is offline</h2></div><p>Its commands, background ` +
+      `work, federation exchange, and API are inactive. Enable ` +
+      `<code>modules.${escapeHtml(pageModule)}.enabled</code> in the Outpost configuration ` +
+      `and restart the service.</p>`;
     main.prepend(banner);
   } else if (!disabled) {
     banner?.remove();
@@ -476,7 +482,11 @@ function renderReviewCallout(count, kinds) {
   const main = document.querySelector("main");
   if (!main) return;
   const noun = kinds.length === 1 ? kinds[0] : "federated records";
-  main.insertAdjacentHTML("afterbegin", `<a class="federation-review-callout" href="/federation.html#federation-inbox"><span><b>${reviewLabel(count)}</b><i>Operator review required</i></span><strong>${count} ${noun} ${count === 1 ? "is" : "are"} waiting in the federation approval queue.</strong><em>Review now →</em></a>`);
+  main.insertAdjacentHTML("afterbegin", `<a class="federation-review-callout" ` +
+    `href="${escapeHtml(safeLocalHref("/federation.html#federation-inbox"))}"><span><b>` +
+    `${escapeHtml(reviewLabel(count))}</b><i>Operator review required</i></span><strong>` +
+    `${escapeHtml(count)} ${escapeHtml(noun)} ${count === 1 ? "is" : "are"} waiting in the ` +
+    `federation approval queue.</strong><em>Review now →</em></a>`);
 }
 
 async function refreshFederationReviews() {

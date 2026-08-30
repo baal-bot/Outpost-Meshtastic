@@ -1,13 +1,9 @@
-import("/nav.js");
-
-const $ = (id) => document.getElementById(id);
-const safe = (value) => String(value ?? "").replace(
-  /[&<>'"]/g,
-  (character) => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", '"':"&quot;"})[character],
-);
+import "/nav.js";
+import {byId as $, createApiClient, escapeHtml as safe} from "/ui-primitives.js";
 let csrf = "";
 let session = null;
 let operatorRadios = [];
+const api = createApiClient(() => csrf, {json: true});
 
 const roleLabel = (role) => ({
   administrator: "Administrator",
@@ -20,16 +16,6 @@ const timeLabel = (stamp) => stamp
 const radioName = (radio) => radio.handle
   ? `@${radio.handle}`
   : radio.long_name || radio.short_name || radio.mesh_id;
-
-async function api(path, options = {}) {
-  const headers = {...(options.headers || {})};
-  if (options.method && !["GET", "HEAD"].includes(options.method)) headers["x-csrf-token"] = csrf;
-  if (options.body) headers["content-type"] = "application/json";
-  const response = await fetch(path, {...options, headers});
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error?.message || `Request failed (${response.status})`);
-  return body;
-}
 
 function renderIdentity() {
   $("signed-account").innerHTML = `<i></i><span><b>${safe(session.display_name)}</b><small>@${safe(session.username)} · ${safe(roleLabel(session.role))}</small></span>`;

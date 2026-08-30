@@ -1,3 +1,5 @@
+import {escapeHtml as safe} from "/ui-primitives.js";
+
 const PRESETS = {
   isolated: {
     label: "Discovery only",
@@ -150,7 +152,7 @@ function updateOptionState(dialog) {
   });
 }
 
-function renderReview(dialog, peer, boards, safe) {
+function renderReview(dialog, peer, boards) {
   const before = comparablePolicy(peer);
   const candidate = candidatePolicy(dialog, peer, boards);
   const rows = Object.keys(policyLabels).map(key => {
@@ -187,7 +189,7 @@ function renderReview(dialog, peer, boards, safe) {
   return candidate.policy;
 }
 
-export async function openPolicyWizard({peer, api, safe, refresh}) {
+export async function openPolicyWizard({peer, api, refresh}) {
   const returnFocus = document.activeElement;
   const boardResponse = await api("/api/v1/boards?limit=200");
   const boards = boardResponse.ok ? (await boardResponse.json()).items : [];
@@ -283,7 +285,7 @@ export async function openPolicyWizard({peer, api, safe, refresh}) {
   dialog.querySelector("form").addEventListener("submit", event => {
     event.preventDefault();
     if (!event.currentTarget.reportValidity()) return;
-    reviewedPolicy = renderReview(dialog, peer, boards, safe);
+    reviewedPolicy = renderReview(dialog, peer, boards);
   });
   dialog.querySelector(".wizard-back").addEventListener("click", () => {
     dialog.querySelector("#wizard-edit").hidden = false;

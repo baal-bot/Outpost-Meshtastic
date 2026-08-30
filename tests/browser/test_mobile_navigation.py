@@ -46,11 +46,8 @@ DESTINATIONS = (
     ("Activity", "/#activity"),
     ("System", "/#system"),
     ("AI", "/ai.html"),
-    ("API", "/api/docs"),
 )
-OPERATOR_PAGES = tuple(
-    dict.fromkeys(target.split("#", 1)[0] for _label, target in DESTINATIONS[:-1])
-)
+OPERATOR_PAGES = tuple(dict.fromkeys(target.split("#", 1)[0] for _label, target in DESTINATIONS))
 THEMES = ("dark", "daylight", "night")
 VISUAL_PAGES = (
     ("overview", "/"),
@@ -223,6 +220,37 @@ def prepare_page(
     page.goto(dashboard_url, wait_until="domcontentloaded")
     wait_for_navigation(page)
     return page
+
+
+def test_shared_ui_primitives_escape_values_and_constrain_urls(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1024, dashboard_url)
+    result = page.evaluate(
+        """async () => {
+          const ui = await import('/ui-primitives.js');
+          return {
+            escaped: [
+              ui.escapeHtml(null),
+              ui.escapeHtml(undefined),
+              ui.escapeHtml(0),
+              ui.escapeHtml(false),
+              ui.escapeHtml(String.fromCharCode(38, 60, 62, 39, 34)),
+            ],
+            urls: [
+              ui.safeLocalHref('/watch.html#incidents'),
+              ui.safeLocalHref('//host/path'),
+              ui.safeLocalHref(String.fromCharCode(47, 92) + 'host/path'),
+              ui.safeLocalHref('javascript:alert(1)'),
+            ],
+          };
+        }"""
+    )
+    assert result == {
+        "escaped": ["", "", "0", "false", "&amp;&lt;&gt;&#39;&quot;"],
+        "urls": ["/watch.html#incidents", "#", "#", "#"],
+    }
+    page.close()
 
 
 def test_viewer_overview_requests_only_the_redacted_wallboard_contract(
@@ -1912,7 +1940,9 @@ def test_weather_forecast_provenance_and_unavailable_values_are_visible(
                 ),
             ),
         )
-        page.evaluate("refreshWeather()")
+        page.reload(wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.locator("#weather-summary").get_by_text("This Afternoon").wait_for()
 
         assert page.locator("#weather-kind").text_content() == "LOCAL FORECAST"
         assert page.locator("#weather-title").text_content() == "Near-term forecast"

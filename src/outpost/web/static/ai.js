@@ -1,6 +1,5 @@
-import("/nav.js");
-
-const $ = (id) => document.getElementById(id);
+import "/nav.js";
+import {byId as $} from "/ui-primitives.js";
 let csrfToken = "";
 let documents = [];
 

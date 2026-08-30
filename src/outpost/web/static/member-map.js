@@ -1,3 +1,5 @@
+import {byId as mm, escapeHtml as escapeMap, formatAgeSeconds} from "/ui-primitives.js";
+
 const memberMapPanel = document.createElement("section");
 memberMapPanel.className = "ui-card panel member-map-panel";
 memberMapPanel.innerHTML = `
@@ -39,15 +41,10 @@ memberMapPanel.innerHTML = `
   </div>`;
 document.querySelector("#member-directory").after(memberMapPanel);
 
-const mm = id => document.getElementById(id);
-const escapeMap = value => String(value ?? "").replace(
-  /[&<>'"]/g,
-  char => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"})[char],
-);
-const positionAge = seconds => seconds < 60 ? "just now" :
-  seconds < 3600 ? `${Math.floor(seconds / 60)}m ago` :
-  seconds < 86400 ? `${Math.floor(seconds / 3600)}h ago` :
-  `${Math.floor(seconds / 86400)}d ago`;
+const positionAge = seconds => formatAgeSeconds(seconds, {
+  immediate: "just now",
+  suffix: " ago",
+});
 
 let memberMapItems = [];
 

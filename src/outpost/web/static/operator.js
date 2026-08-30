@@ -1,19 +1,7 @@
-import("/nav.js");
+import "/nav.js";
 import("/member-map.js?v=7");
-
-const $ = id => document.getElementById(id);
-const safe = value => String(value ?? "").replace(
-  /[&<>'"]/g,
-  char => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"})[char],
-);
-const relative = stamp => {
-  if (!stamp) return "never";
-  const seconds = Math.max(0, (Date.now() - new Date(stamp)) / 1000);
-  if (seconds < 60) return "now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
-};
+import {byId as $, escapeHtml as safe, relativeAge} from "/ui-primitives.js";
+const relative = stamp => relativeAge(stamp, {suffix:" ago"});
 const exactTime = stamp => stamp ? new Date(stamp).toLocaleString() : "Not recorded";
 const trustLevels = ["blocked", "guest", "member", "trusted", "responder", "operator"];
 
@@ -80,7 +68,7 @@ function renderSavedFilters(filters) {
 
 function renderMemberRows() {
   $("member-rows").innerHTML = memberItems.map(member => {
-    const identity = member.handle ? `@${member.handle}` :
+    const identity = member.handle ? "@" + member.handle :
       (member.long_name || member.short_name || "Unnamed radio");
     const signal = member.last_heard_snr == null ? "Signal unknown" :
       `${member.last_heard_snr} dB · ${member.hops_away ?? "—"} hops`;
@@ -226,7 +214,7 @@ function renderDetail(result) {
   selectedDetail = result;
   const member = result.member;
   const passiveDiscovery = ["discovered", "blocked"].includes(member.category);
-  const label = member.handle ? `@${member.handle}` :
+  const label = member.handle ? "@" + member.handle :
     (member.long_name || member.short_name || "Unnamed radio");
   $("detail-eyebrow").textContent = member.needs_review ? "IDENTITY REVIEW" : "IDENTITY DETAILS";
   $("detail-title").textContent = label;
@@ -410,7 +398,7 @@ function auditDetail(event, index) {
 
 function renderAudit(total) {
   $("audit-list").innerHTML = auditItems.map((event, index) => {
-    const actor = `${event.actor_kind}:${event.actor_ref}`;
+    const actor = event.actor_kind + ":" + event.actor_ref;
     return `<article class="audit-event"><div class="audit-action"><code>${safe(event.action)}</code>` +
       `<span class="audit-outcome ${safe(event.outcome)}">${safe(event.outcome)}</span></div>` +
       `<div class="audit-value audit-actor"><small>Actor</small><span>${safe(actor)}</span></div>` +

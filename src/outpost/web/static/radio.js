@@ -1,11 +1,5 @@
-import("/nav.js");
-
-const $ = (id) => document.getElementById(id);
-const safe = (value) =>
-  String(value ?? "").replace(
-    /[&<>'"]/g,
-    (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char],
-  );
+import "/nav.js";
+import {byId as $, createApiClient, escapeHtml as safe} from "/ui-primitives.js";
 let csrfToken = "";
 const messagePageSize = 25;
 let messageItems = [];
@@ -21,15 +15,7 @@ let queueMeta = { counts: {}, total: 0, retention_days: 30 };
 $("send-channel").disabled = true;
 $("send-form").querySelector("button").disabled = true;
 
-const api = async (url, options = {}) =>
-  fetch(url, {
-    ...options,
-    headers: {
-      ...(options.body ? { "content-type": "application/json" } : {}),
-      ...(options.method && options.method !== "GET" ? { "x-csrf-token": csrfToken } : {}),
-      ...options.headers,
-    },
-  });
+const api = createApiClient(() => csrfToken);
 
 const activeQueueStates = new Set(["pending", "held", "sending", "awaiting_ack"]);
 const terminalQueueStates = new Set([

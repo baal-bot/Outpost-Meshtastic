@@ -1,10 +1,5 @@
-import("/nav.js");
-
-const $ = (id) => document.getElementById(id);
-const safe = (value) => String(value ?? "").replace(
-  /[&<>'"]/g,
-  (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;" })[char],
-);
+import "/nav.js";
+import {byId as $, escapeHtml as safe} from "/ui-primitives.js";
 const RESTORE_JOB_KEY = "outpost.restore.job";
 const TERMINAL_STATES = new Set(["completed", "failed_recovered", "failed", "interrupted"]);
 let csrfToken = "";

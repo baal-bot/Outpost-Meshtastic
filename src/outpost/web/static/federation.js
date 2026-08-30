@@ -1,14 +1,13 @@
-import("/nav.js");
-const $ = id => document.getElementById(id);
-const safe = value => String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[char]);
+import "/nav.js";
+import {byId as $, createApiClient, escapeHtml as safe, relativeAge} from "/ui-primitives.js";
 let csrf = "";
 let policyWizardOpen = false;
 let topologyMap = null;
 let topologyItems = [];
 let topologyIncidents = [];
 let topologyFitted = false;
-const api = (url, options = {}) => fetch(url, {...options, headers: {...(options.body ? {"content-type":"application/json"} : {}), ...(options.method && options.method !== "GET" ? {"x-csrf-token":csrf} : {}), ...options.headers}});
-function age(epoch) { if (!epoch) return "Never"; const seconds = Math.max(0, Date.now()/1000-epoch); if (seconds < 90) return "Just now"; if (seconds < 3600) return `${Math.floor(seconds/60)}m ago`; if (seconds < 86400) return `${Math.floor(seconds/3600)}h ago`; return `${Math.floor(seconds/86400)}d ago`; }
+const api = createApiClient(() => csrf);
+const age = (epoch) => relativeAge(epoch, {epochSeconds:true, empty:"Never", immediate:"Just now", immediateSeconds:90, suffix:" ago"});
 function serviceProvenance(item) {
   const value = item.provenance || {};
   if (!value.provider) return new Date(item.created_at * 1000).toLocaleString();
@@ -25,7 +24,7 @@ async function showPolicyWizard(peer) {
   policyWizardOpen = true;
   try {
     const {openPolicyWizard} = await import("/federation-policy.js?v=1");
-    await openPolicyWizard({peer, api, safe, refresh});
+    await openPolicyWizard({peer, api, refresh});
   } finally {
     policyWizardOpen = false;
   }

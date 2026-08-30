@@ -1,5 +1,5 @@
-import("/nav.js");
-const $=(id)=>document.getElementById(id),safe=(value)=>String(value??"").replace(/[&<>'"]/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"})[char]);
+import "/nav.js";
+import {byId as $, escapeHtml as safe, formatAgeSeconds} from "/ui-primitives.js";
 let csrfToken="",waypointItems=[],mapQuakes=[],mapHome={lat:40.4406,lon:-79.9959};
 const waterOption=document.createElement("option");waterOption.value="water";waterOption.textContent="water";$("waypoint-category").appendChild(waterOption);
 const waypointMapCard=document.createElement("aside");waypointMapCard.id="waypoint-map-card";waypointMapCard.className="outpost-map-detail waypoint-map-card";waypointMapCard.hidden=true;$("environment-map").appendChild(waypointMapCard);
@@ -9,7 +9,7 @@ function showWaypointCard(value){environmentMapController.select(`waypoint-${val
 function showQuakeCard(value){environmentMapController.select(`quake-${value.id}`);waypointMapCard.hidden=false;waypointMapCard.innerHTML=`<button class="outpost-map-detail-close" type="button" aria-label="Close">×</button><p class="eyebrow">USGS EARTHQUAKE · QUAKE ${safe(value.id)}</p><h3>M${Number(value.magnitude).toFixed(1)} · ${safe(value.place)}</h3><p><strong>${Number(value.distance_km).toFixed(0)} km from the Outpost${value.bearing_deg==null?"":` at ${safe(value.bearing_deg)}°`}</strong></p><p>Depth ${Number(value.depth_km).toFixed(1)} km${value.occurred_at?` · ${new Date(value.occurred_at*1000).toLocaleString()}`:""}</p><div class="waypoint-card-actions"><button data-quake-card-center type="button">Center</button></div>`;waypointMapCard.querySelector(".outpost-map-detail-close").onclick=closeEnvironmentCard;waypointMapCard.querySelector("[data-quake-card-center]").onclick=()=>environmentMapController.setView({lat:Number(value.latitude),lon:Number(value.longitude),zoom:Math.max(environmentMapController.getView().zoom,13)});}
 const time=(stamp)=>stamp?new Date(stamp).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"—";
 const weatherSource=(kind)=>({observation:"Station observation",forecast:"Near-term forecast",estimate:"Current model estimate",peer:"Peer-provided conditions"})[kind]||"Weather data";
-const weatherAge=(seconds)=>seconds==null?"valid time unavailable":seconds<60?"valid now":seconds<3600?`valid ${Math.floor(seconds/60)}m ago`:`valid ${Math.floor(seconds/3600)}h ago`;
+const weatherAge=(seconds)=>formatAgeSeconds(seconds,{empty:"valid time unavailable",immediate:"valid now",prefix:"valid ",suffix:" ago"});
 const receiverLabels={disabled:"Not configured",stopped:"Stopped",starting:"Starting",listening:"Listening",monitoring:"Listening · awaiting signal",up:"Signal detected",no_signal:"Signal overdue",backoff:"Restarting"};
 function renderSame(same){
   const health=same.health||{},status=health.status||"stopped",state=$("same-receiver-state");

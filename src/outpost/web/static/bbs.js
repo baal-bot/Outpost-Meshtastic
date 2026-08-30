@@ -1,8 +1,7 @@
-import("/nav.js");
-const $ = (id) => document.getElementById(id);
-const safe = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"})[char]);
+import "/nav.js";
+import {byId as $, createApiClient, escapeHtml as safe} from "/ui-primitives.js";
 let csrfToken = "", boards = [], selectedBoard = null, selectedThread = null, threadRevision = "", threadRefreshBusy = false;
-const api = async (url, options = {}) => fetch(url, {...options, headers:{...(options.body ? {"content-type":"application/json"}:{}), ...(options.method && options.method !== "GET" ? {"x-csrf-token":csrfToken}:{}), ...options.headers}});
+const api = createApiClient(() => csrfToken);
 
 async function initialize() { const response = await fetch("/api/v1/auth/session"); if (!response.ok) { location.href="/"; return; } csrfToken=(await response.json()).csrf_token; await loadBoards(); }
 async function loadBoards() { const response=await api("/api/v1/boards?limit=200"); if(!response.ok){$("board-count").textContent="—";$("board-list").innerHTML=`<p class="ui-empty empty">Boards unavailable · HTTP ${response.status}. Existing data may be stale.</p>`;return false;}const body=await response.json();boards=body.items||[]; $("board-count").textContent=boards.length; $("board-list").innerHTML=boards.map((board)=>`<button class="board-row ${selectedBoard===board.id?"active":""}" data-board="${board.id}"><strong>${safe(board.title)}</strong><small>${safe(board.slug)} · ${board.thread_count} threads · ${board.federated?"federated":"local only"} · post: ${safe(board.min_post_trust)}</small></button>`).join("")||'<p class="ui-empty empty">No boards available.</p>'; document.querySelectorAll("[data-board]").forEach((button)=>button.addEventListener("click",()=>selectBoard(Number(button.dataset.board))));return true; }

@@ -1,4 +1,4 @@
-const byId = (id) => document.getElementById(id);
+import {byId} from "/ui-primitives.js";
 
 function option(select, value, label = value) {
   const entry = document.createElement("option");

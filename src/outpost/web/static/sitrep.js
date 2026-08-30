@@ -1,8 +1,7 @@
-const $=id=>document.getElementById(id);
+import {byId as $, safeLocalHref as safeHref} from "/ui-primitives.js";
 const labels={alerts:"Authoritative alerts",incidents:"Urgent incidents",welfare:"Welfare",weather:"Forecast",community:"Community",network:"Network"};
 
 function element(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
-function safeHref(value){return typeof value==="string"&&value.startsWith("/")&&!value.startsWith("//")?value:"#";}
 function timestamp(value){return new Date(Number(value)*1000).toLocaleString();}
 
 function sourceFlags(source){const flags=[];if(source.stale)flags.push("stale");if(source.conflict)flags.push("conflict");return flags;}
