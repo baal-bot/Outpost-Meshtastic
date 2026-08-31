@@ -452,7 +452,7 @@ async function initialize() {
     return;
   }
   csrfToken = (await response.json()).csrf_token;
-  const {initRadioConfigurator} = await import("/radio-config.js");
+  const {initRadioConfigurator} = await import("/radio-config.js?v=2");
   await initRadioConfigurator({api});
   await refresh();
   const {scheduler} = await import("/refresh-scheduler.js");

@@ -27,11 +27,11 @@ revision on which CI runs this manifest check.
 
 | Capability | Present behavior | Maturity | Verification |
 | --- | --- | --- | --- |
-| Meshtastic transport | Serial, TCP, and BLE links; reconnect, liveness supervision, inbound backpressure, and radio status. | Single-node field-tested | unreleased @ `HEAD` (2026-08-27); introduced `04e74ca` |
+| Meshtastic transport | Serial, TCP, and BLE links; reconnect, liveness supervision, inbound backpressure, radio status, and verified add-only installation of standard Outpost channels into selected empty slots. | Single-node field-tested | unreleased @ `HEAD` (2026-08-31); introduced `04e74ca` |
 | Command routing | Guided capability-aware DM screens, mutation-safe tolerant commands, globally reserved disabled-feature vocabulary, contextual composition, recovery, channel parsing, paging, trust/module gates, PKI-bound elevated actions, and bounded inbound workers. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `04e74ca` |
 | Recorded traffic replay and drills | Bounded query-only traffic selection, virtual-time production routing, scratch persistence, simulated RF/MQTT egress, comparable per-message decisions, redacted bundles, and an unmistakable drill dashboard. | Automated-tested | unreleased @ `HEAD` (2026-08-30); introduced `b58facb` |
 | Airtime and outbound delivery | Durable priority queue, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, restart recovery, and a delivery-health briefing comparing confirmed 24-hour channel outcomes and enrolled-radio receive quality with the preceding 14 days. | Automated-tested | unreleased @ `HEAD` (2026-08-30); introduced `3d65058` |
-| Identity and member directory | Handles, social trust, reviewed Meshtastic PKI fingerprints, conflict demotion, explicit key rotation, recently-heard radio discovery, exact-position controls, and operator triage. | Automated-tested | unreleased @ `HEAD` (2026-08-28); introduced `8accdf3` |
+| Identity and member directory | Radio-suffixed Outpost display identities, handles, social trust, reviewed Meshtastic PKI fingerprints, conflict demotion, explicit key rotation, recently-heard radio discovery, exact-position controls, centralized responder-group administration, grouped-member map markers, and operator triage. | Automated-tested | unreleased @ `HEAD` (2026-08-31); introduced `8accdf3` |
 | BBS, mail, and operator inbox | Boards, threads, posts, subscriptions, digests, private mail, moderation, and one replyable operations inbox. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `41a6c85` |
 | Community Watch | Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, delivery-accountable and proximity-targeted responder alerts, member-relative mesh listings, retrying zero-recipient escalation, per-stage bounded repeats, all-clear, and maps. | Simulated | unreleased @ `HEAD` (2026-08-30); introduced `8323143` |
 | Welfare events and check-ins | Events, recurring opt-in drills with reviewed airtime ceilings, named responder groups, readiness history, roster states, delivery-accountable HELP/OK handling, honest no-responder guidance, derived unaccounted members, and CSV export. | Simulated | unreleased @ `HEAD` (2026-08-29); introduced `04e74ca` |
@@ -54,6 +54,7 @@ Maturity: **Single-node field-tested**.
 Evidence:
 
 - Automated: [tests/unit/test_radio_link.py::test_full_callback_queue_counts_drop_and_keeps_newest_frame](../tests/unit/test_radio_link.py) — A saturated callback queue records the dropped frame and retains the newest packet.
+- Automated: [tests/integration/test_radio_configuration.py::test_outpost_profile_is_add_only_verified_and_persists_bindings](../tests/integration/test_radio_configuration.py) — Standard Outpost channels use only selected empty slots, require readback verification, and persist semantic bindings without exposing keys.
 - Field: [docs/FEDERATION-ACCEPTANCE-BACKLOG.md](FEDERATION-ACCEPTANCE-BACKLOG.md) — Live radio traffic and recovery were exercised between physical Outposts.
 
 Known limitations:
@@ -120,6 +121,8 @@ Evidence:
 - Automated: [tests/integration/test_directory_moderation.py::test_channel_keys_only_appear_in_member_dm_detail](../tests/integration/test_directory_moderation.py) — Channel keys stay confined to the authorized member DM detail path.
 - Automated: [tests/integration/test_member_triage.py::test_member_triage_filters_review_history_and_detail](../tests/integration/test_member_triage.py) — Discovered-radio triage and accountable operator actions.
 - Automated: [tests/integration/test_mesh_pki_trust.py::test_pki_key_change_demotes_and_requires_explicit_rotation_review](../tests/integration/test_mesh_pki_trust.py) — A PKI key change demotes trust until an explicit audited rotation review.
+- Automated: [tests/browser/test_mobile_navigation.py::test_member_group_workspace_creates_edits_and_assigns_response_teams](../tests/browser/test_mobile_navigation.py) — The Members workspace creates, edits, and assigns every response team while grouped members receive distinct map markers.
+- Automated: [tests/unit/test_channel_profile.py::test_outpost_display_name_adds_radio_suffix_without_duplicating_it](../tests/unit/test_channel_profile.py) — Operational display names gain the stable four-character radio suffix without changing the stored human name.
 
 Known limitations:
 
@@ -167,7 +170,7 @@ Evidence:
 - Automated: [tests/integration/test_watch_checkin.py::test_need_help_reports_zero_when_requester_is_only_responder](../tests/integration/test_watch_checkin.py) — HELP reports zero notified responders when the requester is the only eligible responder.
 - Automated: [tests/integration/test_watch_checkin.py::test_recurring_drill_enforces_opt_out_ceiling_and_reports_participation](../tests/integration/test_watch_checkin.py) — Recurring drills remain marked, honor member opt-outs, enforce the reviewed send ceiling, and retain participation results.
 - Automated: [tests/integration/test_watch_checkin.py::test_scheduled_drill_suppresses_for_real_event_quiet_hours_and_roster_growth](../tests/integration/test_watch_checkin.py) — Scheduled practice yields to real events and quiet hours and stops when its roster outgrows operator approval.
-- Automated: [tests/browser/test_mobile_navigation.py::test_welfare_drill_schedule_preview_groups_and_readiness_are_functional](../tests/browser/test_mobile_navigation.py) — Mobile and desktop operator flows cover responder groups, exact-message/airtime preview, scheduling, and readiness reporting.
+- Automated: [tests/browser/test_mobile_navigation.py::test_welfare_drill_schedule_preview_groups_and_readiness_are_functional](../tests/browser/test_mobile_navigation.py) — Mobile and desktop operator flows cover responder-group targeting, exact-message/airtime preview, scheduling, and readiness reporting.
 
 Known limitations:
 

@@ -128,6 +128,17 @@
 .outpost-map-marker.shape-pin.selected .outpost-map-marker-symbol {
   transform: translate(-50%, -68%) rotate(-45deg) scale(1.18);
 }
+.outpost-map-marker.shape-group .outpost-map-marker-symbol {
+  --marker-size: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px 6px 10px 10px;
+}
+.outpost-map-marker.shape-group .outpost-map-marker-symbol::after {
+  content: "✦";
+  color: #fff;
+  font: 800 10px/1 Figtree, sans-serif;
+}
 
 .outpost-map-marker.tone-info { --marker-color: #63a8a0; }
 .outpost-map-marker.tone-caution { --marker-color: #d2a85b; }
@@ -141,6 +152,7 @@
 .outpost-map-marker.tone-member { --marker-color: #397d66; --marker-border: #b9e3d1; }
 .outpost-map-marker.tone-discovered { --marker-color: #5885a1; --marker-border: #b9d8e8; }
 .outpost-map-marker.tone-trusted { --marker-color: #a47c35; --marker-border: #efd08b; }
+.outpost-map-marker.tone-grouped { --marker-color: #76569c; --marker-border: #e1c6ff; }
 .outpost-map-marker.tone-waypoint { --marker-color: #286c55; --marker-border: #9ad4ba; }
 .outpost-map-marker.tone-quake { --marker-color: #8c672b; --marker-border: #f0ca77; }
 .outpost-map-marker.status-monitoring .outpost-map-marker-symbol {

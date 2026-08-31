@@ -5,6 +5,10 @@ import time
 from typing import Any
 
 from outpost.audit import write_audit
+from outpost.channel_profile import (
+    CHANNEL_BINDINGS_SETTING,
+    apply_channel_bindings,
+)
 from outpost.config import Config
 from outpost.operator_context import current_actor_ref
 from outpost.store import Database
@@ -48,6 +52,11 @@ class RuntimeSettings:
             watch_candidate = self.config.watch.model_dump()
             watch_candidate.update(watch_values)
             self.config.watch = type(self.config.watch).model_validate(watch_candidate)
+        channel_bindings = values.get(CHANNEL_BINDINGS_SETTING)
+        if channel_bindings is not None:
+            if not isinstance(channel_bindings, dict):
+                raise ValueError("stored Outpost channel bindings must be a mapping")
+            apply_channel_bindings(self.config, channel_bindings)
 
     def redacted(self) -> dict[str, Any]:
         return {
@@ -105,6 +114,20 @@ class RuntimeSettings:
         node = self.redacted()["node"]
         assert isinstance(node, dict)
         return node
+
+    async def bind_outpost_channels(self, bindings: dict[str, int]) -> dict[str, int]:
+        candidate = self.config.model_copy(deep=True)
+        apply_channel_bindings(candidate, bindings)
+        normalized = {str(name).lower(): int(index) for name, index in bindings.items()}
+        await self.database.write(
+            """
+            INSERT INTO runtime_setting(key,value,updated_at) VALUES(?,?,?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at
+            """,
+            (CHANNEL_BINDINGS_SETTING, json.dumps(normalized, sort_keys=True), int(time.time())),
+        )
+        apply_channel_bindings(self.config, normalized)
+        return normalized
 
     async def update_watch(self, values: dict[str, Any]) -> dict[str, Any]:
         allowed = {

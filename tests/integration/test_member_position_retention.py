@@ -103,6 +103,9 @@ async def test_operator_position_lifecycle_and_sensitive_export_disclosure(tmp_p
     )
     governor = production_governor(database, clock)
     checkins = CheckinService(database, governor, clock)
+    await database.write("UPDATE member SET trust='responder' WHERE id=?", (member.id,))
+    group = await checkins.create_group("Medical", "medical", "web:operator")
+    await checkins.set_group_members(group["id"], [member.id], "web:operator")
     event = await checkins.open_event("Privacy exercise", "all", "operator")
     await checkins.checkin(member, "ok")
     backups = BackupService(database)
@@ -125,11 +128,15 @@ async def test_operator_position_lifecycle_and_sensitive_export_disclosure(tmp_p
     assert item["visibility"] == "operator exact; member coarse"
     assert item["retention_hours"] == 2
     assert item["expires_at"] > item["received_at"]
+    assert item["responder_groups"] == [
+        {"id": group["id"], "name": "Medical", "response_type": "medical"}
+    ]
     discovered_items = client.get("/api/v1/members/map?view=discovered").json()["items"]
     assert len(discovered_items) == 1
     assert discovered_items[0]["mesh_id"] == discovered.mesh_id
     assert discovered_items[0]["long_name"] == "Field Radio"
     assert discovered_items[0]["category"] == "discovered"
+    assert discovered_items[0]["responder_groups"] == []
     assert "mesh broadcast" in discovered_items[0]["visibility"]
     all_items = client.get("/api/v1/members/map?view=all").json()["items"]
     assert {value["category"] for value in all_items} == {"approved", "discovered"}

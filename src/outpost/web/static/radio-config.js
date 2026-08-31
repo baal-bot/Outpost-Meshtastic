@@ -34,12 +34,13 @@ function configMarkup() {
       </nav>
       <div class="radio-config-pane active" data-radio-pane="essentials">
         <div class="radio-config-grid">
-          <form id="radio-identity-form" class="radio-config-form"><div><p class="eyebrow">IDENTITY</p><h3>Node name</h3><p>Shown to nearby Meshtastic users.</p></div><label>Long name<input id="radio-long-name" maxlength="40" required></label><label>Short name<input id="radio-short-name" maxlength="4" required></label><button type="submit">Save identity</button><output id="radio-identity-result"></output></form>
+          <form id="radio-identity-form" class="radio-config-form"><div><p class="eyebrow">IDENTITY</p><h3>Node name</h3><p>Shown to nearby Meshtastic users.</p></div><div id="outpost-identity-preview" class="radio-policy-note"></div><label>Long name<input id="radio-long-name" maxlength="40" required></label><label>Short name<input id="radio-short-name" maxlength="4" required></label><div class="radio-form-actions"><button type="submit">Save identity</button><button id="radio-use-outpost-identity" class="secondary" type="button">Use unique Outpost name</button></div><output id="radio-identity-result"></output></form>
           <form id="radio-device-form" class="radio-config-form"><div><p class="eyebrow">DEVICE</p><h3>Connected-node behavior</h3><p>Only roles that preserve Outpost's client connection are available.</p></div><label>Role<select id="radio-role"></select></label><label>Rebroadcast mode<select id="radio-rebroadcast"></select></label><label>Node info interval · seconds<input id="radio-node-interval" type="number" min="900" max="86400" required></label><button type="submit">Save device settings</button><output id="radio-device-result"></output></form>
         </div>
         <form id="radio-lora-form" class="radio-config-form radio-config-wide"><div><p class="eyebrow">LORA</p><h3>Regional radio profile</h3><p>Region must match local law. LONG FAST, hop limit 3, and automatic transmit power are the Outpost defaults.</p></div><div class="radio-form-row"><label>Legal region<select id="radio-region" required></select></label><label>Modem preset<select id="radio-preset-config" required></select></label><label>Hop limit<input id="radio-hop-limit" type="number" min="1" max="7" required></label><label>Transmit power · dBm<input id="radio-tx-power" type="number" min="0" max="30" required><small>0 lets firmware choose.</small></label><label>Frequency slot<input id="radio-frequency-slot" type="number" min="0" max="65535" required><small>0 = automatic from the primary channel name. Explicit slots must exist for the selected region and preset. Shared by all messaging channels.</small></label></div><label class="radio-check"><input id="radio-tx-enabled" type="checkbox"> Radio transmission enabled</label><button type="submit">Save LoRa profile</button><output id="radio-lora-result"></output></form>
       </div>
       <div class="radio-config-pane" data-radio-pane="channels" hidden>
+        <form id="outpost-profile-form" class="radio-config-form radio-config-wide outpost-profile-form"><div class="outpost-profile-heading"><div><p class="eyebrow">OUTPOST INTEROPERABILITY</p><h3>Add Outpost channels</h3><p>Install the standard public, outpost, and watch channels into compatible empty slots. Existing radio channels are never renamed, moved, rekeyed, disabled, or overwritten.</p></div><span id="outpost-profile-state" class="group-type-pill">Checking…</span></div><p class="outpost-profile-boundary"><strong>Shared-key boundary:</strong> these versioned keys let independent Outposts meet on air, but they do not establish trust. Full mesh IDs, reviewed PKI keys, and operator approval remain the identity boundary.</p><div id="outpost-profile-rows" class="outpost-profile-rows"><p>Inspecting channel slots…</p></div><div class="radio-form-actions"><button id="outpost-profile-install" type="submit">Review channel install</button><span id="outpost-profile-slot-note"></span></div><output id="outpost-profile-result"></output></form>
         <form id="radio-channel-form" class="radio-config-form radio-config-wide"><div><p class="eyebrow">CHANNELS</p><h3>Meshtastic channel slots</h3><p>Active slots must be consecutive. Keys are never read back or written to Outpost logs.</p></div><div class="radio-form-row"><label>Messaging channel slot<select id="radio-channel-index"></select></label><label>Role<select id="radio-channel-role"></select></label><label>Name<input id="radio-channel-name" maxlength="12"></label><label>Position precision<input id="radio-position-precision" type="number" min="0" max="32"><small>0 hides position; 32 is exact.</small></label></div><div id="radio-channel-policy" class="radio-policy-note"></div><fieldset><legend>Channel key</legend><label>Replace with base64 key<input id="radio-channel-psk" maxlength="44" autocomplete="off" spellcheck="false" placeholder="Leave blank to retain current key"></label><label class="radio-check"><input id="radio-channel-generate" type="checkbox"> Generate a new AES-256 key</label><small id="radio-channel-key-state"></small></fieldset><div class="radio-check-row"><label class="radio-check"><input id="radio-channel-uplink" type="checkbox"> MQTT uplink</label><label class="radio-check"><input id="radio-channel-downlink" type="checkbox"> MQTT downlink</label><label class="radio-check"><input id="radio-channel-muted" type="checkbox"> Mute received notifications</label></div><button type="submit">Save channel</button><output id="radio-channel-result"></output><div id="radio-generated-key" class="radio-generated-key" hidden><strong>Copy this key now</strong><p>It will not be shown again by Outpost.</p><code></code></div></form>
       </div>
       <div class="radio-config-pane" data-radio-pane="location" hidden>
@@ -105,6 +106,57 @@ export async function initRadioConfigurator({api}) {
     }
   }
 
+  function renderOutpostProfile(profile) {
+    const rows = byId("outpost-profile-rows");
+    const badge = byId("outpost-profile-state");
+    const button = byId("outpost-profile-install");
+    const note = byId("outpost-profile-slot-note");
+    rows.replaceChildren();
+    if (!profile) {
+      rows.textContent = "Outpost channel profile is unavailable.";
+      badge.textContent = "Unavailable";
+      button.disabled = true;
+      return;
+    }
+    badge.textContent = profile.ready ? `Outpost v${profile.version} configured` : `Outpost v${profile.version} incomplete`;
+    badge.classList.toggle("active", profile.ready);
+    for (const channel of profile.channels) {
+      const row = document.createElement("article");
+      const identity = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = channel.name;
+      const detail = document.createElement("small");
+      const installed = channel.matching_slots.length > 0;
+      detail.textContent = installed
+        ? `Compatible channel found in slot ${channel.matching_slots.join(", ")}.`
+        : "Standard AES-256 channel is not installed.";
+      identity.append(title, detail);
+      if (channel.conflict_slots.length) {
+        const conflict = document.createElement("small");
+        conflict.className = "outpost-profile-conflict";
+        conflict.textContent = `Same name with another key in slot ${channel.conflict_slots.join(", ")}; it will remain unchanged.`;
+        identity.append(conflict);
+      }
+      const label = document.createElement("label");
+      label.append(document.createTextNode(installed ? "Use slot" : "Add to empty slot"));
+      const select = document.createElement("select");
+      select.id = `outpost-profile-${channel.name}`;
+      select.dataset.profileChannel = channel.name;
+      const slots = installed ? channel.matching_slots : profile.install_slots;
+      for (const slot of slots) option(select, slot, `Slot ${slot}`);
+      select.value = String(profile.recommended_bindings[channel.name] ?? slots[0] ?? "");
+      select.disabled = slots.length === 0;
+      label.append(select);
+      row.append(identity, label);
+      rows.append(row);
+    }
+    button.disabled = profile.ready || !profile.can_install;
+    button.textContent = profile.ready ? "Outpost channels configured" : "Review channel install";
+    note.textContent = profile.ready
+      ? "Bindings and channel keys match."
+      : profile.reason || `Only empty slot${profile.install_slots.length === 1 ? "" : "s"} ${profile.install_slots.join(", ")} may be written.`;
+  }
+
   function render(next) {
     state = next;
     renderOutpostPolicies(state?.outpost_channel_policies || []);
@@ -147,6 +199,8 @@ export async function initRadioConfigurator({api}) {
     }
     value("radio-long-name", state.identity.long_name);
     value("radio-short-name", state.identity.short_name);
+    byId("outpost-identity-preview").textContent = `Unique Outpost identity: ${state.outpost_identity?.display_name || state.identity.long_name}`;
+    renderOutpostProfile(state.outpost_profile);
     fillSelect(byId("radio-role"), state.options.roles, state.device.role);
     fillSelect(byId("radio-rebroadcast"), state.options.rebroadcast_modes, state.device.rebroadcast_mode);
     value("radio-node-interval", state.device.node_info_broadcast_secs || 10800);
@@ -274,6 +328,31 @@ export async function initRadioConfigurator({api}) {
     checked("radio-fixed-position", true);
     value("radio-latitude", state.outpost_location.latitude);
     value("radio-longitude", state.outpost_location.longitude);
+  });
+  byId("radio-use-outpost-identity").addEventListener("click", () => {
+    if (state?.outpost_identity?.display_name) {
+      value("radio-long-name", state.outpost_identity.display_name);
+    }
+  });
+
+  byId("outpost-profile-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const bindings = Object.fromEntries(
+      [...document.querySelectorAll("[data-profile-channel]")].map((select) => [
+        select.dataset.profileChannel,
+        Number(select.value),
+      ]),
+    );
+    if (Object.values(bindings).some((slot) => !Number.isInteger(slot))) {
+      byId("outpost-profile-result").textContent = "Select a legal slot for every Outpost channel.";
+      return;
+    }
+    await apply(
+      "outpost_profile",
+      {bindings},
+      "This add-only operation writes standard shared keys only to the selected empty slots. Existing radio channels remain unchanged.",
+      byId("outpost-profile-result"),
+    );
   });
 
   byId("radio-identity-form").addEventListener("submit", async (event) => {

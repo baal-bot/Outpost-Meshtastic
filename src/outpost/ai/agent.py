@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -75,12 +76,14 @@ class AIService:
         store: AIStore,
         *,
         now: Any,
+        node_name: Callable[[], str] | None = None,
     ) -> None:
         self.config = config
         self.provider = provider
         self.retrieval = retrieval
         self.store = store
         self.now = now
+        self.node_name = node_name or (lambda: self.config.node.name)
         self._semaphore = asyncio.Semaphore(config.ai.max_concurrency)
         self._count_lock = asyncio.Lock()
         self._pending = 0
@@ -102,7 +105,7 @@ class AIService:
         self._capabilities = await self.provider.capabilities()
         budgeter = TokenBudgeter(self.config.ai.budget, self._capabilities.context_tokens)
         system = SYSTEM_PROMPT.format(
-            node_name=self.config.node.name,
+            node_name=self.node_name(),
             locale=self.config.node.locale,
             emergency_number=self.config.node.emergency_number,
             persona=self.config.ai.persona_addendum,
@@ -367,7 +370,7 @@ class AIService:
         capabilities = self._capabilities or await self.provider.capabilities()
         system = (
             SYSTEM_PROMPT.format(
-                node_name=self.config.node.name,
+                node_name=self.node_name(),
                 locale=self.config.node.locale,
                 emergency_number=self.config.node.emergency_number,
                 persona=self.config.ai.persona_addendum,

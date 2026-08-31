@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from copy import deepcopy
 from typing import Any
 
+from outpost.channel_profile import OUTPOST_CHANNEL_PROFILE, matching_profile_channel
 from outpost.clock import Clock
 from outpost.config import RadioConfig
 from outpost.radio_power import normalize_battery_level
@@ -198,6 +199,10 @@ class MeshtasticRadioLink:
                         getattr(channel.settings.module_settings, "position_precision", 0)
                     ),
                     "muted": bool(getattr(channel.settings.module_settings, "is_muted", False)),
+                    "outpost_profile": matching_profile_channel(
+                        str(getattr(channel.settings, "name", "")),
+                        bytes(getattr(channel.settings, "psk", b"")),
+                    ),
                 }
                 for index, channel in enumerate(channels)
             ],
@@ -250,7 +255,7 @@ class MeshtasticRadioLink:
                     status = await self.configuration_status()
                     snapshot["coordinates"] = dict(status["position"])
                 return snapshot
-            if section == "channel":
+            if section in {"channel", "outpost_profile"}:
                 return {
                     "index": None,
                     "channels": [self._clone_message(channel) for channel in local.channels],
@@ -263,7 +268,12 @@ class MeshtasticRadioLink:
         raise ValueError("unsupported radio configuration section")
 
     async def restore_configuration(
-        self, section: str, snapshot: dict[str, Any], *, channel_index: int | None = None
+        self,
+        section: str,
+        snapshot: dict[str, Any],
+        *,
+        channel_index: int | None = None,
+        channel_indices: list[int] | None = None,
     ) -> None:
         """Best-effort rollback using a secret-bearing snapshot held only in memory."""
         local = self._local_node()
@@ -298,6 +308,13 @@ class MeshtasticRadioLink:
                 local.channels[channel_index].CopyFrom(snapshot["channels"][channel_index])
                 await asyncio.to_thread(local.writeChannel, channel_index)
                 return
+            if section == "outpost_profile":
+                if not channel_indices:
+                    raise ValueError("Outpost profile rollback requires channel indices")
+                for index in sorted(set(channel_indices)):
+                    local.channels[index].CopyFrom(snapshot["channels"][index])
+                    await asyncio.to_thread(local.writeChannel, index)
+                return
             if section == "mqtt":
                 local.moduleConfig.mqtt.CopyFrom(snapshot["mqtt"])
                 for index, channel in enumerate(snapshot["channels"]):
@@ -326,6 +343,14 @@ class MeshtasticRadioLink:
                 actual = bytes(local.channels[int(values["index"])].settings.psk)
                 if not secrets.compare_digest(expected, actual):
                     rejected.append("psk")
+        elif section == "outpost_profile":
+            for name, index in values["bindings"].items():
+                channel = local.channels[int(index)]
+                if matching_profile_channel(
+                    str(getattr(channel.settings, "name", "")),
+                    bytes(getattr(channel.settings, "psk", b"")),
+                ) != str(name):
+                    rejected.append(f"channels.{name}.psk")
         elif section == "mqtt":
             mqtt = local.moduleConfig.mqtt
             for field in ("username", "password"):
@@ -353,6 +378,7 @@ class MeshtasticRadioLink:
         local = self._local_node()
         generated_psk: str | None = None
         async with self._config_lock:
+            channels = getattr(local, "channels", []) or []
             if section == "identity":
                 long_name = str(values["long_name"]).strip()
                 short_name = str(values["short_name"]).strip()
@@ -409,7 +435,6 @@ class MeshtasticRadioLink:
                     await asyncio.to_thread(local.removeFixedPosition)
             elif section == "channel":
                 index = int(values["index"])
-                channels = getattr(local, "channels", []) or []
                 if not 0 <= index < len(channels):
                     raise ValueError("channel slot is unavailable")
                 role = str(values["role"]).upper()
@@ -450,6 +475,47 @@ class MeshtasticRadioLink:
                 )
                 channel.settings.module_settings.is_muted = bool(values["muted"])
                 await asyncio.to_thread(local.writeChannel, index)
+            elif section == "outpost_profile":
+                bindings = {
+                    str(name).lower(): int(index) for name, index in values["bindings"].items()
+                }
+                planned_active = {
+                    index
+                    for index, channel in enumerate(channels)
+                    if self._enum_name(channel, "role") != "DISABLED"
+                } | set(bindings.values())
+                if sorted(planned_active) != list(range(len(planned_active))):
+                    raise ValueError(
+                        "selected additions would leave a disabled gap between active channels"
+                    )
+                added: list[int] = []
+                for name, index in sorted(bindings.items(), key=lambda item: item[1]):
+                    if name not in OUTPOST_CHANNEL_PROFILE:
+                        raise ValueError(f"unknown Outpost channel: {name}")
+                    if not 0 <= index < len(channels):
+                        raise ValueError("channel slot is unavailable")
+                    channel = channels[index]
+                    existing_match = matching_profile_channel(
+                        str(getattr(channel.settings, "name", "")),
+                        bytes(getattr(channel.settings, "psk", b"")),
+                    )
+                    if existing_match == name:
+                        continue
+                    if self._enum_name(channel, "role") != "DISABLED":
+                        raise ValueError(f"slot {index} is active and will not be overwritten")
+                    if index == 0:
+                        raise ValueError("the active primary channel will not be overwritten")
+                    profile = OUTPOST_CHANNEL_PROFILE[name]
+                    self._set_enum(channel, "role", "SECONDARY")
+                    channel.settings.name = profile.name
+                    channel.settings.psk = profile.psk
+                    channel.settings.uplink_enabled = False
+                    channel.settings.downlink_enabled = False
+                    channel.settings.module_settings.position_precision = 0
+                    channel.settings.module_settings.is_muted = False
+                    await asyncio.to_thread(local.writeChannel, index)
+                    added.append(index)
+                return {"generated_psk": None, "added_channel_indices": added}
             else:
                 raise ValueError("unsupported radio configuration section")
         result = await self.configuration_status()

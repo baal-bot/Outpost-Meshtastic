@@ -26,6 +26,7 @@ from outpost.bbs.channels import ChannelDirectory
 from outpost.bbs.digests import DigestService
 from outpost.bbs.mail import MailService
 from outpost.bbs.service import BBSService
+from outpost.channel_profile import channel_slot, outpost_display_name
 from outpost.clock import Clock, SystemClock
 from outpost.commands.ai import specs as ai_specs
 from outpost.commands.alerts import specs as alert_specs
@@ -195,7 +196,9 @@ class OutpostApp:
             self.database,
             safety_repeat_window_seconds=self.config.security.safety_repeat_window_seconds,
         )
-        self.router = Router(self.config, members, sessions, limiter)
+        self.router = Router(
+            self.config, members, sessions, limiter, node_name=lambda: self.outpost_name
+        )
         self.ai_store = AIStore(
             self.database, evidence_tokens=self.config.ai.budget.evidence_tokens
         )
@@ -214,6 +217,7 @@ class OutpostApp:
             ),
             self.ai_store,
             now=lambda: int(self.clock.now().timestamp()),
+            node_name=lambda: self.outpost_name,
         )
         self.bbs = BBSService(
             self.database,
@@ -244,7 +248,11 @@ class OutpostApp:
         )
         self.alerts = AlertService(self.database, self.governor, self.clock, self.config)
         self.checkins = CheckinService(
-            self.database, self.governor, self.clock, self.config.node.timezone
+            self.database,
+            self.governor,
+            self.clock,
+            self.config.node.timezone,
+            public_channel=lambda: channel_slot(self.config, "public", 0),
         )
         self.incident_reports = IncidentReportService(
             self.database,
@@ -364,6 +372,7 @@ class OutpostApp:
             throttle_max_seconds=auth_config.throttle_max_seconds,
         )
         self.runtime_settings = RuntimeSettings(self.database, self.config)
+        self.radio_configuration.binding_updater = self.runtime_settings.bind_outpost_channels
         self.backups = BackupService(self.database, self.config.store.backup)
         self.restore_coordinator = RestoreCoordinator(
             self.backups, self._restore_database, self._request_restart
@@ -587,6 +596,11 @@ class OutpostApp:
             self.incidents.origin_node = local_id
             self.federation.local_mesh_id = local_id
             self.federation_sync.local_mesh_id = local_id
+
+    @property
+    def outpost_name(self) -> str:
+        mesh_id = self.radio.local_node_id or self.radio.snapshot.node_id
+        return outpost_display_name(self.config.node.name, mesh_id)
 
     def _background_task_done(self, task: asyncio.Task[None]) -> None:
         name = task.get_name()
@@ -1135,7 +1149,7 @@ class OutpostApp:
         counter = int(self.clock.now().timestamp()) & 0xFFFFFFFF
         hello = {
             "mesh_id": local_id,
-            "name": self.config.node.name,
+            "name": self.outpost_name,
             "protocol": 1,
             "capabilities": capabilities,
         }
@@ -1154,7 +1168,7 @@ class OutpostApp:
                     binary_payload=frame,
                     portnum=self.config.radio.federation_portnum,
                     dest=destination,
-                    channel=0,
+                    channel=channel_slot(self.config, "outpost", 0),
                     traffic_class=TrafficClass.FEDERATION,
                     want_ack=destination != "^all",
                     multipart=len(frames) > 1,
@@ -1180,7 +1194,7 @@ class OutpostApp:
                     binary_payload=frame,
                     portnum=self.config.radio.federation_portnum,
                     dest=destination,
-                    channel=0,
+                    channel=channel_slot(self.config, "outpost", 0),
                     traffic_class=traffic_class,
                     want_ack=want_ack,
                     multipart=len(frames) > 1,
@@ -3019,6 +3033,10 @@ class OutpostApp:
             {"latitude": location.lat, "longitude": location.lon} if location is not None else None
         )
         result["outpost_policy_channels"] = sorted(self.config.channels)
+        result["outpost_identity"] = {
+            "base_name": self.config.node.name,
+            "display_name": self.outpost_name,
+        }
         result["outpost_channel_policies"] = [
             {
                 "index": index,
@@ -3063,6 +3081,7 @@ class OutpostApp:
                     result["lora"]["frequency_slot"],
                     primary.get("name", ""),
                 )
+        result["outpost_profile"] = self.radio_configuration.profile_context(result)
         result["operation"] = self.radio_configuration.operation()
         return result
 
@@ -3093,7 +3112,7 @@ class OutpostApp:
                             OutboundItem(
                                 text=part,
                                 dest=delivery.mesh_id,
-                                channel=0,
+                                channel=channel_slot(self.config, "public", 0),
                                 traffic_class=TrafficClass.DIGEST,
                                 want_ack=True,
                                 multipart=len(parts) > 1,
@@ -3462,7 +3481,7 @@ class OutpostApp:
             target=f"incident:{incident.id}",
             audience="responders",
             text=f"⚠ Emergency keyword · INC {incident.local_ref} · {incident.title[:80]}",
-            channels=[0],
+            channels=[channel_slot(self.config, "public", 0)],
             traffic_class=TrafficClass.ALERT,
             severity=Severity.URGENT,
             exclude_mesh_ids=(sender_mesh_id,),
@@ -3478,7 +3497,7 @@ class OutpostApp:
         configured = set(self.config.channels)
         available = set(self.radio.snapshot.channels)
         return {
-            "node": self.config.node.name,
+            "node": self.outpost_name,
             "runtime": {
                 "mode": self.runtime_mode,
                 "simulated": self.runtime_mode != "live",

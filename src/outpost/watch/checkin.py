@@ -5,6 +5,7 @@ import csv
 import hashlib
 import io
 import sqlite3
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, time, timedelta
 from typing import Any
@@ -20,6 +21,18 @@ from outpost.transport.models import Severity, TrafficClass
 from outpost.transport.toa import MAX_PAYLOAD_BYTES
 
 from .delivery import AudienceDelivery, AudienceNotifier
+
+RESPONDER_GROUP_TYPES = frozenset(
+    {
+        "general",
+        "medical",
+        "fire",
+        "search",
+        "logistics",
+        "communications",
+        "public_safety",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -77,9 +90,11 @@ class CheckinService:
         governor: AirtimeGovernor,
         clock: Clock,
         timezone: str = "UTC",
+        public_channel: Callable[[], int] | None = None,
     ) -> None:
         self.database, self.governor, self.clock = database, governor, clock
         self.timezone = ZoneInfo(timezone)
+        self.public_channel = public_channel or (lambda: 0)
         self.notifier = AudienceNotifier(database, governor, clock)
         self._solicitation_lock = asyncio.Lock()
         self._schedule_lock = asyncio.Lock()
@@ -243,7 +258,7 @@ class CheckinService:
             target=f"checkin:{checkin_id}",
             audience="responders",
             text=text,
-            channels=[0],
+            channels=[self.public_channel()],
             traffic_class=TrafficClass.ALERT,
             severity=Severity.URGENT,
             exclude_mesh_ids=(member.mesh_id,),
@@ -259,7 +274,8 @@ class CheckinService:
         result: list[dict[str, Any]] = []
         for row in rows:
             members = await self.database.read(
-                "SELECT m.id,m.mesh_id,m.handle,m.trust FROM responder_group_member gm "
+                "SELECT m.id,m.mesh_id,m.handle,m.long_name,m.short_name,m.trust,m.last_seen "
+                "FROM responder_group_member gm "
                 "JOIN member m ON m.id=gm.member_id WHERE gm.group_id=? "
                 "ORDER BY COALESCE(m.handle,m.mesh_id)",
                 (row["id"],),
@@ -273,26 +289,36 @@ class CheckinService:
             raise ValueError("Responder group not found.")
         return dict(rows[0])
 
-    async def create_group(self, name: str, response_type: str, actor: str) -> dict[str, Any]:
-        name = name.strip()
-        kinds = {
-            "general",
-            "medical",
-            "fire",
-            "search",
-            "logistics",
-            "communications",
-            "public_safety",
-        }
-        if not 1 <= len(name) <= 50:
+    @staticmethod
+    def _validate_group(name: str, response_type: str) -> str:
+        normalized_name = name.strip()
+        if not 1 <= len(normalized_name) <= 50:
             raise ValueError("Group name must be 1-50 characters.")
-        if response_type not in kinds:
+        if response_type not in RESPONDER_GROUP_TYPES:
             raise ValueError("Unknown responder group type.")
+        return normalized_name
+
+    async def create_group(self, name: str, response_type: str, actor: str) -> dict[str, Any]:
+        name = self._validate_group(name, response_type)
         try:
             group_id = await self.database.write(
                 "INSERT INTO responder_group(name,response_type,created_at,created_by) "
                 "VALUES(?,?,?,?)",
                 (name, response_type, int(self.clock.now().timestamp()), actor),
+            )
+        except sqlite3.IntegrityError as error:
+            if "UNIQUE constraint failed" in str(error):
+                raise ValueError("A responder group with that name already exists.") from error
+            raise
+        return next(group for group in await self.groups() if group["id"] == group_id)
+
+    async def update_group(self, group_id: int, name: str, response_type: str) -> dict[str, Any]:
+        await self._require_group(group_id)
+        name = self._validate_group(name, response_type)
+        try:
+            await self.database.write(
+                "UPDATE responder_group SET name=?,response_type=? WHERE id=?",
+                (name, response_type, group_id),
             )
         except sqlite3.IntegrityError as error:
             if "UNIQUE constraint failed" in str(error):
@@ -342,7 +368,7 @@ class CheckinService:
 
     async def responder_candidates(self) -> list[dict[str, Any]]:
         rows = await self.database.read(
-            "SELECT id,mesh_id,handle,trust FROM member "
+            "SELECT id,mesh_id,handle,long_name,short_name,trust,last_seen FROM member "
             "WHERE trust IN ('responder','operator') ORDER BY COALESCE(handle,mesh_id)"
         )
         return [dict(row) for row in rows]
@@ -485,7 +511,14 @@ class CheckinService:
             traffic_class=TrafficClass.DIGEST,
             copies=len(selected),
         )
-        estimate.update({"recipient_count": len(selected), "channel_count": 1, "channels": [0]})
+        public_channel = self.public_channel()
+        estimate.update(
+            {
+                "recipient_count": len(selected),
+                "channel_count": 1,
+                "channels": [public_channel],
+            }
+        )
         return estimate
 
     async def solicit(self, event_id: int) -> dict[str, Any]:
@@ -506,7 +539,7 @@ class CheckinService:
                             OutboundItem(
                                 text=message,
                                 dest=row["mesh_id"],
-                                channel=0,
+                                channel=self.public_channel(),
                                 traffic_class=TrafficClass.DIGEST,
                                 want_ack=True,
                                 queue_key=f"checkin:{event.id}:{row['member_id']}",

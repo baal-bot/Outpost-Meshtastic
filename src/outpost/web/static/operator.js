@@ -1,5 +1,6 @@
 import "/nav.js";
-import("/member-map.js?v=7");
+import("/member-map.js?v=8");
+import("/member-groups.js?v=1");
 import {byId as $, escapeHtml as safe, relativeAge} from "/ui-primitives.js";
 const relative = stamp => relativeAge(stamp, {suffix:" ago"});
 const exactTime = stamp => stamp ? new Date(stamp).toLocaleString() : "Not recorded";
@@ -303,6 +304,7 @@ async function reviewPki(action) {
     return;
   }
   await Promise.all([loadMembers(), loadAudit(false)]);
+  if (payload.trust) window.dispatchEvent(new Event("outpost:member-trust-changed"));
   await openMemberDetail(member.id);
 }
 

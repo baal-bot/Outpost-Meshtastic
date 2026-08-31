@@ -163,6 +163,13 @@ primary-channel-name calculation, while an explicit slot selects the shared RF f
 messaging channel. Preflight validates the region/preset slot count and shows the automatic or
 explicit effective slot and center frequency before any write.
 
+The Radio page's **Add Outpost channels** action is add-only. It detects compatible `public`,
+`outpost`, and `watch` channels, offers only consecutive empty slots the radio can legally activate,
+and previews the additions and application bindings. Occupied slots are rejected rather than
+modified. After verified readback, Outpost persists the semantic bindings so BBS, federation,
+direct welfare traffic, and Watch escalation follow the chosen slots. The common profile keys are
+public interoperability material and must not be treated as peer authentication.
+
 Outpost keeps a redacted pre-change snapshot and lifecycle record in SQLite. If firmware rejects a
 field, a multi-write operation fails partway, or fresh readback differs, it attempts to restore the
 in-memory pre-change radio configuration while the transport remains reachable. A failed or
@@ -195,6 +202,12 @@ more expensive future roster suppresses the run for operator review. Practice ne
 their response window, yield to real watch events and local quiet hours, and retain response rate,
 never-responded members, and nodes not heard since the prior net. Members can send `DRILLS OFF`
 without leaving real welfare rosters. `HELPME` always reports real need, including during a drill.
+
+Manage responder groups from **Members → Responder group management**, directly below the member
+map. Group names, specialties, and assignments are audited. Only identities already reviewed as
+Responder or Operator are eligible; changing a group does not change trust. Grouped members use a
+distinct response-team marker on the member map. The Watch page shows the current teams and uses
+them as selectable event and drill audiences.
 
 ## SAME receiver operations
 

@@ -18,6 +18,11 @@
   color: var(--muted);
   font-size: .65rem;
 }
+.member-map-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: -3px 0 12px; color: var(--muted); font-size: .61rem; }
+.member-map-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.member-map-legend i { display: grid; width: 14px; height: 14px; place-items: center; border: 2px solid #b9e3d1; border-radius: 50%; background: #397d66; color: #fff; font: 700 .48rem/1 Figtree, sans-serif; }
+.member-map-legend i.grouped { border-color: #e1c6ff; border-radius: 4px 4px 7px 7px; background: #76569c; }
+.member-map-legend i.discovered { border-color: #b9d8e8; border-radius: 3px; background: #5885a1; transform: rotate(45deg); }
 .member-position-map { height: 450px; }
 .member-position-result {
   min-height: 1em;
@@ -32,6 +37,10 @@
 }
 .outpost-map-detail .delete-position { width: 100%; margin-top: 8px; padding: 8px; }
 .outpost-map-detail p b { color: var(--ink); font-weight: 650; }
+.member-map-groups { display: grid; gap: 5px; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--soft); }
+.member-map-groups > b { color: var(--ink); font-size: .7rem; }
+.member-map-groups > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.member-map-groups span { padding: 4px 6px; color: #e1c6ff; background: color-mix(in srgb, var(--violet) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--violet) 42%, var(--line)); border-radius: 999px; font-size: .57rem; }
 
 @media (max-width: 700px) {
   .member-map-heading { align-items: flex-start; flex-direction: column; }

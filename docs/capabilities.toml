@@ -36,7 +36,7 @@ definition = "A release decision explicitly accepted all required safety, compat
 [[capabilities]]
 id = "meshtastic_transport"
 area = "Meshtastic transport"
-present = "Serial, TCP, and BLE links; reconnect, liveness supervision, inbound backpressure, and radio status."
+present = "Serial, TCP, and BLE links; reconnect, liveness supervision, inbound backpressure, radio status, and verified add-only installation of standard Outpost channels into selected empty slots."
 maturity = "single_node_field_tested"
 introduced_commit = "04e74ca"
 limitations = [
@@ -47,11 +47,15 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-27"
+date = "2026-08-31"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/unit/test_radio_link.py::test_full_callback_queue_counts_drop_and_keeps_newest_frame"
 description = "A saturated callback queue records the dropped frame and retains the newest packet."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_radio_configuration.py::test_outpost_profile_is_add_only_verified_and_persists_bindings"
+description = "Standard Outpost channels use only selected empty slots, require readback verification, and persist semantic bindings without exposing keys."
 [[capabilities.evidence]]
 kind = "field"
 path = "docs/FEDERATION-ACCEPTANCE-BACKLOG.md"
@@ -165,7 +169,7 @@ description = "Dispatch-time configuration faults are surfaced as degraded witho
 [[capabilities]]
 id = "identity_directory"
 area = "Identity and member directory"
-present = "Handles, social trust, reviewed Meshtastic PKI fingerprints, conflict demotion, explicit key rotation, recently-heard radio discovery, exact-position controls, and operator triage."
+present = "Radio-suffixed Outpost display identities, handles, social trust, reviewed Meshtastic PKI fingerprints, conflict demotion, explicit key rotation, recently-heard radio discovery, exact-position controls, centralized responder-group administration, grouped-member map markers, and operator triage."
 maturity = "automated_tested"
 introduced_commit = "8accdf3"
 limitations = [
@@ -176,7 +180,7 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-28"
+date = "2026-08-31"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_directory_moderation.py::test_channel_keys_only_appear_in_member_dm_detail"
@@ -189,6 +193,14 @@ description = "Discovered-radio triage and accountable operator actions."
 kind = "automated"
 path = "tests/integration/test_mesh_pki_trust.py::test_pki_key_change_demotes_and_requires_explicit_rotation_review"
 description = "A PKI key change demotes trust until an explicit audited rotation review."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_mobile_navigation.py::test_member_group_workspace_creates_edits_and_assigns_response_teams"
+description = "The Members workspace creates, edits, and assigns every response team while grouped members receive distinct map markers."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/unit/test_channel_profile.py::test_outpost_display_name_adds_radio_suffix_without_duplicating_it"
+description = "Operational display names gain the stable four-character radio suffix without changing the stored human name."
 
 [[capabilities]]
 id = "bbs_mail"
@@ -283,7 +295,7 @@ description = "Scheduled practice yields to real events and quiet hours and stop
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/browser/test_mobile_navigation.py::test_welfare_drill_schedule_preview_groups_and_readiness_are_functional"
-description = "Mobile and desktop operator flows cover responder groups, exact-message/airtime preview, scheduling, and readiness reporting."
+description = "Mobile and desktop operator flows cover responder-group targeting, exact-message/airtime preview, scheduling, and readiness reporting."
 
 [[capabilities]]
 id = "environment"

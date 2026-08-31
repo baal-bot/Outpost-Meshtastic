@@ -219,6 +219,8 @@ async def test_responder_groups_are_role_bounded_and_target_welfare_rosters(tmp_
     service = CheckinService(database, production_governor(database, clock), clock)
 
     group = await service.create_group("Medical", "medical", "web:operator")
+    group = await service.update_group(group["id"], "Medical Response", "medical")
+    assert group["name"] == "Medical Response"
     with pytest.raises(ValueError, match="only responder or operator"):
         await service.set_group_members(group["id"], [ordinary.id], "web:operator")
     await service.set_group_members(group["id"], [responder.id], "web:operator")
@@ -385,6 +387,12 @@ async def test_operator_api_manages_groups_schedules_and_drill_report(tmp_path) 
     )
     assert assigned.status_code == 200
     assert assigned.json()["members"][0]["handle"] == "medic"
+    updated_group = client.patch(
+        f"/api/v1/responder-groups/{group_id}",
+        json={"name": "Medical Response", "response_type": "medical"},
+    )
+    assert updated_group.status_code == 200
+    assert updated_group.json()["name"] == "Medical Response"
 
     preview = client.post(
         "/api/v1/welfare-schedules/preview",
@@ -474,6 +482,7 @@ async def test_operator_api_manages_groups_schedules_and_drill_report(tmp_path) 
         "responder_group.create",
         "responder_group.delete",
         "responder_group.members",
+        "responder_group.update",
         "welfare_schedule.create",
         "welfare_schedule.delete",
     }

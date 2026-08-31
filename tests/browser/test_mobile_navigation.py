@@ -2207,6 +2207,7 @@ def test_member_map_marker_filter_and_detail_use_shared_controller(
         "visibility": "members",
         "last_heard_snr": 8.5,
         "hops_away": 1,
+        "responder_groups": [{"id": 3, "name": "Medical", "response_type": "medical"}],
     }
     discovered = {
         **member,
@@ -2280,11 +2281,14 @@ def test_member_map_marker_filter_and_detail_use_shared_controller(
         assert discovery_row.get_by_role("button", name="Review").count() == 0
         marker = page.locator('[data-marker-id="member-9"]')
         marker.wait_for()
+        marker_classes = marker.get_attribute("class") or ""
+        assert "shape-group" in marker_classes and "tone-grouped" in marker_classes
         assert page.locator('[data-marker-id="member-10"]').count() == 0
         marker.click()
         detail = page.locator("#member-map-detail")
         detail.get_by_role("heading", name="@alice").wait_for()
         assert "Meshtastic position share" in detail.text_content()
+        assert "Response teams" in detail.text_content() and "Medical" in detail.text_content()
         assert marker.get_attribute("aria-pressed") == "true"
 
         page.locator("#member-map-trust").select_option("operator")
@@ -2301,6 +2305,139 @@ def test_member_map_marker_filter_and_detail_use_shared_controller(
         discovered_marker.click()
         detail.get_by_role("heading", name="Field Radio (!00000010)").wait_for()
         assert "DISCOVERED RADIO" in detail.text_content()
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("width", (390, 1280))
+def test_member_group_workspace_creates_edits_and_assigns_response_teams(
+    browser: object, dashboard_url: str, width: int
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    route_operator_workspace(page, [])
+    candidates = [
+        {
+            "id": 8,
+            "mesh_id": "!00000008",
+            "handle": "medic",
+            "long_name": "Morgan Lee",
+            "short_name": "MED",
+            "trust": "responder",
+            "last_seen": 2_000_000_000,
+        },
+        {
+            "id": 9,
+            "mesh_id": "!00000009",
+            "handle": "radio",
+            "long_name": "Riley Chen",
+            "short_name": "RAD",
+            "trust": "operator",
+            "last_seen": 2_000_000_000,
+        },
+    ]
+    groups = [
+        {
+            "id": 1,
+            "name": "Medical",
+            "response_type": "medical",
+            "created_at": 2_000_000_000,
+            "created_by": "web:operator",
+            "member_count": 1,
+            "members": [candidates[0]],
+        }
+    ]
+    mutations: list[tuple[str, dict[str, object]]] = []
+
+    def group_route(route: object) -> None:
+        request = route.request
+        path = urlparse(request.url).path
+        method = request.method
+        payload = request.post_data_json if request.post_data else {}
+        if method == "GET":
+            body = {"items": groups, "eligible_members": candidates}
+        elif method == "POST":
+            created = {
+                "id": 2,
+                "created_at": 2_000_000_100,
+                "created_by": "web:operator",
+                "member_count": 0,
+                "members": [],
+                **payload,
+            }
+            groups.append(created)
+            mutations.append(("create", payload))
+            body = created
+        elif method == "PATCH":
+            group = next(value for value in groups if value["id"] == int(path.rsplit("/", 1)[1]))
+            group.update(payload)
+            mutations.append(("update", payload))
+            body = group
+        elif method == "PUT" and path.endswith("/members"):
+            group_id = int(path.split("/")[-2])
+            group = next(value for value in groups if value["id"] == group_id)
+            member_ids = set(payload["member_ids"])
+            group["members"] = [member for member in candidates if member["id"] in member_ids]
+            group["member_count"] = len(group["members"])
+            mutations.append(("members", payload))
+            body = group
+        elif method == "DELETE":
+            group_id = int(path.rsplit("/", 1)[1])
+            groups[:] = [value for value in groups if value["id"] != group_id]
+            mutations.append(("delete", {"group_id": group_id}))
+            body = {"status": "deleted"}
+        else:
+            route.fulfill(status=405, content_type="application/json", body="{}")
+            return
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/api/v1/responder-groups**", group_route)
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/operator.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        workspace = page.locator("#responder-group-admin")
+        workspace.get_by_role("heading", name="Responder group management").wait_for()
+        map_box = page.locator(".member-map-panel").bounding_box()
+        group_box = workspace.bounding_box()
+        assert map_box is not None and group_box is not None
+        assert group_box["y"] >= map_box["y"] + map_box["height"]
+        assert workspace.locator("#group-admin-count").text_content() == "1"
+
+        page.locator("#group-create-name").fill("Radio Team")
+        page.locator("#group-create-type").select_option("communications")
+        page.get_by_role("button", name="Create group").click()
+        page.get_by_text("Created Radio Team.", exact=False).wait_for()
+        assert workspace.locator("#group-admin-count").text_content() == "2"
+
+        page.locator("#group-member-search").fill("Riley")
+        radio_choice = page.locator(".group-member-choice", has_text="Riley Chen")
+        radio_choice.locator('input[type="checkbox"]').check()
+        page.get_by_role("button", name="Save assignments").click()
+        page.get_by_text("Saved 1 assignment for Radio Team.", exact=True).wait_for()
+
+        page.locator("#group-edit-name").fill("Emergency Comms")
+        page.locator("#group-edit-type").select_option("logistics")
+        page.get_by_role("button", name="Save details").click()
+        page.get_by_text("Saved Emergency Comms.", exact=True).wait_for()
+        if VISUAL_ARTIFACT_DIR:
+            Path(VISUAL_ARTIFACT_DIR).mkdir(parents=True, exist_ok=True)
+            workspace.screenshot(
+                path=str(Path(VISUAL_ARTIFACT_DIR) / f"member-groups-{width}.png"),
+                animations="disabled",
+            )
+        page.get_by_role("button", name="Delete group").click()
+        dialog = page.get_by_role("dialog")
+        dialog.get_by_role("button", name="Delete responder group").click()
+        page.get_by_text("Deleted Emergency Comms.", exact=False).wait_for()
+        assert mutations == [
+            ("create", {"name": "Radio Team", "response_type": "communications"}),
+            ("members", {"member_ids": [9]}),
+            ("update", {"name": "Emergency Comms", "response_type": "logistics"}),
+            ("delete", {"group_id": 2}),
+        ]
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
     finally:
         page.close()
@@ -3083,6 +3220,191 @@ def test_radio_configurator_guides_mqtt_and_uses_shared_live_settings(
             },
         )
         assert accessibility.violations_count == 0, accessibility.generate_report()
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_radio_outpost_profile_adds_to_selected_empty_slots_without_overwrite(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    writes: list[dict[str, object]] = []
+    installed = False
+
+    def radio_config(bindings: dict[str, int] | None = None) -> dict[str, object]:
+        selected = bindings or {"public": 2, "outpost": 3, "watch": 4}
+        channels = [
+            {
+                "index": index,
+                "role": (
+                    "PRIMARY"
+                    if index == 0
+                    else "SECONDARY"
+                    if index == 1 or (bindings is not None and index in selected.values())
+                    else "DISABLED"
+                ),
+                "name": (
+                    "Neighborhood"
+                    if index == 0
+                    else "Family"
+                    if index == 1
+                    else next((name for name, slot in selected.items() if slot == index), "")
+                    if bindings is not None
+                    else ""
+                ),
+                "psk": "AES-256" if index else "default",
+                "uplink_enabled": False,
+                "downlink_enabled": False,
+                "position_precision": 0,
+                "muted": False,
+                "outpost_profile": (
+                    next((name for name, slot in selected.items() if slot == index), None)
+                    if bindings is not None
+                    else None
+                ),
+            }
+            for index in range(8)
+        ]
+        profile_channels = [
+            {
+                "name": name,
+                "configured_slot": selected[name] if bindings is not None else old_slot,
+                "matching_slots": [selected[name]] if bindings is not None else [],
+                "conflict_slots": [],
+            }
+            for name, old_slot in {"public": 0, "outpost": 2, "watch": 3}.items()
+        ]
+        return {
+            "available": True,
+            "node_id": "!699c2f30",
+            "identity": {"long_name": "Pittsburgh Outpost", "short_name": "PGH"},
+            "outpost_identity": {
+                "base_name": "Pittsburgh Outpost",
+                "display_name": "Pittsburgh Outpost 2f30",
+            },
+            "device": {
+                "role": "CLIENT",
+                "rebroadcast_mode": "ALL",
+                "node_info_broadcast_secs": 10800,
+            },
+            "lora": {
+                "region": "US",
+                "modem_preset": "LONG_FAST",
+                "frequency_slot": 20,
+                "hop_limit": 3,
+                "tx_power": 0,
+                "tx_enabled": True,
+            },
+            "position": {
+                "fixed_position": False,
+                "gps_mode": "NOT_PRESENT",
+                "smart_broadcast": True,
+                "broadcast_secs": 0,
+                "latitude": None,
+                "longitude": None,
+                "altitude": 0,
+            },
+            "channels": channels,
+            "mqtt": {"enabled": False},
+            "options": {
+                "roles": ["CLIENT", "CLIENT_BASE"],
+                "rebroadcast_modes": ["ALL", "LOCAL_ONLY"],
+                "regions": ["US"],
+                "modem_presets": ["LONG_FAST"],
+                "gps_modes": ["NOT_PRESENT"],
+            },
+            "warnings": [],
+            "outpost_channel_policies": [
+                {
+                    "index": 0,
+                    "name": "public",
+                    "bbs": "read_only",
+                    "ai": False,
+                    "alerts": True,
+                    "accept_reports": True,
+                },
+                {
+                    "index": 2,
+                    "name": "outpost",
+                    "bbs": "full",
+                    "ai": True,
+                    "alerts": True,
+                    "accept_reports": True,
+                },
+                {
+                    "index": 3,
+                    "name": "watch",
+                    "bbs": "none",
+                    "ai": False,
+                    "alerts": True,
+                    "accept_reports": True,
+                },
+            ],
+            "outpost_profile": {
+                "version": 1,
+                "bindings": selected
+                if bindings is not None
+                else {"public": 0, "outpost": 2, "watch": 3},
+                "channels": profile_channels,
+                "active_slots": list(range(5)) if bindings is not None else [0, 1],
+                "install_slots": [] if bindings is not None else [2, 3, 4],
+                "recommended_bindings": selected,
+                "ready": bindings is not None,
+                "can_install": True,
+                "reason": None,
+            },
+        }
+
+    def configuration_route(route: object) -> None:
+        nonlocal installed
+        if route.request.method == "PUT":
+            payload = route.request.post_data_json
+            writes.append(payload)
+            installed = True
+            body = radio_config(payload["outpost_profile"]["bindings"])
+            body["operation"] = {"state": "verified"}
+        else:
+            body = radio_config(writes[-1]["outpost_profile"]["bindings"] if installed else None)
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/api/v1/radio/config", configuration_route)
+    page.route(
+        "**/api/v1/radio/config/preflight",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "id": "outpost-profile-review",
+                    "state": "preflight",
+                    "section": "outpost_profile",
+                    "diff": [{"field": "channels.public", "from": "empty slot", "to": "slot 4"}],
+                    "impact": ["Existing channels remain unchanged."],
+                }
+            ),
+        ),
+    )
+    health = BrowserHealth(page)
+    try:
+        page.goto(f"{dashboard_url}/radio.html", wait_until="networkidle")
+        wait_for_navigation(page)
+        page.get_by_role("button", name="Configure radio").click()
+        page.get_by_role("button", name="Channels", exact=True).click()
+        page.locator("#outpost-profile-public").select_option("4")
+        page.locator("#outpost-profile-watch").select_option("2")
+        page.get_by_role("button", name="Review channel install").click()
+        page.get_by_role("button", name="Apply and verify").click()
+        page.get_by_text("Outpost v1 configured", exact=True).wait_for()
+
+        assert writes[-1]["outpost_profile"] == {
+            "bindings": {"public": 4, "outpost": 3, "watch": 2}
+        }
+        assert "psk" not in json.dumps(writes[-1]).lower()
+        assert "Neighborhood" in page.locator("#radio-channel-index").text_content()
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         health.assert_clean()
     finally:
         page.close()
@@ -4919,9 +5241,8 @@ def test_welfare_drill_schedule_preview_groups_and_readiness_are_functional(
         page.get_by_role("button", name="Save reviewed schedule").click()
         page.get_by_text("Schedule saved. Next run").wait_for()
 
-        page.get_by_text("Assign responders").click()
-        page.get_by_role("button", name="Save membership").click()
-        page.get_by_text("Saved 1 responder assignment").wait_for()
+        manage_groups = page.get_by_role("link", name="Manage groups")
+        assert manage_groups.get_attribute("href") == "/operator.html#responder-group-admin"
         assert mutations[0] == (
             "preview",
             {
@@ -4938,7 +5259,7 @@ def test_welfare_drill_schedule_preview_groups_and_readiness_are_functional(
         )
         assert mutations[1][0] == "schedule"
         assert mutations[1][1]["suppress_if_real_event"] is True
-        assert mutations[2] == ("members", {"member_ids": [8]})
+        assert len(mutations) == 2
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         if VISUAL_ARTIFACT_DIR:
             Path(VISUAL_ARTIFACT_DIR).mkdir(parents=True, exist_ok=True)

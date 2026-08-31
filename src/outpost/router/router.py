@@ -4,6 +4,7 @@ import asyncio
 import re
 import unicodedata
 from collections import defaultdict
+from collections.abc import Callable
 
 from outpost import __version__
 from outpost.audit import write_audit
@@ -35,7 +36,12 @@ VERIFIED_MEMBER_MUTATIONS = frozenset({"FORGETPOS", "REMOVEME"})
 
 class Router:
     def __init__(
-        self, config: Config, members: MemberRepo, sessions: SessionStore, rate_limiter: RateLimiter
+        self,
+        config: Config,
+        members: MemberRepo,
+        sessions: SessionStore,
+        rate_limiter: RateLimiter,
+        node_name: Callable[[], str] | None = None,
     ) -> None:
         self.config, self.members, self.sessions, self.rate_limiter = (
             config,
@@ -43,6 +49,7 @@ class Router:
             sessions,
             rate_limiter,
         )
+        self.node_name = node_name or (lambda: self.config.node.name)
         self.registry = CommandRegistry()
         for spec in core_specs():
             self.registry.register(spec)
@@ -324,7 +331,7 @@ class Router:
             session=session,
             args=args,
             registry=self.registry,
-            node_name=self.config.node.name,
+            node_name=self.node_name(),
             operator_contact=self.config.node.operator_contact,
             version=__version__,
             disclaimer=self.config.node.disclaimer,

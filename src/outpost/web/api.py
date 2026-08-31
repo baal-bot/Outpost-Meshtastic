@@ -21,6 +21,7 @@ from outpost.ai import AIService
 from outpost.ai.store import AIStore
 from outpost.audit import display_audit_detail, write_audit
 from outpost.bbs.admin import BBSAdmin
+from outpost.channel_profile import channel_slot
 from outpost.clock import SystemClock
 from outpost.config import DEFAULT_TILES_PATH, RetentionConfig, WebConfig
 from outpost.env import (
@@ -359,7 +360,7 @@ class AlertCreateBody(BaseModel):
     severity: Literal["caution", "urgent", "critical"]
     headline: str
     incident_ref: int | None = None
-    channels: list[int] = [3]
+    channels: list[int] | None = None
     lat: float | None = Field(default=None, ge=-90, le=90)
     lon: float | None = Field(default=None, ge=-180, le=180)
     radius_km: float = Field(default=1.0, ge=0.1, le=100)
@@ -386,6 +387,13 @@ class ResponderGroupCreateBody(BaseModel):
     response_type: Literal[
         "general", "medical", "fire", "search", "logistics", "communications", "public_safety"
     ] = "general"
+
+
+class ResponderGroupUpdateBody(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    response_type: Literal[
+        "general", "medical", "fire", "search", "logistics", "communications", "public_safety"
+    ]
 
 
 class ResponderGroupMembersBody(BaseModel):
@@ -505,6 +513,22 @@ class RadioChannelConfigBody(BaseModel):
         return self
 
 
+class RadioOutpostProfileBody(BaseModel):
+    bindings: dict[str, int]
+
+    @model_validator(mode="after")
+    def all_channels_have_distinct_slots(self) -> RadioOutpostProfileBody:
+        normalized = {str(name).lower(): int(index) for name, index in self.bindings.items()}
+        if set(normalized) != {"public", "outpost", "watch"}:
+            raise ValueError("select slots for public, outpost, and watch")
+        if len(set(normalized.values())) != 3:
+            raise ValueError("each Outpost channel must use a different slot")
+        if any(index < 0 or index > 7 for index in normalized.values()):
+            raise ValueError("Outpost channels must use slots 0 through 7")
+        self.bindings = normalized
+        return self
+
+
 class RadioMqttConfigBody(FederationMqttBody):
     username: str | None = Field(default=None, max_length=128)
     password: str | None = Field(default=None, max_length=256)
@@ -520,13 +544,22 @@ class RadioConfigurationBody(BaseModel):
     lora: RadioLoraConfigBody | None = None
     position: RadioPositionConfigBody | None = None
     channel: RadioChannelConfigBody | None = None
+    outpost_profile: RadioOutpostProfileBody | None = None
     mqtt: RadioMqttConfigBody | None = None
 
     @model_validator(mode="after")
     def exactly_one_section(self) -> RadioConfigurationBody:
         populated = [
             name
-            for name in ("identity", "device", "lora", "position", "channel", "mqtt")
+            for name in (
+                "identity",
+                "device",
+                "lora",
+                "position",
+                "channel",
+                "outpost_profile",
+                "mqtt",
+            )
             if getattr(self, name) is not None
         ]
         if len(populated) != 1:
@@ -536,7 +569,15 @@ class RadioConfigurationBody(BaseModel):
     def change(self) -> tuple[str, dict[str, Any]]:
         section = next(
             name
-            for name in ("identity", "device", "lora", "position", "channel", "mqtt")
+            for name in (
+                "identity",
+                "device",
+                "lora",
+                "position",
+                "channel",
+                "outpost_profile",
+                "mqtt",
+            )
             if getattr(self, name) is not None
         )
         value = getattr(self, section)
@@ -3340,11 +3381,14 @@ def create_web_app(
             @app.post("/api/v1/alerts/estimate", response_model=None)
             async def alert_estimate(body: AlertCreateBody) -> dict[str, object] | Response:
                 try:
-                    await require_active_radio_channels(body.channels)
+                    channels = body.channels or [
+                        channel_slot(settings.config, "watch", 3) if settings else 3
+                    ]
+                    await require_active_radio_channels(channels)
                     return await alerts.airtime_preview(
                         body.severity,
                         body.headline,
-                        body.channels,
+                        channels,
                         incident_ref=body.incident_ref,
                         lat=body.lat,
                         lon=body.lon,
@@ -3359,11 +3403,14 @@ def create_web_app(
             @app.post("/api/v1/alerts", response_model=None)
             async def alert_create(body: AlertCreateBody) -> dict[str, Any] | Response:
                 try:
-                    await require_active_radio_channels(body.channels)
+                    channels = body.channels or [
+                        channel_slot(settings.config, "watch", 3) if settings else 3
+                    ]
+                    await require_active_radio_channels(channels)
                     estimate = await alerts.airtime_preview(
                         body.severity,
                         body.headline,
-                        body.channels,
+                        channels,
                         incident_ref=body.incident_ref,
                         lat=body.lat,
                         lon=body.lon,
@@ -3388,7 +3435,7 @@ def create_web_app(
                         body.headline,
                         current_actor(),
                         incident_ref=body.incident_ref,
-                        channels=body.channels,
+                        channels=channels,
                         source="incident" if body.incident_ref else "operator",
                         lat=body.lat,
                         lon=body.lon,
@@ -3631,6 +3678,27 @@ def create_web_app(
                     action="responder_group.members",
                     target=f"responder_group:{group_id}",
                     detail={"member_count": len(value["members"])},
+                )
+                return value
+
+            @app.patch("/api/v1/responder-groups/{group_id}", response_model=None)
+            async def responder_group_update(
+                group_id: int, body: ResponderGroupUpdateBody
+            ) -> dict[str, Any] | Response:
+                try:
+                    value = await checkins.update_group(group_id, body.name, body.response_type)
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_responder_group", "message": str(error)}},
+                        status_code=422,
+                    )
+                await write_audit(
+                    database,
+                    actor_kind="web",
+                    actor_ref=current_actor_ref(),
+                    action="responder_group.update",
+                    target=f"responder_group:{group_id}",
+                    detail={"name": value["name"], "response_type": value["response_type"]},
                 )
                 return value
 
@@ -4379,6 +4447,19 @@ def create_web_app(
                 (now,),
             )
             items = [dict(row) for row in rows]
+            groups_by_member: dict[int, list[dict[str, Any]]] = {}
+            for membership in await database.read(
+                "SELECT gm.member_id,g.id,g.name,g.response_type "
+                "FROM responder_group_member gm JOIN responder_group g ON g.id=gm.group_id "
+                "ORDER BY g.name COLLATE NOCASE"
+            ):
+                groups_by_member.setdefault(int(membership["member_id"]), []).append(
+                    {
+                        "id": int(membership["id"]),
+                        "name": membership["name"],
+                        "response_type": membership["response_type"],
+                    }
+                )
             for item in items:
                 received_at, expires_at = int(item["received_at"]), int(item["expires_at"])
                 item["age_seconds"] = max(0, now - received_at)
@@ -4390,6 +4471,7 @@ def create_web_app(
                     if item["category"] == "discovered"
                     else f"operator exact; member {item['privacy']}"
                 )
+                item["responder_groups"] = groups_by_member.get(int(item["id"]), [])
                 item["last_seen"] = _timestamp(item["last_seen"])
                 item["received_at"] = _timestamp(received_at)
                 item["expires_at"] = _timestamp(expires_at)

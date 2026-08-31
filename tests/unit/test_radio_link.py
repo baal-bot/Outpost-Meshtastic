@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from meshtastic.protobuf import channel_pb2, config_pb2, module_config_pb2
 
+from outpost.channel_profile import OUTPOST_CHANNEL_PROFILE
 from outpost.clock import VirtualClock
 from outpost.config import RadioConfig
 from outpost.transport.models import LinkState
@@ -231,6 +232,43 @@ async def test_radio_configuration_is_guarded_and_never_reads_back_secrets() -> 
     assert [channel["name"] for channel in stale["channels"]] == ["LongFast", "Rescue"]
     assert "secret-key-material" not in str(stale)
     assert "last verified configuration" in stale["warnings"][-1]
+
+
+@pytest.mark.asyncio
+async def test_outpost_profile_only_fills_selected_disabled_slots() -> None:
+    writes: list[int] = []
+    link = MeshtasticRadioLink(RadioConfig(), VirtualClock())
+    channels = []
+    for index in range(8):
+        channel = channel_pb2.Channel()
+        link._set_enum(channel, "role", "PRIMARY" if index == 0 else "DISABLED")
+        channel.settings.name = "Neighborhood" if index == 0 else ""
+        channel.settings.psk = b"existing-user-key" if index == 0 else b""
+        channels.append(channel)
+    local = SimpleNamespace(
+        channels=channels,
+        writeChannel=lambda index: writes.append(index),
+    )
+    link._interface = SimpleNamespace(localNode=local)
+
+    result = await link.configure(
+        "outpost_profile",
+        {"bindings": {"public": 1, "outpost": 2, "watch": 3}},
+    )
+
+    assert result["added_channel_indices"] == [1, 2, 3]
+    assert writes == [1, 2, 3]
+    assert channels[0].settings.name == "Neighborhood"
+    assert channels[0].settings.psk == b"existing-user-key"
+    for name, index in {"public": 1, "outpost": 2, "watch": 3}.items():
+        assert channels[index].settings.name == name
+        assert channels[index].settings.psk == OUTPOST_CHANNEL_PROFILE[name].psk
+
+    with pytest.raises(ValueError, match="will not be overwritten"):
+        await link.configure(
+            "outpost_profile",
+            {"bindings": {"public": 0, "outpost": 2, "watch": 3}},
+        )
 
 
 @pytest.mark.asyncio

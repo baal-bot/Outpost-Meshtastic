@@ -19,7 +19,9 @@ settings saved in the dashboard should be reviewed alongside the file.
 
 ### `node`
 
-- `name`: instance name such as `Pittsburgh Outpost`.
+- `name`: human instance name such as `Pittsburgh Outpost`. Outpost appends the connected radio's
+  four-character mesh-ID suffix when presenting the operational identity, for example
+  `Pittsburgh Outpost 2f30`; the stored human name remains unchanged.
 - `short_name`: 1–4 UTF-8 bytes.
 - `operator_contact`: public operational contact.
 - `timezone`: installed IANA zone such as `America/New_York`; the appliance requires the operating
@@ -61,9 +63,16 @@ of the broadcast channel map.
 
 The radio configurator shows these effective rules per slot and warns when an active radio slot has
 no policy or a configured policy slot is inactive. Its guarded workflow can change the radio's
-region, modem preset, frequency slot, channel settings/PSK, identity, position, and MQTT state. It
-does not edit Outpost's YAML channel policy; change that policy first before disabling a referenced
-radio slot.
+region, modem preset, frequency slot, channel settings/PSK, identity, position, and MQTT state.
+
+**Add Outpost channels** installs the versioned `public`, `outpost`, and `watch` interoperability
+profile only into operator-selected disabled slots. Compatible existing profile channels are
+reused. The operation never renames, rekeys, moves, disables, or overwrites another radio channel;
+Meshtastic's consecutive-slot requirement limits which empty slots can be selected. After verified
+radio readback, Outpost persists the semantic channel-to-slot bindings and moves the corresponding
+application policy and Watch escalation targets. These common keys provide interoperability, not
+authentication or confidentiality from another Outpost operator. Mesh-ID, reviewed PKI, and local
+trust policy remain the identity boundary.
 
 ### `modules`
 

@@ -7,12 +7,14 @@ from outpost.app import OutpostApp
 from outpost.clock import VirtualClock
 from outpost.config import Config
 from outpost.fed import FederationPeerService
+from outpost.radio_configuration import RadioConfigurationManager
 from outpost.radio_operations import RadioOperations
 from outpost.store import Database
 from outpost.store.members import MemberRepo
 from outpost.watch import AlertService
 from outpost.web.api import create_web_app
 from outpost.web.auth import WebAuthService
+from outpost.web.settings import RuntimeSettings
 from tests.support.application import production_governor
 
 pytestmark = pytest.mark.production_wiring
@@ -495,3 +497,82 @@ def test_radio_api_requires_matching_preflight_for_transactional_apply() -> None
             {"long_name": "New Outpost", "short_name": "NEW"},
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_outpost_profile_is_add_only_verified_and_persists_bindings(tmp_path) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    config = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "channels": {
+                0: {"name": "public", "bbs": "read_only"},
+                2: {"name": "outpost", "bbs": "full", "ai": True},
+                3: {"name": "watch"},
+            },
+        }
+    )
+    channels = [
+        {
+            "index": index,
+            "role": "PRIMARY" if index == 0 else "SECONDARY" if index == 1 else "DISABLED",
+            "name": "Neighborhood" if index == 0 else "Family" if index == 1 else "",
+            "outpost_profile": None,
+        }
+        for index in range(8)
+    ]
+    writes: list[tuple[str, dict[str, int]]] = []
+
+    class FakeRadio:
+        async def refresh_configuration(self):
+            return {"available": True, "channels": deepcopy(channels)}
+
+        async def capture_configuration(self, section):
+            assert section == "outpost_profile"
+            return {"channels": deepcopy(channels)}
+
+        async def configure(self, section, values):
+            assert section == "outpost_profile"
+            writes.append((section, dict(values["bindings"])))
+            for name, index in values["bindings"].items():
+                channels[index].update({"role": "SECONDARY", "name": name, "outpost_profile": name})
+            return {"generated_psk": None, "added_channel_indices": [2, 3, 4]}
+
+        async def verify_configuration_secrets(self, section, values, generated_psk):
+            return []
+
+        async def restore_configuration(self, section, snapshot, **options):
+            raise AssertionError("successful profile install must not roll back")
+
+    manager = RadioConfigurationManager(database, FakeRadio(), VirtualClock(), config)
+    settings = RuntimeSettings(database, config)
+    manager.binding_updater = settings.bind_outpost_channels
+    values = {"bindings": {"public": 2, "outpost": 3, "watch": 4}}
+
+    with pytest.raises(ValueError, match="will not be overwritten"):
+        await manager.preflight(
+            "outpost_profile",
+            {"bindings": {"public": 1, "outpost": 3, "watch": 4}},
+        )
+    assert writes == []
+    reviewed = await manager.preflight("outpost_profile", values)
+    assert reviewed["added_channel_indices"] == [2, 3, 4]
+    assert "psk" not in str(reviewed).lower()
+    result = await manager.apply(reviewed["id"], "outpost_profile", values)
+
+    assert result["operation"]["state"] == "verified"
+    assert writes == [("outpost_profile", values["bindings"])]
+    assert {index: policy.name for index, policy in config.channels.items()} == {
+        2: "public",
+        3: "outpost",
+        4: "watch",
+    }
+    assert config.watch.escalation.critical.stages[0].channels == [2, 4]
+    stored = await database.read(
+        "SELECT value FROM runtime_setting WHERE key='radio.outpost_channel_bindings'"
+    )
+    assert stored and stored[0]["value"] == '{"outpost": 3, "public": 2, "watch": 4}'
+    audit = await database.read("SELECT detail FROM audit_log WHERE action='radio.config_update'")
+    assert audit and "key" not in audit[0]["detail"].lower()
+    await database.close()

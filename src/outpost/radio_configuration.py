@@ -3,14 +3,22 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import contextlib
 import hashlib
 import hmac
 import json
 import secrets
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from typing import Any, Literal, cast
 
 from outpost.audit import write_audit
+from outpost.channel_profile import (
+    OUTPOST_CHANNEL_NAMES,
+    OUTPOST_PROFILE_VERSION,
+    apply_channel_bindings,
+    configured_channel_bindings,
+)
 from outpost.clock import Clock
 from outpost.config import Config
 from outpost.operator_context import current_actor_ref
@@ -186,6 +194,7 @@ class RadioConfigurationManager:
         self._signing_key = secrets.token_bytes(32)
         self._preflights: dict[str, bytes] = {}
         self._operation: dict[str, Any] | None = None
+        self.binding_updater: Callable[[dict[str, int]], Awaitable[dict[str, int]]] | None = None
 
     def _now(self) -> int:
         return int(self.clock.now().timestamp())
@@ -267,6 +276,121 @@ class RadioConfigurationManager:
     def operation(self) -> dict[str, Any] | None:
         return deepcopy(self._operation)
 
+    def profile_context(self, status: dict[str, Any]) -> dict[str, Any]:
+        channels = [dict(channel) for channel in status.get("channels", [])]
+        active = sorted(
+            int(channel["index"]) for channel in channels if channel.get("role") != "DISABLED"
+        )
+        compact = active == list(range(len(active)))
+        bindings = configured_channel_bindings(self.config)
+        items: list[dict[str, Any]] = []
+        recommended: dict[str, int] = {}
+        missing: list[str] = []
+        for name in OUTPOST_CHANNEL_NAMES:
+            matches = sorted(
+                int(channel["index"])
+                for channel in channels
+                if channel.get("outpost_profile") == name
+            )
+            conflicts = sorted(
+                int(channel["index"])
+                for channel in channels
+                if str(channel.get("name", "")).strip().lower() == name
+                and channel.get("role") != "DISABLED"
+                and channel.get("outpost_profile") != name
+            )
+            if matches:
+                recommended[name] = bindings.get(name, matches[0])
+                if recommended[name] not in matches:
+                    recommended[name] = matches[0]
+            else:
+                missing.append(name)
+            items.append(
+                {
+                    "name": name,
+                    "configured_slot": bindings.get(name),
+                    "matching_slots": matches,
+                    "conflict_slots": conflicts,
+                }
+            )
+        install_slots = (
+            list(range(len(active), min(8, len(active) + len(missing)))) if compact else []
+        )
+        if len(install_slots) == len(missing):
+            recommended.update(dict(zip(missing, install_slots, strict=True)))
+        matching_by_name = {str(item["name"]): set(item["matching_slots"]) for item in items}
+        return {
+            "version": OUTPOST_PROFILE_VERSION,
+            "bindings": bindings,
+            "channels": items,
+            "active_slots": active,
+            "install_slots": install_slots,
+            "recommended_bindings": recommended,
+            "ready": not missing
+            and all(bindings.get(name) in matching_by_name[name] for name in OUTPOST_CHANNEL_NAMES),
+            "can_install": len(install_slots) == len(missing),
+            "reason": (
+                None
+                if compact and len(install_slots) == len(missing)
+                else "The radio needs a consecutive active channel layout and enough free slots."
+            ),
+        }
+
+    def _profile_plan(
+        self, status: dict[str, Any], values: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], list[int]]:
+        bindings = {str(name).lower(): int(index) for name, index in values["bindings"].items()}
+        if set(bindings) != set(OUTPOST_CHANNEL_NAMES):
+            raise ValueError("select slots for public, outpost, and watch")
+        if len(set(bindings.values())) != len(bindings):
+            raise ValueError("each Outpost channel must use a different slot")
+        apply_channel_bindings(self.config.model_copy(deep=True), bindings)
+        channels = {int(channel["index"]): channel for channel in status.get("channels", [])}
+        if not channels:
+            raise ValueError("radio channel slots are unavailable")
+        active = {index for index, channel in channels.items() if channel.get("role") != "DISABLED"}
+        additions: list[int] = []
+        changes: list[dict[str, Any]] = []
+        current_bindings = configured_channel_bindings(self.config)
+        for name in OUTPOST_CHANNEL_NAMES:
+            index = bindings[name]
+            channel = channels.get(index)
+            if channel is None:
+                raise ValueError(f"radio channel slot {index} is unavailable")
+            matching_elsewhere = [
+                slot
+                for slot, candidate in channels.items()
+                if candidate.get("outpost_profile") == name
+            ]
+            if matching_elsewhere and index not in matching_elsewhere:
+                slots = ", ".join(str(slot) for slot in sorted(matching_elsewhere))
+                raise ValueError(f"{name} is already installed in slot {slots}; bind that slot")
+            if channel.get("outpost_profile") != name:
+                if channel.get("role") != "DISABLED":
+                    raise ValueError(f"slot {index} is active and will not be overwritten")
+                if index == 0:
+                    raise ValueError("the active primary channel will not be overwritten")
+                additions.append(index)
+                changes.append(
+                    {
+                        "field": f"channels.{name}",
+                        "from": f"empty slot {index}",
+                        "to": f"Outpost v{OUTPOST_PROFILE_VERSION} channel in slot {index}",
+                    }
+                )
+            if current_bindings.get(name) != index:
+                changes.append(
+                    {
+                        "field": f"bindings.{name}",
+                        "from": current_bindings.get(name),
+                        "to": index,
+                    }
+                )
+        planned_active = sorted(active | set(additions))
+        if planned_active != list(range(len(planned_active))):
+            raise ValueError("selected slots would leave a disabled gap between active channels")
+        return changes, sorted(additions)
+
     def _validate_dependencies(
         self, status: dict[str, Any], section: str, values: dict[str, Any]
     ) -> list[str]:
@@ -316,6 +440,16 @@ class RadioConfigurationManager:
             impacts.append("The fixed position may be shared at each channel's precision.")
         elif section == "identity":
             impacts.append("Nearby nodes will see the new radio identity.")
+        elif section == "outpost_profile":
+            self._profile_plan(status, values)
+            impacts.extend(
+                [
+                    "Only selected disabled slots will be written; existing channels "
+                    "stay unchanged.",
+                    "Shared Outpost keys provide interoperability, not identity authentication.",
+                    "Outpost routing and Watch escalation will follow the verified selected slots.",
+                ]
+            )
         elif section == "device":
             impacts.append("Device behavior changes while the serial client role is preserved.")
         return impacts
@@ -325,7 +459,7 @@ class RadioConfigurationManager:
         suffix = (
             " Channel keys and MQTT credentials must be restored from the operator's "
             "secret store because Outpost never persists them."
-            if section in {"channel", "mqtt"}
+            if section in {"channel", "mqtt", "outpost_profile"}
             else ""
         )
         return (
@@ -342,9 +476,14 @@ class RadioConfigurationManager:
             if not status.get("available"):
                 raise ConnectionError("radio configuration is unavailable")
             impacts = self._validate_dependencies(status, section, values)
-            before = _section_snapshot(status, section, values)
-            desired = _desired_snapshot(before, section, values)
-            changes = _review_diff(before, desired, section, values)
+            added_indices: list[int] = []
+            if section == "outpost_profile":
+                changes, added_indices = self._profile_plan(status, values)
+                before = {"bindings": configured_channel_bindings(self.config)}
+            else:
+                before = _section_snapshot(status, section, values)
+                desired = _desired_snapshot(before, section, values)
+                changes = _review_diff(before, desired, section, values)
             if not changes:
                 raise ValueError("reviewed values already match the fresh radio state")
             operation_id = secrets.token_urlsafe(18)
@@ -373,6 +512,7 @@ class RadioConfigurationManager:
                 "diff": changes,
                 "impact": impacts,
                 "frequency": frequency,
+                "added_channel_indices": added_indices,
                 "recovery": self._manual_recovery(section),
             }
             self._preflights = {operation_id: self._signature(section, values)}
@@ -400,6 +540,7 @@ class RadioConfigurationManager:
         async with self._operation_lock:
             rollback_image: dict[str, Any] | None = None
             wrote = False
+            bindings_updated = False
             readback_mismatches: list[dict[str, Any]] = []
             try:
                 await self._transition("applying")
@@ -411,9 +552,13 @@ class RadioConfigurationManager:
                 await self._transition("reconnecting")
                 fresh = await self.radio.refresh_configuration()
                 await self._transition("verifying")
-                actual = _section_snapshot(fresh, section, values)
                 before = dict(self._operation["before"])
-                desired = _desired_snapshot(before, section, values)
+                if section == "outpost_profile":
+                    actual: dict[str, Any] = {}
+                    desired: dict[str, Any] = {}
+                else:
+                    actual = _section_snapshot(fresh, section, values)
+                    desired = _desired_snapshot(before, section, values)
                 if section == "lora":
                     frequency = self._operation.get("frequency") or {}
                     if int(values["frequency_slot"]) == 0 and actual.get(
@@ -426,7 +571,21 @@ class RadioConfigurationManager:
                         # Zero asks firmware to choose the legal regional power. Current
                         # firmware may read the chosen dBm value back instead of zero.
                         desired["tx_power"] = actual["tx_power"]
-                readback_mismatches = _mismatches(desired, actual)
+                if section == "outpost_profile":
+                    by_index = {
+                        int(channel["index"]): channel for channel in fresh.get("channels", [])
+                    }
+                    readback_mismatches = [
+                        {
+                            "field": f"channels.{name}",
+                            "expected": f"Outpost v{OUTPOST_PROFILE_VERSION}",
+                            "observed": by_index.get(int(index), {}).get("outpost_profile"),
+                        }
+                        for name, index in values["bindings"].items()
+                        if by_index.get(int(index), {}).get("outpost_profile") != name
+                    ]
+                else:
+                    readback_mismatches = _mismatches(desired, actual)
                 if hasattr(self.radio, "verify_configuration_secrets"):
                     rejected_secrets = await self.radio.verify_configuration_secrets(
                         section, values, write_result.get("generated_psk")
@@ -444,6 +603,13 @@ class RadioConfigurationManager:
                     raise RadioConfigurationError(
                         f"radio rejected or changed reviewed field(s): {fields}"
                     )
+                if section == "outpost_profile":
+                    if self.binding_updater is None:
+                        raise RadioConfigurationError(
+                            "Outpost channel binding persistence is unavailable"
+                        )
+                    await self.binding_updater(values["bindings"])
+                    bindings_updated = True
                 await self._transition(
                     "verified", verified_at=self._now(), mismatches=[], rollback="not_needed"
                 )
@@ -467,22 +633,42 @@ class RadioConfigurationManager:
                 raise
             except Exception as error:
                 rollback = "not_attempted"
+                if bindings_updated and self.binding_updater is not None:
+                    with contextlib.suppress(Exception):
+                        await self.binding_updater(dict(self._operation["before"]["bindings"]))
                 if rollback_image is not None:
                     try:
+                        restore_options: dict[str, Any] = {}
+                        if section in {"channel", "mqtt"}:
+                            restore_options["channel_index"] = int(
+                                values.get("index", values.get("channel", -1))
+                            )
+                        elif section == "outpost_profile":
+                            restore_options["channel_indices"] = list(
+                                self._operation.get("added_channel_indices", [])
+                            )
                         await self.radio.restore_configuration(
-                            section,
-                            rollback_image,
-                            channel_index=(
-                                int(values.get("index", values.get("channel", -1)))
-                                if section in {"channel", "mqtt"}
-                                else None
-                            ),
+                            section, rollback_image, **restore_options
                         )
                         if wrote:
                             rollback_fresh = await self.radio.refresh_configuration()
-                            rollback_actual = _section_snapshot(rollback_fresh, section, values)
-                            rollback_expected = dict(self._operation["before"])
-                            rollback_mismatches = _mismatches(rollback_expected, rollback_actual)
+                            if section == "outpost_profile":
+                                rollback_channels = {
+                                    int(channel["index"]): channel
+                                    for channel in rollback_fresh.get("channels", [])
+                                }
+                                rollback_mismatches = [
+                                    {"field": f"channels.{index}"}
+                                    for index in self._operation.get("added_channel_indices", [])
+                                    if rollback_channels.get(int(index), {}).get("role")
+                                    != "DISABLED"
+                                ]
+                            else:
+                                rollback_actual = _section_snapshot(rollback_fresh, section, values)
+                                rollback_expected = dict(self._operation["before"])
+                                rollback_mismatches = _mismatches(
+                                    rollback_expected, rollback_actual
+                                )
                             if rollback_mismatches:
                                 raise RadioConfigurationError(
                                     "rollback readback did not match pre-change state"

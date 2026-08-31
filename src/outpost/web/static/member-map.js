@@ -25,6 +25,7 @@ memberMapPanel.innerHTML = `
     </div>
   </div>
   <p class="member-privacy-notice">Operator view shows retained coordinates for approved members and radios that broadcast a position on the mesh. A discovered location is observational and does not make that radio a member. Expired positions are hidden immediately and physically removed by maintenance; member-facing POS responses still honor each member’s visibility preference.</p>
+  <div class="member-map-legend" aria-label="Member map marker legend"><span><i class="regular"></i>Member</span><span><i class="grouped">✦</i>Response team member</span><span><i class="discovered"></i>Discovered radio</span></div>
   <p id="member-position-result" class="member-position-result" aria-live="polite"></p>
   <div id="member-map" class="outpost-map member-position-map" tabindex="0" aria-label="Interactive radio map. Use arrow keys to pan, plus and minus to zoom, and zero to fit visible radios.">
     <div id="member-map-tiles" class="outpost-map-tiles"></div>
@@ -66,6 +67,10 @@ function radioLabel(value) {
   return value.mesh_id;
 }
 
+function responderGroups(value) {
+  return Array.isArray(value.responder_groups) ? value.responder_groups : [];
+}
+
 function closeMemberDetail() {
   mm("member-map-detail").hidden = true;
   memberMapController.clearSelection();
@@ -92,6 +97,10 @@ function showMember(value) {
   const discovered = value.category === "discovered";
   const source = value.source === "position_app" ?
     `Meshtastic position ${discovered ? "broadcast" : "share"}` : value.source;
+  const groups = responderGroups(value);
+  const groupMarkup = groups.length
+    ? `<div class="member-map-groups"><b>Response teams</b><div>${groups.map(group => `<span>${escapeMap(group.name)}</span>`).join("")}</div></div>`
+    : "";
   detail.hidden = false;
   detail.innerHTML = `
     <button class="outpost-map-detail-close" aria-label="Close">×</button>
@@ -103,6 +112,7 @@ function showMember(value) {
     <p><b>Visibility</b> ${escapeMap(value.visibility)}</p>
     <p><b>Scheduled deletion</b> ${new Date(value.expires_at).toLocaleString()} · ${Math.max(1, Math.ceil(value.deletes_in_seconds / 3600))}h remaining</p>
     <p><b>Last heard</b> ${new Date(value.last_seen).toLocaleString()} · ${value.last_heard_snr ?? "—"} dB · ${value.hops_away ?? "—"} hops</p>
+    ${groupMarkup}
     <button class="member-map-danger delete-position" type="button">Delete exact position</button>`;
   detail.querySelector(".outpost-map-detail-close").onclick = closeMemberDetail;
   detail.querySelector(".delete-position").onclick = () => deleteMemberPosition(value);
@@ -110,17 +120,22 @@ function showMember(value) {
 
 function renderMemberMap() {
   const values = visibleMembers();
-  memberMapController.setMarkers(values.map(value => ({
-    id: `member-${value.id}`,
-    lat: value.lat,
-    lon: value.lon,
-    className: value.category === "discovered" ? "shape-diamond tone-discovered" :
-      `shape-circle ${["trusted", "responder", "operator"].includes(value.trust) ? "tone-trusted" : "tone-member"}`,
-    title: radioLabel(value),
-    label: `Show ${radioLabel(value)} on the radio map`,
-    data: value,
-    onActivate: showMember,
-  })));
+  memberMapController.setMarkers(values.map(value => {
+    const groups = responderGroups(value);
+    const grouped = value.category !== "discovered" && groups.length > 0;
+    return {
+      id: `member-${value.id}`,
+      lat: value.lat,
+      lon: value.lon,
+      className: value.category === "discovered" ? "shape-diamond tone-discovered" : grouped
+        ? "shape-group tone-grouped"
+        : `shape-circle ${["trusted", "responder", "operator"].includes(value.trust) ? "tone-trusted" : "tone-member"}`,
+      title: grouped ? `${radioLabel(value)} · ${groups.map(group => group.name).join(", ")}` : radioLabel(value),
+      label: grouped ? `Show response team member ${radioLabel(value)} on the radio map` : `Show ${radioLabel(value)} on the radio map`,
+      data: value,
+      onActivate: showMember,
+    };
+  }));
   memberMapController.setEmpty(values.length === 0);
 }
 
@@ -233,4 +248,5 @@ mm("member-map-trust").onchange = fitMemberMap;
 mm("member-map-age").onchange = fitMemberMap;
 mm("member-map-purge-expired").onclick = purgeExpiredPositions;
 new MutationObserver(bindMemberRows).observe(mm("member-rows"), {childList: true});
+window.addEventListener("outpost:responder-groups-changed", loadMemberMap);
 loadMemberMap();

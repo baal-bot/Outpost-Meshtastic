@@ -68,4 +68,22 @@ async def test_runtime_node_settings_are_validated_persisted_and_audited(tmp_pat
     assert footprint["escalation"]["urgent"]["stages"][0]["proximity"] == "footprint"
     await restored.load()
     assert fresh.watch.escalation.urgent.stages[0].proximity == "footprint"
+    await settings.bind_outpost_channels({"public": 1, "outpost": 2, "watch": 3})
+    rebound = Config.model_validate(
+        {
+            "store": {"path": str(tmp_path / "outpost.db")},
+            "channels": {
+                0: {"name": "public"},
+                2: {"name": "outpost"},
+                3: {"name": "watch"},
+            },
+        }
+    )
+    await RuntimeSettings(database, rebound).load()
+    assert {index: policy.name for index, policy in rebound.channels.items()} == {
+        1: "public",
+        2: "outpost",
+        3: "watch",
+    }
+    assert rebound.watch.escalation.critical.stages[0].channels == [1, 3]
     await database.close()

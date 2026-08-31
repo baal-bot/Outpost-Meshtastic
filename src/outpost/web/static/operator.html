@@ -8,9 +8,9 @@
   <title>Community · Outpost</title>
   <link rel="stylesheet" href="/base.css?v=1">
   <link rel="stylesheet" href="/layout.css?v=1">
-  <link rel="stylesheet" href="/operator.css?v=9">
-  <link rel="stylesheet" href="/member-map.css?v=4">
-  <link rel="stylesheet" href="/map-controller.css?v=3">
+  <link rel="stylesheet" href="/operator.css?v=10">
+  <link rel="stylesheet" href="/member-map.css?v=5">
+  <link rel="stylesheet" href="/map-controller.css?v=4">
   <link rel="stylesheet" href="/components.css?v=1">
 </head>
 <body>
@@ -86,6 +86,58 @@
         <button id="member-more" class="ui-button small-button directory-more" type="button" hidden>Load more identities</button>
       </section>
 
+      <section id="responder-group-admin" class="ui-card panel content-panel operator-panel group-admin-panel">
+        <div class="heading group-admin-heading">
+          <div>
+            <p class="eyebrow">RESPONSE TEAM DIRECTORY</p>
+            <h2>Responder group management</h2>
+            <p class="section-intro">Create and maintain every response team, then assign eligible Responder and Operator identities. Group membership targets welfare events without changing a member’s trust.</p>
+          </div>
+          <a class="back-link" href="/watch.html">Open Community watch</a>
+        </div>
+        <div class="group-admin-summary" aria-label="Responder group summary">
+          <article><small>GROUPS</small><strong id="group-admin-count">—</strong></article>
+          <article><small>ASSIGNED PEOPLE</small><strong id="group-admin-assigned">—</strong></article>
+          <article><small>UNASSIGNED RESPONDERS</small><strong id="group-admin-unassigned">—</strong></article>
+          <article><small>MEMBERSHIPS</small><strong id="group-admin-memberships">—</strong></article>
+        </div>
+        <p class="group-eligibility-note"><strong>Trust boundary:</strong> only identities reviewed as Responder or Operator can join a response team. Promote a member in Identity &amp; trust before assigning them here.</p>
+        <p id="group-admin-result" class="group-admin-result" aria-live="polite"></p>
+        <div class="group-admin-workspace">
+          <aside class="group-directory-pane">
+            <form id="group-create-form" class="group-create-form">
+              <div><p class="eyebrow">NEW GROUP</p><h3>Create response team</h3></div>
+              <label><span>Name</span><input id="group-create-name" maxlength="50" placeholder="Team name" required></label>
+              <label><span>Specialty</span><select id="group-create-type" aria-label="New group specialty"><option value="general">General</option><option value="medical">Medical</option><option value="fire">Fire</option><option value="search">Search &amp; rescue</option><option value="logistics">Logistics</option><option value="communications">Communications</option><option value="public_safety">Public safety</option></select></label>
+              <button type="submit">Create group</button>
+            </form>
+            <div class="group-directory-heading"><strong>All groups</strong><span id="group-directory-count">0</span></div>
+            <div id="group-directory-list" class="group-directory-list"><p class="ui-empty empty">Loading responder groups…</p></div>
+          </aside>
+          <section class="group-editor-pane" aria-labelledby="group-editor-title">
+            <div id="group-editor-empty" class="group-editor-empty"><span>✦</span><h3>No responder group selected</h3><p>Create a group or select one from the directory to manage its specialty and assignments.</p></div>
+            <div id="group-editor" hidden>
+              <form id="group-metadata-form" class="group-metadata-form">
+                <div class="group-editor-heading"><div><p class="eyebrow">SELECTED GROUP</p><h3 id="group-editor-title">Responder group</h3><p id="group-editor-meta"></p></div><span id="group-editor-type" class="group-type-pill">General</span></div>
+                <div class="group-metadata-fields">
+                  <label><span>Group name</span><input id="group-edit-name" maxlength="50" required></label>
+                  <label><span>Specialty</span><select id="group-edit-type"><option value="general">General</option><option value="medical">Medical</option><option value="fire">Fire</option><option value="search">Search &amp; rescue</option><option value="logistics">Logistics</option><option value="communications">Communications</option><option value="public_safety">Public safety</option></select></label>
+                  <button type="submit">Save details</button>
+                  <button id="group-delete" class="small-button danger" type="button">Delete group</button>
+                </div>
+              </form>
+              <div class="group-assignment-heading"><div><p class="eyebrow">ASSIGNMENTS</p><h3>Responder membership</h3><p>People may belong to more than one specialty team.</p></div><strong id="group-draft-count">0 selected</strong></div>
+              <div class="group-assignment-tools">
+                <label><span class="sr-only">Search eligible responders</span><input id="group-member-search" maxlength="100" placeholder="Search name, handle, or mesh ID"></label>
+                <select id="group-member-filter" aria-label="Filter responder assignments"><option value="all">All eligible people</option><option value="assigned">Assigned to this group</option><option value="unassigned">Not assigned here</option></select>
+              </div>
+              <div id="group-member-list" class="group-member-list"><p class="ui-empty empty">Loading eligible responders…</p></div>
+              <div class="group-assignment-footer"><span>Assignments are applied together and audit logged.</span><button id="group-save-members" type="button" disabled>Save assignments</button></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
       <section id="audit" class="ui-card panel content-panel operator-panel audit-panel">
         <div class="heading"><div><p class="eyebrow">ACCOUNTABILITY</p><h2>Audit trail</h2></div><p id="audit-summary" class="audit-summary" aria-live="polite">Loading…</p></div>
         <form id="audit-filters" class="audit-filters">
@@ -114,6 +166,6 @@
     </div>
   </dialog>
   <script src="/map-controller.js?v=1" defer></script>
-  <script type="module" src="/operator.js?v=13"></script>
+  <script type="module" src="/operator.js?v=14"></script>
 </body>
 </html>
