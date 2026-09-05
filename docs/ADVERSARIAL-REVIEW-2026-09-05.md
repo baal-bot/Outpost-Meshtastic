@@ -2,9 +2,16 @@
 
 Reviewed source revision: `49756805513ca3fe3e15cfe9c30569d49f4a63f5`.
 
+This is the preserved pre-remediation review. Current remediation is tracked in
+[resilience hardening](RESILIENCE-HARDENING.md) and the
+[requirement disposition ledger](REQUIREMENT-DISPOSITIONS.md); historical findings below are
+not assertions about the current source revision.
+
 GitHub tracking: [resilience review #130](https://github.com/baal-bot/Outpost-Meshtastic/issues/130) links 29 tasks (#131–#159), with priorities, dependencies, acceptance criteria, and related earlier work. R1–R10 map to #131–#140. The existing physical power-loss and MQTT-fallback gates remain in #44. Logging is complete; implementation has not started.
 
 Preserved on GitHub: [full review archive](https://github.com/baal-bot/Outpost-Meshtastic/issues/130#issuecomment-5553852356) and [runnable synthetic probes](https://github.com/baal-bot/Outpost-Meshtastic/issues/130#issuecomment-5553852199).
+The [version-controlled probe artifact](review-artifacts/README.md) preserves the original suite
+without turning known historical failures into current CI acceptance claims.
 
 ## Assessment
 

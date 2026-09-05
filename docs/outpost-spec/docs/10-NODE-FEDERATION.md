@@ -40,17 +40,25 @@ Previously-synced content remains, marked with its origin.
 **REQ-FED-005** — Bodies **MUST** be CBOR-encoded, and **MUST** be deflate-compressed when
 compression reduces size (signalled in the message type's high bit).
 
-**REQ-FED-006** — Payload budget is **215 bytes per fragment** (233 − 18 bytes of header,
-counter, and HMAC — see doc 03 §6 for the exact byte map). Messages larger than that **MUST**
-fragment, with at most `fed.max_fragments` (default 8) fragments per message — a **1720-byte**
-ceiling. Anything larger is redesigned, not fragmented further.
+**REQ-FED-006** — Each complete federation application frame **MUST** fit within **188 bytes**:
+18 bytes of header, counter and HMAC plus at most **170 body bytes** (doc 03 §6).
+Larger encoded messages **MUST** fragment, with at most `fed.max_fragments` (default 8)
+fragments: **1360 encoded body bytes** at that default. Compression does not remove the
+fragment-count limit; this is not a limit on the size of decoded application objects.
+The owner-approved replacement of the original 215/1720-byte assumptions is recorded in
+[the requirement ledger](../../REQUIREMENT-RECONCILIATION.md).
 
 **REQ-FED-007** — Fragments **MUST** be reassembled with a timeout (`fed.reassembly_timeout_s`,
 default 300). Incomplete sets are discarded and counted; the sender is not notified (a NAK
 would cost as much as a retry).
 
-**REQ-FED-008** — All federation messages except the discovery beacon **MUST** be sent as
-direct messages to a specific peer with `want_ack=True`.
+**REQ-FED-008** — Federation uses the authenticated broadcast RF carrier, including messages
+logically addressed to a paired peer. Peer-specific authentication, replay checks and receive
+policy **MUST** still apply; broadcast reception is not permission to import or relay content.
+Application receipts/reconciliation, not a direct-message RF acknowledgement, establish the
+documented delivery stage. Discovery and pairing retain their separately specified handshake
+rules. This owner-approved carrier replacement does not promise mesh-wide delivery or privacy
+from other listeners; see [the requirement ledger](../../REQUIREMENT-RECONCILIATION.md).
 
 ---
 
@@ -121,10 +129,13 @@ and counted.
 > impersonating a peer, and the counter protects against replay of a captured frame. Do not
 > overstate it (doc 12 §7).
 
-**REQ-FED-015a** — After pairing, one operator flow **MUST** configure boards, incident radius,
+**REQ-FED-015b** — After pairing, one operator flow **MUST** configure boards, incident radius,
 alerts, mail, service permissions, and quotas. It **MUST** present a before/after policy diff and
 require explicit confirmation before making a local-only board federation-eligible. The applied
 operator, timestamp, and optional review date are retained with the peer policy.
+
+The operator-policy clause was previously also numbered `REQ-FED-015a`. The ledger corrects
+that duplicate to `015b`; the original secret-storage clause retains `015a`. No behavior changed.
 
 ---
 
@@ -284,8 +295,11 @@ the right answer is not to use LoRa at all.
 | Peer floods items | Per-peer inbound rate limit; excess discarded and counted; auto-pause at `fed.peer_flood_threshold` |
 | Clock skew between nodes | Cursors are opaque and monotonic per stream, **not** wall-clock timestamps, precisely so skew cannot break sync |
 
-**REQ-FED-042** — Sync cursors **MUST** be opaque monotonic sequence values, never timestamps.
-Neither node may assume that the other has a reliable clock or an RTC.
+**REQ-FED-042** — On links where both endpoints negotiate producer-revision reconciliation,
+sync cursors **MUST** use the producer's persistent lineage and monotonic revisions, not either
+node's wall clock. Mixed-version timestamp synchronization is an explicit compatibility path,
+not a clock-skew-safe implementation. This approved replacement scopes the ordering guarantee
+to upgraded links; it does not waive RTC/time-confidence qualification for other functions.
 
 The revision-based implementation advertises `capabilities.reconciliation: 2` within the
 existing authenticated version-1 framing. A cursor consists of a persistent producer lineage

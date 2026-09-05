@@ -25,18 +25,19 @@ jobs:
       - run: >-
           ruff format --check src tests tools/build_release_metadata.py
           tools/check_capabilities.py tools/check_commands.py tools/check_ci_evidence.py
-          tools/check_dependency_lock.py
+          tools/check_dependency_lock.py tools/check_requirements.py
           tools/check_mypy_ratchet.py tools/check_static_markup.py tools/pytest_evidence_plugin.py
           tools/verify_release.py deploy/configure.py deploy/render_avahi.py
       - run: >-
           ruff check src tests tools/build_release_metadata.py
           tools/check_capabilities.py tools/check_commands.py tools/check_ci_evidence.py
-          tools/check_dependency_lock.py
+          tools/check_dependency_lock.py tools/check_requirements.py
           tools/check_mypy_ratchet.py tools/check_static_markup.py tools/pytest_evidence_plugin.py
           tools/verify_release.py deploy/configure.py deploy/render_avahi.py
       - run: mypy
       - run: python tools/check_mypy_ratchet.py
       - run: python tools/check_capabilities.py --check
+      - run: python -m tools.check_requirements --check
       - run: python tools/check_commands.py --check
       - run: python tools/check_static_markup.py
       - run: pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json
@@ -51,6 +52,7 @@ jobs:
           deploy/smoke-package.sh tools/pre-push.sh
       - run: >-
           python -m py_compile tools/check_ci_evidence.py tools/check_dependency_lock.py
+          tools/check_requirements.py
           tools/check_mypy_ratchet.py tools/check_static_markup.py tools/pytest_evidence_plugin.py
           deploy/configure.py deploy/render_avahi.py
       - run: sh deploy/smoke-package.sh

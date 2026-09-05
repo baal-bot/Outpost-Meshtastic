@@ -386,16 +386,19 @@ bytes 10-17  hmac          first 8 bytes of HMAC-SHA256 over bytes 0-9 ‖ body,
 bytes 18..   body          CBOR
 ```
 
-Maximum body: **`233 - 18 = 215` bytes per fragment.** With `fed.max_fragments` = 8 the
-ceiling on a single logical message is **1720 bytes**.
+Maximum body: **`188 - 18 = 170` bytes per fragment.** With `fed.max_fragments` = 8 the
+ceiling is **1360 encoded body bytes**. The complete application frame is capped at 188 bytes;
+the nominal 233-byte Meshtastic ceiling is not the federation operating budget. This
+owner-approved replacement is shared with REQ-FED-006.
 
 **REQ-TRANSPORT-036a** — The receiver **MUST** reject a frame whose `counter` is less than
 or equal to the highest counter already accepted from that peer, and **MUST** count it as a
 replay. Counters are persisted per peer so a restart does not reopen the window.
 
-**REQ-TRANSPORT-038** — Federation frames **MUST** be sent with `want_ack=True` to a
-specific destination node, never broadcast, except for the peer-discovery beacon
-(doc 10 §4).
+**REQ-TRANSPORT-038** — Federation frames **MUST** use the authenticated broadcast carrier
+described by REQ-FED-008. Logical peer addressing and authentication remain required for paired
+traffic; a broadcast is not an application delivery acknowledgement. This replaces the original
+direct-message-only carrier requirement, not the common governor or receiver policy.
 
 **REQ-TRANSPORT-039** — Unparseable, wrong-magic, or wrong-version frames **MUST** be
 silently discarded and counted. No error is transmitted — a foreign application using the

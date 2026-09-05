@@ -94,26 +94,24 @@ agent core deals only in `ChatRequest`/`ChatResponse`. Notably, `hailo-ollama` i
 OpenAI-compatible and its streaming chunks are bare `{"content": "..."}` objects — that
 translation belongs entirely in the `hailo` adapter.
 
-### 2.3 Tool calling on a small model
+### 2.3 Deterministic retrieval and guarded generation
 
-**REQ-AI-006** — The agent **MUST NOT** assume native tool-calling support. Two modes:
+**REQ-AI-006** — The implemented agent **MUST** select read-only evidence through deterministic,
+permission-scoped retrieval before generation. Native model tool calls and a model-emitted
+`TOOL` protocol are not required or trusted to authorize data access. Generated answers **MUST**
+pass the grounding/safety guards; invalid output uses the guarded fallback or declines.
+This owner-approved replacement preserves evidence and privacy requirements, not a claim that
+the model follows a tool protocol. Independent holdout acceptance remains open.
 
-- **Native**, when `Capabilities.supports_tools` is true (e.g. a `llamacpp` build with
-  grammar-constrained function calling, or `Qwen2-1.5B-Instruct-Function-Calling-v1` on
-  Hailo).
-- **Constrained-emit**, otherwise: a single-tool-per-turn protocol where the model is
-  instructed to emit exactly one line of the form `TOOL <name> <json-args>` or `ANSWER
-  <text>`, and the parser is strict. Malformed output triggers **one** retry with a
-  corrective system note, then falls back to a non-AI response.
+**REQ-AI-007** — The supported request path has **no model-driven tool-call loop**. Retrieval,
+context and provider work **MUST** remain bounded by the configured limits and timeout, with
+an explicit guarded response or decline when generation is unavailable or unsuitable. This
+replaces the original two-round model-tool protocol; it does not remove latency/resource gates.
 
-**REQ-AI-007** — Maximum **2** tool-call rounds per question.
-A 1.5B model on a 2048-token budget cannot sustain a longer loop, and each round costs
-seconds. Beyond the limit, the agent answers with whatever evidence it has or declines.
-
-**REQ-AI-008** — Prefer **pre-retrieval over tool calling** where the intent is clear.
-The router classifies the question (§4.1) and pre-populates evidence before the model's
-first turn. Tool calling is for the residual cases. This halves latency and token spend on
-the common path.
+**REQ-AI-008** — The router classifies the question (§4.1) and pre-populates permitted evidence
+before generation. Residual or unsupported intents **MUST** use the supported bounded retrieval
+path or decline, not invoke an unimplemented model-driven tool loop. This is part of the
+approved deterministic-retrieval replacement; latency is measured, not assumed to be halved.
 
 ### 2.4 Model selection guidance
 

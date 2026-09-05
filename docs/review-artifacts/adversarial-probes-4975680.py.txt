@@ -1,0 +1,257 @@
+"""Adversarial review, 2026-09-05. Assertions describe desired resilience guarantees.
+
+Uses temporary stores and simulated radios only; never opens live hardware/configuration.
+Run from the repository with PYTHONPATH=src .venv/bin/pytest -v this_file.
+"""
+import asyncio
+import json
+from datetime import timedelta
+
+import pytest
+
+from outpost.app import OutpostApp
+from outpost.bbs.mail import MailService
+from outpost.bbs.service import BBSService
+from outpost.clock import VirtualClock
+from outpost.config import AirtimeConfig, Config
+from outpost.fed import FederationPeerService, FederationSyncService
+from outpost.store import Database
+from outpost.store.outbox import OutboxStore
+from outpost.store.members import MemberRepo
+from outpost.transport.governor import AirtimeGovernor, OutboundItem
+from outpost.transport.models import InboundMessage, Severity, TrafficClass
+from outpost.transport.simulated import SimulatedRadioLink
+from outpost.watch.incidents import IncidentService
+
+
+@pytest.mark.asyncio
+async def test_exhausted_alert_share_does_not_starve_reply(tmp_path):
+    db = Database(tmp_path / "queue.db")
+    await db.open()
+    try:
+        clock = VirtualClock()
+        radio = SimulatedRadioLink(clock)
+        await radio.connect()
+        governor = AirtimeGovernor(radio, AirtimeConfig(), clock, outbox=OutboxStore(db))
+        alert_budget = 3600 * governor.budget_percent / 100 * governor.config.class_shares["alert"]
+        governor.history.append((clock.monotonic(), alert_budget, TrafficClass.ALERT, Severity.URGENT))
+        await governor.admit(OutboundItem("pending urgent", "!bbbbbbbb", 0, TrafficClass.ALERT, Severity.URGENT))
+        await governor.admit(OutboundItem("requested reply", "!cccccccc", 0, TrafficClass.REPLY))
+        for _ in range(4):
+            await governor.tick()
+            clock.advance(1)
+        assert any(packet.text == "requested reply" for packet in radio.sent), (
+            f"No reply dispatched although reply share is unused; sent={radio.sent}; "
+            f"used={governor.used_airtime}s of {3600 * governor.budget_percent / 100}s"
+        )
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_incident_manifest_tolerates_requester_six_hours_behind(tmp_path):
+    db = Database(tmp_path / "clock.db")
+    await db.open()
+    try:
+        sender_clock = VirtualClock()
+        requester_clock = VirtualClock(epoch=sender_clock.epoch - timedelta(hours=6))
+        peers = FederationPeerService(db, sender_clock, "!aaaaaaaa")
+        await peers.discover("!bbbbbbbb", "B", 1, {}, "radio")
+        await db.write("UPDATE fed_peer SET state='active',sync_incidents=1")
+        peer = await peers.by_mesh_id("!bbbbbbbb")
+        service = IncidentService(db, sender_clock)
+        incident, _ = await service.create("road bridge blocked", None)
+        sync = FederationSyncService(db)
+        unfiltered = await sync.manifest(peer)
+        assert len(unfiltered) == 1
+        result = await sync.manifest(peer, snapshot=int(requester_clock.now().timestamp()))
+        assert len(result) == 1, (
+            f"Incident {incident.uid} is omitted solely because requester snapshot "
+            f"is six hours behind the producer; without snapshot={len(unfiltered)}, with={len(result)}"
+        )
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_incident_create_schedules_federation_within_sixty_seconds(tmp_path):
+    clock = VirtualClock()
+    config = Config.model_validate({"store": {"path": str(tmp_path / "propagation.db")}, "modules": {"fed": {"enabled": True}, "watch": {"enabled": True}}})
+    radio = SimulatedRadioLink(clock, node_id="!aaaaaaaa")
+    app = OutpostApp(config, clock=clock, radio=radio)
+    await app.database.open()
+    try:
+        await radio.connect()
+        peer = await app.federation.discover("!bbbbbbbb", "B", 1, {}, "radio")
+        now = int(clock.now().timestamp())
+        await app.database.write(
+            "UPDATE fed_peer SET state='active',shared_secret=?,sync_incidents=1,"
+            "local_approved=1,remote_approved=1,last_sync_at=? WHERE id=?",
+            (bytes(range(32)), now, peer.id),
+        )
+        await app.incidents.create("road bridge blocked", None)
+        for _ in range(3):
+            await app._federation_sync_once()
+            clock.advance(30)
+        assert app.governor.queued_items(), (
+            "No federation work queued by t=60 after an incident was created "
+            f"immediately after sync; interval={config.fed.sync_interval_minutes} minutes"
+        )
+    finally:
+        await app.ai_service.close()
+        await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_distinct_incident_reports_are_all_retained(tmp_path):
+    db = Database(tmp_path / "concurrent.db")
+    await db.open()
+    try:
+        service = IncidentService(db, VirtualClock())
+        results = await asyncio.gather(
+            *(service.create(f"road obstruction at site {i}", None, force=True) for i in range(12)),
+            return_exceptions=True,
+        )
+        errors = [f"{type(result).__name__}: {result}" for result in results if isinstance(result, Exception)]
+        rows = await db.read("SELECT id,local_ref FROM incident")
+        assert not errors and len(rows) == 12, f"Only {len(rows)}/12 retained; errors={errors}"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_writer_durability_mode_is_full(tmp_path):
+    db = Database(tmp_path / "durability.db")
+    await db.open()
+    try:
+        async with db.transaction() as tx:
+            synchronous = (await tx.read("PRAGMA synchronous"))[0][0]
+            journal = (await tx.read("PRAGMA journal_mode"))[0][0]
+        assert synchronous >= 2, json.dumps({"journal_mode": journal, "synchronous": synchronous, "meaning": "NORMAL does not guarantee committed WAL writes survive power loss"})
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_mail_sends_are_all_retained(tmp_path):
+    db = Database(tmp_path / "mail-concurrent.db")
+    await db.open()
+    try:
+        clock = VirtualClock()
+        members = MemberRepo(db, clock)
+        senders = []
+        for i in range(12):
+            mesh_id = f"!{i + 1:08x}"
+            await members.resolve(mesh_id)
+            senders.append(await members.claim_handle(mesh_id, f"sender{i}"))
+        service = MailService(db, members, clock, "local")
+        results = await asyncio.gather(
+            *(service.send(sender, "receiver", f"message from {i}") for i, sender in enumerate(senders)),
+            return_exceptions=True,
+        )
+        errors = [f"{type(result).__name__}: {result}" for result in results if isinstance(result, Exception)]
+        rows = await db.read("SELECT id,uid FROM mail")
+        assert not errors and len(rows) == 12, f"Only {len(rows)}/12 mail stored; errors={errors}"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_interrupted_mail_uid_finalization_does_not_poison_future_sends(tmp_path):
+    path = tmp_path / "mail-restart.db"
+    db = Database(path)
+    await db.open()
+    clock = VirtualClock()
+    try:
+        members = MemberRepo(db, clock)
+        await members.resolve("!aaaaaaaa")
+        sender = await members.claim_handle("!aaaaaaaa", "sender")
+        service = MailService(db, members, clock, "local")
+        original_write = db.write
+
+        async def interrupted_write(sql, params=()):
+            if sql.startswith("UPDATE mail SET uid="):
+                raise RuntimeError("injected interruption after committed INSERT")
+            return await original_write(sql, params)
+
+        db.write = interrupted_write
+        with pytest.raises(RuntimeError, match="injected interruption"):
+            await service.send(sender, "receiver", "first message")
+        db.write = original_write
+        assert (await db.read("SELECT uid FROM mail"))[0][0] == "pending"
+    finally:
+        await db.close()
+    reopened = Database(path)
+    await reopened.open()
+    try:
+        service = MailService(reopened, MemberRepo(reopened, clock), clock, "local")
+        await service.send(sender, "receiver", "message after restart")
+        assert len(await reopened.read("SELECT id FROM mail")) == 2
+    finally:
+        await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_delayed_incident_reference_does_not_select_unrelated_incident(tmp_path):
+    db = Database(tmp_path / "reused-reference.db")
+    await db.open()
+    try:
+        clock = VirtualClock()
+        service = IncidentService(db, clock)
+        first, _ = await service.create("fire old warehouse", None)
+        await db.write("UPDATE incident SET status='resolved' WHERE id=?", (first.id,))
+        clock.advance(1)
+        second, _ = await service.create("road new obstruction", None)
+        selected = await service.by_ref(first.local_ref)
+        assert selected.id == first.id, (
+            f"Delayed INC {first.local_ref} now resolves to incident {second.id}, "
+            f"not original incident {first.id}; references reused after one second"
+        )
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_four_radio_users_can_report_concurrently_through_router(tmp_path):
+    clock = VirtualClock()
+    config = Config.model_validate({"store": {"path": str(tmp_path / "router.db")}, "modules": {"watch": {"enabled": True}}})
+    app = OutpostApp(config, clock=clock, radio=SimulatedRadioLink(clock))
+    await app.database.open()
+    try:
+        messages = [
+            InboundMessage(i + 1, f"!{i + 1:08x}", "!aaaaaaaa", 0, 1, True,
+                           f"REPORT road obstruction at site {i} -nopos", None, clock.now())
+            for i in range(4)
+        ]
+        for message in messages:
+            await app.router.members.resolve(message.from_id)
+        responses = await asyncio.gather(*(app.router.dispatch(message) for message in messages))
+        kinds = [response.kind.value for response in responses]
+        count = len(await app.database.read("SELECT id FROM incident"))
+        assert count == 4, f"Only {count}/4 radio reports stored; responses={kinds}; lines={[r.lines for r in responses]}"
+    finally:
+        await app.ai_service.close()
+        await app.database.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_bbs_posts_remain_atomic_positive_control(tmp_path):
+    db = Database(tmp_path / "bbs-control.db")
+    await db.open()
+    try:
+        clock = VirtualClock()
+        members = MemberRepo(db, clock)
+        senders = []
+        for i in range(12):
+            mesh_id = f"!{i + 1:08x}"
+            await members.resolve(mesh_id)
+            senders.append(await members.claim_handle(mesh_id, f"sender{i}"))
+        bbs = BBSService(db, clock, "local")
+        results = await asyncio.gather(
+            *(bbs.create_thread("roads", f"update from site {i}", member) for i, member in enumerate(senders)),
+            return_exceptions=True,
+        )
+        assert all(not isinstance(result, Exception) for result in results), results
+        assert len(await db.read("SELECT id FROM thread")) == 12
+    finally:
+        await db.close()

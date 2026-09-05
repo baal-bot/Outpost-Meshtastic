@@ -8,6 +8,9 @@ and modem preset without disclosing channel keys. For UI work, test phone and de
 protocol or schema work, describe compatibility, migration, privacy, and airtime consequences.
 Behavior, limitation, field-result, or maturity changes must update `docs/capabilities.toml` and
 regenerate the capability documentation with `python tools/check_capabilities.py`.
+Requirement changes also need an explicit [disposition review](docs/REQUIREMENT-RECONCILIATION.md)
+and `python -m tools.check_requirements --check`. Preserve the original snapshot and obtain owner
+approval for replacements or withdrawals; passing software tests do not close field gates.
 
 Never submit real databases, credentials, precise member locations, private messages, or pairing
 secrets. Use `outpost-replay export` for the smallest relevant pseudonymized, position-coarsened

@@ -1,0 +1,267 @@
+schema_version = 1
+reviewed_revision = "8d59d11420bcfb9540cd9c92fcc7dc7c21ed3458"
+
+[defaults]
+state = "deferred"
+owner_decision = "Original requirement retained. Acceptance is pending; this ledger approves no waiver, replacement, or implementation pause."
+
+[domains.PROD]
+rationale = "Working product capabilities are recorded, but the original deployment/resource and independent-module acceptance needs release-level qualification. See G1-G6; software CI is not field acceptance."
+implementation = ["src/outpost/app.py", "src/outpost/config.py"]
+related = ["docs/FEATURES.md", "docs/PERFORMANCE.md"]
+issues = [130, 136, 142, 147, 148, 157, 158]
+
+[domains.ARCH]
+rationale = "The single-process application, failure domains, configuration and durable services exist. Complete clause-level architecture/default/ordering conformance has not been established by the capability matrix."
+implementation = ["src/outpost/app.py", "src/outpost/config.py", "src/outpost/task_supervision.py"]
+related = ["docs/DEVELOPMENT.md", "docs/RESILIENCE-HARDENING.md"]
+issues = [130, 136, 149, 153, 154]
+
+[domains.TRANSPORT]
+rationale = "Governor, framing, worker and recovery evidence is substantial, but this original clause has not received complete requirement-level signoff. Synthetic throughput is not live-mesh airtime or reliability qualification."
+implementation = ["src/outpost/transport"]
+related = ["docs/EMERGENCY-BURST-QUALIFICATION.md", "docs/FEATURES.md"]
+issues = [130, 142, 152, 157, 158]
+
+[domains.CMD]
+rationale = "The generated command catalogue and router/browser tests establish implemented flows, not every original grammar, multipart, session and first-time-user criterion."
+implementation = ["src/outpost/commands", "src/outpost/router"]
+related = ["docs/FEATURES.md", "docs/RESILIENCE-HARDENING.md"]
+issues = [130, 140, 151, 155]
+
+[domains.DATA]
+rationale = "Serialized transactions, migrations and recovery regressions exist. Complete original schema/default/retention conformance and power-loss/off-device recovery require separate qualification."
+implementation = ["src/outpost/store"]
+related = ["docs/RESILIENCE-HARDENING.md", "docs/SECURITY.md"]
+issues = [130, 131, 132, 137, 145, 146]
+
+[domains.AI]
+rationale = "Guarded retrieval, provider adapters and historical target-model evaluations exist. Original tool-loop/default assumptions and independent guarded holdout quality are not implicitly accepted by those results."
+implementation = ["src/outpost/ai"]
+related = ["docs/AI.md", "docs/benchmarks/HAILO-H10-QWEN-2026-08-27.md"]
+issues = [130, 154, 156]
+
+[domains.BBS]
+rationale = "Boards, mail, directory, moderation and atomic send tests exist. Complete original per-clause behavior, privacy, retention and unaided handheld acceptance still require individual evidence review."
+implementation = ["src/outpost/bbs"]
+related = ["docs/FEATURES.md", "docs/RESILIENCE-HARDENING.md"]
+issues = [130, 132, 142, 145, 155]
+
+[domains.WATCH]
+rationale = "Transactional incidents, references, corrections, alerts and welfare workflows are tested. This does not certify every original lifecycle rule, real responder timing, consensus or multi-node visibility."
+implementation = ["src/outpost/watch", "src/outpost/commands/watch.py"]
+related = ["docs/PHASE3-ACCEPTANCE.md", "docs/EMERGENCY-BURST-QUALIFICATION.md"]
+issues = [130, 131, 135, 138, 140, 151, 152, 155, 157]
+
+[domains.WX]
+rationale = "Provider/cache and SAME software paths have evidence, but clause-specific offline-age/coverage acceptance and actual station/SAME decoding remain distinct from an open SDR audio stream."
+implementation = ["src/outpost/env"]
+related = ["docs/PHASE4-ACCEPTANCE.md"]
+issues = [130, 141, 150, 158]
+
+[domains.FED]
+rationale = "Historical two-node evidence and modern simulated reconciliation exist. Original carrier/fragment and compatibility assumptions, physical outage timing, signed bundles and recovery remain explicitly qualified or open."
+implementation = ["src/outpost/fed"]
+related = ["docs/FEDERATION-ACCEPTANCE-BACKLOG.md", "docs/FEDERATION-PAGING-QUALIFICATION.md"]
+issues = [130, 134, 135, 143, 144, 146, 157, 159]
+
+[domains.API]
+rationale = "Authenticated web routes and browser/API regressions exist. A route's presence is not proof of every original response, pagination, streaming, latency or authorization clause."
+implementation = ["src/outpost/web/api.py", "src/outpost/web/auth.py"]
+related = ["docs/FEATURES.md", "docs/PERFORMANCE.md"]
+issues = [130, 149, 153, 154]
+
+[domains.UI]
+rationale = "Dashboard, accessibility and performance evidence exists. A usable uncached regional offline map, supported outage LAN and independent first-time operator workflows remain open."
+implementation = ["src/outpost/web/static"]
+related = ["docs/PERFORMANCE.md", "docs/UI-DESIGN-SYSTEM.md"]
+issues = [130, 139, 147, 149, 155]
+
+[domains.SEC]
+rationale = "Trust, PKI, authentication, admission and privacy controls have regression evidence. Original clauses need individual assurance; encryption/recovery and explicit architecture exceptions are not implied by passing CI."
+implementation = ["src/outpost/security", "src/outpost/web/auth.py", "src/outpost/store/members.py"]
+related = ["docs/SECURITY.md", "docs/EMERGENCY-BURST-QUALIFICATION.md"]
+issues = [130, 145, 146, 152, 154]
+
+[domains.TEST]
+rationale = "CI, collected evidence validation and production-wiring coverage exist. Full original property/fault/performance/evaluation and physical acceptance claims require their actual measurements, not a test-file reference."
+implementation = ["tests", "tools/check_capabilities.py", "tools/check_critical_coverage.py"]
+related = ["docs/FEATURES.md", "docs/PHASE3-ACCEPTANCE.md", "docs/PHASE4-ACCEPTANCE.md"]
+issues = [130, 44, 118, 142, 152, 155, 156, 157, 158]
+
+[requirements.REQ-TRANSPORT-013]
+state = "implemented_tested"
+rationale = "The inbound pipeline drops the local radio ID before logging/dispatch, and the named unit regression asserts unconditional self-drop. This is a software loop-protection claim, not RF qualification."
+owner_decision = "Original clause unchanged and retained; no replacement or waiver is involved."
+implementation = ["src/outpost/transport/inbound.py", "src/outpost/app.py"]
+tests = ["tests/unit/test_inbound.py::test_self_and_duplicate_packets_are_dropped"]
+tested_revision = "a219eb4c554005f4748564f746dde074965c919f"
+ci = "https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/33993492995"
+issues = [130, 154]
+
+[requirements.REQ-PROD-004]
+rationale = "Dashboard idle probe measures incremental workload, not the complete original non-inference idle RSS/CPU envelope. The observed AI-enabled process includes native inference and is not a valid isolated acceptance result."
+issues = [142, 148, 158]
+
+[requirements.REQ-DATA-002]
+rationale = "The code retains the original WAL/NORMAL policy. That policy is not an acknowledged-data power-loss guarantee; FULL benchmarking and whole-appliance loss/recovery acceptance remain open."
+issues = [137, 44, 148]
+
+[requirements.REQ-DATA-009]
+rationale = "Original per-module numeric migration bands differ from the implemented shared monotonic migration history. Do not renumber applied migrations to make the catalogue look compliant; an explicit replacement decision is pending."
+issues = [154, 136]
+
+[requirements.REQ-TRANSPORT-017]
+rationale = "Local receipt time is distinct from sender claims, but reliable local time/RTC confidence after cold boot and offline clock steps remains unqualified. Producer revisions solve only modern federation ordering."
+issues = [134, 141]
+
+[requirements.REQ-TRANSPORT-049]
+rationale = "A collected property test asserts total, non-alert and class ceilings; separate examples exercise critical reserve. Full clause-level signoff must explicitly cover reserve attribution and the generated channel-condition envelope, not infer them from a green suite."
+related = ["tests/unit/test_governor.py", "tests/integration/test_governor_eligibility.py"]
+issues = [142, 152, 154]
+
+[requirements.REQ-WATCH-011]
+state = "accepted_replacement"
+approval = "https://github.com/baal-bot/Outpost-Meshtastic/issues/154#issuecomment-5555091612"
+replacement = "Permanent monotonically allocated incident references and retired-number tombstones within each database lineage."
+rationale = "Migration 174 replaces active-only free-number allocation with permanent monotonic reference bindings and tombstones. #138's safety correction is implemented/tested; the original allocation wording is not silently certified as followed."
+owner_decision = "Owner approved this replacement on 2026-09-05. #138's software evidence stands; backup-lineage recovery is not waived."
+related = ["docs/RESILIENCE-HARDENING.md", "tests/integration/test_incident_references.py"]
+issues = [138, 146, 154]
+
+[requirements.REQ-FED-006]
+state = "accepted_replacement"
+approval = "https://github.com/baal-bot/Outpost-Meshtastic/issues/154#issuecomment-5555091612"
+replacement = "At most 188 application-frame bytes including the 18-byte header; 170 body bytes and 1360 encoded body bytes at eight fragments."
+rationale = "Original 215-byte fragment bodies differ from the field-derived 170-byte body / 188-byte complete application-frame ceiling. Smaller fragments improve observed reliability but do not establish original capacity assumptions."
+owner_decision = "Owner approved the implemented frame budget on 2026-09-05; this does not qualify a new mesh's capacity or delivery SLA."
+issues = [154, 142, 157]
+
+[requirements.REQ-FED-008]
+state = "accepted_replacement"
+approval = "https://github.com/baal-bot/Outpost-Meshtastic/issues/154#issuecomment-5555091612"
+replacement = "Authenticated broadcast RF carrier with logical peer addressing, replay/policy checks, and explicit application receipt stages."
+rationale = "The current authenticated broadcast carrier differs from the original direct-message carrier requirement. Historical field evidence supports the implemented path, not literal direct-carrier compliance."
+owner_decision = "Owner approved the implemented carrier on 2026-09-05. Import approval, transport confidentiality limits and physical qualification remain separate."
+issues = [154, 157, 159]
+
+[requirements.REQ-TRANSPORT-037]
+state = "accepted_replacement"
+approval = "https://github.com/baal-bot/Outpost-Meshtastic/issues/154#issuecomment-5555091612"
+replacement = "The shared frame byte map uses the approved 188-byte complete-frame / 170-byte body operating budget."
+rationale = "This is the transport-side duplicate of the approved REQ-FED-006 budget change, not a claim that nominal 233-byte frames were field-qualified."
+owner_decision = "Owner approval of the frame budget applies consistently to both normative definitions."
+implementation = ["src/outpost/fed/framing.py"]
+related = ["docs/FEDERATION-PAGING-QUALIFICATION.md"]
+issues = [154, 142, 157]
+
+[requirements.REQ-TRANSPORT-038]
+state = "accepted_replacement"
+approval = "https://github.com/baal-bot/Outpost-Meshtastic/issues/154#issuecomment-5555091612"
+replacement = "The transport-side carrier definition uses REQ-FED-008's authenticated broadcast path, not direct-message-only RF ACKs."
+rationale = "Both original direct-carrier MUSTs are reconciled together so the transport and federation documents do not contradict the same approved behavior."
+owner_decision = "Owner approval of the carrier applies to this duplicated transport clause; it does not waive peer authentication or the governor."
+implementation = ["src/outpost/app.py", "src/outpost/fed/framing.py"]
+issues = [154, 157, 159]
+
+[requirements.REQ-FED-015a]
+rationale = "Original shared-secret protection also requires encrypted-backup coverage. Key handling and pairing evidence cannot close that missing recovery/encryption clause. The duplicate operator-policy identifier is separately corrected to 015b."
+issues = [145, 146, 154]
+
+[requirements.REQ-FED-015b]
+rationale = "The later operator-policy flow duplicated the original secret-storage identifier 015a. This ledger renames only that added clause to 015b, preserving its behavior and the original secret-storage identity."
+issues = [154]
+
+[requirements.REQ-FED-034]
+rationale = "Prompt event-driven incident propagation remains #135. Producer-owned catch-up revisions and a bounded indexed query do not establish the original mesh-wide/map 60-second outcome."
+issues = [135, 157]
+
+[requirements.REQ-FED-041]
+rationale = "Signed, scope-filtered physical sync bundles are not implemented. Replay bundles and full database backups are not substitutes for this federation deliverable."
+issues = [143, 145, 146]
+
+[requirements.REQ-FED-042]
+state = "accepted_replacement"
+approval = "https://github.com/baal-bot/Outpost-Meshtastic/issues/154#issuecomment-5555091612"
+replacement = "Producer-lineage/revision ordering on mutually upgraded peers; legacy timestamp links remain explicitly clock-sensitive and are not qualified by the modern tests."
+rationale = "#134 supplies tested producer revisions on negotiated modern links. The original no-RTC assertion has been removed, and mixed-version links retain legacy timestamp ordering; whole-clock and compatibility acceptance is not inferred."
+owner_decision = "Owner approved the modern-link guarantee and explicit compatibility limits on 2026-09-05. RTC and recovery identity gates remain open."
+related = ["docs/RESILIENCE-HARDENING.md", "docs/FEDERATION-PAGING-QUALIFICATION.md"]
+issues = [134, 141, 144, 154]
+
+[requirements.REQ-SEC-042]
+rationale = "Current database snapshots and advice to use encrypted external storage are not the original integrated operator-recipient-encrypted backup and fresh-node restoration requirement."
+issues = [145, 146]
+
+[requirements.REQ-SEC-028]
+rationale = "The original blanket no-application-crypto policy needs reconciliation with the current encrypted federation mail/relay protocols. Documented primitives and trust boundaries are not an implicit approval of changed requirements."
+related = ["docs/SECURITY.md", "docs/FEDERATION-RELAY-PROTOCOL.md"]
+issues = [154, 146]
+
+[requirements.REQ-AI-006]
+state = "accepted_replacement"
+approval = "https://github.com/baal-bot/Outpost-Meshtastic/issues/154#issuecomment-5555091612"
+replacement = "Deterministic permission-scoped pre-retrieval with guarded generation/fallback; no required native or model-emitted tool-call protocol."
+owner_decision = "Owner approved the implemented guarded retrieval path on 2026-09-05, without accepting independent holdout quality or resource performance."
+rationale = "Original native/constrained model tool-call modes are not the current deterministic permission-scoped pre-retrieval/guarded fallback path. Recorded guarded corpus results are not proof of native model tool-call behavior."
+issues = [154, 156]
+
+[requirements.REQ-AI-007]
+state = "accepted_replacement"
+approval = "https://github.com/baal-bot/Outpost-Meshtastic/issues/154#issuecomment-5555091612"
+replacement = "No model-driven tool loop; supported retrieval/provider work remains bounded by context, resource limits and timeout."
+owner_decision = "Owner approved replacement of the two-round model-tool assumption, not removal of request bounds or safety checks."
+rationale = "Current provider and retrieval policy changed the original tool-round assumptions. A documented implementation and removed ineffective setting do not themselves approve replacement of the original two-round tool protocol."
+issues = [154, 156]
+
+[requirements.REQ-AI-008]
+state = "accepted_replacement"
+approval = "https://github.com/baal-bot/Outpost-Meshtastic/issues/154#issuecomment-5555091612"
+replacement = "Deterministic supported retrieval or decline for residual intents, without a required residual model-tool loop or assumed latency improvement."
+rationale = "This adjacent original clause also mandated residual tool calling; it must agree with the approved REQ-AI-006/007 path."
+owner_decision = "Owner approval of the deterministic guarded retrieval path applies to its residual-intent wording."
+issues = [154, 156]
+
+[requirements.REQ-AI-023]
+state = "accepted_replacement"
+approval = "https://github.com/baal-bot/Outpost-Meshtastic/issues/154#issuecomment-5555091612"
+replacement = "Current supported retrieval is FTS5/BM25 with no embedding configuration; future embeddings require bounded runtime/indexing evidence before exposure."
+owner_decision = "Owner approved recording the existing retrieval choice, not certifying vector search or waiving the independent quality gate."
+rationale = "The original MiniLM/ONNX optional embedding path differs from the current retrieval approach. Keep its replacement or deferral explicit instead of inferring vector-retrieval compliance from FTS/citation tests."
+issues = [154, 156]
+
+[goals.G1]
+state = "open"
+rationale = "Phase 1-3 software evidence exists; a fresh, uncached WAN-down deployment still needs installed boot, regional map, local access and offline recovery qualification. Hardware exercises are held by the operator."
+related = ["docs/PHASE3-ACCEPTANCE.md", "docs/FEATURES.md"]
+issues = [136, 139, 141, 145, 147, 157]
+
+[goals.G2]
+state = "open"
+rationale = "Browser and command regressions are not the original >=80% unprompted first-time handheld-user result. Participant exercise remains unperformed in this review."
+related = ["docs/PHASE3-ACCEPTANCE.md"]
+issues = [155]
+
+[goals.G3]
+state = "open"
+rationale = "Governor/synthetic burst checks do not establish a seven-day live mesh airtime share. Offered load and RF overlap across nodes require the population/capacity exercise."
+related = ["docs/EMERGENCY-BURST-QUALIFICATION.md"]
+issues = [142, 157, 158]
+
+[goals.G4]
+state = "open"
+rationale = "Historical guarded 60-item passes are retained as dated evidence, not unrestricted model reliability. A blinded independent holdout on the selected runtime with zero safety failures remains open."
+related = ["docs/benchmarks/HAILO-H10-QWEN-2026-08-27.md", "docs/AI.md"]
+issues = [156]
+
+[goals.G5]
+state = "open"
+rationale = "No current-release 30-day no-intervention qualification with radio, power and provider recovery has been established. The installed service mismatch and physical loss tests remain open and held."
+related = ["docs/FEATURES.md", "docs/RESILIENCE-HARDENING.md"]
+issues = [136, 137, 145, 148, 158, 44]
+
+[goals.G6]
+state = "open"
+rationale = "The original 60-second field incident-to-community/map outcome is not satisfied by hourly catch-up, quarantine receipt, or a 10-ms manifest query. Event-driven delivery and measured multi-node field acceptance remain open."
+related = ["docs/PHASE3-ACCEPTANCE.md", "docs/FEDERATION-ACCEPTANCE-BACKLOG.md"]
+issues = [135, 151, 157]

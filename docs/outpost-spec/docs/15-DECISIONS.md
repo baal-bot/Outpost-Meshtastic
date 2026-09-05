@@ -2,6 +2,12 @@
 
 **Status:** Living document — update as decisions are made and questions resolved.
 
+The [requirement ledger](../../REQUIREMENT-DISPOSITIONS.md) records every original/current REQ
+identity and G1–G6, including explicit reasons for pending acceptance. Its
+[reconciliation policy](../../REQUIREMENT-RECONCILIATION.md) records the owner's four September
+2026 replacements and unresolved conflicts. This is the clause disposition record for Phase 6.4;
+it does not approve other Part B choices or waive field gates.
+
 ---
 
 ## Part A — Architecture Decision Records
@@ -133,10 +139,13 @@ path.
 
 ---
 
-### ADR-008 — Retrieval-grounded tool-calling AI, not a chat passthrough
+### ADR-008 — Deterministic retrieval with guarded AI generation
 
 **Decision.** The assistant answers from retrieved local evidence with citations, or declines.
-Its tools are read-only and scoped to local community data.
+Its retrieval functions are read-only and permission-scoped to local community data. The
+owner approved deterministic pre-retrieval and guarded fallback in place of the originally
+required model-driven tool loop. The supported retrieval default is FTS5/BM25, with no exposed
+embedding configuration. This does not close independent holdout or resource acceptance.
 
 **Forces.** A 1.5B model knows nothing about your valley. Its parametric knowledge is worse
 than useless here because it is confidently wrong about exactly the local facts people ask
@@ -155,6 +164,11 @@ does not appear imminent at this parameter scale.
 
 **Decision.** Inter-node replication uses `PRIVATE_APP` portnum 260 with magic-byte-framed,
 CBOR-encoded, HMAC-authenticated messages.
+
+The owner-approved RF carrier is broadcast, with logically peer-addressed authenticated
+traffic and complete frames capped at 188 bytes (170 body bytes). It replaces the original
+direct-message-only/215-body-byte assumptions. Application receipts and import approval remain
+distinct from RF reception. This decision does not qualify new radio hardware or multi-node SLA.
 
 **Forces.** Replication on text channels would pollute human channels, be visible as noise in
 every Meshtastic client, and cost several times the airtime in text encoding. A binary
@@ -315,7 +329,7 @@ in one place; every other mention is a cross-reference.
 | Alert severities | `caution`, `urgent`, `critical` (no `info`) | REQ-WATCH-026 |
 | AI context budget | 2048 tokens, allocated in doc 06 §5 | REQ-AI-029 |
 | AI output length | model ≤180 B · renderer 1 part ≤200 B · transport 2 parts | doc 06 §1 |
-| Federation fragment body | 215 bytes; 8 fragments = 1720 bytes | REQ-FED-006, doc 03 §6 |
+| Federation application frame / body | 188 / 170 bytes; 8 fragments = 1360 encoded body bytes | REQ-FED-006, doc 03 §6 |
 | AI eval set | 60 items, ≥70% pass, 0 safety failures | REQ-TEST-015…017 |
 | Coverage gate | ≥80% transport/router/security/store, ≥70% overall | REQ-TEST-012 |
 | Retention defaults | posts 90d · mail 180d · incidents 365d · positions 7d · msg log 30d | `store.retention`, doc 02 §7 |
@@ -328,7 +342,7 @@ Recorded so reviewers understand these are choices, not oversights.
 
 | Reference behaviour | Outpost | Why |
 |---|---|---|
-| Mesh-API: AI as a provider passthrough | Retrieval-grounded, tool-calling, cited | ADR-008 |
+| Mesh-API: AI as a provider passthrough | Deterministic retrieval, guarded generation, cited | ADR-008 |
 | Mesh-API: randomised command alias suffixes (`/ai-XY`) | Node short-name prefix (`CRO help`) | More memorable, solves the same collision problem, and reads as a name rather than noise |
 | Mesh-API: MCP server exposing mesh functions | Not in v1 | Interesting, but a remote-agent control surface on a community node needs a security model first |
 | ZephyrGate: manifest-based plugin system | Explicit module registration | ADR-010 |
