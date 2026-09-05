@@ -37,6 +37,10 @@ config, database, API/channel key, member export, precise location, or tile cach
 | `tests` | Unit, integration, acceptance, hardware procedures |
 | `deploy` | Installer, service, package smoke test |
 
+For mutation changes, use the [transaction and delivery ownership map](TRANSACTION-OWNERSHIP.md).
+It distinguishes domain commits from governed sends and remote/operator acceptance, and records
+the planned incremental extraction boundaries without claiming they are already implemented.
+
 ## Quality gates
 
 Before pushing, run the lightweight formatting helper. Its scope is kept identical to the first CI
