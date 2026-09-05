@@ -25,6 +25,8 @@ minimum = 86
 files = [
   "src/outpost/fed/framing.py",
   "src/outpost/fed/sync.py",
+  "src/outpost/fed/revisions.py",
+  "src/outpost/fed/reconciliation.py",
 ]
 
 [groups.auth]

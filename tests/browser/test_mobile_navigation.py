@@ -1869,10 +1869,12 @@ def test_federation_origin_key_recovery_and_rotation_controls(
         page.close()
 
 
+@pytest.mark.parametrize("width", [390, 1280])
+@pytest.mark.parametrize("theme", THEMES)
 def test_federation_resource_limits_surface_mail_rejections_and_stopped_reconciliation(
-    browser: object, dashboard_url: str
+    browser: object, dashboard_url: str, width: int, theme: str
 ) -> None:
-    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    page = prepare_page(browser, width, dashboard_url, theme=theme)
     route_shared_operator_api(page)
     route_visual_content_api(page)
     stopped = {
@@ -1958,6 +1960,19 @@ def test_federation_resource_limits_surface_mail_rejections_and_stopped_reconcil
         budget = page.locator(".relay-mail-budget.warn")
         assert "Inbound 20 / 20 this hour · 3 rejected" in budget.text_content()
         assert "separate 20 / hour allowance" in budget.text_content()
+        stopped["transfers"]["catch_up"].update(
+            active=True,
+            waiting=True,
+            status="active",
+            reason=None,
+            cursor_mode="producer_revision",
+            snapshot=42,
+        )
+        page.reload(wait_until="networkidle")
+        wait_for_navigation(page)
+        catchup = page.locator(".catchup-strip")
+        assert "producer revision 42" in catchup.text_content()
+        assert "1970" not in catchup.text_content()
         health.assert_clean()
     finally:
         page.close()

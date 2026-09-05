@@ -285,7 +285,33 @@ the right answer is not to use LoRa at all.
 | Clock skew between nodes | Cursors are opaque and monotonic per stream, **not** wall-clock timestamps, precisely so skew cannot break sync |
 
 **REQ-FED-042** — Sync cursors **MUST** be opaque monotonic sequence values, never timestamps.
-Neither node has a reliable clock (a Pi has no RTC).
+Neither node may assume that the other has a reliable clock or an RTC.
+
+The revision-based implementation advertises `capabilities.reconciliation: 2` within the
+existing authenticated version-1 framing. A cursor consists of a persistent producer lineage
+and producer-owned SQLite revision, shared across the selected streams. The producer chooses
+the discovery high-water mark; the requester never supplies its wall clock as ordering authority.
+This is a change-discovery watermark, not a historical copy of every payload. An edit committed
+after the watermark may be fetched early at its newer revision or discovered next cycle.
+
+Pages advance only when every advertised item has a durable quarantine receipt, or the producer
+explicitly reports that it is no longer exportable. Quarantine is not operator approval, and
+unavailability is not proof that an older replica was withdrawn. Item and round limits remain
+locally owned; a budget-limited cycle resumes its existing watermark and position. Duplicate or
+late pages cannot advance another cycle. Source revisions, not display timestamps, order
+quarantine and authoritative-origin incident updates. Human merge and local-monitoring decisions
+remain authoritative.
+
+Mixed-version links retain the legacy timestamp protocol and **do not satisfy this clock-skew
+requirement** until both endpoints are upgraded. A successfully negotiated revision link is pinned
+against silent downgrade. A changed producer lineage blocks automatic import pending operator
+identity/recovery review; restoring an older backup must not pretend to be a fresh continuation.
+Quiet hours, expiry, peer liveness, and signed multi-hop envelope lifetimes still have separate
+time-confidence requirements. Tests isolate quiet scheduling when testing cursor clock skew.
+
+Evidence: `tests/integration/test_federation_revisions.py` covers six-hour offsets and in-cycle
+clock steps, durable radio framing in both directions, restart, edits during pagination, lost
+fetches, duplicate/delayed pages, local limits, receipt rollback/cancellation, and schema upgrade.
 
 **REQ-FED-043** — A peer public-alert service request **MUST** be evaluated for the request's
 normalized latitude/longitude, never against the serving Outpost's local alert inbox. The

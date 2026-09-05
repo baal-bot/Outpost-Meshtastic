@@ -64,3 +64,10 @@ coordinate consent, stale references, atomic before/after evidence, and federati
 Browser intake tests now start without a map position and exercise the correction control
 on phone and desktop in Dark, Daylight, and Night Ops. These checks do not establish
 prompt multi-radio propagation or erase previously shared history.
+
+The #134 revision protocol adds producer-owned ordering and durable pending-page checkpoints.
+`test_federation_revisions.py` covers six-hour offsets, clock steps during a page, restart/lost
+fetches, concurrent edits, delayed/duplicate pages, local budgets, and authenticated simulated
+radio frames. Approved incident updates retain origin identity and local human-reconciliation
+protections. This is not a field result for the incident propagation latency gate; legacy peers,
+quiet schedules, expiry and signed multi-hop lifetimes retain their documented timing limits.

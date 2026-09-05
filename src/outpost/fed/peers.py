@@ -51,6 +51,7 @@ class Peer:
     service_concurrency: int
     service_max_response_bytes: int
     service_airtime_seconds_per_hour: float
+    reconciliation_version: int = 1
 
 
 class FederationPeerService:
@@ -137,6 +138,7 @@ class FederationPeerService:
             service_concurrency=int(row["service_concurrency"]),
             service_max_response_bytes=int(row["service_max_response_bytes"]),
             service_airtime_seconds_per_hour=float(row["service_airtime_seconds_per_hour"]),
+            reconciliation_version=int(row["reconciliation_version"]),
         )
 
     def _derive_secret(

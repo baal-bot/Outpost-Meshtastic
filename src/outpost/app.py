@@ -68,6 +68,10 @@ from outpost.fed import (
     wire_bytes,
     wire_int,
 )
+from outpost.fed.reconciliation import Reconciliation
+from outpost.fed.revisions import CAPABILITY as RECONCILIATION_CAPABILITY
+from outpost.fed.revisions import MODE as RECONCILIATION_MODE
+from outpost.fed.revisions import RevisionReset
 from outpost.member_data import MemberDataService
 from outpost.operations_center import MeshOperationsCenter
 from outpost.operator_context import current_actor
@@ -288,6 +292,7 @@ class OutpostApp:
         self.federation_sync = FederationSyncService(
             self.database, module_enabled=self.config.modules.is_enabled
         )
+        self.federation_reconciliation = Reconciliation(self)
         self.federation_mail = FederationMailService(self.database, self.federation, self.clock)
         self.federation_relay = FederationRelayService(self.database, self.federation, self.clock)
         self.federation_relay.register_handler("incident", self._dispatch_relay_incident)
@@ -1145,6 +1150,7 @@ class OutpostApp:
             "alerts": self.config.modules.env.enabled,
             "bbs": self.config.modules.bbs.enabled,
             "ai": self.config.modules.ai.enabled,
+            RECONCILIATION_CAPABILITY: RECONCILIATION_MODE,
         }
         counter = int(self.clock.now().timestamp()) & 0xFFFFFFFF
         hello = {
@@ -1888,6 +1894,10 @@ class OutpostApp:
         await self._store_reconciliation_checkpoint(peer_id, stopped, now)
 
     async def _handle_sync_manifest(self, sender: str, value: dict[str, object]) -> None:
+        if value.get("mode") == RECONCILIATION_MODE:
+            peer = await self.federation.by_mesh_id(sender)
+            await self.federation_reconciliation.manifest(peer, value)
+            return
         manifest = value.get("items", [])
         if not isinstance(manifest, list):
             raise ValueError("invalid sync manifest")
@@ -1905,6 +1915,8 @@ class OutpostApp:
             raise ValueError("invalid local federation reconciliation checkpoint") from error
         if not isinstance(checkpoint, dict):
             raise ValueError("invalid local federation reconciliation checkpoint")
+        if checkpoint.get("mode") == RECONCILIATION_MODE:
+            raise ValueError("legacy manifest cannot advance a producer-revision cycle")
         if checkpoint.get("status") not in {None, "active"}:
             raise ValueError("unexpected federation reconciliation manifest after cycle stopped")
         now = int(self.clock.now().timestamp())
@@ -2089,6 +2101,16 @@ class OutpostApp:
             return
         now = int(self.clock.now().timestamp())
         for peer in await self.federation.list("active"):
+            if (
+                peer.reconciliation_version == RECONCILIATION_MODE
+                or peer.capabilities.get(RECONCILIATION_CAPABILITY) == RECONCILIATION_MODE
+            ):
+                if peer.boards or peer.sync_incidents or peer.relay_alerts:
+                    try:
+                        await self.federation_reconciliation.tick(peer)
+                    except (FrameError, ValueError):
+                        continue
+                continue
             if not self.federation.is_online(peer, now=now):
                 continue
             if not (peer.boards or peer.sync_incidents or peer.relay_alerts):
@@ -2506,6 +2528,12 @@ class OutpostApp:
                 await self._handle_service_response(sender, value)
             elif msg_type is MessageType.SYNC_REQ:
                 peer = await self.federation.by_mesh_id(sender)
+                if value.get("mode") == RECONCILIATION_MODE:
+                    page_value = await self.federation_sync.revisions.page(peer, value)
+                    await self._queue_federation_control(
+                        sender, MessageType.SYNC_MANIFEST, page_value
+                    )
+                    return
                 limit = wire_int(value.get("limit", 8), "limit", minimum=1, maximum=8)
                 budget = wire_int(value.get("budget", limit), "budget", minimum=1, maximum=100)
                 page_size = min(limit, budget)
@@ -2546,7 +2574,13 @@ class OutpostApp:
                 peer = await self.federation.by_mesh_id(sender)
                 if not stream.startswith("board:") or stream[6:] not in peer.boards:
                     raise ValueError("federation change notification is outside peer policy")
-                await self._queue_federation_control(sender, MessageType.SYNC_REQ, {"limit": 8})
+                if (
+                    peer.reconciliation_version == RECONCILIATION_MODE
+                    or peer.capabilities.get(RECONCILIATION_CAPABILITY) == RECONCILIATION_MODE
+                ):
+                    await self.federation_reconciliation.tick(peer)
+                else:
+                    await self._queue_federation_control(sender, MessageType.SYNC_REQ, {"limit": 8})
             elif msg_type is MessageType.SYNC_MANIFEST:
                 await self._handle_sync_manifest(sender, value)
             elif msg_type is MessageType.ITEM_REQ:
@@ -2554,7 +2588,17 @@ class OutpostApp:
                 if not isinstance(requests, list):
                     raise ValueError("invalid federation item request")
                 peer = await self.federation.by_mesh_id(sender)
-                exported = await self.federation_sync.export_items(peer, requests)
+                try:
+                    exported = (
+                        await self.federation_sync.revisions.export(peer, value)
+                        if value.get("mode") == RECONCILIATION_MODE
+                        else await self.federation_sync.export_items(peer, requests)
+                    )
+                except RevisionReset as reset:
+                    await self._queue_federation_control(
+                        sender, MessageType.SYNC_MANIFEST, reset.manifest
+                    )
+                    return
                 sent = 0
                 for item in exported:
                     try:
@@ -2566,18 +2610,23 @@ class OutpostApp:
                         sent += 1
                     except FrameError:
                         continue
-                await self._queue_federation_control(
-                    sender,
-                    MessageType.SYNC_DONE,
-                    {"mesh_id": self.federation.local_mesh_id, "sent": sent},
-                )
+                if value.get("mode") != RECONCILIATION_MODE:
+                    await self._queue_federation_control(
+                        sender,
+                        MessageType.SYNC_DONE,
+                        {"mesh_id": self.federation.local_mesh_id, "sent": sent},
+                    )
             elif msg_type is MessageType.ITEM:
                 incoming_item = value.get("item")
                 if not isinstance(incoming_item, dict):
                     raise ValueError("invalid federation item")
                 peer = await self.federation.by_mesh_id(sender)
                 received = False
-                if not replayed_item:
+                if "revision" in incoming_item or "epoch" in incoming_item:
+                    received = await self.federation_reconciliation.receive(peer, incoming_item)
+                    if incoming_item.get("unavailable") is True:
+                        return
+                elif not replayed_item:
                     received = await self.federation_sync.quarantine(
                         peer, incoming_item, int(self.clock.now().timestamp())
                     )
@@ -2632,10 +2681,15 @@ class OutpostApp:
                     (peer.id, str(value.get("uid", ""))),
                 )
             elif msg_type is MessageType.SYNC_DONE:
-                await self.database.write(
-                    "UPDATE fed_peer SET last_sync_at=unixepoch() WHERE mesh_id=?",
-                    (sender,),
-                )
+                peer = await self.federation.by_mesh_id(sender)
+                if (
+                    peer.reconciliation_version != RECONCILIATION_MODE
+                    and peer.capabilities.get(RECONCILIATION_CAPABILITY) != RECONCILIATION_MODE
+                ):
+                    await self.database.write(
+                        "UPDATE fed_peer SET last_sync_at=unixepoch() WHERE mesh_id=?",
+                        (sender,),
+                    )
             elif msg_type is MessageType.MAIL_RELAY:
                 try:
                     relay_id, state = await self.federation_mail.open(sender, value)

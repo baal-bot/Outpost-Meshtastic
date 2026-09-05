@@ -193,6 +193,19 @@ TABLE_POLICIES = (
         True,
     ),
     TablePolicy("fed_cursor", "federation", "preserve", "Bounded cursor per peer and stream."),
+    TablePolicy(
+        "fed_revision",
+        "federation",
+        "preserve",
+        "Metadata-only current revision per identity.",
+        True,
+    ),
+    TablePolicy(
+        "fed_revision_lineage", "federation", "preserve", "Producer cursor lineage; one row.", True
+    ),
+    TablePolicy(
+        "fed_revision_receipt", "federation", "cascade", "Revision receipt follows its peer.", True
+    ),
     TablePolicy("fed_service_circuit", "federation", "preserve", "Bounded state per peer/service."),
     TablePolicy("fed_topology_policy", "federation", "cascade", "Follows its peer."),
     TablePolicy("fed_topology_peer", "federation", "cascade", "Current state follows its peer."),
@@ -267,6 +280,7 @@ DOMAIN_LABELS = {
 # Internal FTS tables and SQLite's schema allocation still need a storage owner.
 INTERNAL_TABLE_DOMAINS = {
     "sqlite_schema": "system",
+    "sqlite_sequence": "system",
     "post_fts": "community",
     "post_fts_config": "community",
     "post_fts_content": "community",

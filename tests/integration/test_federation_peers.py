@@ -355,6 +355,8 @@ async def test_sync_status_reports_transport_and_delivery_health(tmp_path) -> No
     assert transfer["security"]["recent"][0]["reason"] == "replay detected"
     assert transfer["catch_up"]["active"] is True
     assert transfer["catch_up"]["waiting"] is False
+    assert transfer["catch_up"]["cursor_mode"] == "legacy_timestamp"
+    assert transfer["catch_up"]["clock_independent"] is False
     await database.write(
         "UPDATE fed_cursor SET cursor=? WHERE peer_id=? AND stream='_reconcile'",
         (
@@ -370,4 +372,14 @@ async def test_sync_status_reports_transport_and_delivery_health(tmp_path) -> No
     assert stopped["catch_up"]["status"] == "aborted"
     assert stopped["catch_up"]["reason"] == "peer reconciliation cursor did not advance"
     assert stopped["catch_up"]["used"] == 8
+    await database.write(
+        "UPDATE fed_cursor SET cursor=? WHERE peer_id=? AND stream='_reconcile'",
+        ('{"mode":2,"snapshot":42,"after":10,"pending":true,"status":"active"}', peer.id),
+    )
+    modern = client.get("/api/v1/federation/sync-status").json()["items"][0]["transfers"][
+        "catch_up"
+    ]
+    assert modern["active"] is True and modern["waiting"] is True
+    assert modern["snapshot"] == 42 and modern["cursor_mode"] == "producer_revision"
+    assert modern["clock_independent"] is True
     await database.close()

@@ -7,7 +7,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from outpost.audit import write_audit
 from outpost.fed.peers import Peer
+from outpost.fed.revisions import RevisionIndex, source_revision
 from outpost.store import Database, Transaction
 from outpost.store.incident_refs import incident_reference
 
@@ -52,6 +54,7 @@ class FederationSyncService:
         self.database = database
         self.local_mesh_id = local_mesh_id
         self.module_enabled = module_enabled or (lambda _name: True)
+        self.revisions = RevisionIndex(self)
 
     @staticmethod
     def stream_module(stream: str) -> str | None:
@@ -309,7 +312,8 @@ class FederationSyncService:
                     """SELECT p.uid,p.seq,p.author_label,p.origin_node,p.body,p.created_at,
                        p.edited_at,t.uid thread_uid,t.subject,b.slug FROM post p
                        JOIN thread t ON t.id=p.thread_id JOIN board b ON b.id=t.board_id
-                       WHERE p.uid=? AND p.hidden=0 AND b.federated=1 AND b.slug=?""",
+                       WHERE p.uid=? AND p.hidden=0 AND t.hidden=0 AND b.archived=0
+                       AND b.federated=1 AND b.slug=?""",
                     (local_uid, stream[6:]),
                 )
             elif stream == "incidents" and peer.sync_incidents:
@@ -365,10 +369,31 @@ class FederationSyncService:
         )
         if not allowed or not uid or len(uid) > 160 or not isinstance(payload, dict):
             raise ValueError("inbound item is outside peer sync policy")
+        revision = source_revision(item)
         encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         if len(encoded.encode()) > 12_000:
             raise ValueError("inbound federation item is too large")
         async with self.database.transaction() as transaction:
+            digest = self._payload_digest(encoded)
+            receipts = await transaction.read(
+                "SELECT epoch,revision,digest FROM fed_revision_receipt "
+                "WHERE peer_id=? AND stream=? AND uid=?",
+                (peer.id, stream, uid),
+            )
+            if receipts:
+                receipt = receipts[0]
+                if revision is None and digest == receipt["digest"]:
+                    return False  # Legacy delivery retry of identical stored content.
+                if revision is None or revision[0] != receipt["epoch"]:
+                    raise ValueError(
+                        "federation revision lineage changed; operator review required"
+                    )
+                if revision[1] < int(receipt["revision"]):
+                    return False
+                if revision[1] == int(receipt["revision"]):
+                    if digest != receipt["digest"]:
+                        raise ValueError("conflicting payload for the same producer revision")
+                    return False
             recent = await transaction.read(
                 "SELECT COUNT(*) count FROM fed_inbox_item WHERE peer_id=? AND received_at>?",
                 (peer.id, now - 3600),
@@ -379,7 +404,6 @@ class FederationSyncService:
                 "SELECT id,digest FROM fed_inbox_item WHERE peer_id=? AND stream=? AND uid=?",
                 (peer.id, stream, uid),
             )
-            digest = self._payload_digest(encoded)
             if existing and str(existing[0]["digest"]) == digest:
                 changed = False
             elif existing:
@@ -397,6 +421,19 @@ class FederationSyncService:
                     (peer.id, stream, uid, encoded, digest, now),
                 )
                 changed = True
+            if revision is not None:
+                epoch, sequence = revision
+                await transaction.write(
+                    "UPDATE fed_inbox_item SET source_epoch=?,source_revision=? "
+                    "WHERE peer_id=? AND stream=? AND uid=?",
+                    (epoch, sequence, peer.id, stream, uid),
+                )
+                await transaction.write(
+                    "INSERT INTO fed_revision_receipt(peer_id,stream,uid,epoch,revision,digest) "
+                    "VALUES(?,?,?,?,?,?) ON CONFLICT(peer_id,stream,uid) DO UPDATE SET "
+                    "epoch=excluded.epoch,revision=excluded.revision,digest=excluded.digest",
+                    (peer.id, stream, uid, epoch, sequence, digest),
+                )
             await transaction.write(
                 "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
                 "VALUES(?,?,'recv',?,?) ON CONFLICT(peer_id,stream,direction) "
@@ -406,7 +443,7 @@ class FederationSyncService:
         return changed
 
     @staticmethod
-    def _incident_values(payload: dict[str, Any]) -> dict[str, Any]:
+    def _incident_values(payload: dict[str, Any], *, revisioned: bool = False) -> dict[str, Any]:
         values: dict[str, Any] = {
             "type": str(payload["type"]),
             "severity": str(payload["severity"]),
@@ -459,7 +496,11 @@ class FederationSyncService:
             -90 <= float(str(lat)) <= 90 and -180 <= float(str(lon)) <= 180
         ):
             raise ValueError("invalid federated incident coordinates")
-        if int(values["created_at"]) < 0 or int(values["updated_at"]) < int(values["created_at"]):
+        if (
+            int(values["created_at"]) < 0
+            or int(values["updated_at"]) < 0
+            or (not revisioned and int(values["updated_at"]) < int(values["created_at"]))
+        ):
             raise ValueError("invalid federated incident timestamps")
         return values
 
@@ -523,7 +564,12 @@ class FederationSyncService:
         operator: str,
         now: int,
     ) -> None:
-        values = self._incident_values(payload)
+        revision = (
+            (str(inbox["source_epoch"]), int(inbox["source_revision"]))
+            if "source_revision" in inbox.keys() and inbox["source_revision"] is not None
+            else None
+        )
+        values = self._incident_values(payload, revisioned=revision is not None)
         source_updated_at = int(values["updated_at"])
         source_node = str(inbox["mesh_id"])
         digest = str(inbox["digest"] or "")[:64]
@@ -531,7 +577,7 @@ class FederationSyncService:
         origin_uid = self._stored_origin_uid(uid)
         origins = await transaction.read(
             "SELECT incident_id,original_incident_id,origin_node,source_kind,source_updated_at,"
-            "source_digest "
+            "source_digest,source_epoch,source_revision "
             "FROM incident_origin WHERE origin_uid=?",
             (origin_uid,),
         )
@@ -558,7 +604,7 @@ class FederationSyncService:
                 )
                 origins = await transaction.read(
                     "SELECT incident_id,original_incident_id,origin_node,source_kind,"
-                    "source_updated_at,source_digest "
+                    "source_updated_at,source_digest,source_epoch,source_revision "
                     "FROM incident_origin WHERE origin_uid=?",
                     (origin_uid,),
                 )
@@ -614,6 +660,12 @@ class FederationSyncService:
                 recorded_at=now,
                 actor=operator,
             )
+            if revision is not None and self._origin_node_for_uid(uid, source_node) == source_node:
+                await transaction.write(
+                    "UPDATE incident_origin SET source_epoch=?,source_revision=? "
+                    "WHERE origin_uid=?",
+                    (*revision, origin_uid),
+                )
             return
 
         origin = origins[0]
@@ -625,7 +677,25 @@ class FederationSyncService:
         if not original_rows:
             raise ValueError("incident origin points to missing original")
         original = original_rows[0]
-        if source_updated_at < source_version:
+        foreign_relay = (
+            str(origin["source_kind"]) == "local" or str(origin["origin_node"]) != source_node
+        )
+        # A relay's local sequence is never authority over another origin. Preserve
+        # the existing human-review path, regardless of clocks or relay revisions.
+        modern_authority = revision is not None and not foreign_relay
+        prior_revision = origin["source_revision"]
+        if (
+            not foreign_relay
+            and prior_revision is not None
+            and (revision is None or revision[0] != origin["source_epoch"])
+        ):
+            raise ValueError("incident producer lineage changed; operator review required")
+        ordering = source_updated_at - source_version
+        if modern_authority and revision is not None:
+            ordering = revision[1] - int(prior_revision) if prior_revision is not None else 1
+        if foreign_relay and revision is not None:
+            ordering = 1
+        if ordering < 0:
             await transaction.write(
                 "UPDATE incident_origin SET last_seen_at=? WHERE origin_uid=?", (now, origin_uid)
             )
@@ -642,7 +712,7 @@ class FederationSyncService:
             )
             return
         same_snapshot = all(original[field] == values[field] for field in self.INCIDENT_FIELDS)
-        if source_updated_at == source_version and (
+        if ordering == 0 and (
             (source_digest and digest != source_digest) or (not source_digest and not same_snapshot)
         ):
             await transaction.write(
@@ -660,7 +730,7 @@ class FederationSyncService:
                 actor=operator,
             )
             return
-        if source_updated_at == source_version and (source_digest == digest or same_snapshot):
+        if ordering == 0 and (source_digest == digest or same_snapshot):
             await transaction.write(
                 "UPDATE incident_origin SET last_seen_at=?,source_digest=? WHERE origin_uid=?",
                 (now, digest, origin_uid),
@@ -669,9 +739,6 @@ class FederationSyncService:
 
         adopted_identity_only = str(original["uid"]) != origin_uid
         merged = original["merged_into_id"] is not None
-        foreign_relay = (
-            str(origin["source_kind"]) == "local" or str(origin["origin_node"]) != source_node
-        )
         if foreign_relay:
             await transaction.write(
                 "UPDATE incident SET reconciliation_review=1 WHERE id=?", (incident_id,)
@@ -730,6 +797,11 @@ class FederationSyncService:
             "source_peer_id=? WHERE origin_uid=?",
             (now, source_updated_at, digest, peer_id, origin_uid),
         )
+        if modern_authority and revision is not None:
+            await transaction.write(
+                "UPDATE incident_origin SET source_epoch=?,source_revision=? WHERE origin_uid=?",
+                (*revision, origin_uid),
+            )
         await self._adopt_incident_origins(
             transaction,
             payload=payload,
@@ -874,6 +946,33 @@ class FederationSyncService:
                         payload.get("edited_at"),
                     ),
                 )
+                if row["source_revision"] is not None:
+                    # Only the original producer may revise a retained post. Do not
+                    # move it into a different thread or undo local moderation.
+                    posts = await transaction.read(
+                        "SELECT id,thread_id,origin_node FROM post WHERE uid=?", (uid,)
+                    )
+                    if posts and (
+                        posts[0]["origin_node"] != row["mesh_id"]
+                        or not uid.startswith(f"{row['mesh_id']}:")
+                        or posts[0]["thread_id"] != thread_id
+                    ):
+                        raise ValueError(
+                            "post revision does not match its original producer/thread"
+                        )
+                    await transaction.write(
+                        "UPDATE post SET body=?,author_label=?,edited_at=? WHERE uid=?",
+                        (
+                            str(payload["body"])[:4000],
+                            str(payload["author_label"])[:80],
+                            payload.get("edited_at"),
+                            uid,
+                        ),
+                    )
+                    await transaction.write(
+                        "UPDATE thread SET subject=? WHERE id=? AND origin_node=?",
+                        (str(payload["subject"])[:160], thread_id, row["mesh_id"]),
+                    )
                 await transaction.write(
                     "UPDATE thread SET post_count=(SELECT COUNT(*) FROM post WHERE thread_id=?),"
                     "last_post_at=MAX(last_post_at,?) WHERE id=?",
@@ -907,8 +1006,43 @@ class FederationSyncService:
                         payload.get("cancelled_at"),
                     ),
                 )
+                if row["source_revision"] is not None:
+                    if not uid.startswith(f"{row['mesh_id']}:"):
+                        raise ValueError("alert revision does not match its original producer")
+                    alerts = await transaction.read(
+                        "SELECT raised_by FROM alert WHERE uid=?", (uid,)
+                    )
+                    if alerts[0]["raised_by"] != f"federation:{row['peer_id']}":
+                        raise ValueError("alert revision cannot replace a local or relayed alert")
+                    await transaction.write(
+                        "UPDATE alert SET severity=?,headline=?,body=?,effective_at=?,expires_at=?,"
+                        "cancelled_at=? WHERE uid=?",
+                        (
+                            payload["severity"],
+                            str(payload["headline"])[:140],
+                            payload.get("body"),
+                            payload.get("effective_at"),
+                            payload.get("expires_at"),
+                            payload.get("cancelled_at"),
+                            uid,
+                        ),
+                    )
             else:
                 raise ValueError("unsupported federation inbox stream")
+            if row["source_revision"] is not None:
+                await write_audit(
+                    transaction,
+                    actor_kind="operator" if not operator.startswith("federation:") else "system",
+                    actor_ref=operator,
+                    action="federation.revision_imported",
+                    target=f"{stream}:{uid}",
+                    detail={
+                        "epoch": row["source_epoch"],
+                        "revision": row["source_revision"],
+                        "digest": row["digest"],
+                    },
+                    created_at=now,
+                )
             await transaction.write(
                 "UPDATE fed_inbox_item SET state='imported',reviewed_at=?,reviewed_by=? WHERE id=?",
                 (now, operator, item_id),

@@ -1976,6 +1976,12 @@ def create_web_app(
                             "rounds": checkpoint.get("rounds", 0),
                             "resume_after": checkpoint.get("resume_after"),
                             "snapshot": checkpoint.get("snapshot"),
+                            "cursor_mode": (
+                                "producer_revision"
+                                if checkpoint.get("mode") == 2
+                                else "legacy_timestamp"
+                            ),
+                            "clock_independent": checkpoint.get("mode") == 2,
                             "updated_at": cursor["updated_at"],
                         }
                 transfer_map: dict[int, dict[str, Any]] = {}
@@ -2072,6 +2078,8 @@ def create_web_app(
                                 "rounds": 0,
                                 "resume_after": None,
                                 "snapshot": None,
+                                "cursor_mode": "unnegotiated",
+                                "clock_independent": False,
                                 "updated_at": None,
                             },
                         ),

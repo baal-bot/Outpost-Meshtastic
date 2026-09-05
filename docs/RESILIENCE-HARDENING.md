@@ -132,3 +132,51 @@ edits, rollback/cancellation at all five writes with database reopen, authentica
 roles/CSRF, and production federation export/quarantine/import. Browser tests exercise
 unlocated intake → explicit location → map marker and subsequent operator actions on
 phone and desktop in all three themes. No new schema migration or periodic work is added.
+
+## Clock-independent reconciliation — #134
+
+Migration 175 installs a producer-owned AUTOINCREMENT revision index. Transactional triggers
+advance the index for export-relevant incident, origin-binding, post/thread/board, and alert
+changes. Repeated edits replace the current metadata head rather than retaining payload copies.
+Deleted or moved identities retain metadata-only heads, so retention cannot recycle the producer
+clock. The index contains stream names, opaque UIDs and revision numbers, not bodies or locations.
+A random lineage is initialized once. Full backups must preserve that lineage, the index and
+SQLite's sequence state. Older binaries refuse schema 175; back up before a planned deployment.
+
+The negotiated `reconciliation: 2` capability leaves radio framing at version 1 and the existing
+188-byte fragment ceiling. The initial request has no timestamp or producer watermark. The
+producer chooses a high-water revision, and pages scan at most 100 indexed metadata heads and
+return at most eight permitted records. Cursors ascend and persist across budget-limited cycles.
+The local item budget and 16-round ceiling cannot be increased by peer metadata or scope resets.
+Scope changes restart discovery under the new policy; new producer lineages stop for review.
+An observed watermark or requested revision ahead of the producer also stops for recovery review,
+rather than silently replaying an older backup as a valid continuation. This detects observed
+rollback; it cannot identify every fork whose reused counters have already overtaken the old head.
+
+This is bounded change discovery, not a historical snapshot. A concurrent edit can move a head
+beyond the current watermark; the next cycle discovers that newer revision. Fetching an advertised
+item can return its newer current revision. Per-peer durable receipts prevent an older packet or
+a timestamp-only downgrade from replacing the newer payload. The same revision with a different
+payload is rejected. Checkpoints hold the pending page until all fetched payloads and receipts
+are committed together, so restart/lost fetches cannot silently advance past missing data. A
+source deletion or scope change during fetch returns an explicit unavailable/reset result.
+
+Imported authoritative-origin incidents use source revision ordering even if `updated_at` moved
+behind `created_at`. Local origin, merge and monitoring protections remain in place. Revisioned
+post edits and alert cancellations update their existing original-producer records on approval;
+they do not override local moderation or another origin. Revision import records its actor,
+lineage, revision and digest in the audit log, without duplicating report content there.
+
+Legacy peers still use timestamp ordering. They remain usable, but are explicitly not clock-skew
+qualified. Negotiated revision use is pinned independently of later unauthenticated HELLO
+capability changes. The status API exposes `cursor_mode` and `clock_independent`; the dashboard
+renders revision numbers as revisions, not 1970-era dates. Modern retry/cycle delays use monotonic
+time; after restart an active page retries, while a completed/budget-stopped cycle conservatively
+waits one interval. Quiet hours, liveness and expiries still follow their existing policies (#141).
+
+Out-of-scope unavailability does not erase an old replica or its history. Reliable withdrawal and
+event-driven incident propagation remain #135. Signed multi-hop relay envelopes retain their
+existing protocol and lifetime rules; they cannot silently downgrade an origin already pinned to
+revisions. Database rollback/lineage adoption needs the recovery work in #145/#146. This migration
+does not restart or upgrade the installed appliance, and automated framing tests are not physical
+radio or prolonged-partition qualification.
