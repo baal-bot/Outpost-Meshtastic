@@ -101,6 +101,9 @@ Maturity: **Automated-tested**.
 Evidence:
 
 - Automated: [tests/integration/test_delivery_health_briefing.py::test_delivery_health_is_healthy_then_cautions_on_durable_trends](../tests/integration/test_delivery_health_briefing.py) — Confirmed-delivery and enrolled-radio SNR trends remain informational when healthy, become durable cautions when degrading, and are de-identified for public viewers.
+- Automated: [tests/integration/test_emergency_bursts.py::test_six_minute_mixed_burst_preserves_intake_and_bounds_amplification](../tests/integration/test_emergency_bursts.py) — Synthetic mixed safety intake preserves changed information, coalesces equivalent requests, bounds responder amplification and interleaves versioned peer catch-up without RF.
+- Automated: [tests/integration/test_emergency_bursts.py::test_full_queue_preserves_reports_and_attributes_every_refused_reply](../tests/integration/test_emergency_bursts.py) — A full outbox retains urgent records, attributes reply refusal and recovers through expiry and process restart.
+- Operations: [docs/EMERGENCY-BURST-QUALIFICATION.md](EMERGENCY-BURST-QUALIFICATION.md) — Measured synthetic workload, storage-full recovery, queue and responder policies, and explicit limits of application-only qualification.
 - Automated: [tests/integration/test_delivery_health_briefing.py::test_delivery_health_reports_insufficient_history_without_zero_rate](../tests/integration/test_delivery_health_briefing.py) — Sparse history is reported as insufficient rather than as a misleading zero-percent delivery rate.
 - Automated: [tests/integration/test_durable_outbox.py::test_acknowledgement_is_correlated_and_not_resent_after_restart](../tests/integration/test_durable_outbox.py) — Delivery acknowledgement is correlated durably and suppresses resend after restart.
 - Automated: [tests/integration/test_durable_outbox.py::test_ack_timeout_is_terminal_in_message_history_live_and_after_restart](../tests/integration/test_durable_outbox.py) — Live and restart-time acknowledgement expiry records a terminal timeout in durable message history.
@@ -114,6 +117,7 @@ Evidence:
 Known limitations:
 
 - A 24-hour comparison with the deployed radio preset and destructive power-loss campaign remain open.
+- Synthetic emergency bursts qualify finite-load admission and explicit overload recovery, not unlimited intake, physical delivery capacity or independent human consensus.
 
 ### Identity and member directory
 

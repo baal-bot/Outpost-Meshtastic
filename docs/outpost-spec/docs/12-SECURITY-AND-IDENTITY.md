@@ -141,6 +141,15 @@ status, or position remain admissible. Fingerprints and aggregate counts are per
 `safety_floor_attempt`, shown in the operator workspace, and retained for
 `security.safety_attempt_retention_hours` (default 72 hours).
 
+Acknowledgements of distinct accepted safety requests use request identity, not identical
+rendered text, for outbound deduplication. Handler errors, timeouts and cancellations release
+the retry marker; cancellation still propagates. This permits at-least-once retry, not a claim
+that an interrupted handler never committed. Admission is distinct from transmission, radio
+receipt and human response. Full-queue refusal remains attributable to the inbound request.
+The finite synthetic load and storage-full/restart boundaries are recorded in
+[emergency-burst qualification](../../EMERGENCY-BURST-QUALIFICATION.md); they do not establish
+unlimited storage or a sustainable RF arrival rate.
+
 **REQ-SEC-018** — Repeated rate-limit violations (default 20 in an hour) **MUST**
 auto-mute the member for an escalating duration (15 m → 1 h → 6 h → 24 h) with an audit entry
 and a dashboard notification.

@@ -3,6 +3,17 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Emergency-burst qualification — #152
+
+[The synthetic burst report](EMERGENCY-BURST-QUALIFICATION.md) defines the tested load,
+measured admission/storage/memory/latency, overload attribution, class exhaustion,
+restart and SQLite-full recovery, responder fan-out and identity limitations.
+Changed safety requests now retain distinct acknowledgement identities even when
+their rendered text is identical. Cancelled/timed-out handlers release their retry
+marker and propagate cancellation; service transactions retain commit/rollback
+ownership. These are automated application guarantees, not RF or physical-power
+qualification, indefinite storage bounds, or exactly-once emergency delivery.
+
 ## Local mail atomicity — #132
 
 Local sends and replies now insert the message and finalize its UID and conversation

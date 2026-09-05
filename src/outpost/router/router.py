@@ -347,6 +347,19 @@ class Router:
         )
         try:
             response = await spec.handler(ctx)
+        except asyncio.CancelledError:
+            if trace is not None:
+                trace.decision = "handler_cancelled"
+            if safety_decision is not None and safety_decision.accepted:
+                # A timeout/shutdown is not evidence that the report was recorded.
+                # Apply the same retry policy as a handler error and propagate
+                # cancellation. Service transactions own rollback/commit safety.
+                await asyncio.shield(
+                    self.rate_limiter.release_safety_floor(
+                        member.mesh_id, token, safety_decision.fingerprint
+                    )
+                )
+            raise
         except Exception:
             if trace is not None:
                 trace.decision = "handler_error"

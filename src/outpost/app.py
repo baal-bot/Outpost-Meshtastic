@@ -82,7 +82,7 @@ from outpost.render.renderer import render_response
 from outpost.router.models import DispatchTrace, Line, Response, ResponseKind
 from outpost.router.router import Router
 from outpost.router.session import SessionStore
-from outpost.security.rate_limit import RateLimiter
+from outpost.security.rate_limit import SAFETY_FLOOR, RateLimiter
 from outpost.self_check import SelfCheckService
 from outpost.situation import SituationBriefingService
 from outpost.store import Database, Transaction
@@ -3492,6 +3492,12 @@ class OutpostApp:
             trace.response_text = text
             trace.airtime_class = response.airtime_class.value
             trace.outbound_parts = len(parts)
+        # Distinct accepted safety requests can have identical acknowledgement
+        # text (HELPME, or two OK notes in the same minute). Coalesce equivalent
+        # requests at intake, not a later acknowledgement of changed information.
+        safety_reply = (
+            response.kind == ResponseKind.ACK and self.router.command_token(message) in SAFETY_FLOOR
+        )
         outbound = [
             OutboundItem(
                 text=part,
@@ -3500,8 +3506,13 @@ class OutpostApp:
                 traffic_class=response.airtime_class,
                 want_ack=True,
                 multipart=len(parts) > 1,
+                dedupe_token=(
+                    f"safety-reply:{message.from_id}:{message.packet_id}:{index}"
+                    if safety_reply
+                    else None
+                ),
             )
-            for part in parts
+            for index, part in enumerate(parts)
         ]
         admission = await self.governor.admit_many_result(outbound)
         outcome = admission.rejection_reason or "admitted"

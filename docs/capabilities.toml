@@ -131,6 +131,7 @@ maturity = "automated_tested"
 introduced_commit = "3d65058"
 limitations = [
   "A 24-hour comparison with the deployed radio preset and destructive power-loss campaign remain open.",
+  "Synthetic emergency bursts qualify finite-load admission and explicit overload recovery, not unlimited intake, physical delivery capacity or independent human consensus.",
 ]
 roadmap = []
 [capabilities.verification]
@@ -141,6 +142,18 @@ date = "2026-09-05"
 kind = "automated"
 path = "tests/integration/test_delivery_health_briefing.py::test_delivery_health_is_healthy_then_cautions_on_durable_trends"
 description = "Confirmed-delivery and enrolled-radio SNR trends remain informational when healthy, become durable cautions when degrading, and are de-identified for public viewers."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_emergency_bursts.py::test_six_minute_mixed_burst_preserves_intake_and_bounds_amplification"
+description = "Synthetic mixed safety intake preserves changed information, coalesces equivalent requests, bounds responder amplification and interleaves versioned peer catch-up without RF."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_emergency_bursts.py::test_full_queue_preserves_reports_and_attributes_every_refused_reply"
+description = "A full outbox retains urgent records, attributes reply refusal and recovers through expiry and process restart."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/EMERGENCY-BURST-QUALIFICATION.md"
+description = "Measured synthetic workload, storage-full recovery, queue and responder policies, and explicit limits of application-only qualification."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_delivery_health_briefing.py::test_delivery_health_reports_insufficient_history_without_zero_rate"
