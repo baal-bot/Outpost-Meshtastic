@@ -141,6 +141,13 @@ def wait_for_navigation(page: object) -> None:
     page.wait_for_function("() => !document.querySelector('.rail')?.inert")
 
 
+def wait_for_access_visual_content(page: object) -> None:
+    # Navigation initializes independently of access.js. Its readiness (or a
+    # fixed 100 ms delay) does not mean identity/session placeholders are gone.
+    page.locator("#welcome-name").filter(has_text="Operator's Outpost identity").wait_for()
+    page.locator("#session-list").get_by_text("No active sessions.", exact=True).wait_for()
+
+
 def visual_signature(png: bytes) -> dict[str, object]:
     """Create a renderer-tolerant perceptual baseline without committing large PNGs."""
     with Image.open(io.BytesIO(png)) as source:
@@ -1487,6 +1494,8 @@ def test_operator_page_visual_baseline_and_browser_health(
     try:
         page.goto(f"{dashboard_url}{target}", wait_until="domcontentloaded")
         wait_for_navigation(page)
+        if page_name == "access":
+            wait_for_access_visual_content(page)
         page.wait_for_timeout(100)
         page.add_style_tag(
             content=(
@@ -1545,6 +1554,37 @@ def test_operator_page_visual_baseline_and_browser_health(
             )
             assert_visual_signature(signature, baselines[key], key=key)
         health.assert_clean()
+    finally:
+        page.close()
+
+
+def test_access_visual_waits_for_content_after_navigation_is_ready(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 768, dashboard_url, theme="night")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    # Hold only the page module, leaving its shared navigation dependency free
+    # to initialize. Release after the content wait starts, not by a fixed sleep.
+    page.route(
+        "**/access.js*",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="text/javascript",
+            body="await new Promise(resolve => {window.releaseAccess = resolve;});\n"
+            + (STATIC_ROOT / "access.js").read_text(),
+        ),
+    )
+    try:
+        page.goto(f"{dashboard_url}/access.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.wait_for_function("() => typeof window.releaseAccess === 'function'")
+        assert page.locator("#welcome-name").text_content() == "Your Outpost identity"
+        assert "Loading sessions" in page.locator("#session-list").text_content()
+        page.evaluate("() => setTimeout(() => window.releaseAccess(), 250)")
+        wait_for_access_visual_content(page)
+        assert page.locator("#security-state").text_content() == "PASSWORD ONLY"
+        assert page.locator("#enable-mfa").is_visible()
     finally:
         page.close()
 
