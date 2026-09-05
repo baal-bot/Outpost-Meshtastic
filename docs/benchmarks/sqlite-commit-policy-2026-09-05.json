@@ -1,0 +1,251 @@
+{
+  "trials": [
+    {
+      "trial": 1,
+      "mode": "NORMAL",
+      "default_writer_mode": 1,
+      "measured_writer_mode": 1,
+      "reopen_default_writer_mode": 1,
+      "wall_seconds": 0.2954252999916207,
+      "operations": 96,
+      "concurrency": 4,
+      "counts_after_reopen": {
+        "incident": 24,
+        "mail": 24,
+        "outbound_work": 24,
+        "fed_inbox_item": 24,
+        "fed_revision_receipt": 24
+      },
+      "database_bytes": 1146880,
+      "wal_bytes": 4124152,
+      "latency_ms": {
+        "incident": {
+          "p50": 2.5743424776010215,
+          "p95": 5.0199249817524105,
+          "max": 222.56210399791598
+        },
+        "mail": {
+          "p50": 2.520749985706061,
+          "p95": 7.08383199525997,
+          "max": 224.5170300011523
+        },
+        "outbox": {
+          "p50": 2.4654439912410453,
+          "p95": 5.4250739922281355,
+          "max": 224.73806698690169
+        },
+        "quarantine_receipt": {
+          "p50": 2.4720834917388856,
+          "p95": 6.323055014945567,
+          "max": 224.9038269801531
+        }
+      }
+    },
+    {
+      "trial": 2,
+      "mode": "FULL",
+      "default_writer_mode": 1,
+      "measured_writer_mode": 2,
+      "reopen_default_writer_mode": 1,
+      "wall_seconds": 1.3319840390176978,
+      "operations": 96,
+      "concurrency": 4,
+      "counts_after_reopen": {
+        "incident": 24,
+        "mail": 24,
+        "outbound_work": 24,
+        "fed_inbox_item": 24,
+        "fed_revision_receipt": 24
+      },
+      "database_bytes": 1146880,
+      "wal_bytes": 4124152,
+      "latency_ms": {
+        "incident": {
+          "p50": 19.57284950185567,
+          "p95": 135.4123350174632,
+          "max": 596.4082209975459
+        },
+        "mail": {
+          "p50": 18.676173509447835,
+          "p95": 168.19903597934172,
+          "max": 693.3975240099244
+        },
+        "outbox": {
+          "p50": 19.17632151162252,
+          "p95": 149.99153799726628,
+          "max": 690.9681349934544
+        },
+        "quarantine_receipt": {
+          "p50": 19.02484049787745,
+          "p95": 156.23736998531967,
+          "max": 606.5496079972945
+        }
+      }
+    },
+    {
+      "trial": 3,
+      "mode": "FULL",
+      "default_writer_mode": 1,
+      "measured_writer_mode": 2,
+      "reopen_default_writer_mode": 1,
+      "wall_seconds": 0.6545580049860291,
+      "operations": 96,
+      "concurrency": 4,
+      "counts_after_reopen": {
+        "incident": 24,
+        "mail": 24,
+        "outbound_work": 24,
+        "fed_inbox_item": 24,
+        "fed_revision_receipt": 24
+      },
+      "database_bytes": 1146880,
+      "wal_bytes": 4124152,
+      "latency_ms": {
+        "incident": {
+          "p50": 16.906340504647233,
+          "p95": 71.09298999421299,
+          "max": 150.25316501851194
+        },
+        "mail": {
+          "p50": 19.506191994878463,
+          "p95": 77.44376701884903,
+          "max": 172.36279201461002
+        },
+        "outbox": {
+          "p50": 17.252200996153988,
+          "p95": 74.8202120012138,
+          "max": 155.93281199107878
+        },
+        "quarantine_receipt": {
+          "p50": 17.067729015252553,
+          "p95": 65.01176898018457,
+          "max": 162.0717370242346
+        }
+      }
+    },
+    {
+      "trial": 4,
+      "mode": "NORMAL",
+      "default_writer_mode": 1,
+      "measured_writer_mode": 1,
+      "reopen_default_writer_mode": 1,
+      "wall_seconds": 0.3033313640044071,
+      "operations": 96,
+      "concurrency": 4,
+      "counts_after_reopen": {
+        "incident": 24,
+        "mail": 24,
+        "outbound_work": 24,
+        "fed_inbox_item": 24,
+        "fed_revision_receipt": 24
+      },
+      "database_bytes": 1146880,
+      "wal_bytes": 4124152,
+      "latency_ms": {
+        "incident": {
+          "p50": 2.667287000804208,
+          "p95": 8.211814012611285,
+          "max": 230.16556099173613
+        },
+        "mail": {
+          "p50": 2.743833014392294,
+          "p95": 4.309555020881817,
+          "max": 234.47557800682262
+        },
+        "outbox": {
+          "p50": 2.676138508832082,
+          "p95": 4.551185003947467,
+          "max": 235.06831901613623
+        },
+        "quarantine_receipt": {
+          "p50": 2.7506940095918253,
+          "p95": 4.888851020950824,
+          "max": 235.40724499616772
+        }
+      }
+    },
+    {
+      "trial": 5,
+      "mode": "NORMAL",
+      "default_writer_mode": 1,
+      "measured_writer_mode": 1,
+      "reopen_default_writer_mode": 1,
+      "wall_seconds": 0.3140511579986196,
+      "operations": 96,
+      "concurrency": 4,
+      "counts_after_reopen": {
+        "incident": 24,
+        "mail": 24,
+        "outbound_work": 24,
+        "fed_inbox_item": 24,
+        "fed_revision_receipt": 24
+      },
+      "database_bytes": 1146880,
+      "wal_bytes": 4124152,
+      "latency_ms": {
+        "incident": {
+          "p50": 2.586703500128351,
+          "p95": 5.734480015235022,
+          "max": 243.14025999046862
+        },
+        "mail": {
+          "p50": 2.708665997488424,
+          "p95": 4.622554988600314,
+          "max": 245.93889000243507
+        },
+        "outbox": {
+          "p50": 2.576814513304271,
+          "p95": 4.730999993626028,
+          "max": 244.60622400511056
+        },
+        "quarantine_receipt": {
+          "p50": 2.656999495229684,
+          "p95": 5.35214800038375,
+          "max": 243.64818702451885
+        }
+      }
+    },
+    {
+      "trial": 6,
+      "mode": "FULL",
+      "default_writer_mode": 1,
+      "measured_writer_mode": 2,
+      "reopen_default_writer_mode": 1,
+      "wall_seconds": 0.6333495709986892,
+      "operations": 96,
+      "concurrency": 4,
+      "counts_after_reopen": {
+        "incident": 24,
+        "mail": 24,
+        "outbound_work": 24,
+        "fed_inbox_item": 24,
+        "fed_revision_receipt": 24
+      },
+      "database_bytes": 1146880,
+      "wal_bytes": 4124152,
+      "latency_ms": {
+        "incident": {
+          "p50": 17.55546899221372,
+          "p95": 91.6072090039961,
+          "max": 138.48422101000324
+        },
+        "mail": {
+          "p50": 17.812247504480183,
+          "p95": 94.43498498876579,
+          "max": 163.70199399534613
+        },
+        "outbox": {
+          "p50": 15.709775499999523,
+          "p95": 84.60256198304705,
+          "max": 152.28686699992977
+        },
+        "quarantine_receipt": {
+          "p50": 16.513738490175456,
+          "p95": 82.02574701863341,
+          "max": 158.39605100336485
+        }
+      }
+    }
+  ],
+  "scope": "temporary workspace ext4 databases; no RF, power cut, energy, live settings or custody-envelope measurement"
+}

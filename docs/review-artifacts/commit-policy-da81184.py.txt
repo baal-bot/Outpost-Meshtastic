@@ -1,0 +1,112 @@
+"""Temporary-store NORMAL/FULL latency comparison; no RF or power-loss claim."""
+import asyncio
+import json
+import math
+import statistics
+import tempfile
+import time
+from pathlib import Path
+
+from outpost.bbs.mail import MailService
+from outpost.clock import VirtualClock
+from outpost.config import AirtimeConfig
+from outpost.fed import FederationPeerService, FederationSyncService
+from outpost.store import Database
+from outpost.store.members import MemberRepo
+from outpost.store.outbox import OutboxStore
+from outpost.transport.governor import AirtimeGovernor, OutboundItem
+from outpost.transport.models import TrafficClass
+from outpost.transport.simulated import SimulatedRadioLink
+from outpost.watch.incidents import IncidentService
+
+
+async def trial(root, mode, trial_number):
+    path = root / f"trial-{trial_number}-{mode}.db"
+    db = Database(path)
+    await db.open()
+    clock = VirtualClock()
+    members = MemberRepo(db, clock)
+    await members.resolve("!10000001")
+    sender = await members.claim_handle("!10000001", "synthetic_sender")
+    mail = MailService(db, members, clock, "synthetic")
+    incidents = IncidentService(db, clock)
+    radio = SimulatedRadioLink(clock)
+    governor = AirtimeGovernor(radio, AirtimeConfig(), clock, outbox=OutboxStore(db))
+    peers = FederationPeerService(db, clock, "!aaaaaaaa")
+    await peers.discover("!bbbbbbbb", "Synthetic producer", 1, {}, "radio")
+    await db.write("UPDATE fed_peer SET state='active',sync_incidents=1,quota_items_per_hour=100")
+    peer = await peers.by_mesh_id("!bbbbbbbb")
+    sync = FederationSyncService(db)
+    now = int(clock.now().timestamp())
+    default_mode = (await db._writer_read("PRAGMA synchronous"))[0][0]
+    assert mode in {"NORMAL", "FULL"}
+    await db._writer_read(f"PRAGMA synchronous={mode}")
+    actual_mode = (await db._writer_read("PRAGMA synchronous"))[0][0]
+    assert actual_mode == {"NORMAL": 1, "FULL": 2}[mode]
+    samples = {name: [] for name in ("incident", "mail", "outbox", "quarantine_receipt")}
+    semaphore = asyncio.Semaphore(4)
+
+    async def operation(kind, number):
+        async with semaphore:
+            started = time.perf_counter()
+            if kind == "incident":
+                item, _ = await incidents.create(f"road synthetic obstruction {number}", None, force=True)
+                assert item is not None
+            elif kind == "mail":
+                assert await mail.send(sender, "synthetic_receiver", f"Synthetic message {number}")
+            elif kind == "outbox":
+                result = await governor.admit(OutboundItem(f"Synthetic reply {number}", "!10000001", 0, TrafficClass.REPLY))
+                assert result is not None
+            else:
+                assert await sync.quarantine(peer, {
+                    "stream": "incidents", "uid": f"!bbbbbbbb:synthetic-{number}",
+                    "epoch": "1" * 32, "revision": number + 1,
+                    "payload": {"title": f"Synthetic incident {number}", "type": "road", "severity": "caution", "status": "open", "created_at": now, "updated_at": now},
+                }, now)
+            samples[kind].append((time.perf_counter() - started) * 1000)
+
+    started = time.perf_counter()
+    try:
+        await asyncio.gather(*(operation(kind, number) for number in range(24) for kind in samples))
+        elapsed = time.perf_counter() - started
+        assert not radio.sent
+        counts = {}
+        for table in ("incident", "mail", "outbound_work", "fed_inbox_item", "fed_revision_receipt"):
+            counts[table] = (await db.read(f"SELECT COUNT(*) FROM {table}"))[0][0]
+        assert set(counts.values()) == {24}, counts
+        sizes = {"database_bytes": path.stat().st_size, "wal_bytes": Path(str(path) + "-wal").stat().st_size}
+    finally:
+        await radio.close()
+        await db.close()
+    reopened = Database(path)
+    await reopened.open()
+    try:
+        reopen_mode = (await reopened._writer_read("PRAGMA synchronous"))[0][0]
+        for table, count in counts.items():
+            assert (await reopened.read(f"SELECT COUNT(*) FROM {table}"))[0][0] == count
+        assert (await reopened.read("PRAGMA integrity_check"))[0][0] == "ok"
+        assert not await reopened.read("PRAGMA foreign_key_check")
+    finally:
+        await reopened.close()
+    return {
+        "trial": trial_number, "mode": mode, "default_writer_mode": default_mode,
+        "measured_writer_mode": actual_mode, "reopen_default_writer_mode": reopen_mode,
+        "wall_seconds": elapsed, "operations": 96, "concurrency": 4,
+        "counts_after_reopen": counts, **sizes,
+        "latency_ms": {kind: {"p50": statistics.median(values), "p95": sorted(values)[math.ceil(len(values) * .95) - 1], "max": max(values)} for kind, values in samples.items()},
+    }
+
+
+async def main():
+    results = []
+    with tempfile.TemporaryDirectory(prefix="commit-policy-", dir=Path(__file__).parent) as directory:
+        for number, mode in enumerate(("NORMAL", "FULL", "FULL", "NORMAL", "NORMAL", "FULL"), 1):
+            result = await trial(Path(directory), mode, number)
+            results.append(result)
+            print(json.dumps(result, sort_keys=True), flush=True)
+    output = Path(__file__).with_name("commit-policy-measurements.json")
+    output.write_text(json.dumps({"trials": results, "scope": "temporary workspace ext4 databases; no RF, power cut, energy, live settings or custody-envelope measurement"}, indent=2) + "\n")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

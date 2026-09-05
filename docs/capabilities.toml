@@ -478,7 +478,10 @@ area = "Backup, restore, upgrade, and rollback"
 present = "Online verified backups, rotation, quiesced web restore, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback."
 maturity = "automated_tested"
 introduced_commit = "df0ee14"
-limitations = ["Destructive power-loss and full fresh-host recovery drills remain open."]
+limitations = [
+  "Destructive power-loss, integrated encrypted backup and full fresh-host recovery drills remain open.",
+  "Temporary NORMAL/FULL writer latency measurements do not prove power-loss survival, flush compliance, energy cost or sustained service latency. The live and repository default remain NORMAL; #137/#44 are open.",
+]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
@@ -496,6 +499,10 @@ description = "Executed installer mutations prove rollback and activation safety
 kind = "operations"
 path = "docs/RELEASES.md"
 description = "Release evidence, verified update, rollback, compromise, and revocation procedures."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/benchmarks/SQLITE-COMMIT-POLICY-2026-09-05.md"
+description = "Preliminary six-trial, four-concurrent-operation writer comparison on the Pi's temporary SD-card stores; ordinary reopen only, no power cut or changed live policy."
 
 [[capabilities]]
 id = "retention_privacy"

@@ -3,6 +3,13 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Preliminary commit-policy latency — #137 remains open
+
+[The temporary-store comparison](benchmarks/SQLITE-COMMIT-POLICY-2026-09-05.md) records NORMAL
+versus FULL latency for concurrent incident/mail/outbox/quarantine-receipt operations on this
+Pi's workspace SD-card filesystem. It changes no live setting and proves neither power-loss
+survival nor energy/service-level acceptance. Default-policy selection and #44 remain open.
+
 ## Indexed producer page work — #144
 
 Migration 176 adds a covering stream/revision index. Producer paging now merges at

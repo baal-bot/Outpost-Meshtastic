@@ -17,3 +17,8 @@ Maintained regressions live under `tests/` and are linked from
 the old probes as fixes are implemented. The legacy manifest probe intentionally does not prove
 the modern producer-revision protocol (#134). Event-driven propagation (#135) and physical
 durability (#137/#44) remain open, without unmanaged xfails concealing them.
+
+`commit-policy-da81184.py.txt` is a separate, later experimental artifact. Its
+[latency report](../benchmarks/SQLITE-COMMIT-POLICY-2026-09-05.md) records the exact source revision,
+temporary-store method and limits. It does not modify a live store or perform a power cut and
+must not be counted as physical durability acceptance.

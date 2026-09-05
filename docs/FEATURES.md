@@ -254,10 +254,12 @@ Evidence:
 - Automated: [tests/integration/test_backups.py::test_failed_restore_automatically_recovers_safety_snapshot](../tests/integration/test_backups.py) — A failed restore automatically returns to the verified safety snapshot.
 - Automated: [tests/unit/test_deploy_install.py::test_installer_harness_rejects_safety_mutants](../tests/unit/test_deploy_install.py) — Executed installer mutations prove rollback and activation safety assertions can fail.
 - Operations: [docs/RELEASES.md](RELEASES.md) — Release evidence, verified update, rollback, compromise, and revocation procedures.
+- Operations: [docs/benchmarks/SQLITE-COMMIT-POLICY-2026-09-05.md](benchmarks/SQLITE-COMMIT-POLICY-2026-09-05.md) — Preliminary six-trial, four-concurrent-operation writer comparison on the Pi's temporary SD-card stores; ordinary reopen only, no power cut or changed live policy.
 
 Known limitations:
 
-- Destructive power-loss and full fresh-host recovery drills remain open.
+- Destructive power-loss, integrated encrypted backup and full fresh-host recovery drills remain open.
+- Temporary NORMAL/FULL writer latency measurements do not prove power-loss survival, flush compliance, energy cost or sustained service latency. The live and repository default remain NORMAL; #137/#44 are open.
 
 ### Retention and privacy controls
 
