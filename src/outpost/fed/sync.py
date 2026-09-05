@@ -200,6 +200,7 @@ class FederationSyncService:
                     b.slug FROM post p JOIN thread t ON t.id=p.thread_id
                     JOIN board b ON b.id=t.board_id
                     WHERE b.federated=1 AND b.slug IN ({placeholders}) AND p.hidden=0
+                      AND t.hidden=0 AND b.archived=0
                     ORDER BY COALESCE(p.edited_at,p.created_at) DESC""",  # noqa: S608
                 tuple(peer.boards),
             )

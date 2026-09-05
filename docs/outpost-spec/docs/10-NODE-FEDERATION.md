@@ -313,6 +313,13 @@ Evidence: `tests/integration/test_federation_revisions.py` covers six-hour offse
 clock steps, durable radio framing in both directions, restart, edits during pagination, lost
 fetches, duplicate/delayed pages, local limits, receipt rollback/cancellation, and schema upgrade.
 
+Producer page discovery uses migration 176's covering stream/revision index. Scope and revision
+ranges are selected before a bounded merge: at most 101 heads per selected stream (20 boards
+plus incidents and alerts), 101 merged heads returned, 100 export-policy evaluations and eight
+manifest items. Geographic filtering can produce an empty advancing page. The complete query
+plans, 120,000-head synthetic measurement and legacy-adapter limitations are recorded in
+[indexed paging qualification](../../FEDERATION-PAGING-QUALIFICATION.md).
+
 **REQ-FED-043** — A peer public-alert service request **MUST** be evaluated for the request's
 normalized latitude/longitude, never against the serving Outpost's local alert inbox. The
 serving node **MUST** validate that point against the provider's supported service area and

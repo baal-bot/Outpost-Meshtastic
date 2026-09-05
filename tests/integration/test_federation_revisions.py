@@ -266,7 +266,7 @@ async def test_item_leaving_export_scope_does_not_stall_or_leak_new_location(nod
     assert await target.database.read("SELECT id FROM fed_inbox_item") == []
 
 
-async def test_empty_filtered_pages_are_bounded_and_use_an_index(nodes):
+async def test_unselected_history_is_skipped_by_scoped_index(nodes):
     source, sp, _ = await nodes("remote")
     for i in range(SCAN_LIMIT + 3):
         await source.database.write(
@@ -274,17 +274,14 @@ async def test_empty_filtered_pages_are_bounded_and_use_an_index(nodes):
         )
     incident = await report(source)
     first = await source.federation_sync.revisions.page(sp, {"cycle": "a" * 32})
-    assert first["items"] == [] and first["done"] is False
-    assert first["next"] == SCAN_LIMIT
-    second = await source.federation_sync.revisions.page(sp, {**first, "after": first["next"]})
-    assert second["done"] is True and len(second["items"]) == 1
-    assert second["items"][0]["u"].endswith(incident.uid)
+    assert first["done"] is True and len(first["items"]) == 1
+    assert first["items"][0]["u"].endswith(incident.uid)
     plan = await source.database.read(
         "EXPLAIN QUERY PLAN SELECT revision,stream,uid FROM fed_revision "
-        "WHERE revision>? AND revision<=? ORDER BY revision LIMIT ?",
-        (0, 100, 8),
+        "WHERE stream=? AND revision>? AND revision<=? ORDER BY revision LIMIT ?",
+        ("incidents", 0, 1000, 8),
     )
-    assert any("INTEGER PRIMARY KEY" in row["detail"] for row in plan)
+    assert any("idx_fed_revision_stream" in row["detail"] for row in plan)
     assert not any("TEMP B-TREE" in row["detail"] for row in plan)
 
 

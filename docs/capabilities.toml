@@ -269,7 +269,7 @@ introduced_commit = "8323143"
 limitations = [
   "The six-participant real-radio tabletop and receipt-latency gate remain open.",
   "Reporter location edits require a verified PKI DM or operator assistance. Suppression does not erase prior public history; moving outside a peer's area does not withdraw its older copy. Reference safety follows the database lineage; lost history or old-backup restores require identity precautions.",
-  "Clock-independent federation (#134), prompt incident propagation (#135), and acknowledged-data power-loss durability (#137) require separate remediation and evidence.",
+  "Clock-independent producer reconciliation is automated-tested on modern links; prompt incident propagation (#135) and acknowledged-data power-loss durability (#137) require separate remediation and evidence.",
 ]
 roadmap = []
 [capabilities.verification]
@@ -534,6 +534,7 @@ limitations = [
   "Topology location exchange is automated-tested; physical multi-node and long-duration stale/recovery exercises remain open.",
   "Federation remains experimental until every acceptance-backlog item passes.",
   "Revision reconciliation is automated-tested; mixed-version links retain clock-sensitive legacy ordering. Upgrade both peers for clock-independent cursors.",
+  "Large-history paging is qualified only for producer-revision links; the legacy timestamp adapter retains its collection-scaling limitation.",
   "Event-driven incident propagation, replica withdrawal, backup-lineage recovery, and hardware qualification remain open (#135/#145/#146/#157). Quiet hours, liveness and expiry still need time-confidence work (#141).",
 ]
 roadmap = []
@@ -557,6 +558,14 @@ description = "Producer revisions survive six-hour skew and in-cycle clock steps
 kind = "automated"
 path = "tests/integration/test_federation_revisions.py::test_page_waits_for_durable_receipts_and_restarts_without_skipping"
 description = "Pending fetches survive restart; duplicate and delayed pages cannot skip data or enlarge local catch-up budgets."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_federation_page_cost.py::test_large_history_page_cost_is_bounded_and_wire_cost_is_separate"
+description = "Indexed scoped paging at 1,200 and 120,000 retained heads records bounded metadata, Python allocation, query plans, latency and separate wire bytes."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/FEDERATION-PAGING-QUALIFICATION.md"
+description = "Producer-link performance envelope, bounded 22-stream merge, query plans, migration precautions and legacy/per-record limitations."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_federation_revisions.py::test_revision_protocol_crosses_real_framing_and_durable_outbox"

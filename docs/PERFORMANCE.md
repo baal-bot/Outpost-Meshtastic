@@ -1,5 +1,10 @@
 # Dashboard performance budget
 
+Separate application-load evidence is recorded in
+[emergency-burst qualification](EMERGENCY-BURST-QUALIFICATION.md) and
+[federation paging qualification](FEDERATION-PAGING-QUALIFICATION.md). Their synthetic
+admission/query timings are not physical radio delivery or sustainable RF-rate claims.
+
 Outpost is designed to leave enough Raspberry Pi capacity for radio handling, federation, local
 maps, and future on-device services. Dashboard convenience polling must not become a background
 workload merely because an operator left a tab open.

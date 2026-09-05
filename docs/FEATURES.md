@@ -182,7 +182,7 @@ Known limitations:
 
 - The six-participant real-radio tabletop and receipt-latency gate remain open.
 - Reporter location edits require a verified PKI DM or operator assistance. Suppression does not erase prior public history; moving outside a peer's area does not withdraw its older copy. Reference safety follows the database lineage; lost history or old-backup restores require identity precautions.
-- Clock-independent federation (#134), prompt incident propagation (#135), and acknowledged-data power-loss durability (#137) require separate remediation and evidence.
+- Clock-independent producer reconciliation is automated-tested on modern links; prompt incident propagation (#135) and acknowledged-data power-loss durability (#137) require separate remediation and evidence.
 
 ### Welfare events and check-ins
 
@@ -283,6 +283,8 @@ Evidence:
 - Automated: [tests/integration/test_federation_sync.py::test_manifest_keyset_pages_recover_long_outage_without_skips](../tests/integration/test_federation_sync.py) — Legacy keyset pagination control; this timestamp path is not clock-skew qualified.
 - Automated: [tests/integration/test_federation_revisions.py::test_clock_skew_and_step_do_not_skip_incident_updates](../tests/integration/test_federation_revisions.py) — Producer revisions survive six-hour skew and in-cycle clock steps without timestamp ordering authority.
 - Automated: [tests/integration/test_federation_revisions.py::test_page_waits_for_durable_receipts_and_restarts_without_skipping](../tests/integration/test_federation_revisions.py) — Pending fetches survive restart; duplicate and delayed pages cannot skip data or enlarge local catch-up budgets.
+- Automated: [tests/integration/test_federation_page_cost.py::test_large_history_page_cost_is_bounded_and_wire_cost_is_separate](../tests/integration/test_federation_page_cost.py) — Indexed scoped paging at 1,200 and 120,000 retained heads records bounded metadata, Python allocation, query plans, latency and separate wire bytes.
+- Operations: [docs/FEDERATION-PAGING-QUALIFICATION.md](FEDERATION-PAGING-QUALIFICATION.md) — Producer-link performance envelope, bounded 22-stream merge, query plans, migration precautions and legacy/per-record limitations.
 - Automated: [tests/integration/test_federation_revisions.py::test_revision_protocol_crosses_real_framing_and_durable_outbox](../tests/integration/test_federation_revisions.py) — Bidirectional simulated-radio exchange exercises authenticated framing and production durable admission; quarantine is not approval.
 - Automated: [tests/integration/test_incident_reconciliation.py::test_merged_origin_updates_are_advisory_and_identity_is_exported](../tests/integration/test_incident_reconciliation.py) — Merged-origin updates remain advisory and preserve exported origin identity.
 - Automated: [tests/integration/test_federation_relay.py::test_partition_relay_custody_signature_origin_review_and_receipt](../tests/integration/test_federation_relay.py) — A partitioned three-node relay preserves signed custody, origin review, and receipts.
@@ -300,6 +302,7 @@ Known limitations:
 - Topology location exchange is automated-tested; physical multi-node and long-duration stale/recovery exercises remain open.
 - Federation remains experimental until every acceptance-backlog item passes.
 - Revision reconciliation is automated-tested; mixed-version links retain clock-sensitive legacy ordering. Upgrade both peers for clock-independent cursors.
+- Large-history paging is qualified only for producer-revision links; the legacy timestamp adapter retains its collection-scaling limitation.
 - Event-driven incident propagation, replica withdrawal, backup-lineage recovery, and hardware qualification remain open (#135/#145/#146/#157). Quiet hours, liveness and expiry still need time-confidence work (#141).
 
 ### Meshtastic MQTT federation path

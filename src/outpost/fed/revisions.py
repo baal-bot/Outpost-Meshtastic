@@ -11,10 +11,12 @@ from outpost.fed.peers import Peer
 
 if TYPE_CHECKING:
     from outpost.fed.sync import FederationSyncService
+    from outpost.store import Transaction
 
 MODE = 2
 CAPABILITY = "reconciliation"
 SCAN_LIMIT = 100
+MAX_BOARDS = 20
 
 
 class RevisionReset(ValueError):
@@ -66,6 +68,41 @@ class RevisionIndex:
             )
         )
 
+    async def _heads(self, tx: Transaction, peer: Peer, after: int, snapshot: int) -> list[Any]:
+        """Merge bounded index seeks, never a sort of the retained collections."""
+        streams = []
+        if peer.sync_incidents and self.sync.module_enabled("watch"):
+            streams.append("incidents")
+        if peer.relay_alerts and self.sync.module_enabled("watch"):
+            streams.append("alerts")
+        if len(peer.boards) > MAX_BOARDS:
+            raise ValueError("board sync policy is too large")
+        if peer.boards and self.sync.module_enabled("bbs"):
+            placeholders = ",".join("?" for _ in peer.boards)
+            boards = await tx.read(
+                "SELECT slug FROM board WHERE federated=1 AND archived=0 "  # noqa: S608
+                f"AND slug IN ({placeholders}) ORDER BY slug",
+                tuple(peer.boards),
+            )
+            streams.extend(f"board:{row['slug']}" for row in boards)
+        if not streams:
+            return []
+        # Each input is independently limited before UNION's final merge. The
+        # extra head tells page() whether another scoped candidate exists without
+        # scanning an arbitrary number of unselected/private heads after the page.
+        seek = (
+            "SELECT revision,stream,uid FROM (SELECT revision,stream,uid "
+            "FROM fed_revision INDEXED BY idx_fed_revision_stream "
+            "WHERE stream=? AND revision>? AND revision<=? ORDER BY revision LIMIT ?)"
+        )
+        params = tuple(
+            value for stream in streams for value in (stream, after, snapshot, SCAN_LIMIT + 1)
+        )
+        return await tx.read(
+            " UNION ALL ".join(seek for _ in streams) + " ORDER BY revision LIMIT ?",  # noqa: S608
+            (*params, SCAN_LIMIT + 1),
+        )
+
     async def page(self, peer: Peer, request: dict[str, Any]) -> dict[str, Any]:
         if peer.state != "active":
             raise ValueError("sync requires an active peer")
@@ -101,14 +138,10 @@ class RevisionIndex:
                 raise ValueError("snapshot exceeds producer watermark")
             if after > snapshot:
                 raise ValueError("federation cursor exceeds producer watermark")
-            rows = await tx.read(
-                "SELECT revision,stream,uid FROM fed_revision "
-                "WHERE revision>? AND revision<=? ORDER BY revision LIMIT ?",
-                (after, snapshot, SCAN_LIMIT),
-            )
+            rows = await self._heads(tx, peer, after, snapshot)
             items: list[dict[str, Any]] = []
             next_after = after
-            for row in rows:
+            for row in rows[:SCAN_LIMIT]:
                 next_after = int(row["revision"])
                 exported = await self.sync.export_items(
                     peer, [{"stream": row["stream"], "uid": self.sync.wire_uid(row["uid"])}]
@@ -127,10 +160,7 @@ class RevisionIndex:
                     )
                 if len(items) == limit:
                     break
-            more = await tx.read(
-                "SELECT 1 FROM fed_revision WHERE revision>? AND revision<=? LIMIT 1",
-                (next_after, snapshot),
-            )
+            more = bool(rows and int(rows[-1]["revision"]) > next_after)
             if not more:
                 next_after = snapshot
             return {

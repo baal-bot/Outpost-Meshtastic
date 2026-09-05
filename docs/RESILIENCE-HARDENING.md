@@ -3,6 +3,21 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Indexed producer page work — #144
+
+Migration 176 adds a covering stream/revision index. Producer paging now merges at
+most 101 heads from each permitted stream (at most 22), returns at most 101 heads to
+Python, and applies export policy to at most 100 before emitting up to eight items.
+Unselected/private history cannot consume catch-up pages. Geographic and hidden-record
+filtering still uses the same policy as export. Legacy board manifests now also honor
+hidden threads and archived boards.
+
+[The paging qualification](FEDERATION-PAGING-QUALIFICATION.md) records query plans and
+separate database/memory/wire measurements at 1,200 and 120,000 synthetic heads, plus
+scope/order/edit/continuation regressions. These bounds apply to modern negotiated
+links, not the clock-sensitive legacy adapter. Back up before migration 176; the
+installed appliance has not been changed.
+
 ## Emergency-burst qualification — #152
 
 [The synthetic burst report](EMERGENCY-BURST-QUALIFICATION.md) defines the tested load,
@@ -156,8 +171,9 @@ SQLite's sequence state. Older binaries refuse schema 175; back up before a plan
 
 The negotiated `reconciliation: 2` capability leaves radio framing at version 1 and the existing
 188-byte fragment ceiling. The initial request has no timestamp or producer watermark. The
-producer chooses a high-water revision, and pages scan at most 100 indexed metadata heads and
-return at most eight permitted records. Cursors ascend and persist across budget-limited cycles.
+producer chooses a high-water revision, and pages evaluate at most 100 metadata heads and
+return at most eight permitted records. Migration 176's scoped index/merge bounds are detailed
+above. Cursors ascend and persist across budget-limited cycles.
 The local item budget and 16-round ceiling cannot be increased by peer metadata or scope resets.
 Scope changes restart discovery under the new policy; new producer lineages stop for review.
 An observed watermark or requested revision ahead of the producer also stops for recovery review,
