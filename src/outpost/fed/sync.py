@@ -9,6 +9,7 @@ from typing import Any
 
 from outpost.fed.peers import Peer
 from outpost.store import Database, Transaction
+from outpost.store.incident_refs import incident_reference
 
 
 @dataclass(frozen=True)
@@ -562,7 +563,7 @@ class FederationSyncService:
                     (origin_uid,),
                 )
         if not origins:
-            refs = await transaction.read("SELECT COALESCE(MAX(local_ref),0)+1 value FROM incident")
+            local_ref = await incident_reference(transaction, origin_uid)
             incident_id = await transaction.write(
                 """INSERT INTO incident(uid,local_ref,type,severity,status,title,body,
                    lat,lon,location_text,radius_m,reporter_label,origin_node,created_at,
@@ -571,7 +572,7 @@ class FederationSyncService:
                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'member',1,1)""",
                 (
                     origin_uid,
-                    refs[0]["value"],
+                    local_ref,
                     values["type"],
                     values["severity"],
                     values["status"],

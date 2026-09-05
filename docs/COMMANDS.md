@@ -9,6 +9,14 @@ The commands below remain first-class shortcuts and work from any screen. Comman
 case-insensitive. Configured channels normally require `!`; direct messages accept an optional
 prefix. `HELP <command>` shows exact syntax.
 
+Missing incident location? Reply to the **same Outpost** with `UPD 31 North gate`, using
+your report number. Only the original reporter's verified PKI direct message can edit
+the report; if your radio key is not reviewed, ask the operator to review it or use
+Watch → **Correct location** on your behalf. The location is public. Place names do not
+attach GPS; use `UPD 31 -share 40 -79` or `UPD 31 -share -wp shelter` to explicitly share
+coordinates, and `UPD 31 -nopos` to withhold current coordinates. Earlier public locations
+remain in incident history. Closed or merged reports require operator review.
+
 ## Command catalogue
 
 This table is generated from the same `CommandSpec` declarations the router registers. It includes
@@ -76,6 +84,7 @@ configured channel capability, available local data, or a higher role for a sens
 | `SUN`<br>Aliases: `ASTRO` | `SUN` · sunrise, twilight, and moon | Guest | General | reply | Read-only |
 | `TR`<br>Aliases: `TRANSLATE` | `TR <language> <text>` · translate with the local assistant | Member | Local AI | ai | Read-only |
 | `UNSUB`<br>Aliases: `UNSUBSCRIBE` | `UNSUB <board>` | Guest | BBS write | reply | Changes state |
+| `UPD` | `UPD <inc> <place\|-share lat lon\|-share -wp name\|-nopos>` · correct own report; verified DM only (else ask operator). Public; no cached GPS. -share consents to coordinates. | Guest | Incident report | reply | Changes state |
 | `WARN`<br>Aliases: `WARNINGS` | `WARN [number]` · active official alerts | Guest | Alert | reply | Read-only |
 | `WAYPOINT`<br>Aliases: `WP` | `WP [name] / WP ADD <name>` · public waypoint | Guest | General | reply | Changes state |
 | `WHERE`<br>Aliases: `W?` | `WHERE` · current context | Guest | General | reply | Read-only |

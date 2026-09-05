@@ -260,6 +260,12 @@ def _menu_screen(ctx: CommandContext, topic: str) -> Response:
             "Send the incident number",
             "CONFIRM",
         ),
+        "UPD": (
+            "CORRECT MY REPORT LOCATION",
+            "Public location; verified DM required, or ask operator. No cached GPS.",
+            "Send place, or -share lat lon; -nopos withholds coordinates",
+            "UPD",
+        ),
         "DISPUTE": (
             "DISPUTE INCIDENT",
             "Flags an incident for concern or correction.",

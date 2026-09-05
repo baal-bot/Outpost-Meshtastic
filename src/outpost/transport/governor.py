@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from collections import defaultdict, deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import time
 from typing import TYPE_CHECKING
@@ -742,47 +742,35 @@ class AirtimeGovernor:
     def _available(self, item: OutboundItem, now: float) -> bool:
         return item.item_id not in self._held_ids and item.next_attempt_at <= now
 
-    def _eligible_class(
+    def _dispatch_candidates(
         self, *, only_critical: bool, high_util: bool, low_power: bool, now: float
-    ) -> TrafficClass | None:
-        alerts = self.queues[TrafficClass.ALERT]
-        available_alerts = [item for item in alerts if self._available(item, now)]
-        if available_alerts:
-            if not only_critical or any(
-                item.severity == Severity.CRITICAL for item in available_alerts
-            ):
-                return TrafficClass.ALERT
+    ) -> Iterator[OutboundItem]:
+        """Visit each available candidate once, without reordering deferred work.
+
+        Airtime preflight may reject a candidate without blocking later work. Stable
+        sorting preserves FIFO among equal priorities within an alert severity/class.
+        Round-robin advances only as far as the class visited by the caller.
+        """
+        yield from sorted(
+            (
+                item
+                for item in self.queues[TrafficClass.ALERT]
+                if self._available(item, now)
+                and (not only_critical or item.severity == Severity.CRITICAL)
+            ),
+            key=lambda item: (ALERT_SEVERITY_ORDER.index(item.severity), -item.priority),
+        )
         if only_critical or high_util:
-            return None
+            return
         for _ in range(len(self._rr)):
             cls = self._rr[0]
             self._rr.rotate(-1)
-            if low_power and cls in DISCRETIONARY_POWER_CLASSES:
+            if (low_power and cls in DISCRETIONARY_POWER_CLASSES) or self._quiet(cls):
                 continue
-            if any(self._available(item, now) for item in self.queues[cls]) and not self._quiet(
-                cls
-            ):
-                return cls
-        return None
-
-    def _pop_alert(self, queue: deque[OutboundItem], now: float) -> OutboundItem:
-        for severity in ALERT_SEVERITY_ORDER:
-            candidates = [
-                queued
-                for queued in queue
-                if queued.severity == severity and self._available(queued, now)
-            ]
-            item = max(candidates, key=lambda value: value.priority, default=None)
-            if item is not None:
-                queue.remove(item)
-                return item
-        raise AssertionError("non-empty alert queue has no severity")
-
-    def _pop_unheld(self, queue: deque[OutboundItem], now: float) -> OutboundItem:
-        candidates = [queued for queued in queue if self._available(queued, now)]
-        item = max(candidates, key=lambda value: value.priority)
-        queue.remove(item)
-        return item
+            yield from sorted(
+                (item for item in self.queues[cls] if self._available(item, now)),
+                key=lambda item: -item.priority,
+            )
 
     async def tick(self) -> OutboundItem | None:
         now = self.clock.monotonic()
@@ -829,14 +817,53 @@ class AirtimeGovernor:
             and self.battery_level is not None
             and self.battery_level <= self.power_config.shed_below_percent
         )
-        cls = self._eligible_class(
+        used = self.used_airtime
+        class_used = self.airtime_breakdown()
+        throttled_classes: set[TrafficClass] = set()
+        item = None
+        for candidate in self._dispatch_candidates(
             only_critical=only_critical,
             high_util=high_util,
             low_power=low_power,
             now=now,
-        )
-        if cls is None:
-            if any(self.queues.values()):
+        ):
+            cls = candidate.traffic_class
+            # Persisting a rejected payload below yields to other work. A later
+            # candidate in the snapshot may have been cancelled or superseded.
+            if candidate not in self.queues[cls] or not self._available(candidate, now):
+                continue
+            try:
+                portnum = candidate.portnum or (1 if candidate.binary_payload is None else 260)
+                cost = self.estimate_toa(candidate.payload_size, portnum=portnum)
+            except (KeyError, ValueError) as error:
+                self.queues[cls].remove(candidate)
+                self.metrics.dropped[(cls, "invalid_payload")] += 1
+                OUTBOUND_DROPPED.labels(cls.value, "invalid_payload").inc()
+                QUEUE_DEPTH.labels(cls.value).set(len(self.queues[cls]))
+                if self.outbox is not None:
+                    await self.outbox.fail_unstarted(
+                        candidate.item_id,
+                        now_epoch,
+                        f"{type(error).__name__}: {error}",
+                    )
+                continue
+            # Both ceilings are admission-to-transmit checks, not reasons to stop
+            # looking. Another class or a smaller packet may still fit this tick.
+            critical = cls == TrafficClass.ALERT and candidate.severity == Severity.CRITICAL
+            ceiling = total_s if critical else budget_s
+            class_ceiling = budget_s * self.config.class_shares.get(cls.value, 0.0)
+            if used + cost > ceiling or (
+                not critical and class_used[cls.value] + cost > class_ceiling
+            ):
+                throttled_classes.add(cls)
+                continue
+            candidate.estimated_toa = cost
+            item = candidate
+            break
+        for throttled_class in throttled_classes:
+            self.metrics.throttled[throttled_class] += 1
+        if item is None:
+            if any(self.queues.values()) and not throttled_classes:
                 reason = (
                     "budget"
                     if only_critical
@@ -848,38 +875,10 @@ class AirtimeGovernor:
                 )
                 self.metrics.throttled[reason] += 1
             return None
+        cls = item.traffic_class
         queue = self.queues[cls]
-        if cls == TrafficClass.ALERT:
-            item = self._pop_alert(queue, now)
-        else:
-            item = self._pop_unheld(queue, now)
-        try:
-            portnum = item.portnum or (1 if item.binary_payload is None else 260)
-            cost = self.estimate_toa(item.payload_size, portnum=portnum)
-        except (KeyError, ValueError) as error:
-            self.metrics.dropped[(cls, "invalid_payload")] += 1
-            OUTBOUND_DROPPED.labels(cls.value, "invalid_payload").inc()
-            QUEUE_DEPTH.labels(cls.value).set(len(queue))
-            if self.outbox is not None:
-                await self.outbox.fail_unstarted(
-                    item.item_id,
-                    now_epoch,
-                    f"{type(error).__name__}: {error}",
-                )
-            return None
-        item.estimated_toa = cost
-        # Preflight prevents a packet from crossing either rolling ceiling.
-        critical = cls == TrafficClass.ALERT and item.severity == Severity.CRITICAL
-        ceiling = total_s if critical else budget_s
-        if self.used_airtime + cost > ceiling:
-            queue.appendleft(item)
-            self.metrics.throttled[cls] += 1
-            return None
-        class_ceiling = budget_s * self.config.class_shares.get(cls.value, 0.0)
-        if not critical and self.class_airtime(cls) + cost > class_ceiling:
-            queue.appendleft(item)
-            self.metrics.throttled[cls] += 1
-            return None
+        queue.remove(item)
+        cost = item.estimated_toa
         if self.outbox is not None:
             if not await self.outbox.start_attempt(
                 item.item_id, now_epoch, round(item.estimated_toa * 1_000)

@@ -352,6 +352,10 @@ class IncidentUpdateBody(BaseModel):
     note: str = ""
 
 
+class IncidentLocationBody(BaseModel):
+    location: str = Field(min_length=1, max_length=200)
+
+
 class IncidentMergeBody(BaseModel):
     target_id: int = Field(gt=0)
 
@@ -3250,6 +3254,21 @@ def create_web_app(
                     "provenance": await incidents.provenance(canonical_id),
                     "match_candidates": await incidents.match_candidates(value.id),
                 }
+
+            @app.post("/api/v1/incidents/{incident_id}/location", response_model=None)
+            async def incident_location(
+                incident_id: int, body: IncidentLocationBody
+            ) -> dict[str, Any] | Response:
+                try:
+                    value = await incidents.operator_location(
+                        incident_id, body.location, actor=current_actor()
+                    )
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "invalid_location", "message": str(error)}},
+                        status_code=422,
+                    )
+                return value.json()
 
             @app.patch("/api/v1/incidents/{incident_id}", response_model=None)
             async def incident_patch(

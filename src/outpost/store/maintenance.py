@@ -127,6 +127,13 @@ TABLE_POLICIES = (
     TablePolicy(
         "incident", "watch", "retain", "Terminal incidents only; active incidents protected."
     ),
+    TablePolicy(
+        "incident_reference",
+        "watch",
+        "preserve",
+        "Permanent reference/opaque UID bindings prevent delayed-command retargeting.",
+        True,
+    ),
     TablePolicy("incident_update", "watch", "cascade", "Follows its incident."),
     TablePolicy("incident_origin", "watch", "cascade", "Follows its retained incident."),
     TablePolicy("incident_provenance", "watch", "cascade", "Follows its retained incident."),

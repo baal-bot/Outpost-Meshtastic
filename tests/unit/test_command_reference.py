@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import re
 import runpy
 from collections.abc import Callable
 from pathlib import Path
@@ -22,7 +24,21 @@ def test_registered_commands_and_aliases_are_documented() -> None:
     assert {"ACKNOWLEDGE", "EARTHQUAKE", "SUBSCRIBE", "UNSUBSCRIBE"} <= tokens
     assert {"REPORT!", "ROSTER?"} <= tokens
     assert "CONVERSATION" not in tokens
+    assert "UPD" in tokens
     assert run(ROOT / "docs" / "COMMANDS.md", check=True) == 0
+
+
+def test_actionable_watch_hints_and_help_syntax_use_registered_commands() -> None:
+    specs = registered_specs()
+    tokens = {token for spec in specs for token in (spec.name, *spec.aliases)}
+    for spec in specs:
+        assert spec.help_short.split()[0] in tokens
+    for source in ("commands/watch.py", "watch/location.py"):
+        tree = ast.parse((ROOT / "src/outpost" / source).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for token in re.findall(r"\b(?:send|Send|HELP|MENU)\s+([A-Z][A-Z!?]+)", node.value):
+                    assert token in tokens, (source, token)
 
 
 def test_command_reference_generator_detects_and_repairs_drift(tmp_path: Path) -> None:

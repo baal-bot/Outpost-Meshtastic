@@ -8,10 +8,14 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.geo import distance_bearing
 from outpost.store import Database, Transaction
+from outpost.store.incident_refs import incident_reference
 from outpost.store.members import Member
+
+from .location import parse_location
 
 ACTIVE = ("open", "monitoring")
 TERMINAL = ("resolved", "false_alarm", "expired")
@@ -55,6 +59,7 @@ class Incident:
     location_text: str | None
     reporter_id: int | None
     reporter_label: str
+    origin_node: str
     created_at: int
     updated_at: int
     expires_at: int | None
@@ -196,13 +201,16 @@ class IncidentService:
         lon: float | None,
         radius_m: int | None = None,
         window_minutes: int | None = None,
+        *,
+        transaction: Transaction | None = None,
     ) -> Incident | None:
         if lat is None or lon is None:
             return None
         effective_radius = self.dedupe_radius_m if radius_m is None else radius_m
         effective_window = self.dedupe_window_minutes if window_minutes is None else window_minutes
         cutoff = int(self.clock.now().timestamp()) - effective_window * 60
-        rows = await self.database.read(
+        store = transaction or self.database
+        rows = await store.read(
             "SELECT * FROM incident WHERE status IN ('open','monitoring') AND type=? "
             "AND merged_into_id IS NULL AND created_at>=? AND lat IS NOT NULL AND lon IS NOT NULL",
             (kind, cutoff),
@@ -265,17 +273,6 @@ class IncidentService:
             resolved_coordinates = await self.recent_position(member)
         lat, lon = (None, None) if suppressed else resolved_coordinates or (None, None)
         title = clean[:64]
-        if not force:
-            similar = await self.duplicate(kind, title, lat, lon)
-            if similar:
-                return None, similar
-        refs = await self.database.read(
-            "SELECT local_ref FROM incident WHERE status IN ('open','monitoring') "
-            "ORDER BY local_ref"
-        )
-        used = {int(row[0]) for row in refs}
-        local_ref = next(number for number in range(1, len(used) + 2) if number not in used)
-        now = int(self.clock.now().timestamp())
         location_text = (
             waypoint_name
             if waypoint_name and lat is not None
@@ -283,60 +280,70 @@ class IncidentService:
             if lat is not None and lon is not None
             else clean
         )
-        incident_id = await self.database.write(
-            """INSERT INTO incident(uid,local_ref,type,severity,title,body,lat,lon,location_text,
-               reporter_id,reporter_label,origin_node,created_at,updated_at,expires_at,
-               location_unconfirmed,position_suppressed,unverified)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                str(uuid.uuid4()),
-                local_ref,
-                kind,
-                severity,
-                title,
-                clean,
-                lat,
-                lon,
-                location_text,
-                member.id if member else None,
-                self._member_label(member) if member else operator_label,
-                self.origin_node,
-                now,
-                now,
-                now + expiry_hours * 3600,
-                int(lat is None),
-                int(suppressed),
-                int(member is not None and member.trust == "guest"),
-            ),
-        )
-        created = await self.by_id(incident_id)
-        assert created is not None
-        await self.database.write(
-            "INSERT INTO incident_origin(origin_uid,incident_id,original_incident_id,origin_node,"
-            "source_kind,first_seen_at,last_seen_at,source_updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?)",
-            (
+        # Duplicate detection and reference allocation must observe the same serialized
+        # state as the insert; a lock around individual writes cannot protect either read.
+        async with self.database.transaction() as transaction:
+            if not force:
+                similar = await self.duplicate(kind, title, lat, lon, transaction=transaction)
+                if similar:
+                    return None, similar
+            uid = str(uuid.uuid4())
+            local_ref = await incident_reference(transaction, uid)
+            now = int(self.clock.now().timestamp())
+            incident_id = await transaction.write(
+                """INSERT INTO incident(uid,local_ref,type,severity,title,body,lat,lon,
+                   location_text,reporter_id,reporter_label,origin_node,created_at,updated_at,expires_at,
+                   location_unconfirmed,position_suppressed,unverified)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    uid,
+                    local_ref,
+                    kind,
+                    severity,
+                    title,
+                    clean,
+                    lat,
+                    lon,
+                    location_text,
+                    member.id if member else None,
+                    self._member_label(member) if member else operator_label,
+                    self.origin_node,
+                    now,
+                    now,
+                    now + expiry_hours * 3600,
+                    int(lat is None),
+                    int(suppressed),
+                    int(member is not None and member.trust == "guest"),
+                ),
+            )
+            created = await self.by_id(incident_id, transaction=transaction)
+            assert created is not None
+            await transaction.write(
+                "INSERT INTO incident_origin(origin_uid,incident_id,original_incident_id,"
+                "origin_node,source_kind,first_seen_at,last_seen_at,source_updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    created.uid,
+                    created.id,
+                    created.id,
+                    self.origin_node,
+                    "local",
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            await self._append_provenance(
+                transaction,
+                created.id,
                 created.uid,
-                created.id,
-                created.id,
                 self.origin_node,
-                "local",
-                now,
-                now,
-                now,
-            ),
-        )
-        await self._append_provenance(
-            self.database,
-            created.id,
-            created.uid,
-            self.origin_node,
-            "created",
-            self._snapshot(created),
-            actor=self._member_label(member) if member else operator_label,
-            recorded_at=now,
-            source_updated_at=now,
-        )
+                "created",
+                self._snapshot(created),
+                actor=self._member_label(member) if member else operator_label,
+                recorded_at=now,
+                source_updated_at=now,
+            )
         return created, None
 
     async def record_position(
@@ -417,13 +424,19 @@ class IncidentService:
         assert updated is not None
         return updated, True
 
-    async def by_id(self, incident_id: int) -> Incident | None:
-        rows = await self.database.read("SELECT * FROM incident WHERE id=?", (incident_id,))
+    async def by_id(
+        self, incident_id: int, *, transaction: Transaction | None = None
+    ) -> Incident | None:
+        store = transaction or self.database
+        rows = await store.read("SELECT * FROM incident WHERE id=?", (incident_id,))
         return self._row(rows[0]) if rows else None
 
-    async def by_ref(self, local_ref: int) -> Incident | None:
-        rows = await self.database.read(
-            "SELECT * FROM incident WHERE local_ref=? ORDER BY updated_at DESC LIMIT 1",
+    async def by_ref(
+        self, local_ref: int, *, transaction: Transaction | None = None
+    ) -> Incident | None:
+        store = transaction or self.database
+        rows = await store.read(
+            "SELECT * FROM incident WHERE local_ref=?",
             (local_ref,),
         )
         if not rows:
@@ -434,7 +447,7 @@ class IncidentService:
             if value.merged_into_id in seen:
                 raise RuntimeError("incident merge cycle detected")
             seen.add(value.merged_into_id)
-            target = await self.by_id(value.merged_into_id)
+            target = await self.by_id(value.merged_into_id, transaction=transaction)
             if target is None:
                 raise RuntimeError("incident merge target is missing")
             value = target
@@ -788,11 +801,6 @@ class IncidentService:
         resolution: str | None,
         actor: str,
     ) -> Incident:
-        incident = await self.by_id(incident_id)
-        if incident is None:
-            raise ValueError("incident not found")
-        if incident.merged_into_id is not None:
-            raise ValueError("update the canonical incident instead")
         if status in TERMINAL and not (resolution or "").strip():
             raise ValueError("terminal incident status requires a resolution note")
         changes: dict[str, object] = {}
@@ -820,75 +828,215 @@ class IncidentService:
             raise ValueError("no incident changes supplied")
         now = int(self.clock.now().timestamp())
         assignments.extend(("updated_at=?", "reconciliation_review=0"))
-        params.extend((now, incident.id))
-        await self.database.write(
-            f"UPDATE incident SET {','.join(assignments)} WHERE id=?",  # noqa: S608
-            tuple(params),
+        params.extend((now, incident_id))
+        async with self.database.transaction() as transaction:
+            incident = await self.by_id(incident_id, transaction=transaction)
+            if incident is None:
+                raise ValueError("incident not found")
+            if incident.merged_into_id is not None:
+                raise ValueError("update the canonical incident instead")
+            await transaction.write(
+                f"UPDATE incident SET {','.join(assignments)} WHERE id=?",  # noqa: S608
+                tuple(params),
+            )
+            await self._append_provenance(
+                transaction,
+                incident.id,
+                incident.uid,
+                self.origin_node,
+                "operator_correction",
+                changes,
+                actor=actor,
+                recorded_at=now,
+                source_updated_at=now,
+            )
+            updated = await self.by_id(incident.id, transaction=transaction)
+            assert updated is not None
+        return updated
+
+    async def update_location(self, local_ref: int, member: Member, text: str) -> Incident:
+        """Correct one's own report; the router must authenticate this PKI DM first."""
+        if not 0 < local_ref <= 9_223_372_036_854_775_807:
+            raise ValueError("No active incident.")
+        async with self.database.transaction() as transaction:
+            # Unlike read/reaction paths, never follow a merged reference into a
+            # different reporter's canonical incident.
+            rows = await transaction.read("SELECT * FROM incident WHERE local_ref=?", (local_ref,))
+            incident = self._row(rows[0]) if rows else None
+            if incident is None:
+                raise ValueError("No active incident.")
+            identity = await transaction.read(
+                "SELECT pki_state,trust,public_key FROM member WHERE id=?", (member.id,)
+            )
+            if (
+                not identity
+                or identity[0]["pki_state"] != "verified"
+                or identity[0]["trust"] == "blocked"
+                or member.public_key is None
+                or identity[0]["public_key"] != member.public_key
+            ):
+                raise ValueError("Use a verified PKI direct message or ask the operator.")
+            if incident.reporter_id != member.id:
+                raise ValueError("Only the original reporter may use UPD. Ask the operator.")
+            return await self._correct_location(
+                transaction, incident, text, actor=f"mesh:{member.mesh_id}", member=member
+            )
+
+    async def operator_location(self, incident_id: int, text: str, *, actor: str) -> Incident:
+        """Authenticated operator correction using the same consent and audit rules."""
+        if not actor.strip():
+            raise ValueError("An operator identity is required.")
+        if not 0 < incident_id <= 9_223_372_036_854_775_807:
+            raise ValueError("No active incident.")
+        async with self.database.transaction() as transaction:
+            incident = await self.by_id(incident_id, transaction=transaction)
+            if incident is None:
+                raise ValueError("No active incident.")
+            return await self._correct_location(transaction, incident, text, actor=actor)
+
+    async def _correct_location(
+        self,
+        transaction: Transaction,
+        incident: Incident,
+        text: str,
+        *,
+        actor: str,
+        member: Member | None = None,
+    ) -> Incident:
+        if incident.merged_into_id is not None:
+            raise ValueError(
+                "Incident was merged. Ask the operator to correct the canonical report."
+            )
+        if incident.status not in ACTIVE:
+            raise ValueError("No active incident.")
+        location = await parse_location(
+            transaction, text, previously_suppressed=bool(incident.position_suppressed)
+        )
+        fields = ("lat", "lon", "location_text", "position_suppressed", "location_unconfirmed")
+        before = {field: getattr(incident, field) for field in fields}
+        after = dict(
+            zip(
+                fields,
+                (
+                    location.lat,
+                    location.lon,
+                    location.text,
+                    int(location.suppressed),
+                    int(location.lat is None),
+                ),
+                strict=True,
+            )
+        )
+        if before == after:
+            return incident
+        now = int(self.clock.now().timestamp())
+        # Existing federation uses updated_at as the source version. Distinguish
+        # corrections within one clock second (and across a backwards clock step).
+        version = max(now, incident.updated_at + 1)
+        seq_rows = await transaction.read(
+            "SELECT COALESCE(MAX(seq),0)+1 FROM incident_update WHERE incident_id=?",
+            (incident.id,),
+        )
+        await transaction.write(
+            "UPDATE incident SET lat=?,lon=?,location_text=?,position_suppressed=?,"
+            "location_unconfirmed=?,updated_at=? WHERE id=?",
+            (*after.values(), version, incident.id),
+        )
+        await transaction.write(
+            "INSERT INTO incident_update(uid,incident_id,seq,author_id,author_label,kind,"
+            "body,lat,lon,created_at) VALUES(?,?,?,?,?,'update',?,?,?,?)",
+            (
+                str(uuid.uuid4()),
+                incident.id,
+                int(seq_rows[0][0]),
+                member.id if member else None,
+                self._member_label(member) if member else actor[:160],
+                f"Location: {location.text}",
+                location.lat,
+                location.lon,
+                now,
+            ),
+        )
+        await transaction.write(
+            "UPDATE incident_origin SET last_seen_at=?,source_updated_at=? "
+            "WHERE origin_uid=? AND source_kind='local'",
+            (now, version, incident.uid),
         )
         await self._append_provenance(
-            self.database,
+            transaction,
             incident.id,
             incident.uid,
             self.origin_node,
-            "operator_correction",
-            changes,
+            "location_corrected",
+            {"before": before, "after": after, "position_source": "explicit_public_input"},
             actor=actor,
             recorded_at=now,
-            source_updated_at=now,
+            source_updated_at=version,
         )
-        updated = await self.by_id(incident.id)
+        await write_audit(
+            transaction,
+            actor_kind="mesh" if member else "web",
+            actor_ref=actor,
+            action="incident.location",
+            target=f"incident:{incident.id}",
+            detail={"local_ref": incident.local_ref, "position_shared": location.lat is not None},
+            created_at=now,
+        )
+        updated = await self.by_id(incident.id, transaction=transaction)
         assert updated is not None
         return updated
 
     async def react(self, local_ref: int, member: Member, kind: str, note: str = "") -> Incident:
         if kind not in {"confirm", "dispute"}:
             raise ValueError("invalid reaction")
-        incident = await self.by_ref(local_ref)
-        if incident is None or incident.status not in ACTIVE:
-            raise ValueError("No active incident.")
-        prior = await self.database.read(
-            "SELECT id FROM incident_update WHERE incident_id=? AND author_id=? AND kind=?",
-            (incident.id, member.id, kind),
-        )
-        if prior:
-            return incident
-        seq_rows = await self.database.read(
-            "SELECT COALESCE(MAX(seq),0)+1 FROM incident_update WHERE incident_id=?", (incident.id,)
-        )
-        now, seq = int(self.clock.now().timestamp()), int(seq_rows[0][0])
-        await self.database.write(
-            "INSERT INTO incident_update(uid,incident_id,seq,author_id,author_label,kind,body,"
-            "created_at) VALUES(?,?,?,?,?,?,?,?)",
-            (
-                str(uuid.uuid4()),
+        async with self.database.transaction() as transaction:
+            incident = await self.by_ref(local_ref, transaction=transaction)
+            if incident is None or incident.status not in ACTIVE:
+                raise ValueError("No active incident.")
+            prior = await transaction.read(
+                "SELECT id FROM incident_update WHERE incident_id=? AND author_id=? AND kind=?",
+                (incident.id, member.id, kind),
+            )
+            if prior:
+                return incident
+            seq_rows = await transaction.read(
+                "SELECT COALESCE(MAX(seq),0)+1 FROM incident_update WHERE incident_id=?",
+                (incident.id,),
+            )
+            now, seq = int(self.clock.now().timestamp()), int(seq_rows[0][0])
+            await transaction.write(
+                "INSERT INTO incident_update(uid,incident_id,seq,author_id,author_label,kind,body,"
+                "created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    str(uuid.uuid4()),
+                    incident.id,
+                    seq,
+                    member.id,
+                    self._member_label(member),
+                    kind,
+                    note or None,
+                    now,
+                ),
+            )
+            column = "confirm_count" if kind == "confirm" else "dispute_count"
+            await transaction.write(
+                f"UPDATE incident SET {column}={column}+1,updated_at=?,"  # noqa: S608
+                "flagged_for_review=(dispute_count + ? > confirm_count + ?) WHERE id=?",
+                (now, int(kind == "dispute"), int(kind == "confirm"), incident.id),
+            )
+            await self._append_provenance(
+                transaction,
                 incident.id,
-                seq,
-                member.id,
-                self._member_label(member),
+                incident.uid,
+                self.origin_node,
                 kind,
-                note or None,
-                now,
-            ),
-        )
-        column = "confirm_count" if kind == "confirm" else "dispute_count"
-        await self.database.write(
-            f"UPDATE incident SET {column}={column}+1,updated_at=?,"  # noqa: S608
-            "flagged_for_review=(dispute_count + ? > confirm_count + ?) WHERE id=?",
-            (now, int(kind == "dispute"), int(kind == "confirm"), incident.id),
-        )
-        updated = await self.by_id(incident.id)
-        assert updated is not None
-        await self._append_provenance(
-            self.database,
-            incident.id,
-            incident.uid,
-            self.origin_node,
-            kind,
-            {"note": note or None, "member": self._member_label(member)},
-            actor=self._member_label(member),
-            recorded_at=now,
-            source_updated_at=now,
-        )
+                {"note": note or None, "member": self._member_label(member)},
+                actor=self._member_label(member),
+                recorded_at=now,
+                source_updated_at=now,
+            )
+            updated = await self.by_id(incident.id, transaction=transaction)
+            assert updated is not None
         return updated
 
     async def updates(self, incident_id: int, limit: int = 2) -> builtins.list[dict[str, Any]]:
@@ -904,39 +1052,40 @@ class IncidentService:
     ) -> Incident:
         if kind not in {"ack", "update"}:
             raise ValueError("Operator action must be ack or update.")
-        incident = await self.by_id(incident_id)
-        if incident is None or incident.status not in ACTIVE:
-            raise ValueError("No active incident.")
         note = body.strip()[:500]
         if kind == "update" and not note:
             raise ValueError("An update note is required.")
-        seq_rows = await self.database.read(
-            "SELECT COALESCE(MAX(seq),0)+1 FROM incident_update WHERE incident_id=?",
-            (incident.id,),
-        )
-        now, seq = int(self.clock.now().timestamp()), int(seq_rows[0][0])
-        await self.database.write(
-            "INSERT INTO incident_update(uid,incident_id,seq,author_label,kind,body,created_at) "
-            "VALUES(?,?,?,?,?,?,?)",
-            (str(uuid.uuid4()), incident.id, seq, actor, kind, note or None, now),
-        )
-        status = "monitoring" if kind == "ack" else incident.status
-        await self.database.write(
-            "UPDATE incident SET status=?,updated_at=? WHERE id=?", (status, now, incident.id)
-        )
-        updated = await self.by_id(incident.id)
-        assert updated is not None
-        await self._append_provenance(
-            self.database,
-            incident.id,
-            incident.uid,
-            self.origin_node,
-            "acknowledged" if kind == "ack" else "operator_update",
-            {"body": note or None, "status": status},
-            actor=actor,
-            recorded_at=now,
-            source_updated_at=now,
-        )
+        async with self.database.transaction() as transaction:
+            incident = await self.by_id(incident_id, transaction=transaction)
+            if incident is None or incident.status not in ACTIVE:
+                raise ValueError("No active incident.")
+            seq_rows = await transaction.read(
+                "SELECT COALESCE(MAX(seq),0)+1 FROM incident_update WHERE incident_id=?",
+                (incident.id,),
+            )
+            now, seq = int(self.clock.now().timestamp()), int(seq_rows[0][0])
+            await transaction.write(
+                "INSERT INTO incident_update(uid,incident_id,seq,author_label,kind,body,"
+                "created_at) VALUES(?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), incident.id, seq, actor, kind, note or None, now),
+            )
+            status = "monitoring" if kind == "ack" else incident.status
+            await transaction.write(
+                "UPDATE incident SET status=?,updated_at=? WHERE id=?", (status, now, incident.id)
+            )
+            await self._append_provenance(
+                transaction,
+                incident.id,
+                incident.uid,
+                self.origin_node,
+                "acknowledged" if kind == "ack" else "operator_update",
+                {"body": note or None, "status": status},
+                actor=actor,
+                recorded_at=now,
+                source_updated_at=now,
+            )
+            updated = await self.by_id(incident.id, transaction=transaction)
+            assert updated is not None
         return updated
 
     async def expire_due(self) -> builtins.list[Incident]:
@@ -949,34 +1098,43 @@ class IncidentService:
         expired: builtins.list[Incident] = []
         for row in rows:
             incident_id = int(row["id"])
-            seq_rows = await self.database.read(
-                "SELECT COALESCE(MAX(seq),0)+1 FROM incident_update WHERE incident_id=?",
-                (incident_id,),
-            )
-            await self.database.write(
-                "INSERT INTO incident_update(uid,incident_id,seq,author_label,kind,body,"
-                "created_at) VALUES(?,?,?,?,?,?,?)",
-                (
-                    str(uuid.uuid4()),
-                    incident_id,
-                    int(seq_rows[0][0]),
-                    "system",
-                    "status_change",
-                    "Automatically expired",
-                    now,
-                ),
-            )
-            await self.database.write(
-                "UPDATE incident SET status='expired',updated_at=? "
-                "WHERE id=? AND status IN ('open','monitoring')",
-                (now, incident_id),
-            )
-            value = await self.by_id(incident_id)
-            if value is not None and value.status == "expired":
+            async with self.database.transaction() as transaction:
+                # Recheck after acquiring the writer: another sweep, operator, or
+                # federation import may have changed the candidate in the meantime.
+                incident = await self.by_id(incident_id, transaction=transaction)
+                if (
+                    incident is None
+                    or incident.status not in ACTIVE
+                    or incident.merged_into_id is not None
+                    or incident.expires_at is None
+                    or incident.expires_at > now
+                ):
+                    continue
+                seq_rows = await transaction.read(
+                    "SELECT COALESCE(MAX(seq),0)+1 FROM incident_update WHERE incident_id=?",
+                    (incident_id,),
+                )
+                await transaction.write(
+                    "INSERT INTO incident_update(uid,incident_id,seq,author_label,kind,body,"
+                    "created_at) VALUES(?,?,?,?,?,?,?)",
+                    (
+                        str(uuid.uuid4()),
+                        incident_id,
+                        int(seq_rows[0][0]),
+                        "system",
+                        "status_change",
+                        "Automatically expired",
+                        now,
+                    ),
+                )
+                await transaction.write(
+                    "UPDATE incident SET status='expired',updated_at=? WHERE id=?",
+                    (now, incident_id),
+                )
                 await self._append_provenance(
-                    self.database,
-                    value.id,
-                    value.uid,
+                    transaction,
+                    incident.id,
+                    incident.uid,
                     self.origin_node,
                     "expired",
                     {"status": "expired"},
@@ -984,5 +1142,7 @@ class IncidentService:
                     recorded_at=now,
                     source_updated_at=now,
                 )
-                expired.append(value)
+                value = await self.by_id(incident_id, transaction=transaction)
+                assert value is not None
+            expired.append(value)
         return expired

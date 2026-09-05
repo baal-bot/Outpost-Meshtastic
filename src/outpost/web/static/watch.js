@@ -121,6 +121,20 @@ async function incidentActionError(response,title){
   try{const body=await response.json();message=body.error?.message||message;}catch(_){/* Keep status fallback. */}
   await window.OutpostUI.alert({title,message});
 }
+async function correctIncidentLocation(item,button){
+  const location=await window.OutpostUI.prompt({
+    title:`Correct INC ${item.local_ref} location`,
+    message:"Public incident location. Enter a place (160 UTF-8 bytes max), -share lat lon, or -share -wp name. Use -nopos to withhold coordinates. No cached GPS is attached. Earlier locations remain in the audited history; confirm the reporter's consent before sharing coordinates.",
+    label:"Public location",confirmLabel:"Record location"
+  });
+  if(!location)return;
+  try{
+    if(await runIncidentAction(button,`/api/v1/incidents/${item.id}/location`,{method:"POST",body:JSON.stringify({location})}))notify(`INC ${item.local_ref} location corrected and audited.`);
+  }catch(error){
+    button.disabled=false;button.textContent="Correct location";
+    await window.OutpostUI.alert({title:"Location result uncertain",message:"The connection failed. Refresh the incident to check whether it was saved before retrying."});
+  }
+}
 async function runIncidentAction(button,url,options){
   const prior=button.textContent;
   button.disabled=true;
@@ -148,6 +162,10 @@ showDetail=async(item)=>{
     ack.onclick=()=>runIncidentAction(ack,`/api/v1/incidents/${item.id}/updates`,{method:"POST",body:JSON.stringify({kind:"ack"})});
   }
   const update=panel.querySelector("[data-update]");
+  const locationButton=document.createElement("button");
+  locationButton.className="ui-button";locationButton.textContent="Correct location";
+  locationButton.onclick=()=>correctIncidentLocation(item,locationButton);
+  panel.querySelector(".detail-actions").append(locationButton);
   if(update)update.onclick=async()=>{
     const note=await window.OutpostUI.prompt({title:"Add incident update",message:"The update becomes part of the incident history.",label:"Update note",multiline:true,confirmLabel:"Record update"});
     if(!note)return;
@@ -168,7 +186,18 @@ function renderMap(){const values=located();const definitions=values.map(item=>(
 function renderWelfare(){const active=Boolean(eventState);$("event-empty").hidden=active;$("event-active").hidden=!active;$("close-event").hidden=!active;$("roster-download").hidden=!active;$("event-title").textContent=active?eventState.name:"No open watch event";if(!active||!rosterState)return;$("roster-download").href=`/api/v1/events/${eventState.id}/roster.csv`;const recipients=solicitationPreview?.recipients||[];$("solicitation-status").innerHTML=`<span>${recipients.length} approved, unaccounted member(s) ${recipients.length?"are eligible for one check-in request.":"remain eligible for a check-in request."}</span><button id="review-recipients" type="button">Review${recipients.length?" & approve":""}</button>`;const review=$("solicitation-review");review.innerHTML=`<div class="solicitation-message"><small>EXACT MESSAGE</small><p>${safe(solicitationPreview?.message||"")}</p></div>${recipients.map(person=>`<div class="solicitation-recipient"><strong>${safe(person.handle?`@${person.handle}`:"Unnamed member")}</strong><code>${safe(person.mesh_id)} · ${safe(person.trust)}</code></div>`).join("")||'<div class="solicitation-recipient"><span>No eligible recipients</span></div>'}${recipients.length?'<button id="approve-solicitation" type="button">Approve & queue direct messages</button>':'<div class="send-disabled">NO MESSAGES TO QUEUE</div>'}`;$("review-recipients").onclick=()=>{review.hidden=!review.hidden;$("review-recipients").textContent=review.hidden?`Review${recipients.length?" & approve":""}`:"Hide review";};const approve=$("approve-solicitation");if(approve)approve.onclick=async()=>{const phrase=`QUEUE ${eventState.id}`,confirmation=await window.OutpostUI.prompt({title:"Queue welfare requests?",message:`This queues ${recipients.length} direct message(s) to the approved recipients shown in the review.`,label:"Queue confirmation",verification:phrase,confirmLabel:"Queue direct messages"});if(confirmation!==phrase)return;approve.disabled=true;const response=await api(`/api/v1/events/${eventState.id}/solicit`,{method:"POST",body:JSON.stringify({confirmation})}),body=await response.json();$("event-result").textContent=response.ok?`Queued ${body.recipient_count} welfare check-in request(s).`:body.error?.message||"Could not queue requests.";await refresh();};for(const key of ["ok","need_help","evacuated","unaccounted"])$(`roster-${key.replace("need_help","help")}`).textContent=rosterState.counts[key];$("roster-list").innerHTML=rosterState.items.map(person=>`<article class="roster-person ${safe(person.status)}"><strong>${safe(person.handle?`@${person.handle}`:person.mesh_id)}</strong><span>${safe(person.status.replace("_"," "))}${person.note?` · ${safe(person.note)}`:""}</span></article>`).join("");}
 function render(){renderWelfare();const urgent=items.filter(i=>["urgent","critical"].includes(i.severity));$("active-count").textContent=items.length;$("urgent-count").textContent=urgent.length;$("confirm-count").textContent=items.reduce((sum,i)=>sum+i.confirm_count,0);$("review-count").textContent=items.filter(i=>i.flagged_for_review).length;$("alert-incident").innerHTML=`<option value="">No linked incident</option>`+items.map(i=>`<option value="${i.local_ref}">INC ${i.local_ref} · ${safe(i.type)}</option>`).join("");$("alert-list").innerHTML=alertItems.map(a=>`<article class="active-alert ${safe(a.severity)}"><header><strong>${safe(a.severity.toUpperCase())}${a.incident_ref?` · INC ${a.incident_ref}`:""}</strong><span>ACK ${a.ack_count}/${a.ack_required||"—"}</span></header><p>${safe(a.headline)}</p><small>Stage ${a.escalation_stage} · ${a.broadcast_count} broadcasts</small> <button data-cancel-alert="${a.id}">All clear</button></article>`).join("")||`<p class="ui-empty empty">No active alerts.</p>`;document.querySelectorAll("[data-cancel-alert]").forEach(button=>button.onclick=async()=>{const resolution=await window.OutpostUI.prompt({title:"Issue all clear?",message:"The resolution is sent through the airtime governor and closes this active alert.",label:"All-clear message",multiline:true,confirmLabel:"Queue all clear"});if(!resolution)return;await api(`/api/v1/alerts/${button.dataset.cancelAlert}/cancel`,{method:"POST",body:JSON.stringify({resolution})});await refresh();});$("incident-list").innerHTML=items.map(item=>`<article data-incident="${item.id}" class="incident-card severity-${safe(item.severity)}"><div class="incident-ref"><small>INCIDENT</small>#${item.local_ref}</div><div><h3>${safe(item.title)} ${incidentOrigin(item)}</h3><p>${safe(item.type)} · ${safe(item.location_text||"Location unconfirmed")} · reported by ${safe(item.reporter_label)}</p></div><div class="incident-meta"><strong>${safe(item.severity.toUpperCase())}</strong><br>✓ ${item.confirm_count} · ? ${item.dispute_count}<br>${new Date(item.updated_at*1000).toLocaleString()}</div><div class="incident-actions"><button class="incident-map-open" data-incident-open="${item.id}">Open on map</button><a class="incident-report-link" href="/incident-report.html?id&#61;${item.id}&mode=handover">Handover</a></div></article>`).join("")||`<p class="ui-empty empty">No active incidents.</p>`;document.querySelectorAll("[data-incident-open]").forEach(button=>button.onclick=()=>{const item=items.find(i=>i.id===Number(button.dataset.incidentOpen));if(item?.lat!=null){mapState.lat=item.lat;mapState.lon=item.lon;mapState.zoom=Math.max(mapState.zoom,15);renderMap();showDetail({...item,markerType:"incident",markerId:`incident-${item.id}`});$("incident-map").scrollIntoView({behavior:"smooth",block:"center"});}});renderMap();}
 const renderIncidentReviewBase=render;
-render=()=>{renderIncidentReviewBase();$("review-count").textContent=items.filter(item=>item.flagged_for_review||(item.reporter_id!=null&&item.status==="open")).length;};
+render=()=>{
+  renderIncidentReviewBase();
+  $("review-count").textContent=items.filter(item=>item.flagged_for_review||(item.reporter_id!=null&&item.status==="open")).length;
+  for(const item of items){
+    const actions=document.querySelector(`[data-incident="${item.id}"] .incident-actions`);
+    if(!actions)continue;
+    const button=document.createElement("button");
+    button.className="ui-button";button.textContent="Correct location";
+    button.onclick=()=>correctIncidentLocation(item,button);
+    actions.append(button);
+  }
+};
 const renderNotificationConditionsBase=render;
 render=()=>{renderNotificationConditionsBase();items.filter(item=>item.notification_state&&item.notification_state!=="delivered").forEach(item=>{const card=document.querySelector(`[data-incident="${item.id}"]`);if(card&&!card.querySelector(".notification-failure"))card.querySelector("div:nth-child(2)")?.insertAdjacentHTML("beforeend",`<p class="notification-failure">No responder reached · ${safe(item.notification_state.replace("_"," "))}. Operator action required.</p>`);});(rosterState?.items||[]).forEach((person,index)=>{if(person.notification_state&&person.notification_state!=="delivered")document.querySelectorAll(".roster-person")[index]?.insertAdjacentHTML("beforeend",`<small class="notification-failure">No responder notification delivered · ${safe(person.notification_state.replace("_"," "))}</small>`);});};
 async function refresh(){

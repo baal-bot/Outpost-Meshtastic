@@ -11,5 +11,5 @@
   "src/outpost/commands/identity.py": 12,
   "src/outpost/commands/mail.py": 30,
   "src/outpost/commands/operator.py": 1,
-  "src/outpost/commands/watch.py": 30
+  "src/outpost/commands/watch.py": 7
 }

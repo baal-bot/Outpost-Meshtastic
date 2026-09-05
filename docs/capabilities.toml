@@ -126,7 +126,7 @@ description = "Operator safety boundary, replay, redaction, drill, and limitatio
 [[capabilities]]
 id = "airtime_delivery"
 area = "Airtime and outbound delivery"
-present = "Durable priority queue, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, restart recovery, and a delivery-health briefing comparing confirmed 24-hour channel outcomes and enrolled-radio receive quality with the preceding 14 days."
+present = "Durable priority queue with budget-aware candidate selection, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, restart recovery, and a delivery-health briefing comparing confirmed 24-hour channel outcomes and enrolled-radio receive quality with the preceding 14 days."
 maturity = "automated_tested"
 introduced_commit = "3d65058"
 limitations = [
@@ -136,7 +136,7 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-30"
+date = "2026-09-05"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_delivery_health_briefing.py::test_delivery_health_is_healthy_then_cautions_on_durable_trends"
@@ -165,6 +165,18 @@ description = "Invalid airtime budgets and utilisation ceilings are rejected at 
 kind = "automated"
 path = "tests/unit/test_background_tasks.py::test_governor_config_error_is_degraded_without_stopping_loop"
 description = "Dispatch-time configuration faults are surfaced as degraded without terminating the core governor loop."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_governor_eligibility.py::test_exhausted_class_does_not_starve_another_eligible_class"
+description = "All thirty distinct exhausted/eligible class pairs dispatch eligible work with the production durable outbox, preserving budget and attempt accounting."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_governor_eligibility.py::test_smaller_eligible_item_can_pass_without_reordering_deferred_items"
+description = "Smaller eligible packets can pass temporarily budget-blocked work in each class without reordering deferred items."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_governor_eligibility.py::test_restart_keeps_class_eligibility_and_expired_work_has_no_false_send"
+description = "Recovered airtime history still permits eligible replies, while expired work remains terminal without a false send or attempt."
 
 [[capabilities]]
 id = "identity_directory"
@@ -205,7 +217,7 @@ description = "Operational display names gain the stable four-character radio su
 [[capabilities]]
 id = "bbs_mail"
 area = "BBS, mail, and operator inbox"
-present = "Boards, threads, posts, subscriptions, digests, private mail, moderation, and one replyable operations inbox."
+present = "Boards, threads, posts, subscriptions, digests, transactional local mail and replies with recovery of legacy interrupted sends, moderation, and one replyable operations inbox."
 maturity = "automated_tested"
 introduced_commit = "41a6c85"
 limitations = ["Real-mesh multipart loss and high-volume community moderation need longer field exercises."]
@@ -213,7 +225,7 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-27"
+date = "2026-09-05"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_bbs_mail.py::test_thread_reply_search_and_mail_lifecycle"
@@ -222,19 +234,87 @@ description = "Stored messaging, routing, authorization, and paging behavior."
 kind = "automated"
 path = "tests/integration/test_operator_inbox.py::test_operations_inbox_groups_member_conversation_and_preserves_reply_route"
 description = "Unified reply routing and audited operator workflow."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_mail_transactions.py::test_concurrent_sends_and_replies_keep_unique_ids_and_conversations"
+description = "Concurrent local sends and replies retain unique identities and shared thread context in the operator inbox."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_mail_transactions.py::test_interrupted_send_or_reply_is_atomic_and_does_not_poison_future_mail"
+description = "Failures and cancellation at each write boundary roll back without blocking later sends, including after reopening the store."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_mail_transactions.py::test_legacy_pending_mail_migration_preserves_content_routes_and_reply_links"
+description = "Idempotent migration repairs legacy placeholder mail while preserving content, existing conversation keys, reply links, and federation routing."
 
 [[capabilities]]
 id = "community_watch"
 area = "Community Watch"
-present = "Incident reporting, cross-Outpost origin/provenance reconciliation, human merge/unmerge, confirmation/dispute, delivery-accountable and proximity-targeted responder alerts, member-relative mesh listings, retrying zero-recipient escalation, per-stage bounded repeats, all-clear, and maps."
+present = "Transactional incident intake, authorized public-location corrections, reactions, operator changes and expiry with permanent local reference bindings; cross-Outpost origin/provenance reconciliation, human merge/unmerge, delivery-accountable and proximity-targeted responder alerts, member-relative mesh listings, retrying zero-recipient escalation, per-stage bounded repeats, all-clear, and maps."
 maturity = "simulated"
 introduced_commit = "8323143"
-limitations = ["The six-participant real-radio tabletop and receipt-latency gate remain open."]
+limitations = [
+  "The six-participant real-radio tabletop and receipt-latency gate remain open.",
+  "Reporter location edits require a verified PKI DM or operator assistance. Suppression does not erase prior public history; moving outside a peer's area does not withdraw its older copy. Reference safety follows the database lineage; lost history or old-backup restores require identity precautions.",
+  "Clock-independent federation (#134), prompt incident propagation (#135), and acknowledged-data power-loss durability (#137) require separate remediation and evidence.",
+]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-30"
+date = "2026-09-05"
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_transactions.py::test_concurrent_distinct_reports_have_unique_references_and_complete_origins"
+description = "Concurrent reports allocate unique references and commit incident, origin, and initial provenance together."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_transactions.py::test_concurrent_reports_through_real_router_and_authenticated_web"
+description = "Production-wired guest radio reports and authenticated web submissions survive simultaneous intake."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_transactions.py::test_creation_rolls_back_at_every_write_boundary_and_recovers_after_reopen"
+description = "Write failures and actual task cancellation roll back partial intake and allow subsequent reports after closing and reopening the store."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_transactions.py::test_incident_mutations_roll_back_history_counts_and_provenance_together"
+description = "Reactions, operator updates/corrections, and expiry roll back state and provenance at every write boundary."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_transactions.py::test_concurrent_reactions_and_operator_updates_have_atomic_counts_and_sequences"
+description = "Concurrent member reactions and operator notes preserve unique sequences, idempotent reaction counts, and monitoring status."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_transactions.py::test_cancelled_begin_rolls_back_before_releasing_the_writer"
+description = "Cancellation while beginning a transaction rolls back before another request acquires the writer."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_references.py::test_partition_delayed_commands_cannot_target_a_new_incident"
+description = "Delayed INC/CONFIRM/DISPUTE commands resolve retained originals or explicitly fail after deletion, while reaction acknowledgements name the affected report and origin."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_references.py::test_migration_retires_ambiguous_legacy_numbers_without_changing_incident_identity"
+description = "Migration retains unique legacy numbers and retires reused ambiguous numbers without changing incident identity or content."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_references.py::test_import_merge_unmerge_and_reimport_keep_reference_identity"
+description = "Federated import, human merge/unmerge, and reimport of a purged origin preserve local reference identity."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_location.py::test_handheld_follows_exact_ack_then_corrects_without_cached_gps"
+description = "The actual missing-location ACK completes through an authenticated reporter reply without cached GPS attachment."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_location.py::test_correction_rolls_back_each_write_and_recovers_after_reopen"
+description = "Location state, update history, origin metadata, provenance, and actor audit roll back at all five write boundaries."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_location.py::test_corrected_location_federates_same_uid_and_retains_peer_boundary"
+description = "Same-second corrections and coordinate withholding retain identity through export/quarantine/import; geographic policy remains enforced."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_mobile_navigation.py::test_watch_incident_intake_is_functional_and_browser_clean"
+description = "Unlocated intake, explicit operator correction, map marker, and subsequent incident actions on phone/desktop in all three themes."
 [[capabilities.evidence]]
 kind = "acceptance"
 path = "docs/PHASE3-ACCEPTANCE.md"

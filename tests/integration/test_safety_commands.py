@@ -189,16 +189,23 @@ async def test_incident_commands_render_validation_reactions_lists_and_detail(tm
         forced = await app.router.dispatch(
             inbound(35, "REPORT! tree blocking cedar road", "!00000025")
         )
-        assert render_response(forced) == "✓ INC 3 hazard filed."
+        assert render_response(forced) == (
+            "✓ INC 3 hazard filed.\n"
+            "No location — send UPD 3 <where> (public place; verified DM or ask operator)."
+        )
 
         bad_confirm = await app.router.dispatch(inbound(36, "CONFIRM nope", "!00000026"))
         assert render_response(bad_confirm) == "CONFIRM needs incident number."
         confirmed = await app.router.dispatch(inbound(37, "CONFIRM 1", "!00000027"))
-        assert render_response(confirmed) == "✓ INC 1 confirmed · ✓1"
+        assert render_response(confirmed) == (
+            "✓ INC 1 confirmed · ✓1\ntree blocking cedar road · " + app.incidents.origin_node
+        )
         bad_dispute = await app.router.dispatch(inbound(38, "DISPUTE nope", "!00000028"))
         assert render_response(bad_dispute) == "DISPUTE needs incident number [note]."
         disputed = await app.router.dispatch(inbound(39, "DISPUTE 1 road passable", "!00000029"))
-        assert render_response(disputed) == "✓ INC 1 disputed · 1"
+        assert render_response(disputed) == (
+            "✓ INC 1 disputed · 1\ntree blocking cedar road · " + app.incidents.origin_node
+        )
 
         listing = await app.router.dispatch(inbound(40, "INCIDENTS", "!00000030"))
         assert listing.screen is not None and listing.screen.title == "ACTIVE INCIDENTS"

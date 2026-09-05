@@ -174,8 +174,10 @@ class Database:
     async def transaction(self) -> AsyncIterator[Transaction]:
         """Hold the sole writer and commit all enclosed operations as one unit."""
         async with self._transaction_lock:
-            await self._writer_call(self._begin)
             try:
+                # Cancelling the await cannot stop a BEGIN already running on the
+                # writer thread. Roll it back before another task gets the lock.
+                await self._writer_call(self._begin)
                 yield Transaction(self)
             except BaseException:
                 await asyncio.shield(self._writer_call(self._rollback))

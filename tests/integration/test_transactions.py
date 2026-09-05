@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import pytest
@@ -52,6 +52,49 @@ async def test_transaction_commits_or_rolls_back_as_one_unit(tmp_path) -> None:
             await transaction.write("INSERT INTO kv(ns,k,v,updated_at) VALUES('test','one','1',1)")
             await transaction.write("INSERT INTO kv(ns,k,v,updated_at) VALUES('test','two','2',1)")
         assert len(await database.read("SELECT 1 FROM kv WHERE ns='test'")) == 2
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_begin_rolls_back_before_releasing_the_writer(
+    tmp_path, monkeypatch
+) -> None:
+    database = Database(tmp_path / "outpost.db")
+    await database.open()
+    began, release = asyncio.Event(), asyncio.Event()
+    original = database._writer_call
+
+    async def paused_begin(operation: Callable[[], Any]) -> Any:
+        result = await original(operation)
+        if operation == database._begin:
+            began.set()
+            await release.wait()
+        return result
+
+    async def create_record() -> None:
+        async with database.transaction() as transaction:
+            await transaction.write("INSERT INTO kv(ns,k,v,updated_at) VALUES('test','old','1',1)")
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(database, "_writer_call", paused_begin)
+            task = asyncio.create_task(create_record())
+            try:
+                await asyncio.wait_for(began.wait(), timeout=5)
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            finally:
+                release.set()
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        assert await database.read("SELECT * FROM kv WHERE ns='test'") == []
+        async with database.transaction() as transaction:
+            await transaction.write("INSERT INTO kv(ns,k,v,updated_at) VALUES('test','new','2',2)")
+        rows = await database.read("SELECT k FROM kv WHERE ns='test'")
+        assert [row["k"] for row in rows] == ["new"]
     finally:
         await database.close()
 

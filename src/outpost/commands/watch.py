@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TypedDict
+
 from outpost.router.models import (
     ChannelUse,
     CommandContext,
@@ -12,8 +14,17 @@ from outpost.router.models import (
     TuiChoice,
     TuiScreen,
 )
+from outpost.transport.chunker import truncate_utf8
 from outpost.transport.models import TrafficClass
 from outpost.watch.incidents import IncidentService
+
+
+class _WatchDefaults(TypedDict):
+    module: str
+    min_trust: TrustLevel
+    airtime_class: TrafficClass
+    max_parts: int
+    rate_key: str
 
 
 def _proximity(distance_km: float | None, bearing: int | None) -> str | None:
@@ -44,7 +55,7 @@ def specs(service: IncidentService) -> list[CommandSpec]:
         if created.lat is None:
             text = (
                 f"✓ INC {created.local_ref} {created.type}. No location — "
-                f"send UPD {created.local_ref} <where>."
+                f"send UPD {created.local_ref} <where> (public place; verified DM or ask operator)."
             )
         else:
             text = (
@@ -63,26 +74,72 @@ def specs(service: IncidentService) -> list[CommandSpec]:
     async def report_force(ctx: CommandContext) -> Response:
         created, _ = await service.create(ctx.args, ctx.member, force=True)
         assert created is not None
+        lines = [Line(f"✓ INC {created.local_ref} {created.type} filed.")]
+        if created.lat is None:
+            lines.append(
+                Line(
+                    f"No location — send UPD {created.local_ref} <where> "
+                    "(public place; verified DM or ask operator)."
+                )
+            )
+        return Response(ResponseKind.ACK, lines)
+
+    async def update_location(ctx: CommandContext) -> Response:
+        parts = ctx.args.strip().split(maxsplit=1)
+        if len(parts) != 2 or not parts[0].isascii() or not parts[0].isdigit():
+            return Response(
+                ResponseKind.ERROR, [Line("UPD needs <incident number> <where>. HELP UPD.")]
+            )
+        if len(parts[0]) > 19:
+            return Response(ResponseKind.ERROR, [Line("No active incident.")])
+        reference = int(parts[0])
+        if not 0 < reference <= 9_223_372_036_854_775_807:
+            return Response(ResponseKind.ERROR, [Line("No active incident.")])
+        try:
+            value = await service.update_location(reference, ctx.member, parts[1])
+        except ValueError as error:
+            return Response(ResponseKind.ERROR, [Line(str(error))])
         return Response(
-            ResponseKind.ACK, [Line(f"✓ INC {created.local_ref} {created.type} filed.")]
+            ResponseKind.ACK,
+            [
+                Line(
+                    f"✓ INC {value.local_ref} location: "
+                    f"{truncate_utf8(value.location_text or '', 80)}"
+                ),
+                Line(f"{truncate_utf8(value.title, 40)} · {truncate_utf8(value.origin_node, 24)}"),
+            ],
         )
 
     async def confirm(ctx: CommandContext) -> Response:
         token = ctx.args.strip()
         if not token.isdigit():
             return Response(ResponseKind.ERROR, [Line("CONFIRM needs incident number.")])
-        value = await service.react(int(token), ctx.member, "confirm")
+        try:
+            value = await service.react(int(token), ctx.member, "confirm")
+        except ValueError as error:
+            return Response(ResponseKind.ERROR, [Line(str(error))])
         return Response(
-            ResponseKind.ACK, [Line(f"✓ INC {value.local_ref} confirmed · ✓{value.confirm_count}")]
+            ResponseKind.ACK,
+            [
+                Line(f"✓ INC {value.local_ref} confirmed · ✓{value.confirm_count}"),
+                Line(f"{truncate_utf8(value.title, 48)} · {truncate_utf8(value.origin_node, 24)}"),
+            ],
         )
 
     async def dispute(ctx: CommandContext) -> Response:
         token, _, note = ctx.args.strip().partition(" ")
         if not token.isdigit():
             return Response(ResponseKind.ERROR, [Line("DISPUTE needs incident number [note].")])
-        value = await service.react(int(token), ctx.member, "dispute", note)
+        try:
+            value = await service.react(int(token), ctx.member, "dispute", note)
+        except ValueError as error:
+            return Response(ResponseKind.ERROR, [Line(str(error))])
         return Response(
-            ResponseKind.ACK, [Line(f"✓ INC {value.local_ref} disputed · {value.dispute_count}")]
+            ResponseKind.ACK,
+            [
+                Line(f"✓ INC {value.local_ref} disputed · {value.dispute_count}"),
+                Line(f"{truncate_utf8(value.title, 48)} · {truncate_utf8(value.origin_node, 24)}"),
+            ],
         )
 
     async def incidents(ctx: CommandContext) -> Response:
@@ -163,13 +220,19 @@ def specs(service: IncidentService) -> list[CommandSpec]:
                 f"INCIDENT {value.local_ref}",
                 choices=(
                     TuiChoice("Confirm this report", f"CONFIRM {value.local_ref}"),
-                    TuiChoice("Dispute or correct", f"MENU DISPUTE {value.local_ref}"),
+                    TuiChoice("Dispute this report", f"MENU DISPUTE {value.local_ref}"),
                     TuiChoice("Acknowledge", f"MENU ACK {value.local_ref}"),
+                    *(
+                        (TuiChoice("Correct my location", f"MENU UPD {value.local_ref}"),)
+                        if value.reporter_id == ctx.member.id
+                        and value.status in {"open", "monitoring"}
+                        else ()
+                    ),
                 ),
             )
         return response
 
-    base = dict(
+    base = _WatchDefaults(
         module="watch",
         min_trust=TrustLevel.GUEST,
         airtime_class=TrafficClass.REPLY,
@@ -194,6 +257,19 @@ def specs(service: IncidentService) -> list[CommandSpec]:
             (),
             help_short="REPORT! <details> · file despite duplicate suggestion",
             handler=report_force,
+            mutates=True,
+            channel_use=ChannelUse.REPORT,
+            **base,
+        ),
+        CommandSpec(
+            "UPD",
+            (),
+            help_short=(
+                "UPD <inc> <place|-share lat lon|-share -wp name|-nopos> · "
+                "correct own report; verified DM only (else ask operator). "
+                "Public; no cached GPS. -share consents to coordinates."
+            ),
+            handler=update_location,
             mutates=True,
             channel_use=ChannelUse.REPORT,
             **base,

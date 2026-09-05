@@ -50,34 +50,37 @@ class MailService:
             raise ValueError("Mail must be 1-200 bytes.")
         recipient = await self.members.by_handle(handle)
         now = int(self.clock.now().timestamp())
-        mail_id = await self.database.write(
-            """
-            INSERT INTO mail(
-              uid,from_id,from_label,to_id,to_label,subject,body,created_at,state,expires_at,
-              in_reply_to,conversation_key,participant_handle,operator_actor
-            ) VALUES('pending',?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                sender.id,
-                sender.handle,
-                recipient.id if recipient else None,
-                handle.lower(),
-                subject,
-                body,
-                now,
-                "queued",
-                now + self.hold_days * 86_400,
-                in_reply_to,
-                conversation_key,
-                (participant_handle or handle).lower(),
-                f"member:@{sender.handle}",
-            ),
-        )
-        uid = f"{self.origin_node}:{mail_id}"
-        await self.database.write(
-            "UPDATE mail SET uid=?,conversation_key=COALESCE(conversation_key,?) WHERE id=?",
-            (uid, f"local:{uid}", mail_id),
-        )
+        # The placeholder must never be committed or visible to another send.
+        # Keep the established node:row-id UID and reply context in the same unit.
+        async with self.database.transaction() as transaction:
+            mail_id = await transaction.write(
+                """
+                INSERT INTO mail(
+                  uid,from_id,from_label,to_id,to_label,subject,body,created_at,state,expires_at,
+                  in_reply_to,conversation_key,participant_handle,operator_actor
+                ) VALUES('pending',?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    sender.id,
+                    sender.handle,
+                    recipient.id if recipient else None,
+                    handle.lower(),
+                    subject,
+                    body,
+                    now,
+                    "queued",
+                    now + self.hold_days * 86_400,
+                    in_reply_to,
+                    conversation_key,
+                    (participant_handle or handle).lower(),
+                    f"member:@{sender.handle}",
+                ),
+            )
+            uid = f"{self.origin_node}:{mail_id}"
+            await transaction.write(
+                "UPDATE mail SET uid=?,conversation_key=COALESCE(conversation_key,?) WHERE id=?",
+                (uid, f"local:{uid}", mail_id),
+            )
         return mail_id
 
     async def bind_handle(self, member: Member) -> int:

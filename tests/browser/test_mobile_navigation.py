@@ -4901,10 +4901,12 @@ def test_bbs_create_thread_and_reply_are_functional_and_browser_clean(
         page.close()
 
 
+@pytest.mark.parametrize("width", (390, 1280))
+@pytest.mark.parametrize("theme", THEMES)
 def test_watch_incident_intake_is_functional_and_browser_clean(
-    browser: object, dashboard_url: str
+    browser: object, dashboard_url: str, width: int, theme: str
 ) -> None:
-    page = prepare_page(browser, 1280, dashboard_url, theme="night")
+    page = prepare_page(browser, width, dashboard_url, theme=theme)
     route_shared_operator_api(page)
     mutations: list[dict[str, object]] = []
     incident_actions: list[dict[str, object]] = []
@@ -4913,7 +4915,12 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
     def watch_route(route: object) -> None:
         request = route.request
         path = urlparse(request.url).path
-        if path == "/api/v1/incidents/7/updates" and request.method == "POST":
+        if path == "/api/v1/incidents/7/location" and request.method == "POST":
+            action = request.post_data_json
+            incident_actions.append(action)
+            incidents[0].update(lat=40.4406, lon=-79.9959, location_text="40.44060,-79.99590")
+            body = incidents[0]
+        elif path == "/api/v1/incidents/7/updates" and request.method == "POST":
             action = request.post_data_json
             incident_actions.append(action)
             if action["kind"] == "ack":
@@ -4977,8 +4984,8 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
                     "resolved_at": None,
                     "resolved_by": None,
                     "resolution_note": None,
-                    "lat": 40.4406,
-                    "lon": -79.9959,
+                    "lat": None,
+                    "lon": None,
                     "remote": False,
                 }
             )
@@ -5028,15 +5035,36 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
     try:
         page.goto(f"{dashboard_url}/watch.html", wait_until="domcontentloaded")
         wait_for_navigation(page)
-        page.locator("#report-text").fill("tree down blocking Cedar Lane 40.4406 -79.9959")
+        page.locator("#report-text").fill("tree down blocking Cedar Lane")
         page.get_by_role("button", name="Record incident").click()
         page.get_by_text("Recorded INC 7.").wait_for()
         page.get_by_role("heading", name="Tree down blocking Cedar Lane").wait_for()
 
-        assert mutations == [
-            {"text": "tree down blocking Cedar Lane 40.4406 -79.9959", "force": False}
-        ]
+        assert mutations == [{"text": "tree down blocking Cedar Lane", "force": False}]
         assert page.locator(".lifecycle-badge.open").is_visible()
+        assert page.locator('[data-marker-id="incident-7"]').count() == 0
+        location_control = page.locator('[data-incident="7"]').get_by_role(
+            "button", name="Correct location"
+        )
+        location_control.focus()
+        location_control.press("Enter")
+        location_dialog = page.get_by_role("dialog", name="Correct INC 7 location")
+        location_dialog.wait_for()
+        assert "No cached GPS" in location_dialog.text_content()
+        assert "reporter's consent" in location_dialog.text_content()
+        accessibility = Axe().run(
+            page,
+            options={
+                "runOnly": {"type": "tag", "values": ["wcag2a", "wcag2aa"]},
+                "resultTypes": ["violations"],
+            },
+        )
+        assert accessibility.violations_count == 0, accessibility.generate_report()
+        location_dialog.get_by_role("textbox", name="Public location").fill(
+            "-share 40.4406 -79.9959"
+        )
+        location_dialog.get_by_role("button", name="Record location").click()
+        page.get_by_text("INC 7 location corrected and audited.").wait_for()
         marker = page.locator('[data-marker-id="incident-7"]')
         marker.click()
         detail = page.locator("#map-detail")
@@ -5069,6 +5097,7 @@ def test_watch_incident_intake_is_functional_and_browser_clean(
         assert page.locator("#incident-history-retention").text_content() == "30-day retention"
 
         assert incident_actions == [
+            {"location": "-share 40.4406 -79.9959"},
             {"kind": "ack"},
             {"kind": "update", "note": "Crew is checking the tree"},
             {"status": "resolved", "resolution": "Tree safely removed"},

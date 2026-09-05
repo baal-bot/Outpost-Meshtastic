@@ -86,15 +86,43 @@ REPORT tree down blocking cedar ln near the church
 **REQ-WATCH-009** — When location resolves from the reporter's GPS, the acknowledgement
 **MUST** say so, so the reporter can correct it. When no location resolves, the
 acknowledgement **MUST** ask for one in the same line:
-`✓ INC 31 hazard. No location — send UPD 31 <where>.`
+`✓ INC 31 hazard. No location — send UPD 31 <where> (public place; verified DM or ask operator).`
+
+**REQ-WATCH-009A** — `UPD <local_ref> <where>` **MUST** let the original reporter
+correct an active, unmerged report using a verified PKI direct message. An unauthenticated
+radio ID is not sufficient authority. Other residents **MUST NOT** edit that report;
+an authenticated dashboard operator **MAY** correct it with recorded attribution.
+Corrections **MUST NOT** follow a merged reference into a different canonical record.
+Terminal, purged, and ambiguous retired references **MUST** fail without changing another report.
+
+Corrections accept a bounded public place name (160 UTF-8 bytes), explicit coordinates
+(`-share <lat> <lon>`), an explicit waypoint (`-share -wp <name>`), or `-nopos [place]`.
+They **MUST NOT** attach cached member GPS or change member position-sharing preferences.
+A place replaces any old coordinates; it remains geometrically unconfirmed. Publishing
+coordinates, including after `-nopos`, requires explicit `-share` consent. Prior public
+locations remain in retained history; suppression does not promise retroactive deletion.
+The incident change, ordered update, before/after provenance, origin metadata, and actor
+audit **MUST** commit atomically. Export **MUST** retain existing peer/module/area policy.
+
+_September 2026 resilience amendment (#140): defines the previously advertised but
+unimplemented correction command and its identity, consent, and transaction boundaries._
 
 **REQ-WATCH-010** — Position attached to an incident is **published** to everyone who can see
 the incident. This differs from ordinary position privacy (doc 12 §8) and **MUST** be stated
 in `HELP REPORT`. A reporter **MAY** suppress it with the `-nopos` flag.
 
-**REQ-WATCH-011** — `local_ref` (the short number) **MUST** be assigned from the smallest
-free integer among currently-active incidents, and **MUST NOT** be recycled while the
-incident is visible in any listing.
+**REQ-WATCH-011** — `local_ref` (the short number) **MUST** be permanently bound to one
+incident identity within an Outpost database lineage. New identities receive increasing
+positive integers above every issued or retired reference. Resolution, expiry, merging,
+or content retention cleanup **MUST NOT** make a number available to a different identity.
+Reimport of the same identity **MAY** restore its original reference. Legacy numbers
+known to have identified multiple retained incidents **MUST** be retired rather than
+silently selecting one of them; affected records receive new numbers. Numbers are local
+to the addressed Outpost, not cross-Outpost identifiers.
+
+_September 2026 resilience amendment (#138): replaces active-only smallest-free allocation
+to prevent partition-delayed commands from affecting unrelated incidents. Rollout and
+backup-lineage limitations are documented in `docs/RESILIENCE-HARDENING.md`._
 
 ### 3.1 Deduplication and confirmation
 

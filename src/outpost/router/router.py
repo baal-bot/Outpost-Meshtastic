@@ -31,7 +31,7 @@ from .registry import CommandRegistry
 from .session import Session, SessionStore
 from .tui import TuiController
 
-VERIFIED_MEMBER_MUTATIONS = frozenset({"FORGETPOS", "REMOVEME"})
+VERIFIED_MEMBER_MUTATIONS = frozenset({"FORGETPOS", "REMOVEME", "UPD"})
 
 
 class Router:
