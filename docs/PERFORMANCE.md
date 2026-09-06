@@ -45,6 +45,12 @@ DOM counts, total/average/max render time, and current view. Browser regression 
 real Watch, Members, and Environment maps with mouse, synthetic touch, and keyboard input in every
 theme.
 
+Local-first maps additionally report `basemapMode` and per-visible-tile `tileCounts`.
+Tile completion events use the same coalesced animation frame. Failed tiles stay in the
+visible inventory until coverage changes, mode changes, or an explicit retry, preventing
+render-driven request storms. The shared manifest's five-second timeout is a request deadline,
+not a polling interval. No new recurring dashboard/provider task is added by #164.
+
 ## Implementation
 
 `refresh-scheduler.js` owns repeating browser refresh work. It runs each task single-flight, pauses

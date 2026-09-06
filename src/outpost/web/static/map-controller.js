@@ -3,7 +3,27 @@
 
   const TILE_SIZE = 256;
   const MAX_LATITUDE = 85.05112878;
+  const MODE_KEY = "outpost.map.basemap-mode";
+  const controllers = new Set();
   let manifestPromise = null;
+  let basemapMode = readMode();
+  let basemapModeSaved = true;
+
+  function readMode(fallback = "local-first") {
+    try {
+      return localStorage.getItem(MODE_KEY) === "offline-only" ? "offline-only" : "local-first";
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function onStorage(event) {
+    if (event.key !== MODE_KEY && event.key !== null) return;
+    try { if (event.storageArea !== localStorage) return; } catch (_) { return; }
+    basemapMode = event.newValue === "offline-only" ? "offline-only" : "local-first";
+    basemapModeSaved = true;
+    for (const controller of controllers) controller._applyBasemapMode();
+  }
 
   function clamp(value, minimum, maximum) {
     return Math.min(maximum, Math.max(minimum, value));
@@ -33,18 +53,35 @@
     };
   }
 
-  function loadManifest() {
-    if (!manifestPromise) {
-      manifestPromise = fetch("/tiles/manifest.json", {cache: "no-store"})
+  function loadManifest(refresh = false) {
+    if (!manifestPromise || refresh) {
+      const abort = new AbortController();
+      const deadline = setTimeout(() => abort.abort(), 5000);
+      manifestPromise = fetch("/tiles/manifest.json", {cache: "no-store", signal: abort.signal})
         .then(async response => {
-          const value = await response.json().catch(() => ({}));
-          if (response.ok) return {status: "ready", manifest: value};
+          const value = await response.json().catch(() => null);
+          if (!response.ok) {
+            return {
+              status: value?.status === "unreadable" ? "unreadable" :
+                response.status === 404 || value?.status === "missing" ? "missing" : "unreachable",
+              manifest: null,
+            };
+          }
+          if (!value || typeof value !== "object" || Array.isArray(value)) {
+            return {status: "unreadable", manifest: null};
+          }
+          // Older backends do not include status. Presence is not a coverage certificate.
+          if (!value.status || value.status === "ready") {
+            return {status: "ready", manifest: value};
+          }
           return {
-            status: value.status === "unreadable" ? "unreadable" : "missing",
+            status: value.status === "unreadable" ? "unreadable" :
+              value.status === "missing" ? "missing" : "unreachable",
             manifest: null,
           };
         })
-        .catch(() => ({status: "unreachable", manifest: null}));
+        .catch(() => ({status: "unreachable", manifest: null}))
+        .finally(() => clearTimeout(deadline));
     }
     return manifestPromise;
   }
@@ -82,11 +119,17 @@
       this.markerDefinitions = new Map();
       this.markerElements = new Map();
       this.tileElements = new Map();
+      this.tileRequests = new WeakMap();
       this.selectedId = null;
       this.drag = null;
       this.renderFrame = null;
       this.destroyed = false;
-      this.tileFailures = 0;
+      this.tilePack = {status: "checking", manifest: null};
+      this.manifestEpoch = 0;
+      this.tileReloadToken = "";
+      if (!controllers.size && basemapModeSaved) basemapMode = readMode(basemapMode);
+      this.basemapMode = basemapMode;
+      this.modeSaved = basemapModeSaved;
       this.metrics = {
         frames: 0,
         pointerMoves: 0,
@@ -108,7 +151,9 @@
       );
       this._ensureSupportElements();
       this._bindEvents();
-      this._updateAttribution();
+      if (!controllers.size) global.addEventListener("storage", onStorage);
+      controllers.add(this);
+      this._refreshManifest();
       this.requestRender();
     }
 
@@ -119,6 +164,14 @@
         this.attribution.className = "outpost-map-attribution";
         this.root.appendChild(this.attribution);
       }
+      let footer = this.root.querySelector(".outpost-map-footer");
+      if (!footer) {
+        footer = document.createElement("div");
+        footer.className = "outpost-map-footer";
+        this.root.appendChild(footer);
+      }
+      if (this.coordinates) footer.appendChild(this.coordinates);
+      footer.appendChild(this.attribution);
       this.basemapState = this.root.querySelector(".outpost-map-basemap-state");
       if (!this.basemapState) {
         this.basemapState = document.createElement("p");
@@ -127,37 +180,93 @@
         this.basemapState.textContent = "Basemap unavailable · coordinates and markers remain active";
         this.root.appendChild(this.basemapState);
       }
+      this.basemapState.setAttribute("role", "status");
+      this.sourceControls = document.createElement("div");
+      this.sourceControls.className = "outpost-map-source-controls";
+      const label = document.createElement("label");
+      label.title = "Use only local tiles at this Outpost address in this browser. Other dashboard feeds are unaffected.";
+      this.offlineControl = document.createElement("input");
+      this.offlineControl.type = "checkbox";
+      this.offlineControl.checked = this.basemapMode === "offline-only";
+      label.append(this.offlineControl, document.createTextNode("Offline only"));
+      this.retryControl = document.createElement("button");
+      this.retryControl.type = "button";
+      this.retryControl.className = "ui-icon-button";
+      this.retryControl.dataset.mapAction = "retry-tiles";
+      this.retryControl.textContent = "↻";
+      this.retryControl.title = "Retry tiles and recheck local pack";
+      this.retryControl.setAttribute("aria-label", this.retryControl.title);
+      this.sourceControls.append(label, this.retryControl);
+      this.sourcePanel = document.createElement("div");
+      this.sourcePanel.className = "outpost-map-source-panel";
+      this.sourcePanel.append(this.sourceControls, this.basemapState);
+      this.root.appendChild(this.sourcePanel);
     }
 
-    async _updateAttribution() {
-      const tilePack = await loadManifest();
-      const manifest = tilePack.manifest;
+    async _refreshManifest(refresh = false) {
       if (this.destroyed) return;
-      this.attribution.replaceChildren();
-      const link = document.createElement("a");
-      link.href = "https://www.openstreetmap.org/copyright";
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      link.textContent = "© OpenStreetMap contributors";
-      this.attribution.appendChild(link);
-      if (manifest) {
-        this.attribution.appendChild(document.createTextNode(
-          ` · offline fallback: ${String(manifest.source || "local basemap")}`,
-        ));
-      } else if (tilePack.status === "unreadable") {
-        this.attribution.appendChild(document.createTextNode(" · offline tile pack: unreadable"));
-      } else if (tilePack.status === "missing") {
-        this.attribution.appendChild(document.createTextNode(" · offline tile pack: not installed"));
-      } else {
-        this.attribution.appendChild(document.createTextNode(" · offline tile status unavailable"));
+      const epoch = ++this.manifestEpoch;
+      // The service caches successful tile responses for a day, including corrupt bytes.
+      // An explicit repair retry must not reuse that cached representation.
+      if (refresh) this.tileReloadToken = crypto.getRandomValues(new Uint32Array(2)).join("-");
+      this.tilePack = {status: "checking", manifest: null};
+      this.retryControl.disabled = true;
+      this._clearTiles();
+      this.requestRender();
+      const tilePack = await loadManifest(refresh);
+      if (this.destroyed || epoch !== this.manifestEpoch) return;
+      this.tilePack = tilePack;
+      this.retryControl.disabled = false;
+      this.requestRender();
+    }
+
+    setBasemapMode(mode) {
+      if (this.destroyed || !["local-first", "offline-only"].includes(mode)) return;
+      basemapMode = mode;
+      basemapModeSaved = true;
+      try { localStorage.setItem(MODE_KEY, mode); } catch (_) { basemapModeSaved = false; }
+      for (const controller of controllers) {
+        controller._applyBasemapMode();
       }
-      this.root.dataset.offlineTiles = tilePack.status;
+    }
+
+    _applyBasemapMode() {
+      this.modeSaved = basemapModeSaved;
+      this.offlineControl.checked = basemapMode === "offline-only";
+      if (this.basemapMode !== basemapMode) {
+        // Retire callbacks synchronously, before another image event can start a fallback.
+        this.basemapMode = basemapMode;
+        this._clearTiles();
+      }
+      this.requestRender();
+    }
+
+    _updateAttribution(counts) {
+      const manifest = this.tilePack.manifest;
+      const local = counts.localRequested && manifest ?
+        [manifest.source, manifest.attribution].filter(value => typeof value === "string" && value)
+          .join(" · ") || "Local basemap (attribution not supplied)" : "";
+      const signature = JSON.stringify([local, counts.onlineRequested > 0]);
+      if (signature === this.attributionSignature) return;
+      this.attributionSignature = signature;
+      this.attribution.replaceChildren();
+      if (local) this.attribution.appendChild(document.createTextNode(`Local: ${local}`));
+      if (counts.onlineRequested) {
+        if (local) this.attribution.appendChild(document.createTextNode(" · "));
+        const link = document.createElement("a");
+        link.href = "https://www.openstreetmap.org/copyright";
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = "© OpenStreetMap contributors";
+        this.attribution.appendChild(link);
+      }
+      this.attribution.hidden = !this.attribution.hasChildNodes();
     }
 
     _bindEvents() {
       this.onPointerDown = event => {
         if (event.button !== 0 || !event.isPrimary) return;
-        if (event.target instanceof Element && event.target.closest("button, a, aside")) return;
+        if (event.target instanceof Element && event.target.closest("button, a, aside, label, input, select")) return;
         try {
           this.root.setPointerCapture(event.pointerId);
         } catch (_) {
@@ -199,6 +308,7 @@
         if (!moved && this.options.onBackground) this.options.onBackground();
       };
       this.onWheel = event => {
+        if (event.target instanceof Element && event.target.closest("aside, input, select")) return;
         event.preventDefault();
         this.zoomBy(event.deltaY < 0 ? 1 : -1);
       };
@@ -210,12 +320,14 @@
         if (action === "zoom-in") this.zoomBy(1);
         if (action === "zoom-out") this.zoomBy(-1);
         if (action === "fit") this.options.onFit?.();
+        if (action === "retry-tiles") this._refreshManifest(true);
         if (action === "home") {
           if (this.options.onHome) this.options.onHome();
           else this.setView(this.initialView);
         }
       };
       this.onKeyDown = event => {
+        if (event.target instanceof Element && event.target.closest("input, select, textarea")) return;
         const step = event.shiftKey ? 160 : 64;
         const actions = {
           ArrowLeft: () => this.panByPixels(-step, 0),
@@ -238,7 +350,11 @@
         actions[event.key]();
       };
       this.onResize = () => this.requestRender();
+      this.onModeChange = () => this.setBasemapMode(
+        this.offlineControl.checked ? "offline-only" : "local-first",
+      );
 
+      this.offlineControl.addEventListener("change", this.onModeChange);
       this.root.addEventListener("pointerdown", this.onPointerDown);
       this.root.addEventListener("pointermove", this.onPointerMove);
       this.root.addEventListener("pointerup", this.onPointerUp);
@@ -334,6 +450,7 @@
     }
 
     setMarkers(definitions) {
+      if (this.destroyed) return;
       const next = new Map();
       for (const definition of definitions) {
         const id = String(definition.id);
@@ -371,6 +488,7 @@
           marker.appendChild(symbol);
           marker.addEventListener("click", event => {
             event.stopPropagation();
+            if (this.destroyed) return;
             const current = this.markerDefinitions.get(marker.dataset.markerId);
             if (!current) return;
             this.select(current.id);
@@ -454,9 +572,9 @@
       const zoom = this.view.zoom;
       const maximum = 2 ** zoom;
       const firstX = Math.floor(viewport.left / TILE_SIZE);
-      const lastX = Math.floor((viewport.left + viewport.width) / TILE_SIZE);
+      const lastX = Math.ceil((viewport.left + viewport.width) / TILE_SIZE) - 1;
       const firstY = Math.floor(viewport.top / TILE_SIZE);
-      const lastY = Math.floor((viewport.top + viewport.height) / TILE_SIZE);
+      const lastY = Math.ceil((viewport.top + viewport.height) / TILE_SIZE) - 1;
       for (let x = firstX; x <= lastX; x += 1) {
         for (let y = firstY; y <= lastY; y += 1) {
           if (y < 0 || y >= maximum) continue;
@@ -471,15 +589,23 @@
             image.draggable = false;
             image.referrerPolicy = "strict-origin-when-cross-origin";
             image.dataset.tileKey = key;
-            image.addEventListener("error", () => this._fallbackTile(key, image, zoom, wrappedX, y));
-            image.addEventListener("load", () => {
-              this.tileFailures = 0;
-              this.basemapState.hidden = true;
-            });
-            image.src = `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`;
+            image.dataset.state = "waiting";
+            image.style.visibility = "hidden";
             this.tilesLayer.appendChild(image);
             this.tileElements.set(key, image);
             this.metrics.tileCreates += 1;
+          }
+          if (image.dataset.state === "waiting" && this.tilePack.status !== "checking") {
+            const manifest = this.tilePack.manifest;
+            if (manifest) {
+              // The existing route handles legacy JPEG bytes even under a .png filename.
+              const extension = manifest.tile_extension === "png" ? "png" : "jpg";
+              const retry = this.tileReloadToken ? `?retry=${this.tileReloadToken}` : "";
+              this._requestTile(key, image, "local", `/tiles/${zoom}/${wrappedX}/${y}.${extension}${retry}`);
+            } else {
+              image.dataset.localUnavailable = "true";
+              this._onlineTile(key, image);
+            }
           }
           image.style.transform =
             `translate3d(${Math.round(x * TILE_SIZE - viewport.left)}px, ` +
@@ -488,33 +614,109 @@
       }
       for (const [key, image] of this.tileElements) {
         if (needed.has(key)) continue;
-        image.remove();
-        this.tileElements.delete(key);
-        this.metrics.tileRemoves += 1;
+        this._removeTile(key, image);
       }
+      this._updateBasemapState();
     }
 
-    async _fallbackTile(key, image, zoom, x, y) {
-      if (this.tileElements.get(key) !== image) return;
-      const tilePack = await loadManifest();
-      const manifest = tilePack.manifest;
-      if (tilePack.status === "ready" && manifest && image.dataset.source !== "local") {
-        image.dataset.source = "local";
-        const extension = manifest.tile_extension === "png" ? "png" : "jpg";
-        image.src = `/tiles/${zoom}/${x}/${y}.${extension}`;
+    _requestTile(key, image, source, url) {
+      if (this.destroyed || this.tileElements.get(key) !== image) return;
+      if (source === "online" && this.basemapMode === "offline-only") return;
+      const token = {};
+      this.tileRequests.set(image, token);
+      const current = () => !this.destroyed && this.tileElements.get(key) === image &&
+        this.tileRequests.get(image) === token;
+      image.dataset.source = source;
+      image.dataset[`${source}Requested`] = "true";
+      image.dataset.state = "loading";
+      image.onload = () => {
+        if (!current()) return;
+        this.tileRequests.delete(image);
+        image.onload = image.onerror = null;
+        image.dataset.state = "loaded";
+        image.style.visibility = "visible";
+        this.requestRender();
+      };
+      image.onerror = () => {
+        if (!current()) return;
+        this.tileRequests.delete(image);
+        image.onload = image.onerror = null;
+        if (source === "local") {
+          image.dataset.localUnavailable = "true";
+          this._onlineTile(key, image);
+        } else {
+          image.dataset.state = "failed";
+          image.removeAttribute("src");
+        }
+        this.requestRender();
+      };
+      image.src = url;
+    }
+
+    _onlineTile(key, image) {
+      if (this.destroyed || this.tileElements.get(key) !== image) return;
+      if (this.basemapMode === "offline-only") {
+        image.dataset.state = "failed";
+        image.removeAttribute("src");
         return;
       }
+      const [zoom, x, y] = key.split("/").map(Number);
+      const maximum = 2 ** zoom;
+      const wrappedX = (x % maximum + maximum) % maximum;
+      this._requestTile(key, image, "online", `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`);
+    }
+
+    _removeTile(key, image) {
+      image.onload = image.onerror = null;
+      this.tileRequests.delete(image);
+      image.removeAttribute("src");
       image.remove();
       this.tileElements.delete(key);
-      this.tileFailures += 1;
-      this.basemapState.textContent = tilePack.status === "unreadable"
-        ? "Offline tile pack unreadable · coordinates and markers remain active"
-        : tilePack.status === "missing"
-          ? "No offline tile pack installed · coordinates and markers remain active"
-          : tilePack.status === "ready"
-            ? "Tile absent from offline pack · coordinates and markers remain active"
-            : "Basemap unavailable · coordinates and markers remain active";
-      this.basemapState.hidden = false;
+      this.metrics.tileRemoves += 1;
+    }
+
+    _clearTiles() {
+      for (const [key, image] of this.tileElements) this._removeTile(key, image);
+    }
+
+    _tileCounts() {
+      const counts = {total: this.tileElements.size, waiting: 0, loading: 0, failed: 0,
+        localLoaded: 0, onlineLoaded: 0, localUnavailable: 0, localRequested: 0, onlineRequested: 0};
+      for (const image of this.tileElements.values()) {
+        const state = image.dataset.state;
+        if (state === "loaded") counts[`${image.dataset.source}Loaded`] += 1;
+        else counts[state] += 1;
+        for (const field of ["localUnavailable", "localRequested", "onlineRequested"]) {
+          if (image.dataset[field] === "true") counts[field] += 1;
+        }
+      }
+      return counts;
+    }
+
+    _updateBasemapState() {
+      const counts = this._tileCounts();
+      const status = this.tilePack.status;
+      const messages = [];
+      if (status === "checking") messages.push("Checking local tile pack…");
+      else if (status === "missing") messages.push("No offline tile pack installed");
+      else if (status === "unreadable") messages.push("Offline tile pack unreadable");
+      else if (status === "unreachable") messages.push("Offline tile status unavailable");
+      else if (counts.localUnavailable) {
+        messages.push(`Local coverage incomplete: ${counts.localUnavailable}/${counts.total} visible tiles unavailable`);
+      }
+      if (counts.failed) messages.push(`${counts.failed}/${counts.total} basemap tiles unavailable`);
+      if (counts.onlineRequested) {
+        messages.push(counts.onlineLoaded ? "Internet fallback in use" :
+          counts.loading ? "Internet fallback loading…" : "Internet fallback unavailable");
+      } else if (counts.loading) messages.push("Loading local tiles…");
+      if (!this.modeSaved) messages.push("Mode not saved · applies to this page only");
+      if (messages.length) messages.push("Coordinates and markers remain active");
+      const message = messages.join(" · ");
+      if (this.basemapState.textContent !== message) this.basemapState.textContent = message;
+      this.basemapState.hidden = !message;
+      this.root.dataset.offlineTiles = status;
+      this.root.dataset.basemapMode = this.basemapMode;
+      this._updateAttribution(counts);
     }
 
     _renderMarkers(viewport) {
@@ -547,13 +749,19 @@
           this.metrics.renderMilliseconds / this.metrics.frames : 0,
         liveTiles: this.tileElements.size,
         liveMarkers: this.markerElements.size,
+        basemapMode: this.basemapMode,
+        tileCounts: this._tileCounts(),
         view: this.getView(),
       };
     }
 
     destroy() {
+      if (this.destroyed) return;
       this.destroyed = true;
       if (this.renderFrame !== null) cancelAnimationFrame(this.renderFrame);
+      this.renderFrame = null;
+      this.drag = null;
+      this.root.classList.remove("dragging");
       this.root.removeEventListener("pointerdown", this.onPointerDown);
       this.root.removeEventListener("pointermove", this.onPointerMove);
       this.root.removeEventListener("pointerup", this.onPointerUp);
@@ -561,6 +769,15 @@
       this.root.removeEventListener("wheel", this.onWheel);
       this.root.removeEventListener("click", this.onClick);
       this.root.removeEventListener("keydown", this.onKeyDown);
+      this.offlineControl.removeEventListener("change", this.onModeChange);
+      this.sourcePanel.remove();
+      this._clearTiles();
+      for (const marker of this.markerElements.values()) marker.remove();
+      this.metrics.markerRemoves += this.markerElements.size;
+      this.markerElements.clear();
+      this.markerDefinitions.clear();
+      controllers.delete(this);
+      if (!controllers.size) global.removeEventListener("storage", onStorage);
       this.resizeObserver?.disconnect();
       if (!this.resizeObserver) global.removeEventListener("resize", this.onResize);
       delete this.root.outpostMapController;

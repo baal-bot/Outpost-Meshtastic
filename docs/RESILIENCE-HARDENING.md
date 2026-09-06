@@ -3,6 +3,17 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Local-first map selection — #164 / #139 browser slice
+
+[Shared maps](OFFLINE-MAPS.md) try local tiles before optional Internet fallback, offer a
+browser-origin offline-only preference, and retain per-visible-tile failure state. Explicit
+retry rechecks the manifest; unchanged failed coverage does not cause a render-driven retry
+storm. Retired image/manifest callbacks cannot start late fallbacks. Coordinates, markers,
+selection, lists, and source-appropriate attribution remain available. No backend schema,
+radio policy, recurring provider work, or appliance configuration changes are involved.
+This does not certify whole-pack integrity/coverage: service-path provisioning, complete pack
+validation, and a physical fresh-browser WAN-down gate remain #139.
+
 ## Independent boot-schema evidence — #163 / #136 and #149 software slice
 
 The [existing readiness service](SAFETY-READINESS.md#boot-compatibility-is-separate-from-live-health)

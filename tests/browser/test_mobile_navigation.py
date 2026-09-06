@@ -221,9 +221,18 @@ def browser() -> Iterator[object]:
 
 
 def prepare_page(
-    browser: object, width: int, dashboard_url: str, *, theme: str | None = None
+    browser: object,
+    width: int,
+    dashboard_url: str,
+    *,
+    theme: str | None = None,
+    context: object | None = None,
 ) -> object:
-    page = browser.new_page(viewport={"width": width, "height": 900})  # type: ignore[attr-defined]
+    if context is None:
+        page = browser.new_page(viewport={"width": width, "height": 900})  # type: ignore[attr-defined]
+    else:
+        page = context.new_page()  # type: ignore[attr-defined]
+        page.set_viewport_size({"width": width, "height": 900})
     if theme is not None:
         page.add_init_script(f"localStorage.setItem('outpost.appearance.theme', {theme!r})")
     page.route(
@@ -2278,42 +2287,550 @@ def test_shared_map_coalesces_touch_pan_and_preserves_dom_on_target_pi(
         page.close()
 
 
-@pytest.mark.parametrize("tile_pack_state", ("ready", "missing", "unreadable"))
-def test_shared_map_online_failure_uses_one_offline_fallback_state(
-    browser: object, dashboard_url: str, tile_pack_state: str
+@pytest.mark.parametrize("theme", THEMES)
+@pytest.mark.parametrize("width", (320, 390, 1280))
+def test_shared_map_local_first_without_wan_and_persistent_offline_mode(
+    browser: object, dashboard_url: str, theme: str, width: int
 ) -> None:
-    page = prepare_page(browser, 1280, dashboard_url, theme="dark")
+    page = prepare_page(browser, width, dashboard_url, theme=theme)
     route_shared_operator_api(page)
-    page.route(
-        "https://tile.openstreetmap.org/**",
-        lambda route: route.fulfill(status=503, content_type="text/plain", body="offline"),
-    )
-    if tile_pack_state != "ready":
-        page.route(
-            "**/tiles/manifest.json",
-            lambda route: route.fulfill(
-                status=503 if tile_pack_state == "unreadable" else 404,
-                content_type="application/json",
-                body=json.dumps({"status": tile_pack_state}),
-            ),
+    route_visual_content_api(page)
+    health = BrowserHealth(page)
+    external = []
+    # Hold rather than fail WAN requests: local rendering must not wait for a timeout.
+    page.route("https://tile.openstreetmap.org/**", lambda route: external.append(route))
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.wait_for_function(
+            """() => {
+              const counts = document.querySelector('#environment-map')
+                ?.outpostMapController?.getDiagnostics().tileCounts;
+              return counts?.total > 0 && counts.localLoaded === counts.total;
+            }"""
         )
+        assert external == []
+        root = page.locator("#environment-map")
+        attribution = root.locator(".outpost-map-attribution")
+        assert "Local: browser-test" in attribution.text_content()
+        assert attribution.locator("a").count() == 0
+        assert not root.locator(".outpost-map-basemap-state").is_visible()
+        page.evaluate(
+            """() => {
+              const map = document.querySelector('#environment-map').outpostMapController;
+              const view = map.getView();
+              map.setMarkers([{id: 'offline-marker', lat: view.lat, lon: view.lon,
+                label: 'Offline marker'}]);
+              map.select('offline-marker');
+              map.renderNow();
+            }"""
+        )
+        offline = root.get_by_role("checkbox", name="Offline only")
+        offline.focus()
+        page.keyboard.press("Space")
+        assert offline.is_checked()
+        assert (
+            root.locator('[data-marker-id="offline-marker"]').get_attribute("aria-pressed")
+            == "true"
+        )
+        assert page.evaluate("localStorage.getItem('outpost.map.basemap-mode')") == "offline-only"
+        root.focus()
+        before = root.locator(".outpost-map-coordinates").text_content()
+        page.keyboard.press("ArrowRight")
+        page.wait_for_function(
+            "before => document.querySelector('#environment-map .outpost-map-coordinates')"
+            ".textContent !== before",
+            arg=before,
+        )
+        geometry = root.evaluate(
+            """root => {
+              const box = root.getBoundingClientRect();
+              const controls = [...root.querySelectorAll('.outpost-map-source-controls label, '
+                + '.outpost-map-source-controls button')].map(e => e.getBoundingClientRect());
+              return {inside: controls.every(e => e.left >= box.left && e.right <= box.right),
+                sameRow: controls[0].top === controls[1].top,
+                targets: controls.every(e => e.height >= 36),
+                overflow: document.documentElement.scrollWidth > innerWidth};
+            }"""
+        )
+        assert geometry == {"inside": True, "sameRow": True, "targets": True, "overflow": False}
+        if VISUAL_ARTIFACT_DIR:
+            Path(VISUAL_ARTIFACT_DIR).mkdir(parents=True, exist_ok=True)
+            root.screenshot(path=str(Path(VISUAL_ARTIFACT_DIR) / f"map-local-{width}-{theme}.png"))
+        # Same origin/browser, different workspace, no initialization script forcing the mode.
+        page.goto(f"{dashboard_url}/watch.html", wait_until="networkidle")
+        assert (
+            page.locator("#incident-map").get_by_role("checkbox", name="Offline only").is_checked()
+        )
+        assert external == []
+        health.assert_clean()
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize(
+    ("http_status", "body", "expected"),
+    (
+        (404, '{"status":"missing"}', "No offline tile pack installed"),
+        (503, '{"status":"unreadable"}', "Offline tile pack unreadable"),
+        (500, "{}", "Offline tile status unavailable"),
+        (200, "null", "Offline tile pack unreadable"),
+        (200, "[]", "Offline tile pack unreadable"),
+        (200, "not json", "Offline tile pack unreadable"),
+    ),
+)
+def test_shared_map_offline_only_explains_pack_failure_without_external_requests(
+    browser: object, dashboard_url: str, http_status: int, body: str, expected: str
+) -> None:
+    page = prepare_page(browser, 320, dashboard_url)
+    route_shared_operator_api(page)
+    page.add_init_script("localStorage.setItem('outpost.map.basemap-mode', 'offline-only')")
+    external = []
+    page.route("https://tile.openstreetmap.org/**", lambda route: external.append(route))
+    page.route(
+        "**/tiles/manifest.json",
+        lambda route: route.fulfill(status=http_status, content_type="application/json", body=body),
+    )
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="networkidle")
+        state = page.locator("#environment-map .outpost-map-basemap-state")
+        state.wait_for()
+        assert expected in state.text_content()
+        assert "Coordinates and markers remain active" in state.text_content()
+        assert external == []
+        assert page.locator("#environment-map .outpost-map-attribution a").count() == 0
+        counts = page.evaluate(
+            "document.querySelector('#environment-map').outpostMapController.getDiagnostics().tileCounts"
+        )
+        assert counts["failed"] == counts["total"] > 0
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("mode", ("offline-only", "local-first"))
+@pytest.mark.parametrize("wan_works", (False, True))
+def test_shared_map_partial_tiles_remain_visible_and_retry_is_explicit(
+    browser: object, dashboard_url: str, mode: str, wan_works: bool
+) -> None:
+    page = prepare_page(browser, 390, dashboard_url)
+    route_shared_operator_api(page)
+    page.add_init_script(f"localStorage.setItem('outpost.map.basemap-mode', {mode!r})")
+    local_requests = []
+    external_requests = []
+    repaired = False
+
+    def local_tile(route: object) -> None:
+        local_requests.append(route.request.url)
+        if not repaired and route.request.url == local_requests[0]:
+            route.fulfill(status=200, content_type="image/png", body=b"corrupt tile")
+        else:
+            route.fallback()
+
+    def online_tile(route: object) -> None:
+        external_requests.append(route.request.url)
+        if wan_works:
+            route.fallback()
+        else:
+            route.fulfill(status=503, content_type="text/plain", body="WAN unavailable")
+
+    page.route("**/tiles/*/*/*.png*", local_tile)
+    page.route("https://tile.openstreetmap.org/**", online_tile)
     try:
         page.goto(f"{dashboard_url}/environment.html", wait_until="networkidle")
         wait_for_navigation(page)
-        attribution = page.locator("#environment-map .outpost-map-attribution")
-        assert attribution.locator("a").get_attribute("href") == (
-            "https://www.openstreetmap.org/copyright"
+        root = page.locator("#environment-map")
+        state = root.locator(".outpost-map-basemap-state")
+        assert "Local coverage incomplete: 1/" in state.text_content()
+        counts = page.evaluate(
+            "document.querySelector('#environment-map').outpostMapController.getDiagnostics().tileCounts"
         )
-        if tile_pack_state == "ready":
-            page.locator('#environment-map .outpost-map-tile[data-source="local"]').first.wait_for()
-            assert "offline fallback: browser-test" in attribution.text_content()
-            assert not page.locator("#environment-map .outpost-map-basemap-state").is_visible()
+        fallback = mode == "local-first"
+        assert counts["localLoaded"] == counts["total"] - 1
+        assert counts["onlineLoaded"] == int(fallback and wan_works)
+        assert counts["failed"] == int(not (fallback and wan_works))
+        assert len(external_requests) == int(fallback)
+        attribution = root.locator(".outpost-map-attribution")
+        assert attribution.locator("a").count() == int(fallback)
+        if fallback:
+            assert (
+                attribution.locator("a").get_attribute("href")
+                == "https://www.openstreetmap.org/copyright"
+            )
+            assert "Internet fallback" in state.text_content()
+        before = len(local_requests)
+        page.evaluate(
+            """() => {
+              const root = document.querySelector('#environment-map');
+              const map = root.outpostMapController;
+              root.querySelector('[data-state="loaded"]').dispatchEvent(new Event('load'));
+              for (let index = 0; index < 100; index++) {
+                map.panByPixels(index % 2 ? -1 : 1, 0);
+                map.renderNow();
+              }
+            }"""
+        )
+        assert len(local_requests) == before
+        assert state.is_visible()
+        assert "Local coverage incomplete: 1/" in state.text_content()
+        repaired = True
+        root.get_by_role("button", name="Retry tiles and recheck local pack").click()
+        page.wait_for_function(
+            """() => {
+              const counts = document.querySelector('#environment-map').outpostMapController
+                .getDiagnostics().tileCounts;
+              return counts.total > 0 && counts.localLoaded === counts.total;
+            }"""
+        )
+        assert not state.is_visible()
+        assert len(external_requests) == int(fallback)
+        assert len(local_requests) > before
+        assert all(urlparse(url).query.startswith("retry=") for url in local_requests[before:])
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("longitude", (0, 180))
+def test_shared_map_coverage_excludes_zero_area_edge_tiles(
+    browser: object, dashboard_url: str, longitude: int
+) -> None:
+    page = prepare_page(browser, 1280, dashboard_url)
+    route_shared_operator_api(page)
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="networkidle")
+        result = page.evaluate(
+            """longitude => {
+              const root = document.querySelector('#environment-map');
+              root.style.boxSizing = 'border-box';
+              root.style.width = root.style.height = '514px';
+              const map = root.outpostMapController;
+              map.setView({lat: 0, lon: longitude, zoom: 2});
+              map.renderNow();
+              return {width: root.clientWidth, height: root.clientHeight,
+                keys: [...map.tileElements.keys()].sort()};
+            }""",
+            longitude,
+        )
+        assert result["width"] == result["height"] == 512
+        xs = (1, 2) if longitude == 0 else (-1, 0)
+        assert result["keys"] == sorted(f"2/{x}/{y}" for x in xs for y in (1, 2))
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("action", ("offline", "pan", "retry", "destroy"))
+def test_shared_map_retired_tile_callbacks_cannot_start_fallbacks(
+    browser: object, dashboard_url: str, action: str
+) -> None:
+    page = prepare_page(browser, 390, dashboard_url)
+    route_shared_operator_api(page)
+    held = []
+    external = []
+    page.route("**/tiles/*/*/*.png*", lambda route: held.append(route))
+    page.route("https://tile.openstreetmap.org/**", lambda route: external.append(route))
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="domcontentloaded")
+        page.wait_for_function(
+            "() => document.querySelector('#environment-map')?.outpostMapController"
+            "?.getDiagnostics().tileCounts.loading > 0"
+        )
+        retired = list(held)
+        page.evaluate(
+            """action => {
+              const map = document.querySelector('#environment-map').outpostMapController;
+              const callbacks = [...map.tileElements.values()]
+                .flatMap(image => [image.onload, image.onerror]);
+              if (action === 'offline') map.setBasemapMode('offline-only');
+              if (action === 'pan') { map.panByPixels(10000, 0); map.renderNow(); }
+              if (action === 'retry') map._refreshManifest(true);
+              if (action === 'destroy') map.destroy();
+              // Browser events queued before retirement, delivered afterward.
+              for (const callback of callbacks) callback?.();
+            }""",
+            action,
+        )
+        for route in retired:
+            route.fulfill(status=503, body="retired local request")
+        page.evaluate(
+            "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+        )
+        assert external == []
+        if action == "destroy":
+            assert page.locator("#environment-map .outpost-map-tile").count() == 0
+    finally:
+        page.close()
+
+
+def test_shared_map_offline_switch_retires_pending_online_requests(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 390, dashboard_url)
+    route_shared_operator_api(page)
+    page.route(
+        "**/tiles/manifest.json",
+        lambda route: route.fulfill(status=404, json={"status": "missing"}),
+    )
+    external = []
+    page.route("https://tile.openstreetmap.org/**", lambda route: external.append(route))
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="domcontentloaded")
+        page.wait_for_function(
+            "() => document.querySelector('#environment-map')?.outpostMapController"
+            "?.getDiagnostics().tileCounts.onlineRequested > 0"
+        )
+        page.evaluate(
+            """() => {
+              const map = document.querySelector('#environment-map').outpostMapController;
+              const callbacks = [...map.tileElements.values()]
+                .flatMap(image => [image.onload, image.onerror]);
+              map.setBasemapMode('offline-only');
+              map.renderNow();
+              for (const callback of callbacks) callback?.();
+            }"""
+        )
+        before = len(external)
+        for route in list(external):
+            route.fulfill(status=503, body="late WAN failure")
+        page.evaluate(
+            "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+        )
+        counts = page.evaluate(
+            "document.querySelector('#environment-map').outpostMapController.getDiagnostics().tileCounts"
+        )
+        assert counts["onlineRequested"] == counts["onlineLoaded"] == 0
+        assert counts["failed"] == counts["total"] > 0
+        assert len(external) == before > 0
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("action", ("retry", "destroy"))
+def test_shared_map_late_manifest_cannot_revive_old_coverage(
+    browser: object, dashboard_url: str, action: str
+) -> None:
+    page = prepare_page(browser, 390, dashboard_url)
+    route_shared_operator_api(page)
+    held = []
+
+    def manifest(route: object) -> None:
+        if not held:
+            held.append(route)
         else:
-            basemap_state = page.locator("#environment-map .outpost-map-basemap-state")
-            basemap_state.wait_for()
-            attribution_state = "unreadable" if tile_pack_state == "unreadable" else "not installed"
-            assert f"offline tile pack: {attribution_state}" in attribution.text_content()
-            assert attribution_state.split()[-1] in basemap_state.text_content().lower()
+            route.fulfill(json={"source": "New pack", "tile_extension": "png"})
+
+    page.route("**/tiles/manifest.json", manifest)
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="domcontentloaded")
+        page.wait_for_function(
+            "() => document.querySelector('#environment-map')?.outpostMapController"
+            "?.tileElements.size > 0"
+        )
+        page.evaluate(
+            """action => {
+              const map = document.querySelector('#environment-map').outpostMapController;
+              if (action === 'destroy') map.destroy();
+              else map._refreshManifest(true);
+            }""",
+            action,
+        )
+        if action == "retry":
+            page.locator("#environment-map .outpost-map-attribution").filter(
+                has_text="New pack"
+            ).wait_for()
+        assert held
+        held[0].fulfill(json={"source": "Retired pack", "tile_extension": "png"})
+        page.evaluate(
+            "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+        )
+        assert "Retired pack" not in page.locator("#environment-map").text_content()
+        if action == "destroy":
+            assert page.locator("#environment-map .outpost-map-tile").count() == 0
+    finally:
+        page.close()
+
+
+def test_shared_map_manifest_timeout_has_explicit_retry_and_no_wan_escape(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 390, dashboard_url)
+    route_shared_operator_api(page)
+    external = []
+    page.route("https://tile.openstreetmap.org/**", lambda route: external.append(route))
+    page.add_init_script(
+        """localStorage.setItem('outpost.map.basemap-mode', 'offline-only');
+        const originalFetch = window.fetch.bind(window);
+        window.holdMapManifest = true;
+        window.fetch = (url, options) => {
+          const requestURL = typeof url === 'string' ? url : url.url;
+          if (new URL(requestURL, location.href).pathname === '/tiles/manifest.json'
+              && window.holdMapManifest) {
+            const signal = options?.signal || url.signal;
+            return new Promise((resolve, reject) => signal.addEventListener('abort', () => {
+              window.mapManifestAborted = true;
+              reject(new DOMException('timeout', 'AbortError'));
+            }));
+          }
+          return originalFetch(url, options);
+        };"""
+    )
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="domcontentloaded")
+        state = page.locator("#environment-map .outpost-map-basemap-state")
+        state.filter(has_text="Offline tile status unavailable").wait_for(timeout=10000)
+        assert page.evaluate("window.mapManifestAborted") is True
+        assert external == []
+        page.evaluate("window.holdMapManifest = false")
+        page.get_by_role("button", name="Retry tiles and recheck local pack").click()
+        page.wait_for_function(
+            "() => document.querySelector('#environment-map').outpostMapController"
+            ".getDiagnostics().tileCounts.localLoaded > 0"
+        )
+        assert external == []
+    finally:
+        page.close()
+
+
+def test_shared_map_legacy_manifest_attribution_is_text_and_bounded_to_map(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 320, dashboard_url)
+    route_shared_operator_api(page)
+    source = '<img src="bad-source" onerror="alert(1)"> Legacy pack'
+    attribution = "Test attribution " + "long-unbroken-credit" * 12
+    page.route(
+        "**/tiles/manifest.json",
+        lambda route: route.fulfill(json={"source": source, "attribution": attribution}),
+    )
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="networkidle")
+        credit = page.locator("#environment-map .outpost-map-attribution")
+        assert source in credit.text_content()
+        assert attribution in credit.text_content()
+        assert credit.locator("img, a").count() == 0
+        assert page.locator('#environment-map .outpost-map-tile[src$=".jpg"]').count() > 0
+        geometry = page.evaluate(
+            """() => {
+              const root = document.querySelector('#environment-map').getBoundingClientRect();
+              const credit = document.querySelector('.outpost-map-attribution')
+                .getBoundingClientRect();
+              const coordinates = document.querySelector('.outpost-map-coordinates')
+                .getBoundingClientRect();
+              return {inside: credit.left >= root.left && credit.right <= root.right,
+                separate: credit.top >= coordinates.bottom || credit.left >= coordinates.right,
+                overflow: document.documentElement.scrollWidth > innerWidth};
+            }"""
+        )
+        assert geometry == {"inside": True, "separate": True, "overflow": False}
+    finally:
+        page.close()
+
+
+def test_shared_map_unsaved_preference_applies_to_all_page_maps(
+    browser: object, dashboard_url: str
+) -> None:
+    page = prepare_page(browser, 390, dashboard_url)
+    route_shared_operator_api(page)
+    page.add_init_script(
+        """const originalSet = Storage.prototype.setItem;
+        Storage.prototype.setItem = function(key, value) {
+          if (key === 'outpost.map.basemap-mode') {
+            throw new DOMException('blocked', 'SecurityError');
+          }
+          return originalSet.call(this, key, value);
+        };"""
+    )
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="networkidle")
+        page.get_by_role("checkbox", name="Offline only").check()
+        page.evaluate(
+            """() => {
+              const root = document.createElement('div');
+              root.id = 'second-map';
+              root.innerHTML = '<div class="outpost-map-tiles"></div>'
+                + '<div class="outpost-map-markers"></div>';
+              document.querySelector('main').appendChild(root);
+              new OutpostMap.Controller({root});
+            }"""
+        )
+        page.locator("#second-map .outpost-map-basemap-state").filter(
+            has_text="Mode not saved"
+        ).wait_for()
+        assert page.locator("#second-map").get_by_role("checkbox", name="Offline only").is_checked()
+        page.locator("#second-map").get_by_role("checkbox", name="Offline only").uncheck()
+        assert (
+            not page.locator("#environment-map")
+            .get_by_role("checkbox", name="Offline only")
+            .is_checked()
+        )
+    finally:
+        page.close()
+
+
+def test_shared_map_offline_preference_synchronizes_across_tabs(
+    browser: object, dashboard_url: str
+) -> None:
+    context = browser.new_context()  # type: ignore[attr-defined]
+    page = prepare_page(browser, 390, dashboard_url, context=context)
+    route_shared_operator_api(page)
+    tab = page.context.new_page()
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="networkidle")
+        tab.goto(f"{dashboard_url}/api/v1/health", wait_until="domcontentloaded")
+        tab.evaluate("localStorage.setItem('outpost.map.basemap-mode', 'offline-only')")
+        page.bring_to_front()
+        page.wait_for_function(
+            "() => document.querySelector('#environment-map')?.dataset.basemapMode"
+            " === 'offline-only'"
+        )
+        assert page.get_by_role("checkbox", name="Offline only").is_checked()
+        tab.evaluate("localStorage.removeItem('outpost.map.basemap-mode')")
+        page.wait_for_function(
+            "() => document.querySelector('#environment-map')?.dataset.basemapMode"
+            " === 'local-first'"
+        )
+        assert not page.get_by_role("checkbox", name="Offline only").is_checked()
+    finally:
+        tab.close()
+        page.close()
+        context.close()
+
+
+@pytest.mark.parametrize("theme", THEMES)
+def test_shared_map_enlarged_controls_do_not_overlap_failure_state(
+    browser: object, dashboard_url: str, theme: str
+) -> None:
+    page = prepare_page(browser, 320, dashboard_url, theme=theme)
+    route_shared_operator_api(page)
+    page.add_init_script("localStorage.setItem('outpost.map.basemap-mode', 'offline-only')")
+    page.route(
+        "**/tiles/manifest.json",
+        lambda route: route.fulfill(status=404, json={"status": "missing"}),
+    )
+    try:
+        page.goto(f"{dashboard_url}/environment.html", wait_until="networkidle")
+        # 200% map text at the narrowest supported CSS viewport.
+        page.add_style_tag(
+            content=".outpost-map-source-panel {font-size: 200%}"
+            ".outpost-map-source-controls label {font-size: 1.24rem}"
+            ".outpost-map-basemap-state {font-size: 1.2rem}"
+        )
+        result = page.locator("#environment-map").evaluate(
+            """root => {
+              const controls = root.querySelector('.outpost-map-source-controls')
+                .getBoundingClientRect();
+              const state = root.querySelector('.outpost-map-basemap-state')
+                .getBoundingClientRect();
+              const footer = root.querySelector('.outpost-map-footer').getBoundingClientRect();
+              return {separate: controls.bottom <= state.top && state.bottom <= footer.top,
+                inside: controls.right <= root.getBoundingClientRect().right,
+                overflow: document.documentElement.scrollWidth > innerWidth};
+            }"""
+        )
+        assert result == {"separate": True, "inside": True, "overflow": False}
+        if VISUAL_ARTIFACT_DIR:
+            Path(VISUAL_ARTIFACT_DIR).mkdir(parents=True, exist_ok=True)
+            page.locator("#environment-map").screenshot(
+                path=str(Path(VISUAL_ARTIFACT_DIR) / f"map-enlarged-{theme}.png")
+            )
     finally:
         page.close()
 

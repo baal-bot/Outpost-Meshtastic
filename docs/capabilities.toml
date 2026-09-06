@@ -442,15 +442,15 @@ description = "Process supervision and parser failure boundaries."
 [[capabilities]]
 id = "dashboard_access"
 area = "Dashboard and operator access"
-present = "Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, shared map controls, and an offline-capable federation topology view."
+present = "Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, shared local-first maps with a browser offline-only mode and visible partial-coverage failures, and a federation topology view."
 maturity = "automated_tested"
 introduced_commit = "5295868"
-limitations = ["Trusted HTTP deliberately lacks transport encryption; Internet-facing operation still requires operator-managed TLS, firewalling, and network-abuse controls."]
+limitations = ["Trusted HTTP deliberately lacks transport encryption; Internet-facing operation still requires operator-managed TLS, firewalling, and network-abuse controls.", "Map availability describes visible tiles only. Whole-pack coverage/integrity, service-path provisioning, and physical WAN-down qualification remain #139; offline-only mode affects basemap requests at one browser origin, not other dashboard feeds."]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-29"
+date = "2026-09-06"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/browser/test_mobile_navigation.py::test_shared_dialogs_manage_focus_escape_validation_and_live_regions"
@@ -471,6 +471,18 @@ description = "Invalid certificate validity windows fail before server startup."
 kind = "operations"
 path = "docs/WEB-TRANSPORT.md"
 description = "Operator-only deployment modes, firewall boundaries, certificate rotation, setup hotspot, and local recovery guidance."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_mobile_navigation.py::test_shared_map_local_first_without_wan_and_persistent_offline_mode"
+description = "Fresh browser and held-WAN maps across three themes and phone/desktop sizes, with persistent offline-only mode and keyboard/selection preservation."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_mobile_navigation.py::test_shared_map_partial_tiles_remain_visible_and_retry_is_explicit"
+description = "Corrupt local tiles remain visible as coverage holes despite other successful tiles or Internet fallback; unchanged coverage does not automatically retry."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/OFFLINE-MAPS.md"
+description = "Local-first/offline-only behavior, retry and persistence boundaries, and remaining full-pack and field qualification."
 
 [[capabilities]]
 id = "backup_recovery"

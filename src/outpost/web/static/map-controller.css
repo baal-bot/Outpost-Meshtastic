@@ -61,6 +61,52 @@
 .outpost-map-controls button:last-child { border-bottom: 0; }
 .outpost-map-controls button:hover { background: var(--ui-surface-subtle); }
 
+.outpost-map-source-panel {
+  --ui-icon-button-size: 36px;
+  position: absolute;
+  z-index: 6;
+  top: 12px;
+  left: 58px;
+  right: 12px;
+  display: grid;
+  gap: 8px;
+  pointer-events: none;
+}
+.outpost-map-source-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  pointer-events: none;
+}
+.outpost-map-source-controls label,
+.outpost-map-source-controls button {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  margin: 0;
+  padding: 4px 7px;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  background: var(--ui-surface-raised);
+  color: var(--ui-text);
+  font-size: .62rem;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+.outpost-map-source-controls label { gap: 5px; }
+.outpost-map-source-controls input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--ui-success-text);
+}
+.outpost-map-source-controls button { width: 36px; min-width: 36px; font-size: 1rem; }
+.outpost-map-source-controls :focus-visible { outline: 3px solid var(--ui-focus); outline-offset: 2px; }
+
 .outpost-map-marker {
   --marker-color: var(--ui-success-text);
   --marker-border: var(--ui-surface);
@@ -172,11 +218,22 @@
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--marker-color) 20%, transparent);
 }
 
-.outpost-map-coordinates {
+.outpost-map-footer {
   position: absolute;
   z-index: 5;
-  bottom: 9px;
-  left: 10px;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 4px;
+  padding: 4px;
+  max-height: 40%;
+  overflow: auto;
+  pointer-events: none;
+}
+.outpost-map-coordinates {
   padding: 5px 8px;
   border: 1px solid var(--ui-border);
   border-radius: 5px;
@@ -186,14 +243,15 @@
 }
 
 .outpost-map-attribution {
-  position: absolute;
-  z-index: 5;
-  right: 4px;
-  bottom: 3px;
+  margin-left: auto;
+  max-width: 100%;
   padding: 2px 5px;
   background: #fff;
   color: #222;
   font-size: .56rem;
+  overflow-wrap: anywhere;
+  text-align: right;
+  pointer-events: auto;
 }
 .outpost-map-attribution a { color: #245b9c; text-decoration: underline; }
 
@@ -214,8 +272,7 @@
 }
 .outpost-map-empty[hidden] { display: none; }
 .outpost-map-basemap-state {
-  top: 12px;
-  left: 58px;
+  position: static;
   margin: 0;
   padding: 6px 9px;
   border: 1px solid var(--ui-border);
@@ -223,6 +280,7 @@
   background: color-mix(in srgb, var(--ui-surface) 92%, transparent);
   color: var(--ui-text-muted);
   font-size: .6rem;
+  overflow-wrap: anywhere;
 }
 
 .outpost-map-detail {
@@ -277,5 +335,4 @@ html[data-theme="night"] .outpost-map-tile {
 @media (max-width: 620px) {
   .outpost-map { height: 360px; }
   .outpost-map-detail { top: 8px; right: 8px; }
-  .outpost-map-attribution { max-width: 62%; text-align: right; }
 }
