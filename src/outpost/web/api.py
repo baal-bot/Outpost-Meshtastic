@@ -1981,6 +1981,12 @@ def create_web_app(
                             checkpoint = {}
                         before = checkpoint.get("before")
                         checkpoint_status = str(checkpoint.get("status") or "active")
+                        if (
+                            checkpoint_status == "active"
+                            and checkpoint.get("payload_blocked")
+                            and (checkpoint.get("page") or {}).get("failures")
+                        ):
+                            checkpoint_status = "blocked_payload"
                         catchup_map[int(cursor["peer_id"])] = {
                             "active": checkpoint_status == "active"
                             and (bool(checkpoint.get("pending")) or bool(before)),

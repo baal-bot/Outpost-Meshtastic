@@ -28,7 +28,8 @@ It rechecks current scope and capability before queuing this explanation. The
 receiver requires current active trust and local scope, the outstanding page's
 cycle/epoch and item identity, and a revision no older than advertised. Equal
 revisions must match the advertised digest; a newer failed revision becomes a
-floor for subsequent responses to that pending item. Conflicting equal-revision
+floor for subsequent requests and responses to that pending item, so a restored
+older source head triggers the existing rollback review stop. Conflicting equal-revision
 digests, ambiguous envelopes, unknown codes and unnegotiated failures are rejected.
 Delayed failures for content already stored are ignored.
 
@@ -51,10 +52,18 @@ entries can be evicted and an unrequested/deleted record's diagnostic may remain
 
 The receiver retains failure metadata on its existing outstanding page, at most
 eight entries. Other valid items on that page remain receivable. When only failed
-items remain missing, status is `blocked_payload`; the page, previous cursor,
+items remain missing, operator status is `blocked_payload`; the page, previous cursor,
 watermark, used-item count and round budget stay intact. A negative response never
 creates an inbox item, producer-revision receipt, successful-sync timestamp or
 positive ITEM_RECEIPT, even if an older inbox version of that UID exists.
+
+The persisted checkpoint keeps the existing `active` status and adds a
+`payload_blocked` flag. A pre-extension binary can ignore that flag and still
+retry the missing page; it is not stranded by an unknown checkpoint status.
+It lacks the new failure interpretation and restart pacing guarantee. On upgrade,
+a leftover flag from an older binary cannot make a completed page look blocked.
+This compatibility detail does not qualify general release rollback or schema
+compatibility of the installed appliance (#136).
 
 The existing monotonic `sync_retry_minutes` interval paces another request for the
 still-missing items. Duplicate failures do not resend them or postpone the next

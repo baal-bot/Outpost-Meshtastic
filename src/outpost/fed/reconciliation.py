@@ -111,12 +111,22 @@ class Reconciliation:
                 cleared = bool(page.get("failures")) and not failures
                 page["failures"] = failures
                 if cleared:
-                    state.update(status="active", reason=None)
+                    state.update(status="active", payload_blocked=False, reason=None)
                     await self._save(peer, state)
                 failed = {(entry["stream"], entry["uid"]) for entry in failures}
                 if failures:
+                    floors = {
+                        (entry["stream"], entry["uid"]): entry["revision"] for entry in failures
+                    }
+                    for item in missing:
+                        item["revision"] = max(
+                            item["revision"], floors.get((item["stream"], item["uid"]), 0)
+                        )
                     state.update(
-                        status="blocked_payload" if identities <= failed else "active",
+                        # Keep the checkpoint runnable by pre-extension binaries:
+                        # they ignore this flag but still retry missing content.
+                        status="active",
+                        payload_blocked=identities <= failed,
                         reason="Payload exceeds radio limits; content not received. "
                         "Page retained; retry scheduled while peer is online.",
                     )
@@ -145,7 +155,7 @@ class Reconciliation:
                     },
                 )
                 return
-            state.update(status="active", reason=None)
+            state.update(status="active", payload_blocked=False, reason=None)
             state["after"] = page["next"]
             state["page"] = None
             if page["done"]:

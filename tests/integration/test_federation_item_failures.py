@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from outpost.fed.framing import FrameError, FrameTooLarge, MessageType
 from outpost.fed.item_failures import CODE, CURSOR, LIMIT, validate
 from outpost.fed.reconciliation import Reconciliation
+from outpost.fed.revisions import RevisionReset
 from outpost.store import Database
 from outpost.transport.models import InboundMessage
 from outpost.web.api import create_web_app
@@ -135,7 +136,7 @@ async def test_oversize_failure_crosses_real_codec_outbox_and_keeps_page_missing
     assert not {"payload", "body", "cycle", "lat", "lon"} & errors[0].keys()
     await flush_radio(source, target)
     state = await checkpoint(target, tp)
-    assert state["status"] == "blocked_payload" and state["pending"]
+    assert state["status"] == "active" and state["payload_blocked"] and state["pending"]
     assert state["after"] == 0 and state["used"] == len(items) and state["rounds"] == 1
     assert state["page"]["failures"][0]["uid"] == bad["uid"]
     assert (await target.database.read("SELECT last_sync_at FROM fed_peer WHERE id=?", (tp.id,)))[
@@ -179,7 +180,7 @@ async def test_blocked_page_retry_restart_skew_and_newer_payload_recovery(nodes,
     for item in ordered:
         await target.federation_reconciliation.receive(tp, item)
     state = await checkpoint(target, tp)
-    assert state["status"] == "blocked_payload"
+    assert state["status"] == "active" and state["payload_blocked"]
     queued.clear()
     for _ in range(3):
         await target.federation_reconciliation.receive(tp, failure)
@@ -391,14 +392,12 @@ async def test_scope_reset_can_recover_a_payload_block_without_resetting_budget(
             tp, source.federation_sync.item_failures.envelope(item) if item is bad else item
         )
     old = await checkpoint(target, tp)
-    assert old["status"] == "blocked_payload"
+    assert old["status"] == "active" and old["payload_blocked"]
     queued.clear()
     target.clock.advance(target.config.fed.sync_retry_minutes * 60)
     await target.federation_reconciliation.tick(tp)
     source.config.modules.watch.enabled = False
     _, request = queued.pop(0)
-    from outpost.fed.revisions import RevisionReset
-
     with pytest.raises(RevisionReset) as caught:
         await source.federation_sync.revisions.export(sp, request)
     await target.federation_reconciliation.manifest(tp, caught.value.manifest)
@@ -447,7 +446,7 @@ async def test_real_queue_admission_clears_only_the_encoding_diagnostic(nodes):
     source, sp, target, tp, _, request, _, bad = await prepare(nodes)
     await wire(target, source, MessageType.ITEM_REQ, request)
     await flush_radio(source, target)
-    assert (await checkpoint(target, tp))["status"] == "blocked_payload"
+    assert (await checkpoint(target, tp))["payload_blocked"]
     await source.database.write(
         "UPDATE incident SET body='Concise repaired content' WHERE uid=?",
         (source.federation_sync._local_uid(bad["uid"]),),
@@ -460,7 +459,7 @@ async def test_real_queue_admission_clears_only_the_encoding_diagnostic(nodes):
     )
     assert not await diagnostics(source, sp)
     # Queue admission is not remote receipt. Only actual simulated dispatch repairs it.
-    assert (await checkpoint(target, tp))["status"] == "blocked_payload"
+    assert (await checkpoint(target, tp))["payload_blocked"]
     await flush_radio(source, target)
     assert (await checkpoint(target, tp))["status"] == "complete"
 
@@ -503,7 +502,57 @@ async def test_oversized_board_and_alert_content_is_not_auto_imported(nodes, str
     _, request = queued.pop(0)
     await wire(target, source, MessageType.ITEM_REQ, request)
     await flush_radio(source, target)
-    assert (await checkpoint(target, tp))["status"] == "blocked_payload"
+    assert (await checkpoint(target, tp))["payload_blocked"]
     assert (await diagnostics(source, sp))[0]["stream"] == stream
     for table in ("fed_inbox_item", "fed_revision_receipt", "post", "alert", "outbound_work"):
         assert not await target.database.read(f"SELECT * FROM {table}")  # noqa: S608
+
+
+@pytest.mark.parametrize("status", ["active", "complete"])
+async def test_leftover_payload_flag_does_not_mislabel_a_page_without_failures(nodes, status):
+    target, tp, _ = await nodes(failures=True)
+    await target._store_reconciliation_checkpoint(
+        tp.id,
+        {
+            "mode": 2,
+            "status": status,
+            "payload_blocked": True,
+            "page": {"failures": []} if status == "active" else None,
+        },
+        100,
+    )
+    client = TestClient(
+        create_web_app(
+            lambda: {"radio": "up"}, database=target.database, federation=target.federation
+        )
+    )
+    health = client.get("/api/v1/federation/sync-status").json()["items"][0]
+    assert health["transfers"]["catch_up"]["status"] == status
+
+
+async def test_newer_failure_revision_floor_exposes_producer_rollback(nodes):
+    source, sp, target, tp, queued, _, _, bad = await prepare(nodes)
+    local_uid = source.federation_sync._local_uid(bad["uid"])
+    await source.database.write("UPDATE incident SET body=body||'new' WHERE uid=?", (local_uid,))
+    newer = await exported(source, sp, "incidents", local_uid)
+    newer["cycle"] = bad["cycle"]
+    await target.federation_reconciliation.receive(
+        tp, source.federation_sync.item_failures.envelope(newer)
+    )
+    target.clock.advance(target.config.fed.sync_retry_minutes * 60)
+    await target.federation_reconciliation.tick(tp)
+    _, request = queued.pop(0)
+    assert (
+        next(item for item in request["items"] if item["uid"] == bad["uid"])["revision"]
+        == newer["revision"]
+    )
+    # Synthetic restored head, not an appliance restore or a power-cut test.
+    await source.database.write(
+        "UPDATE fed_revision SET revision=? WHERE uid=?", (bad["revision"], local_uid)
+    )
+    with pytest.raises(RevisionReset) as caught:
+        await source.federation_sync.revisions.export(sp, request)
+    assert caught.value.manifest["rollback"] is True
+    await target.federation_reconciliation.manifest(tp, caught.value.manifest)
+    assert (await checkpoint(target, tp))["status"] == "blocked"
+    assert not await target.database.read("SELECT * FROM fed_revision_receipt")
