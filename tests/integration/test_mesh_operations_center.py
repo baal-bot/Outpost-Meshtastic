@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -194,19 +195,25 @@ async def test_ops_responder_transcript_is_private_bounded_and_snapshot_stable(t
 
 
 @pytest.mark.asyncio
-async def test_web_federation_import_uses_the_matching_audit_action(tmp_path, monkeypatch) -> None:
+async def test_web_federation_import_uses_the_matching_audit_action(tmp_path) -> None:
     app = OutpostApp(config(tmp_path / "outpost.db"))
     await app.database.open()
-    calls: list[tuple[int, str]] = []
-
-    async def imported(item_id: int, actor: str) -> str:
-        calls.append((item_id, actor))
-        return "incidents"
-
-    monkeypatch.setattr(app, "import_federation_inbox_as", imported)
     try:
-        assert await app.import_federation_inbox(42) == "incidents"
-        assert calls == [(42, "web:operator")]
+        peer = await app.federation.discover("!remote", "Remote", 1, {}, "radio")
+        await app.database.write(
+            "UPDATE fed_peer SET state='active',relay_alerts=1 WHERE id=?", (peer.id,)
+        )
+        item_id = await app.database.write(
+            "INSERT INTO fed_inbox_item(peer_id,stream,uid,payload_json,digest,received_at) "
+            "VALUES(?,'alerts','!remote:alert:1',?,'digest',100)",
+            (
+                peer.id,
+                json.dumps({"headline": "Reviewed alert", "severity": "urgent", "raised_at": 90}),
+            ),
+        )
+        preview = await app.operations_center.federation_item(item_id)
+        assert preview is not None
+        assert await app.import_federation_inbox(item_id, preview["review_token"]) == "alerts"
         audits = await app.database.read(
             "SELECT actor_kind,actor_ref,action,target,outcome FROM audit_log "
             "WHERE action='federation.inbox.import'"
@@ -216,10 +223,85 @@ async def test_web_federation_import_uses_the_matching_audit_action(tmp_path, mo
                 "actor_kind": "web",
                 "actor_ref": "operator",
                 "action": "federation.inbox.import",
-                "target": "federation-inbox:42",
+                "target": f"federation-inbox:{item_id}",
                 "outcome": "success",
             }
         ]
+    finally:
+        await app.database.close()
+
+
+@pytest.mark.production_wiring
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["preview", "confirmation", "expired", "revoked"])
+async def test_mesh_federation_confirmation_is_bound_to_preview(tmp_path, stage) -> None:
+    app = OutpostApp(config(tmp_path / "outpost.db"))
+    await app.database.open()
+    operator_id, key = "!00000666", bytes(range(32))
+    try:
+        operator = await grant(app, operator_id, key, "operator")
+        peer = await app.federation.discover("!remote", "Remote", 1, {}, "radio")
+        await app.database.write(
+            "UPDATE fed_peer SET state='active',relay_alerts=1 WHERE id=?", (peer.id,)
+        )
+        item_id = await app.database.write(
+            "INSERT INTO fed_inbox_item(peer_id,stream,uid,payload_json,digest,received_at) "
+            "VALUES(?,'alerts','!remote:alert:1',?,'digest',100)",
+            (
+                peer.id,
+                json.dumps({"headline": "Private content", "severity": "urgent", "raised_at": 90}),
+            ),
+        )
+        direct, _ = await dispatch(app, 1, operator_id, f"OPS IMPORT {item_id}", key)
+        assert "review again" in direct
+        preview, _ = await dispatch(app, 2, operator_id, f"OPS REVIEW {item_id}", key)
+        assert "content withheld until import" in preview
+        assert "Private content" not in preview
+        session = app.router.sessions.get(operator.mesh_id, -1)
+        tag = session.tui_snapshots["federation-review"][1]
+        assert tag not in preview
+        if stage == "preview":
+            await app.database.write(
+                "UPDATE fed_inbox_item SET payload_json=? WHERE id=?",
+                (
+                    json.dumps(
+                        {"headline": "Unseen content", "severity": "urgent", "raised_at": 90}
+                    ),
+                    item_id,
+                ),
+            )
+        elif stage == "expired":
+            session.tui_snapshot_expires_at = 0
+        confirmation, _ = await dispatch(app, 3, operator_id, "1", key)
+        if stage in {"preview", "expired"}:
+            assert "review again" in confirmation
+            assert not session.tui_confirmations
+        else:
+            assert "Nothing changed yet" in confirmation and tag not in confirmation
+            token = next(iter(session.tui_confirmations))
+            if stage == "confirmation":
+                await app.database.write(
+                    "UPDATE fed_inbox_item SET payload_json=? WHERE id=?",
+                    (
+                        json.dumps(
+                            {"headline": "Unseen content", "severity": "urgent", "raised_at": 90}
+                        ),
+                        item_id,
+                    ),
+                )
+            else:
+                await app.database.write("UPDATE fed_peer SET relay_alerts=0")
+            result, _ = await dispatch(app, 4, operator_id, "1", key)
+            assert "Not completed" in result
+            replay, _ = await dispatch(app, 5, operator_id, f"OPS DO {token}", key)
+            assert "already used" in replay
+        assert not await app.database.read("SELECT id FROM alert")
+        assert (await app.database.read("SELECT state FROM fed_inbox_item"))[0][
+            "state"
+        ] == "pending"
+        assert not await app.database.read(
+            "SELECT id FROM audit_log WHERE action='federation.inbox.import'"
+        )
     finally:
         await app.database.close()
 
@@ -232,13 +314,9 @@ async def test_ops_operator_mutations_are_confirmed_audited_and_one_shot(tmp_pat
     key = bytes(reversed(range(32)))
     imports: list[tuple[int, str]] = []
 
-    async def importer(item_id: int, actor: str) -> str:
+    async def importer(item_id: int, actor: str, expected_token: str) -> str:
         imports.append((item_id, actor))
-        await app.database.write(
-            "UPDATE fed_inbox_item SET state='imported',reviewed_at=?,reviewed_by=? WHERE id=?",
-            (int(app.clock.now().timestamp()), actor, item_id),
-        )
-        return "incidents"
+        return await app.import_federation_inbox_as(item_id, actor, expected_token)
 
     app.operations_center.importer = importer
     try:
@@ -252,7 +330,7 @@ async def test_ops_operator_mutations_are_confirmed_audited_and_one_shot(tmp_pat
         app.radio._local_id = "!aaaaaaaa"
         app.federation.local_mesh_id = "!aaaaaaaa"
         await app.database.write(
-            "UPDATE fed_peer SET state='active',shared_secret=?,relay_mail=1,"
+            "UPDATE fed_peer SET state='active',shared_secret=?,relay_mail=1,sync_incidents=1,"
             "local_approved=1,remote_approved=1 WHERE id=?",
             (bytes(range(32)), peer.id),
         )
@@ -274,9 +352,21 @@ async def test_ops_operator_mutations_are_confirmed_audited_and_one_shot(tmp_pat
         )
         inbox_id = await app.database.write(
             "INSERT INTO fed_inbox_item(peer_id,stream,uid,payload_json,digest,received_at) "
-            "VALUES(?,'incidents','remote:inc:1','{\"body\":\"private imported body\"}',"
-            "'digest-1',300)",
-            (peer.id,),
+            "VALUES(?,'incidents','remote:inc:1',?,'digest-1',300)",
+            (
+                peer.id,
+                json.dumps(
+                    {
+                        "body": "private imported body",
+                        "type": "road",
+                        "severity": "caution",
+                        "status": "open",
+                        "title": "Remote report",
+                        "created_at": 200,
+                        "updated_at": 200,
+                    }
+                ),
+            ),
         )
 
         home, _ = await dispatch(app, 19, operator_id, "OPS", key)

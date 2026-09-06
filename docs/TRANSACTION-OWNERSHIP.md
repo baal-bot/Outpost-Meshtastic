@@ -1,10 +1,12 @@
 # Transaction and delivery ownership
 
-Inspected source: `d9ff6e97e2ea8bec0011c21f1e85d9a3d328fd98` (2026-09-05).
+Original boundary inspection: `d9ff6e97e2ea8bec0011c21f1e85d9a3d328fd98` (2026-09-05).
+Updated for the [version-bound review extraction](FEDERATION-REVIEW-SAFETY.md).
 This is the boundary map and incremental extraction plan for
 [#153](https://github.com/baal-bot/Outpost-Meshtastic/issues/153), not a claim that its refactoring
 or prerequisite [event-driven incident delivery](https://github.com/baal-bot/Outpost-Meshtastic/issues/135)
-is complete. It introduces no service, schema, radio behavior or deployment change.
+is complete. The review slice adds an in-process domain service and deliberately tightens
+human review API/command inputs; it changes no schema, radio protocol or live deployment.
 
 ## Shared transaction contract
 
@@ -37,9 +39,10 @@ actual sending belongs to the governed worker after commit.
 | [`OutboxStore.admit_many`](../src/outpost/store/outbox.py) | Queue bounds, dedupe, supersession and batch insertion are one transaction, or participate in an explicitly supplied domain transaction. | In-memory governor state must follow committed admission. `pending`/`held` is not transmitted or delivered. |
 | [`AirtimeGovernor`](../src/outpost/transport/governor.py) with `OutboxStore` | Attempt reservation, persisted outcomes, expiry and restart recovery have their own transaction boundaries. | The radio side effect is necessarily outside SQLite. Interrupted attempts can be uncertain; RF ACK, application receipt and a person's acknowledgement are different facts. Critical reserve remains governed, not available to arbitrary high-priority work. |
 | [`FederationSyncService.quarantine`](../src/outpost/fed/sync.py) | Modern inbox content and producer-revision receipt are persisted together after validation. | A durable receipt permits reconciliation progress; it is not import approval, responder notification or community visibility. Legacy compatibility has different ordering limits. |
-| [`FederationSyncService.import_inbox`](../src/outpost/fed/sync.py) | Reads a pending record and current import scope, mutates the destination domain, records relevant provenance/revision audit and marks the inbox item imported in one transaction. | Operator preview happened earlier. A transaction alone cannot bind an approval to the payload actually reviewed. That known gap is recorded under #153. Existing automatic board import paths must be treated as explicit policy, not described as a human decision. |
+| [`FederationReviewService`](../src/outpost/fed/review.py) | Reads pending content/provenance and checks the expected review fingerprint, rechecks active peer trust, calls the transactional import core and saves human audit together. Rejection and its audit use the same version guard and writer transaction. | Dashboard full-content and handheld metadata-only previews happen earlier, outside the writer lock. A mismatch requires fresh review. The tag is not authorization or a restore-lineage guarantee. |
+| [`FederationSyncService.import_inbox/import_inbox_transaction`](../src/outpost/fed/sync.py) | The domain core reads pending content and current import scope, mutates the destination, records provenance/revision audit and marks imported using its caller's transaction. The automatic-policy wrapper owns its transaction. | Automatic board imports remain explicit policy, not human decisions. Human routes must go through the review service, never the unguarded policy wrapper/core. |
 | [`Reconciliation`](../src/outpost/fed/reconciliation.py) | Durable per-peer checkpoint/receipt state controls advancing a producer snapshot. A per-peer lock prevents overlapping in-process cycle handling. | The lock is not a SQL transaction and checkpoint sends are separate. A source's `unavailable` response is not proof of replica withdrawal or permission to delete local content. |
-| [`OutpostApp`](../src/outpost/app.py) / [`web.api`](../src/outpost/web/api.py) / [`MeshOperationsCenter`](../src/outpost/operations_center.py) | Construct services, translate authenticated commands/API intent, coordinate existing callbacks, and record additional audit/response state. | Some SQL and audit still cross these layers. The federation web import audit follows the domain import; web rejection currently owns its own write. Handheld and operations-center review are additional mutation entry points, not exceptions to a future review-version check. |
+| [`OutpostApp`](../src/outpost/app.py) / [`web.api`](../src/outpost/web/api.py) / [`MeshOperationsCenter`](../src/outpost/operations_center.py) | Construct services, translate authenticated commands/API intent, coordinate callbacks, and record additional response state. Human federation review now passes the expected version to its service-owned transaction/audit. | Other SQL and audit still cross these layers. Handheld preview and confirmation checks are additional guards, not a substitute for the transactional service check. |
 
 This map identifies ownership, not proof that every method in a listed class is race-free.
 Direct SQL writers, migrations, import paths, automatic board handling and maintenance must be
@@ -64,10 +67,10 @@ The [burst envelope](EMERGENCY-BURST-QUALIFICATION.md) and
 
 ## Concrete extraction slices
 
-These are planned boundaries, not changes already implemented. Keep #153 open until the slices
+The review boundary is now implemented; the others remain planned. Keep #153 open until the slices
 actually selected for it meet their evidence gates; do not close #135 on documentation alone.
 
-1. **Federation review service (`fed/review.py`, proposed).** Own preview identity/version, transactional approval/rejection,
+1. **Federation review service (`fed/review.py`, implemented software slice).** Own preview identity/version, transactional approval/rejection,
    scope recheck and audit. Web routes translate request/409 responses, while dashboard and
    handheld/operations-center flows carry the reviewed version. Both approve and reject must
    refuse changed content; an item ID alone is insufficient. Include two-reviewer races,

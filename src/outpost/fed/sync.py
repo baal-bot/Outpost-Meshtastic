@@ -884,168 +884,169 @@ class FederationSyncService:
         return {"incident_id": int(rows[0]["incident_id"]), "incident_uid": stored_uid}
 
     async def import_inbox(self, item_id: int, operator: str, now: int) -> str:
+        """Trusted automatic-policy entry point; human APIs use FederationReviewService."""
         async with self.database.transaction() as transaction:
-            rows = await transaction.read(
-                "SELECT i.*,p.mesh_id,p.node_name,p.boards,p.sync_incidents,p.relay_alerts "
-                "FROM fed_inbox_item i JOIN fed_peer p ON p.id=i.peer_id "
-                "WHERE i.id=? AND i.state='pending'",
-                (item_id,),
+            return await self.import_inbox_transaction(transaction, item_id, operator, now)
+
+    async def import_inbox_transaction(
+        self, transaction: Transaction, item_id: int, operator: str, now: int
+    ) -> str:
+        """Domain import core. The caller owns the transaction and review policy."""
+        rows = await transaction.read(
+            "SELECT i.*,p.mesh_id,p.node_name,p.boards,p.sync_incidents,p.relay_alerts "
+            "FROM fed_inbox_item i JOIN fed_peer p ON p.id=i.peer_id "
+            "WHERE i.id=? AND i.state='pending'",
+            (item_id,),
+        )
+        if not rows:
+            raise ValueError("pending federation item not found")
+        row = rows[0]
+        stream, uid, payload = row["stream"], row["uid"], json.loads(row["payload_json"])
+        if not self.stream_enabled(str(stream)):
+            raise ValueError(f"{self.stream_module(str(stream))} module is disabled")
+        if stream.startswith("board:"):
+            slug = stream[6:]
+            if slug not in json.loads(row["boards"]):
+                raise ValueError("board is no longer allowed for this peer")
+            boards = await transaction.read(
+                "SELECT id FROM board WHERE slug=? AND federated=1 AND archived=0", (slug,)
             )
-            if not rows:
-                raise ValueError("pending federation item not found")
-            row = rows[0]
-            stream, uid, payload = row["stream"], row["uid"], json.loads(row["payload_json"])
-            if not self.stream_enabled(str(stream)):
-                raise ValueError(f"{self.stream_module(str(stream))} module is disabled")
-            if stream.startswith("board:"):
-                slug = stream[6:]
-                if slug not in json.loads(row["boards"]):
-                    raise ValueError("board is no longer allowed for this peer")
-                boards = await transaction.read(
-                    "SELECT id FROM board WHERE slug=? AND federated=1 AND archived=0", (slug,)
-                )
-                if not boards:
-                    raise ValueError("destination board is not federated")
-                thread_uid = await self.canonical_remote_uid(
-                    str(payload["thread_uid"]), transaction
-                )
-                thread_uid = self.local_thread_uid(thread_uid)
-                threads = await transaction.read(
-                    "SELECT id FROM thread WHERE uid=? AND board_id=?",
-                    (thread_uid, boards[0]["id"]),
-                )
-                if threads:
-                    thread_id = int(threads[0]["id"])
-                else:
-                    thread_id = await transaction.write(
-                        "INSERT INTO thread(uid,board_id,subject,origin_node,created_at,"
-                        "last_post_at) VALUES(?,?,?,?,?,?)",
-                        (
-                            thread_uid,
-                            boards[0]["id"],
-                            str(payload["subject"])[:160],
-                            row["mesh_id"],
-                            int(payload["created_at"]),
-                            int(payload["created_at"]),
-                        ),
-                    )
-                sequence = await transaction.read(
-                    "SELECT COALESCE(MAX(seq),0)+1 value FROM post WHERE thread_id=?",
-                    (thread_id,),
-                )
-                await transaction.write(
-                    "INSERT OR IGNORE INTO post(uid,thread_id,seq,author_label,origin_node,body,"
-                    "created_at,edited_at) VALUES(?,?,?,?,?,?,?,?)",
+            if not boards:
+                raise ValueError("destination board is not federated")
+            thread_uid = await self.canonical_remote_uid(str(payload["thread_uid"]), transaction)
+            thread_uid = self.local_thread_uid(thread_uid)
+            threads = await transaction.read(
+                "SELECT id FROM thread WHERE uid=? AND board_id=?",
+                (thread_uid, boards[0]["id"]),
+            )
+            if threads:
+                thread_id = int(threads[0]["id"])
+            else:
+                thread_id = await transaction.write(
+                    "INSERT INTO thread(uid,board_id,subject,origin_node,created_at,"
+                    "last_post_at) VALUES(?,?,?,?,?,?)",
                     (
-                        uid,
-                        thread_id,
-                        sequence[0]["value"],
-                        str(payload["author_label"])[:80],
+                        thread_uid,
+                        boards[0]["id"],
+                        str(payload["subject"])[:160],
                         row["mesh_id"],
-                        str(payload["body"])[:4000],
                         int(payload["created_at"]),
-                        payload.get("edited_at"),
+                        int(payload["created_at"]),
                     ),
                 )
-                if row["source_revision"] is not None:
-                    # Only the original producer may revise a retained post. Do not
-                    # move it into a different thread or undo local moderation.
-                    posts = await transaction.read(
-                        "SELECT id,thread_id,origin_node FROM post WHERE uid=?", (uid,)
-                    )
-                    if posts and (
-                        posts[0]["origin_node"] != row["mesh_id"]
-                        or not uid.startswith(f"{row['mesh_id']}:")
-                        or posts[0]["thread_id"] != thread_id
-                    ):
-                        raise ValueError(
-                            "post revision does not match its original producer/thread"
-                        )
-                    await transaction.write(
-                        "UPDATE post SET body=?,author_label=?,edited_at=? WHERE uid=?",
-                        (
-                            str(payload["body"])[:4000],
-                            str(payload["author_label"])[:80],
-                            payload.get("edited_at"),
-                            uid,
-                        ),
-                    )
-                    await transaction.write(
-                        "UPDATE thread SET subject=? WHERE id=? AND origin_node=?",
-                        (str(payload["subject"])[:160], thread_id, row["mesh_id"]),
-                    )
-                await transaction.write(
-                    "UPDATE thread SET post_count=(SELECT COUNT(*) FROM post WHERE thread_id=?),"
-                    "last_post_at=MAX(last_post_at,?) WHERE id=?",
-                    (thread_id, int(payload["created_at"]), thread_id),
+            sequence = await transaction.read(
+                "SELECT COALESCE(MAX(seq),0)+1 value FROM post WHERE thread_id=?",
+                (thread_id,),
+            )
+            await transaction.write(
+                "INSERT OR IGNORE INTO post(uid,thread_id,seq,author_label,origin_node,body,"
+                "created_at,edited_at) VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    uid,
+                    thread_id,
+                    sequence[0]["value"],
+                    str(payload["author_label"])[:80],
+                    row["mesh_id"],
+                    str(payload["body"])[:4000],
+                    int(payload["created_at"]),
+                    payload.get("edited_at"),
+                ),
+            )
+            if row["source_revision"] is not None:
+                # Only the original producer may revise a retained post. Do not
+                # move it into a different thread or undo local moderation.
+                posts = await transaction.read(
+                    "SELECT id,thread_id,origin_node FROM post WHERE uid=?", (uid,)
                 )
-            elif stream == "incidents":
-                if not row["sync_incidents"]:
-                    raise ValueError("incident sync is no longer allowed")
-                await self._import_incident(transaction, row, uid, payload, operator, now)
-            elif stream == "alerts":
-                if not row["relay_alerts"]:
-                    raise ValueError("alert relay is no longer allowed")
-                source = payload.get("source")
-                if source not in {"operator", "incident", "cap", "same"}:
-                    source = "operator"
+                if posts and (
+                    posts[0]["origin_node"] != row["mesh_id"]
+                    or not uid.startswith(f"{row['mesh_id']}:")
+                    or posts[0]["thread_id"] != thread_id
+                ):
+                    raise ValueError("post revision does not match its original producer/thread")
                 await transaction.write(
-                    """INSERT OR IGNORE INTO alert(uid,severity,headline,body,source,source_ref,
+                    "UPDATE post SET body=?,author_label=?,edited_at=? WHERE uid=?",
+                    (
+                        str(payload["body"])[:4000],
+                        str(payload["author_label"])[:80],
+                        payload.get("edited_at"),
+                        uid,
+                    ),
+                )
+                await transaction.write(
+                    "UPDATE thread SET subject=? WHERE id=? AND origin_node=?",
+                    (str(payload["subject"])[:160], thread_id, row["mesh_id"]),
+                )
+            await transaction.write(
+                "UPDATE thread SET post_count=(SELECT COUNT(*) FROM post WHERE thread_id=?),"
+                "last_post_at=MAX(last_post_at,?) WHERE id=?",
+                (thread_id, int(payload["created_at"]), thread_id),
+            )
+        elif stream == "incidents":
+            if not row["sync_incidents"]:
+                raise ValueError("incident sync is no longer allowed")
+            await self._import_incident(transaction, row, uid, payload, operator, now)
+        elif stream == "alerts":
+            if not row["relay_alerts"]:
+                raise ValueError("alert relay is no longer allowed")
+            source = payload.get("source")
+            if source not in {"operator", "incident", "cap", "same"}:
+                source = "operator"
+            await transaction.write(
+                """INSERT OR IGNORE INTO alert(uid,severity,headline,body,source,source_ref,
                        channels,raised_by,raised_at,effective_at,expires_at,cancelled_at)
                        VALUES(?,?,?,?,?,?,'[]',?,?,?,?,?)""",
+                (
+                    uid,
+                    payload["severity"],
+                    str(payload["headline"])[:140],
+                    payload.get("body"),
+                    source,
+                    str(payload.get("source_ref") or f"federation:{row['peer_id']}")[:160],
+                    f"federation:{row['peer_id']}",
+                    int(payload["raised_at"]),
+                    payload.get("effective_at"),
+                    payload.get("expires_at"),
+                    payload.get("cancelled_at"),
+                ),
+            )
+            if row["source_revision"] is not None:
+                if not uid.startswith(f"{row['mesh_id']}:"):
+                    raise ValueError("alert revision does not match its original producer")
+                alerts = await transaction.read("SELECT raised_by FROM alert WHERE uid=?", (uid,))
+                if alerts[0]["raised_by"] != f"federation:{row['peer_id']}":
+                    raise ValueError("alert revision cannot replace a local or relayed alert")
+                await transaction.write(
+                    "UPDATE alert SET severity=?,headline=?,body=?,effective_at=?,expires_at=?,"
+                    "cancelled_at=? WHERE uid=?",
                     (
-                        uid,
                         payload["severity"],
                         str(payload["headline"])[:140],
                         payload.get("body"),
-                        source,
-                        str(payload.get("source_ref") or f"federation:{row['peer_id']}")[:160],
-                        f"federation:{row['peer_id']}",
-                        int(payload["raised_at"]),
                         payload.get("effective_at"),
                         payload.get("expires_at"),
                         payload.get("cancelled_at"),
+                        uid,
                     ),
                 )
-                if row["source_revision"] is not None:
-                    if not uid.startswith(f"{row['mesh_id']}:"):
-                        raise ValueError("alert revision does not match its original producer")
-                    alerts = await transaction.read(
-                        "SELECT raised_by FROM alert WHERE uid=?", (uid,)
-                    )
-                    if alerts[0]["raised_by"] != f"federation:{row['peer_id']}":
-                        raise ValueError("alert revision cannot replace a local or relayed alert")
-                    await transaction.write(
-                        "UPDATE alert SET severity=?,headline=?,body=?,effective_at=?,expires_at=?,"
-                        "cancelled_at=? WHERE uid=?",
-                        (
-                            payload["severity"],
-                            str(payload["headline"])[:140],
-                            payload.get("body"),
-                            payload.get("effective_at"),
-                            payload.get("expires_at"),
-                            payload.get("cancelled_at"),
-                            uid,
-                        ),
-                    )
-            else:
-                raise ValueError("unsupported federation inbox stream")
-            if row["source_revision"] is not None:
-                await write_audit(
-                    transaction,
-                    actor_kind="operator" if not operator.startswith("federation:") else "system",
-                    actor_ref=operator,
-                    action="federation.revision_imported",
-                    target=f"{stream}:{uid}",
-                    detail={
-                        "epoch": row["source_epoch"],
-                        "revision": row["source_revision"],
-                        "digest": row["digest"],
-                    },
-                    created_at=now,
-                )
-            await transaction.write(
-                "UPDATE fed_inbox_item SET state='imported',reviewed_at=?,reviewed_by=? WHERE id=?",
-                (now, operator, item_id),
+        else:
+            raise ValueError("unsupported federation inbox stream")
+        if row["source_revision"] is not None:
+            await write_audit(
+                transaction,
+                actor_kind="operator" if not operator.startswith("federation:") else "system",
+                actor_ref=operator,
+                action="federation.revision_imported",
+                target=f"{stream}:{uid}",
+                detail={
+                    "epoch": row["source_epoch"],
+                    "revision": row["source_revision"],
+                    "digest": row["digest"],
+                },
+                created_at=now,
             )
+        await transaction.write(
+            "UPDATE fed_inbox_item SET state='imported',reviewed_at=?,reviewed_by=? WHERE id=?",
+            (now, operator, item_id),
+        )
         return str(stream)

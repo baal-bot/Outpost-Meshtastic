@@ -6,13 +6,14 @@ from typing import Any, TypedDict
 
 from outpost.audit import write_audit
 from outpost.clock import Clock
+from outpost.fed.review import review_token
 from outpost.radio_operations import RadioOperations
 from outpost.store import Database
 from outpost.watch import CheckinService
 from outpost.watch.incidents import ACTIVE, IncidentService
 from outpost.web.operator_inbox import OperatorInboxService
 
-Importer = Callable[[int, str], Awaitable[str]]
+Importer = Callable[[int, str, str], Awaitable[str]]
 ReplySender = Callable[[dict[str, str], str, str], Awaitable[dict[str, object]]]
 SNAPSHOT_LIMIT = 60
 COORDINATE_PAIR = re.compile(
@@ -238,7 +239,7 @@ class MeshOperationsCenter:
 
     async def federation_item(self, item_id: int) -> dict[str, Any] | None:
         rows = await self.database.read(
-            "SELECT i.id,i.stream,i.uid,i.received_at,p.mesh_id,p.node_name "
+            "SELECT i.*,p.mesh_id,p.node_name "
             "FROM fed_inbox_item i JOIN fed_peer p ON p.id=i.peer_id "
             "WHERE i.id=? AND i.state='pending'",
             (item_id,),
@@ -248,6 +249,7 @@ class MeshOperationsCenter:
         value = rows[0]
         return {
             "id": int(value["id"]),
+            "review_token": review_token(dict(value)),
             "stream": str(value["stream"]),
             "received_at": value["received_at"],
             "mesh_id": str(value["mesh_id"]),
@@ -311,16 +313,12 @@ class MeshOperationsCenter:
             raise ValueError("Conversation not found.")
         return "Conversation archived; audit recorded."
 
-    async def import_federation_item(self, item_id: int, actor_ref: str) -> str:
+    async def import_federation_item(
+        self, item_id: int, actor_ref: str, expected_token: str
+    ) -> str:
         if self.importer is None:
             raise ValueError("Federation import is unavailable.")
-        stream = await self.importer(item_id, f"mesh:{actor_ref}")
-        await self._audit(
-            actor_ref,
-            "federation.inbox.import",
-            f"federation-inbox:{item_id}",
-            {"stream": stream},
-        )
+        stream = await self.importer(item_id, f"mesh:{actor_ref}", expected_token)
         return f"Federation {stream} item imported; audit recorded."
 
     async def reply(self, key: str, body: str, actor_ref: str) -> str:

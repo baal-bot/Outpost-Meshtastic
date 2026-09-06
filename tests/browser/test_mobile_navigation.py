@@ -4527,6 +4527,164 @@ def route_federation_policy_workspace(
     )
 
 
+@pytest.mark.parametrize("width", [390, 1280])
+@pytest.mark.parametrize("action", ["imported", "rejected"])
+def test_federation_review_refreshes_conflicts_without_resubmitting(
+    browser: object, dashboard_url: str, width: int, action: str
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme="dark")
+    route_federation_policy_workspace(page, [])
+    current = {
+        "id": 7,
+        "stream": "alerts",
+        "uid": "!remote:alert:1",
+        "mesh_id": "!remote",
+        "review_token": "a" * 64,
+        "payload": {"headline": "Original alert", "body": "<img src=x onerror=alert(1)>"},
+    }
+    submitted = []
+
+    def inbox(route: object) -> None:
+        if route.request.method == "PATCH":
+            submitted.append(route.request.post_data_json)
+            if len(submitted) == 1:
+                current["review_token"] = "b" * 64
+                current["payload"] = {"headline": "Replacement needs review"}
+                route.fulfill(
+                    status=409,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "error": {
+                                "code": "review_conflict",
+                                "message": "Federation item changed.",
+                            }
+                        }
+                    ),
+                )
+            else:
+                route.fulfill(
+                    status=200, content_type="application/json", body=json.dumps({"state": action})
+                )
+        else:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"items": [current] if len(submitted) < 2 else []}),
+            )
+
+    page.route("**/api/v1/federation/inbox*", inbox)
+    page.route("**/api/v1/federation/inbox/*", inbox)
+    try:
+        page.goto(f"{dashboard_url}/federation.html", wait_until="domcontentloaded")
+        wait_for_navigation(page)
+        page.evaluate(
+            "window.reviewEvents = 0; window.addEventListener('outpost:federation-reviewed', "
+            "() => window.reviewEvents++)"
+        )
+        card = page.locator(".inbox-card")
+        card.wait_for()
+        card.locator("summary").click()
+        assert "onerror" in card.locator("pre").text_content()
+        assert card.locator("img").count() == 0
+        button = "[data-import]" if action == "imported" else "[data-reject]"
+        card.locator(button).click()
+        playwright.expect(page.locator("#fed-review-result")).to_contain_text("changed")
+        playwright.expect(card).to_contain_text("Replacement needs review")
+        assert submitted == [
+            {"state": action, "review_token": "a" * 64, "reason": "Rejected by operator"}
+        ]
+        assert page.evaluate("window.reviewEvents") == 0
+        card.locator(button).click()
+        playwright.expect(page.locator("#fed-review-result")).to_contain_text("audit recorded")
+        assert len(submitted) == 2 and submitted[1]["review_token"] == "b" * 64
+        assert page.evaluate("window.reviewEvents") == 1
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_federation_review_connection_loss_requires_explicit_refresh(
+    browser: object, dashboard_url: str, committed: bool
+) -> None:
+    page = prepare_page(browser, 390, dashboard_url, theme="dark")
+    route_federation_policy_workspace(page, [])
+    writes = []
+    item = {
+        "id": 7,
+        "stream": "alerts",
+        "uid": "!remote:alert:1",
+        "mesh_id": "!remote",
+        "review_token": "a" * 64,
+        "payload": {"headline": "Review over intermittent LAN"},
+    }
+
+    def inbox(route: object) -> None:
+        if route.request.method == "PATCH":
+            writes.append(route.request.post_data_json)
+            route.abort("connectionclosed")
+        else:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"items": [] if writes and committed else [item]}),
+            )
+
+    page.route("**/api/v1/federation/inbox*", inbox)
+    page.route("**/api/v1/federation/inbox/*", inbox)
+    try:
+        page.goto(f"{dashboard_url}/federation.html", wait_until="domcontentloaded")
+        button = page.locator("[data-import]")
+        button.click()
+        playwright.expect(page.locator("#fed-review-result")).to_contain_text("outcome unconfirmed")
+        assert button.is_disabled() and len(writes) == 1
+        page.locator("#refresh-inbox").click()
+        if committed:
+            playwright.expect(page.locator("#fed-inbox")).to_contain_text(
+                "No records awaiting review"
+            )
+        else:
+            playwright.expect(button).to_be_enabled()
+        assert len(writes) == 1
+    finally:
+        page.close()
+
+
+def test_federation_review_requires_matching_backend(browser: object, dashboard_url: str) -> None:
+    page = prepare_page(browser, 390, dashboard_url, theme="dark")
+    route_federation_policy_workspace(page, [])
+    page.route(
+        "**/api/v1/federation/inbox",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": 7,
+                            "stream": "alerts",
+                            "uid": "!remote:alert:1",
+                            "mesh_id": "!remote",
+                            "payload": {"headline": "Unversioned backend record"},
+                        }
+                    ]
+                }
+            ),
+        ),
+    )
+    try:
+        page.goto(f"{dashboard_url}/federation.html", wait_until="domcontentloaded")
+        card = page.locator(".inbox-card")
+        card.wait_for()
+        assert "matching backend update required" in card.text_content()
+        assert card.locator("[data-import]").is_disabled()
+        assert card.locator("[data-reject]").is_disabled()
+    finally:
+        page.close()
+
+
 def test_federation_peer_card_distinguishes_offline_from_trust(
     browser: object, dashboard_url: str
 ) -> None:

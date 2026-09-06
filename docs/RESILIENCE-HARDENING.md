@@ -3,6 +3,16 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Version-bound operator review — #160 / #153 software slice
+
+[The review contract](FEDERATION-REVIEW-SAFETY.md) binds dashboard and handheld decisions to
+the pending record version and commits mutation plus human audit together. Changed content,
+competing reviewers and revoked import permissions cannot silently reuse a stale approval.
+The dashboard handles conflicts without resubmitting and disables review when paired with
+an older unversioned backend. Automatic board policy stays separate. This is a deliberate
+human API/command safety tightening, not an on-air or SQLite schema change; #153 and its
+event-publication prerequisite #135 remain open.
+
 ## Preliminary commit-policy latency — #137 remains open
 
 [The temporary-store comparison](benchmarks/SQLITE-COMMIT-POLICY-2026-09-05.md) records NORMAL

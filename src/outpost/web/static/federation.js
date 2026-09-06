@@ -107,11 +107,36 @@ async function refreshInbox() {
   const target = $("fed-inbox"); if (!target) return;
   const response = await api("/api/v1/federation/inbox"); if (!response.ok) return;
   const items = (await response.json()).items;
-  target.innerHTML = items.map(item => `<article class="inbox-card"><div><strong>${safe(item.stream)}</strong><code>${safe(item.node_name || item.mesh_id)} · ${safe(item.uid)}</code></div><p>${safe(item.payload.headline || item.payload.title || item.payload.subject || item.payload.body || "Federated record")}</p><div><button data-import="${item.id}">Approve import</button><button class="danger" data-reject="${item.id}">Reject</button></div></article>`).join("") || `<p class="ui-empty empty">No records awaiting review.</p>`;
-  document.querySelectorAll("[data-import]").forEach(button => button.addEventListener("click", async () => { await reviewInbox(button.dataset.import, "imported"); }));
-  document.querySelectorAll("[data-reject]").forEach(button => button.addEventListener("click", async () => { await reviewInbox(button.dataset.reject, "rejected"); }));
+  const hasReviewToken = item => /^[0-9a-f]{64}$/.test(item.review_token || "");
+  target.innerHTML = items.map(item => `<article class="inbox-card"><div><strong>${safe(item.stream)}</strong><code>${safe(item.node_name || item.mesh_id)} · ${safe(item.uid)}</code></div><p>${safe(item.payload.headline || item.payload.title || item.payload.subject || item.payload.body || "Federated record")}</p><details><summary>Full quarantined record</summary><pre>${safe(JSON.stringify(item.payload, null, 2))}</pre></details>${hasReviewToken(item) ? "" : "<p>Safe review unavailable: matching backend update required.</p>"}<div><button data-import="${item.id}" ${hasReviewToken(item) ? "" : "disabled"}>Approve import</button><button class="danger" data-reject="${item.id}" ${hasReviewToken(item) ? "" : "disabled"}>Reject</button></div></article>`).join("") || `<p class="ui-empty empty">No records awaiting review.</p>`;
+  target.querySelectorAll("[data-import], [data-reject]").forEach(button => button.addEventListener("click", async () => {
+    const id = button.dataset.import || button.dataset.reject;
+    const item = items.find(value => String(value.id) === id);
+    await reviewInbox(item, button.dataset.import ? "imported" : "rejected");
+  }));
 }
-async function reviewInbox(id, state) { await api(`/api/v1/federation/inbox/${id}`, {method:"PATCH", body:JSON.stringify({state, reason:"Rejected by operator"})}); window.dispatchEvent(new Event("outpost:federation-reviewed")); await refreshInbox(); }
+async function reviewInbox(item, state) {
+  let result = $("fed-review-result");
+  if (!result) {
+    result = document.createElement("p"); result.id = "fed-review-result"; result.setAttribute("role", "status");
+    $("fed-inbox").before(result);
+  }
+  result.textContent = "Saving review…";
+  $("fed-inbox").querySelectorAll("button").forEach(button => { button.disabled = true; });
+  try {
+    const response = await api(`/api/v1/federation/inbox/${item.id}`, {method:"PATCH", body:JSON.stringify({state, review_token:item.review_token, reason:"Rejected by operator"})});
+    const body = await response.json();
+    if (response.ok) {
+      result.textContent = state === "imported" ? "Import approved; audit recorded." : "Record rejected; audit recorded.";
+      window.dispatchEvent(new Event("outpost:federation-reviewed"));
+    } else {
+      result.textContent = `${body.error?.message || "Review not saved."} Refresh and review again before deciding.`;
+    }
+    await refreshInbox();
+  } catch {
+    result.textContent = "Review outcome unconfirmed. Refresh before deciding again.";
+  }
+}
 async function loadSyncStatus() {
   const policy = document.querySelector(".path-grid").closest(".panel");
   const panel = document.createElement("section");

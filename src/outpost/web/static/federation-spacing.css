@@ -38,6 +38,8 @@
 .inbox-card p { color: var(--muted); font-size: .68rem; }
 .inbox-card button { padding: 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--raised); color: var(--ink); }
 .inbox-card .danger { color: var(--red); }
+.inbox-card pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .68rem; }
+.inbox-card summary { cursor: pointer; color: var(--muted); font-size: .7rem; }
 .service-form { display: grid; grid-template-columns: 180px 1fr auto; gap: 8px; }
 .service-form select, .service-form input, .service-form button {
   padding: 8px; border: 1px solid var(--line); border-radius: 6px;

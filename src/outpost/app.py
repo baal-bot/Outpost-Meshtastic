@@ -20,7 +20,6 @@ import cbor2
 from outpost.ai import AIService, create_provider
 from outpost.ai.retrieval import RetrievalEngine
 from outpost.ai.store import AIStore
-from outpost.audit import write_audit
 from outpost.bbs.admin import BBSAdmin
 from outpost.bbs.channels import ChannelDirectory
 from outpost.bbs.digests import DigestService
@@ -69,6 +68,7 @@ from outpost.fed import (
     wire_int,
 )
 from outpost.fed.reconciliation import Reconciliation
+from outpost.fed.review import FederationReviewService
 from outpost.fed.revisions import CAPABILITY as RECONCILIATION_CAPABILITY
 from outpost.fed.revisions import MODE as RECONCILIATION_MODE
 from outpost.fed.revisions import RevisionReset
@@ -656,25 +656,16 @@ class OutpostApp:
         self._tasks = []
         return await self.backups.restore_quiesced(name)
 
-    async def import_federation_inbox(self, item_id: int) -> str:
-        actor = current_actor()
-        stream = await self.import_federation_inbox_as(item_id, actor)
-        await write_audit(
-            self.database,
-            actor_kind="web",
-            actor_ref=actor.removeprefix("web:"),
-            action="federation.inbox.import",
-            target=f"federation-inbox:{item_id}",
-            detail={"stream": stream},
-            created_at=int(self.clock.now().timestamp()),
-        )
-        return stream
+    async def import_federation_inbox(self, item_id: int, expected_token: str) -> str:
+        return await self.import_federation_inbox_as(item_id, current_actor(), expected_token)
 
-    async def import_federation_inbox_as(self, item_id: int, actor: str) -> str:
+    async def import_federation_inbox_as(
+        self, item_id: int, actor: str, expected_token: str
+    ) -> str:
         if not self.config.modules.fed.enabled:
             raise ValueError("federation module is disabled")
-        return await self.federation_sync.import_inbox(
-            item_id, actor, int(self.clock.now().timestamp())
+        return await FederationReviewService(self.database).approve(
+            self.federation_sync, item_id, expected_token, actor, int(self.clock.now().timestamp())
         )
 
     async def _dispatch_relay_incident(

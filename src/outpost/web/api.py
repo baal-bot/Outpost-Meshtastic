@@ -37,6 +37,7 @@ from outpost.fed import (
     FederationRelayService,
     FederationTopologyService,
 )
+from outpost.fed.review import FederationReviewService, ReviewConflict, review_token
 from outpost.member_data import MemberDataService, retention_statement
 from outpost.operator_context import (
     current_actor,
@@ -620,6 +621,7 @@ class FederationSyncPolicyBody(BaseModel):
 
 class FederationInboxBody(BaseModel):
     state: Literal["imported", "rejected"]
+    review_token: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(default="Rejected by operator", max_length=160)
 
 
@@ -713,7 +715,7 @@ def create_web_app(
     federation_service_list: Callable[[], Awaitable[list[dict[str, object]]]] | None = None,
     federation_service_query: Callable[[str, dict[str, object]], Awaitable[dict[str, object]]]
     | None = None,
-    federation_inbox_import: Callable[[int], Awaitable[str]] | None = None,
+    federation_inbox_import: Callable[[int, str], Awaitable[str]] | None = None,
     federation_mail_send: (
         Callable[[str, str, str, str], Awaitable[dict[str, object]]] | None
     ) = None,
@@ -2138,6 +2140,7 @@ def create_web_app(
                 items = []
                 for row in rows:
                     item = dict(row)
+                    item["review_token"] = review_token(item)
                     item["payload"] = json.loads(item.pop("payload_json"))
                     items.append(item)
                 return {"items": items}
@@ -2146,34 +2149,23 @@ def create_web_app(
             async def federation_inbox_reject(
                 item_id: int, body: FederationInboxBody
             ) -> dict[str, str] | Response:
-                rows = await database.read(
-                    "SELECT id FROM fed_inbox_item WHERE id=? AND state='pending'", (item_id,)
-                )
-                if not rows:
-                    return JSONResponse(
-                        {"error": {"code": "not_found", "message": "Pending item not found."}},
-                        status_code=404,
+                try:
+                    if body.state == "imported":
+                        if federation_inbox_import is None:
+                            raise ValueError("Import unavailable.")
+                        stream = await federation_inbox_import(item_id, body.review_token)
+                        return {"state": "imported", "stream": stream}
+                    await FederationReviewService(database).reject(
+                        item_id, body.review_token, current_actor(), body.reason, int(time.time())
                     )
-                if body.state == "imported":
-                    if federation_inbox_import is None:
-                        return JSONResponse(
-                            {"error": {"code": "unavailable", "message": "Import unavailable."}},
-                            status_code=409,
-                        )
-                    try:
-                        stream = await federation_inbox_import(item_id)
-                    except (KeyError, TypeError, ValueError) as error:
-                        return JSONResponse(
-                            {"error": {"code": "import_failed", "message": str(error)}},
-                            status_code=409,
-                        )
-                    return {"state": "imported", "stream": stream}
-                await database.write(
-                    "UPDATE fed_inbox_item SET state='rejected',reviewed_at=unixepoch(),"
-                    "reviewed_by=?,rejection_reason=? WHERE id=?",
-                    (current_actor(), body.reason, item_id),
-                )
-                return {"state": "rejected"}
+                    return {"state": "rejected"}
+                except (KeyError, TypeError, ValueError) as error:
+                    code = (
+                        "review_conflict" if isinstance(error, ReviewConflict) else "review_failed"
+                    )
+                    return JSONResponse(
+                        {"error": {"code": code, "message": str(error)}}, status_code=409
+                    )
 
         if federation_pair is not None:
 

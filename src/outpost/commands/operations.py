@@ -465,6 +465,10 @@ def specs(center: MeshOperationsCenter) -> list[CommandSpec]:
                 ResponseKind.ERROR, [Line("Federation review not found or not allowed.")]
             )
         _enter(ctx, f"federation review {item['id']}")
+        # One bounded, server-side preview tag; never transmit payload or hash
+        # over the metadata-only handheld interface.
+        ctx.session.tui_snapshots["federation-review"] = [str(item["id"]), item["review_token"]]
+        ctx.session.tui_snapshot_expires_at = center.clock.monotonic() + SENSITIVE_SECONDS
         return _screen(
             "ops-review",
             "FEDERATION REVIEW",
@@ -517,11 +521,18 @@ def specs(center: MeshOperationsCenter) -> list[CommandSpec]:
             item = await center.federation_item(int(value)) if value.isdigit() else None
             if item is None:
                 return Response(ResponseKind.ERROR, [Line("Pending federation item not found.")])
+            ctx.session.expire_tui_sensitive(center.clock.monotonic())
+            preview = ctx.session.tui_snapshots.get("federation-review")
+            if preview != [str(item["id"]), item["review_token"]]:
+                return Response(
+                    ResponseKind.ERROR,
+                    [Line("Review changed or expired. Open OPS REVIEWS and review again.")],
+                )
             return confirm(
                 ctx,
                 action="import",
                 target=value,
-                payload={},
+                payload={"review_token": item["review_token"]},
                 title="IMPORT FEDERATION ITEM?",
                 label="Confirm approved import",
             )
@@ -599,7 +610,9 @@ def specs(center: MeshOperationsCenter) -> list[CommandSpec]:
                 result = await center.archive_conversation(confirmation.target, ctx.member.mesh_id)
             elif confirmation.action == "import":
                 result = await center.import_federation_item(
-                    int(confirmation.target), ctx.member.mesh_id
+                    int(confirmation.target),
+                    ctx.member.mesh_id,
+                    confirmation.payload["review_token"],
                 )
             elif confirmation.action == "reply":
                 result = await center.reply(
