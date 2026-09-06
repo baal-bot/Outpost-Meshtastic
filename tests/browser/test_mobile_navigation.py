@@ -1120,7 +1120,7 @@ def test_operator_styles_follow_static_component_contract() -> None:
         markup = (STATIC_ROOT / filename).read_text()
         base = markup.index("/base.css?v=1")
         layout = markup.index("/layout.css?v=1")
-        components = markup.index("/components.css?v=1")
+        components = markup.index("/components.css?v=2")
         assert base < layout < components, filename
         for obsolete in ("/app.css", "/enhancements.css", "/theme-corrections.css"):
             assert obsolete not in markup, filename
