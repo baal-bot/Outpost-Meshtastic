@@ -27,6 +27,7 @@ files = [
   "src/outpost/fed/sync.py",
   "src/outpost/fed/revisions.py",
   "src/outpost/fed/reconciliation.py",
+  "src/outpost/fed/incident_updates.py",
 ]
 
 [groups.auth]
@@ -67,3 +68,7 @@ files = [
   "src/outpost/store/maintenance.py",
   "src/outpost/store/backups.py",
 ]
+
+[production_groups.incident_note_import]
+minimum = 90
+files = ["src/outpost/fed/incident_updates.py"]
