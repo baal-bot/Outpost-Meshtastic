@@ -26,6 +26,16 @@ from outpost.web.api import create_web_app
 
 pytestmark = pytest.mark.production_wiring
 
+# These fixtures must represent the current checkout, including future migrations.
+# Keep explicit old (153) and future (current + 1) cases to test both guard edges.
+CURRENT_SCHEMA = max(
+    int(path.name[:4])
+    for path in (Path(__file__).parents[2] / "src/outpost/store/migrations").glob(
+        "[0-9][0-9][0-9][0-9]_*.sql"
+    )
+)
+CURRENT_MIGRATION = f"{CURRENT_SCHEMA:04d}_current.sql"
+
 
 @dataclass
 class BootFixture:
@@ -50,7 +60,7 @@ def boot_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> BootFixture
     migrations = package / "store" / "migrations"
     migrations.mkdir(parents=True)
     (migrations / "0000_core.sql").write_text("-- fixture only\n")
-    (migrations / "0177_current.sql").write_text("-- fixture only\n")
+    (migrations / CURRENT_MIGRATION).write_text("-- fixture only\n")
     (release / "bin").mkdir()
     (release / "bin" / "python").symlink_to(sys.executable)
     current = tmp_path / "current"
@@ -142,7 +152,7 @@ async def test_healthy_developer_http_cannot_hide_incompatible_boot_schema(
     tmp_path: Path, boot_fixture: BootFixture
 ) -> None:
     service = await ready_service(tmp_path)
-    migration = boot_fixture.package / "store" / "migrations" / "0177_current.sql"
+    migration = boot_fixture.package / "store" / "migrations" / CURRENT_MIGRATION
     migration.rename(migration.with_name("0153_old.sql"))
     properties_before = boot_fixture.response.read_bytes()
     schema_before = await service.database.read("SELECT version,applied_at FROM schema_version")
@@ -156,7 +166,7 @@ async def test_healthy_developer_http_cannot_hide_incompatible_boot_schema(
         check = next(item for item in report["checks"] if item["name"] == "boot_schema")
         assert check["evidence"]["state"] == "incompatible"
         assert check["evidence"]["boot_schema_cap"] == 153
-        assert "177 exceeds selected boot capacity 153" in check["detail"]
+        assert f"{CURRENT_SCHEMA} exceeds selected boot capacity 153" in check["detail"]
         assert "Do not bypass schema guards" in check["remediation"]
         for path in ("/api/v1/readiness", "/api/v1/dashboard/poll", "/api/v1/diagnostics/status"):
             response = local.get(path).json()
@@ -278,7 +288,10 @@ async def test_boot_probe_does_not_block_radio_event_loop(
         # system bus wait; no second writer or readiness poll loop is introduced.
         assert await service.database.read("SELECT 1")
         if schema_changes:
-            await service.database.write("UPDATE schema_version SET version=178 WHERE version=177")
+            await service.database.write(
+                "INSERT INTO schema_version(version,applied_at) VALUES(?,0)",
+                (CURRENT_SCHEMA + 1,),
+            )
         release.set()
         report = await pending
         assert report["status"] == ("degraded" if schema_changes else "ready")
@@ -298,7 +311,7 @@ def test_diagnostic_bundle_checks_boot_independently_of_live_backend(
     database = tmp_path / "diagnostic.db"
     with closing(sqlite3.connect(database)) as connection:
         connection.execute("CREATE TABLE schema_version(version INTEGER)")
-        connection.execute("INSERT INTO schema_version VALUES(178)")
+        connection.execute("INSERT INTO schema_version VALUES(?)", (CURRENT_SCHEMA + 1,))
         connection.commit()
     before = database.read_bytes()
     config = Config.model_validate({"store": {"path": str(database)}})
@@ -308,7 +321,7 @@ def test_diagnostic_bundle_checks_boot_independently_of_live_backend(
     evidence = diagnostics.runtime_evidence(config)
     assert evidence["self_check"]["status"] == "unavailable"
     assert evidence["boot_schema"]["state"] == "incompatible"
-    assert evidence["boot_schema"]["database_schema"] == 178
+    assert evidence["boot_schema"]["database_schema"] == CURRENT_SCHEMA + 1
     assert database.read_bytes() == before
     assert str(tmp_path) not in json.dumps(evidence["boot_schema"])
 
@@ -339,7 +352,7 @@ def test_invalid_database_schema_is_unknown(boot_fixture: BootFixture, schema: o
 def test_unreadable_or_ambiguous_packages_are_unknown(
     boot_fixture: BootFixture, monkeypatch: pytest.MonkeyPatch, mutation: str, reason: str
 ) -> None:
-    migration = boot_fixture.package / "store" / "migrations" / "0177_current.sql"
+    migration = boot_fixture.package / "store" / "migrations" / CURRENT_MIGRATION
     if mutation in {"missing_current", "broken_current"}:
         boot_fixture.current.unlink()
         if mutation == "broken_current":
@@ -366,13 +379,13 @@ def test_unreadable_or_ambiguous_packages_are_unknown(
         migration.unlink()
         migration.with_name("0000_core.sql").unlink()
     elif mutation == "duplicate_migration":
-        migration.with_name("0177_duplicate.sql").write_text("-- duplicate\n")
+        migration.with_name(f"{CURRENT_SCHEMA:04d}_duplicate.sql").write_text("-- duplicate\n")
     elif mutation == "symlink_migration":
         migration.unlink()
         migration.symlink_to(migration.with_name("0000_core.sql"))
     elif mutation == "entries_limit":
         monkeypatch.setattr(boot_readiness, "MAX_ENTRIES", 1)
-    evidence = boot_readiness.inspect_boot_schema(177)
+    evidence = boot_readiness.inspect_boot_schema(CURRENT_SCHEMA)
     assert evidence["state"] == "unknown"
     assert evidence["reason"] == reason
 
@@ -392,7 +405,7 @@ def test_changed_release_selection_is_unknown(
         return value
 
     monkeypatch.setattr(boot_readiness, "_schema_cap", switch_after_inspection)
-    assert boot_readiness.inspect_boot_schema(177)["reason"] == "selection_changed"
+    assert boot_readiness.inspect_boot_schema(CURRENT_SCHEMA)["reason"] == "selection_changed"
 
 
 def test_changed_unit_and_elided_empty_array_metadata(
@@ -401,7 +414,7 @@ def test_changed_unit_and_elided_empty_array_metadata(
     for key in ("EnvironmentFiles", "PassEnvironment", "UnsetEnvironment"):
         del boot_fixture.properties[key]
     boot_fixture.save()
-    assert boot_readiness.inspect_boot_schema(177)["state"] == "compatible"
+    assert boot_readiness.inspect_boot_schema(CURRENT_SCHEMA)["state"] == "compatible"
     original = boot_readiness._schema_cap
 
     def change_unit(package: Path) -> int:
@@ -412,7 +425,7 @@ def test_changed_unit_and_elided_empty_array_metadata(
         return cap
 
     monkeypatch.setattr(boot_readiness, "_schema_cap", change_unit)
-    assert boot_readiness.inspect_boot_schema(177)["reason"] == "selection_changed"
+    assert boot_readiness.inspect_boot_schema(CURRENT_SCHEMA)["reason"] == "selection_changed"
 
 
 @pytest.mark.asyncio
@@ -523,7 +536,7 @@ def test_systemctl_failures_are_bounded_and_redacted(
             }[mode]
         )
         expected = "unit_metadata_invalid"
-    evidence = boot_readiness.inspect_boot_schema(177)
+    evidence = boot_readiness.inspect_boot_schema(CURRENT_SCHEMA)
     assert evidence["state"] == "unknown"
     assert evidence["reason"] == expected
     assert "private-secret" not in json.dumps(evidence)
