@@ -77,3 +77,7 @@ files = ["src/outpost/fed/incident_updates.py"]
 [production_groups.federation_item_failures]
 minimum = 90
 files = ["src/outpost/fed/item_failures.py"]
+
+[production_groups.boot_readiness]
+minimum = 90
+files = ["src/outpost/boot_readiness.py"]

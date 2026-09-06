@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from prometheus_client import generate_latest
 
+import outpost.self_check as self_check
 from outpost.clock import VirtualClock
 from outpost.config import Config
 from outpost.router.intents import IntentResolver
@@ -33,7 +34,21 @@ def readiness_config(tmp_path: Path) -> Config:
 @pytest.mark.asyncio
 async def test_self_check_persists_failures_recovers_and_detects_delivery_history(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # This test isolates the other readiness checks. The real boot collector and
+    # its fail-closed production wiring are exercised in test_boot_readiness.py.
+    monkeypatch.setattr(
+        self_check,
+        "inspect_boot_schema",
+        lambda schema: {
+            "state": "compatible",
+            "reason": "schema_capacity_sufficient",
+            "database_schema": schema,
+            "boot_schema_cap": schema,
+            "source_relation": "same_location",
+        },
+    )
     config = readiness_config(tmp_path)
     database = Database(config.store.path)
     await database.open()

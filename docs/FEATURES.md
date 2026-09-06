@@ -43,7 +43,7 @@ revision on which CI runs this manifest check.
 | Outpost federation | Pairing, authenticated framing, policy, producer-revision board/incident/alert reconciliation and separately negotiated plain incident notes with durable pending-page receipts and bounded indexed discovery, version-bound human import/rejection with atomic audit, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, transactional destination dispatch, and privacy-gated topology health. | Two-node field-tested | unreleased @ `HEAD` (2026-09-05); introduced `8f7219e` |
 | Meshtastic MQTT federation path | Optional radio-firmware MQTT discovery, targeted bootstrap, transport observation, and resilient pairing approvals. | Two-node field-tested | unreleased @ `HEAD` (2026-08-26); introduced `f75f8af` |
 | Local AI assistant | ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, native HailoRT Qwen3-VL provider, bounded device reacquisition, and explicit readiness state. | Hardware-gated | unreleased @ `HEAD` (2026-08-27); introduced `6b3d01a` |
-| Installation and diagnostics | Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, authenticated releases, health-gated Hailo handoff, and hardened service tooling. | Automated-tested | unreleased @ `HEAD` (2026-08-27); introduced `d614d85` |
+| Installation and diagnostics | Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, fail-closed static boot-schema readiness evidence, authenticated releases, health-gated Hailo handoff, and hardened service tooling. | Automated-tested | unreleased @ `HEAD` (2026-09-05); introduced `d614d85` |
 
 ## Evidence and limitations
 
@@ -355,10 +355,14 @@ Evidence:
 - Automated: [tests/unit/test_deploy_install.py::test_installer_harness_rejects_safety_mutants](../tests/unit/test_deploy_install.py) — Executed installer safety mutations prove the deployment assertions detect regressions.
 - Automated: [tests/unit/test_onboarding.py::test_checklist_is_complete_resumable_and_records_requirements](../tests/unit/test_onboarding.py) — The field checklist is complete, resumable, and records requirement metadata.
 - Operations: [docs/ONBOARDING.md](ONBOARDING.md) — Field checklist, local access, wallboard isolation, and redacted diagnostic procedure.
+- Automated: [tests/integration/test_boot_readiness.py::test_healthy_developer_http_cannot_hide_incompatible_boot_schema](../tests/integration/test_boot_readiness.py) — Healthy HTTP cannot mask an incompatible selected boot package; cached readiness, metrics and loopback diagnostics preserve a scoped warning without migrations or radio work.
+- Automated: [tests/integration/test_boot_readiness.py::test_unknown_or_failed_boot_selection_never_reports_all_ready](../tests/integration/test_boot_readiness.py) — Unknown, disabled, custom, inactive and failed service selections degrade readiness without exporting raw unit values.
+- Operations: [docs/SAFETY-READINESS.md](SAFETY-READINESS.md) — Boot evidence boundaries, collection budgets and non-destructive remediation.
 
 Known limitations:
 
 - A recorded fresh-Pi mDNS/hotspot onboarding drill and extended unattended wallboard soak remain field gates.
+- Boot-schema evidence compares static package capacity with the inspected database; it does not prove configuration, import integrity, migration success, or unattended reboot/radio recovery. Custom or unavailable selections remain unknown.
 
 ## Global boundaries
 

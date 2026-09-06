@@ -1399,6 +1399,57 @@ def test_safety_readiness_failure_is_persistent_actionable_and_rerunnable(
         page.close()
 
 
+@pytest.mark.parametrize("theme", THEMES)
+@pytest.mark.parametrize("width", [320, 390, 1280])
+def test_boot_readiness_warning_reflows_without_claiming_reboot_or_safety_mail(
+    browser: object, dashboard_url: str, theme: str, width: int
+) -> None:
+    from dataclasses import asdict
+
+    from outpost.boot_readiness import describe_boot_schema
+    from outpost.self_check import CHECK_DEFINITIONS
+
+    definition = next(item for item in CHECK_DEFINITIONS if item.name == "boot_schema")
+    page = prepare_page(browser, width, dashboard_url, theme=theme)
+    degraded = {"status": "degraded", "safety_failures": 0, "checks": []}
+    try:
+        page.route(
+            "**/api/v1/dashboard/poll",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=dashboard_poll_body(readiness=degraded),
+            ),
+        )
+        for state, reason in (
+            ("incompatible", "database_newer_than_boot"),
+            ("unknown", "unit_timeout"),
+        ):
+            evidence = {
+                "state": state,
+                "reason": reason,
+                "database_schema": 177,
+                "boot_schema_cap": 153 if state == "incompatible" else None,
+            }
+            check = {
+                **asdict(definition),
+                "passed": False,
+                "detail": describe_boot_schema(evidence),
+            }
+            degraded["checks"] = [check]
+            page.reload(wait_until="domcontentloaded")
+            banner = page.locator("aside.readiness-banner")
+            banner.wait_for(state="visible")
+            assert "READINESS DEGRADED" in banner.text_content()
+            assert check["detail"] in banner.text_content()
+            assert "Do not bypass schema guards" in banner.text_content()
+            assert banner.get_by_role("link", name="Open operator inbox").count() == 0
+            assert banner.get_by_role("button", name="Run readiness check").is_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    finally:
+        page.close()
+
+
 def test_configuration_readiness_failure_is_visible_without_an_inbox_claim(
     browser: object, dashboard_url: str
 ) -> None:

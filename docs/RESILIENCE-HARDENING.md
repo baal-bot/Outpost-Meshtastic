@@ -3,6 +3,18 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Independent boot-schema evidence — #163 / #136 and #149 software slice
+
+The [existing readiness service](SAFETY-READINESS.md#boot-compatibility-is-separate-from-live-health)
+now compares the inspected database with the package selected at boot. Incompatible, failed and
+unknown selections cannot produce an all-ready result, even when developer HTTP is healthy.
+The diagnostics CLI collects independent static evidence when the live backend is missing or old.
+Collection has bounded subprocess output/deadlines and directory inventories, runs off the radio
+event loop, and never executes alternate Python or changes a database/service. Exported evidence
+omits raw unit commands, environment values and filesystem paths. No migration or radio policy
+changes are involved. Installed release alignment, development database ownership, actual reboot
+recovery (#136), and the remaining outage-readiness dimensions (#149) stay open.
+
 ## Visible oversized-item failures — #162 / #135 prerequisite
 
 [Negotiated negative ITEM responses](FEDERATION-ITEM-FAILURES.md) retain a missing

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from outpost import __version__
+from outpost.boot_readiness import inspect_boot_schema
 from outpost.config import Config, load_config
 
 REDACTED = "[REDACTED]"
@@ -220,6 +221,7 @@ def runtime_evidence(config: Config) -> dict[str, object]:
             "status": "unavailable",
             "trigger_reachable": trigger.get("reachable") is True,
         }
+    database = _database_status(database_path)
     return {
         "platform": {
             "operating_system": os_release,
@@ -227,7 +229,8 @@ def runtime_evidence(config: Config) -> dict[str, object]:
             "python": platform.python_version(),
             "outpost": __version__,
         },
-        "database": _database_status(database_path),
+        "database": database,
+        "boot_schema": inspect_boot_schema(database.get("schema")),
         "storage": _storage_status(database_path),
         "service": _service_status(),
         "live": live,

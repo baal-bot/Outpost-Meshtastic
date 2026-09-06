@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 import uuid
 from copy import deepcopy
 from dataclasses import asdict, dataclass
@@ -12,6 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from prometheus_client import Gauge
 from pydantic import BaseModel
 
+from outpost.boot_readiness import describe_boot_schema, inspect_boot_schema
 from outpost.clock import Clock
 from outpost.config import Config
 from outpost.radio_power import normalize_battery_level, power_condition
@@ -54,6 +56,14 @@ class CheckResult:
 
 
 CHECK_DEFINITIONS = (
+    CheckDefinition(
+        "boot_schema",
+        "operations",
+        "The selected boot release supports the current database",
+        "A healthy development process can hide a service that will not recover after restart.",
+        "Review boot evidence and arrange a verified deployment with a validated recovery backup. "
+        "Do not bypass schema guards, restore older data, or reboot just to test this warning.",
+    ),
     CheckDefinition(
         "responder_audience",
         "safety",
@@ -431,6 +441,38 @@ class SelfCheckService:
             detail = f"Timezone {name} is not available on this appliance."
         return self._result("timezone", passed, detail, {"timezone": name})
 
+    async def _database_schema(self) -> object:
+        try:
+            rows = await self.database.read("SELECT MAX(version) AS version FROM schema_version")
+            return rows[0]["version"] if rows else None
+        except sqlite3.Error:
+            return None
+
+    async def _boot_schema(self) -> CheckResult:
+        schema = await self._database_schema()
+        probe = asyncio.create_task(asyncio.to_thread(inspect_boot_schema, schema))
+        cancelled = False
+        while True:
+            try:
+                evidence = await asyncio.shield(probe)
+                break
+            except asyncio.CancelledError:
+                # Cancelling a waiter cannot stop its thread. Retain the run
+                # lock through repeated client cancellation until it exits.
+                if probe.cancelled():
+                    raise
+                cancelled = True
+        if cancelled:
+            raise asyncio.CancelledError
+        if await self._database_schema() != schema:
+            evidence = {**evidence, "state": "unknown", "reason": "database_schema_changed"}
+        return self._result(
+            "boot_schema",
+            evidence["state"] == "compatible",
+            describe_boot_schema(evidence),
+            evidence,
+        )
+
     async def _sync_inbox(self, results: list[CheckResult], now: int) -> None:
         for result in results:
             if result.severity != "safety":
@@ -485,6 +527,7 @@ class SelfCheckService:
             results = [
                 await self._responder_audience(),
                 await self._escalation_audiences(),
+                await self._boot_schema(),
                 await self._maintenance_freshness(now),
                 self._backup_rotation(),
                 await self._radio_power(),
