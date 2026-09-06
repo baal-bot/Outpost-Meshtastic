@@ -10,6 +10,7 @@ from typing import Any
 from outpost.audit import write_audit
 from outpost.fed.incident_updates import STREAM as INCIDENT_UPDATES
 from outpost.fed.incident_updates import IncidentUpdates
+from outpost.fed.item_failures import ItemFailures
 from outpost.fed.peers import Peer
 from outpost.fed.revisions import RevisionIndex, source_revision
 from outpost.store import Database, Transaction
@@ -58,6 +59,7 @@ class FederationSyncService:
         self.module_enabled = module_enabled or (lambda _name: True)
         self.revisions = RevisionIndex(self)
         self.incident_updates = IncidentUpdates(self)
+        self.item_failures = ItemFailures(self)
 
     @staticmethod
     def stream_module(stream: str) -> str | None:

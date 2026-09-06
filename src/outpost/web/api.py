@@ -37,6 +37,8 @@ from outpost.fed import (
     FederationRelayService,
     FederationTopologyService,
 )
+from outpost.fed.item_failures import CURSOR as ENCODING_FAILURE_CURSOR
+from outpost.fed.item_failures import LIMIT as ENCODING_FAILURE_LIMIT
 from outpost.fed.review import FederationReviewService, ReviewConflict, review_token
 from outpost.member_data import MemberDataService, retention_statement
 from outpost.operator_context import (
@@ -1958,8 +1960,20 @@ def create_web_app(
                 )
                 cursor_map: dict[int, list[dict[str, Any]]] = {}
                 catchup_map: dict[int, dict[str, Any]] = {}
+                encoding_map: dict[int, list[dict[str, Any]]] = {}
                 for cursor in cursors:
                     cursor_map.setdefault(int(cursor["peer_id"]), []).append(dict(cursor))
+                    if (
+                        cursor["stream"] == ENCODING_FAILURE_CURSOR
+                        and cursor["direction"] == "send"
+                    ):
+                        try:
+                            failures = json.loads(str(cursor["cursor"]))
+                        except (TypeError, ValueError):
+                            failures = []
+                        encoding_map[int(cursor["peer_id"])] = (
+                            failures[:ENCODING_FAILURE_LIMIT] if isinstance(failures, list) else []
+                        )
                     if cursor["stream"] == "_reconcile" and cursor["direction"] == "recv":
                         try:
                             checkpoint = json.loads(str(cursor["cursor"]))
@@ -1973,6 +1987,9 @@ def create_web_app(
                             "waiting": bool(checkpoint.get("pending")),
                             "status": checkpoint_status,
                             "reason": checkpoint.get("reason"),
+                            "failures": (checkpoint.get("page") or {}).get("failures", [])[
+                                :ENCODING_FAILURE_LIMIT
+                            ],
                             "used": checkpoint.get("used", 0),
                             "budget": checkpoint.get("budget"),
                             "rounds": checkpoint.get("rounds", 0),
@@ -2058,6 +2075,7 @@ def create_web_app(
                             "unknown": path_map.get("unknown", {"count_24h": 0, "last_at": None}),
                         },
                         "deliveries": dict(deliveries),
+                        "encoding_failures": encoding_map.get(peer_id, []),
                         "security": {
                             "rejected_24h": int(rejected[0]["total"]) if rejected else 0,
                             "recent": [

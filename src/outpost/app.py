@@ -64,9 +64,11 @@ from outpost.fed import (
     Peer,
     Reassembler,
     RelayDispatchContext,
+    item_failures,
     wire_bytes,
     wire_int,
 )
+from outpost.fed.framing import FrameTooLarge
 from outpost.fed.incident_updates import CAPABILITY as INCIDENT_UPDATES_CAPABILITY
 from outpost.fed.incident_updates import MODE as INCIDENT_UPDATES_MODE
 from outpost.fed.reconciliation import Reconciliation
@@ -1144,6 +1146,7 @@ class OutpostApp:
             "bbs": self.config.modules.bbs.enabled,
             "ai": self.config.modules.ai.enabled,
             RECONCILIATION_CAPABILITY: RECONCILIATION_MODE,
+            item_failures.CAPABILITY: item_failures.MODE,
         }
         if self.config.modules.watch.enabled:
             capabilities[INCIDENT_UPDATES_CAPABILITY] = INCIDENT_UPDATES_MODE
@@ -2596,6 +2599,10 @@ class OutpostApp:
                     return
                 sent = 0
                 for item in exported:
+                    if value.get("mode") == RECONCILIATION_MODE:
+                        peer = await self.federation.by_mesh_id(sender)
+                        if self.federation_sync.revisions.scope(peer) != value.get("scope"):
+                            raise ValueError("item is outside peer sync policy after export")
                     try:
                         await self._send_federation_value(
                             sender,
@@ -2603,6 +2610,25 @@ class OutpostApp:
                             {"mesh_id": self.federation.local_mesh_id, "item": item},
                         )
                         sent += 1
+                        if value.get("mode") == RECONCILIATION_MODE:
+                            await self.federation_sync.item_failures.admitted(
+                                peer, item, int(self.clock.now().timestamp())
+                            )
+                    except FrameTooLarge:
+                        if value.get("mode") == RECONCILIATION_MODE and "payload" in item:
+                            failure = self.federation_sync.item_failures.envelope(item)
+                            await self.federation_sync.item_failures.record(
+                                peer, failure, int(self.clock.now().timestamp())
+                            )
+                            current_peer = await self.federation.by_mesh_id(sender)
+                            if item_failures.supported(
+                                current_peer
+                            ) and self.federation_sync.revisions.scope(current_peer) == value.get(
+                                "scope"
+                            ):
+                                await self._send_federation_value(
+                                    sender, MessageType.ITEM, {"item": failure}
+                                )
                     except FrameError:
                         continue
                 if value.get("mode") != RECONCILIATION_MODE:
@@ -2619,7 +2645,7 @@ class OutpostApp:
                 received = False
                 if "revision" in incoming_item or "epoch" in incoming_item:
                     received = await self.federation_reconciliation.receive(peer, incoming_item)
-                    if incoming_item.get("unavailable") is True:
+                    if incoming_item.get("unavailable") is True or "failure" in incoming_item:
                         return
                 elif not replayed_item:
                     received = await self.federation_sync.quarantine(

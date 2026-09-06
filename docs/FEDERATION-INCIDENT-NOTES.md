@@ -85,8 +85,9 @@ with a note-capable pair and simulated radios. It checks received content and th
 
 The wire ceiling remains **188 bytes per authenticated application frame, 170 bytes
 of body, eight fragments / 1,360 encoded bytes per message**. A 500-character Unicode
-note is not guaranteed to fit that compressed encoded ceiling. Oversized-content
-handling remains #135; this change neither widens framing nor claims every legal
+note is not guaranteed to fit that compressed encoded ceiling. [Oversized-item
+failures are visible and retryable on capable peers](FEDERATION-ITEM-FAILURES.md),
+but larger-content transport remains #135; this neither widens framing nor claims every legal
 report/note can be delivered. Long incident snapshots and large merged-origin lists
 also retain that limitation.
 

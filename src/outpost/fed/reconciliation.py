@@ -7,6 +7,7 @@ import json
 import secrets
 from typing import TYPE_CHECKING, Any
 
+from outpost.fed import item_failures
 from outpost.fed.framing import MessageType, wire_int
 from outpost.fed.peers import Peer
 from outpost.fed.revisions import MODE, token
@@ -73,6 +74,10 @@ class Reconciliation:
                 state = self._fresh(peer, {"epoch": state.get("epoch")})
                 self._due.pop(peer.id, None)
             interval = self.app.config.fed.sync_interval_minutes * 60
+            if peer.id not in self._due and (state.get("page") or {}).get("failures"):
+                # A blocked page remains visible across boot; wall-clock jumps
+                # cannot cause a tight retry loop or a hours-long future deadline.
+                self._due[peer.id] = now + self.app.config.fed.sync_retry_minutes * 60
             if peer.id not in self._due and state.get("status") in {"complete", "truncated"}:
                 # Monotonic clocks cannot be restored across boot. Conservatively
                 # wait one interval for completed/budget-stopped cycles, not a
@@ -83,10 +88,12 @@ class Reconciliation:
             if not state or state.get("status") in {"complete", "truncated"}:
                 state = self._fresh(peer, state)
                 await self._save(peer, state)
-            await self._drive(peer, state)
+            await self._drive(peer, state, retry_failures=True)
 
-    async def _drive(self, peer: Peer, state: dict[str, Any]) -> None:
-        if state["status"] != "active":
+    async def _drive(
+        self, peer: Peer, state: dict[str, Any], *, retry_failures: bool = False
+    ) -> None:
+        if state["status"] not in {"active", "blocked_payload"}:
             return
         budget = min(state["budget"], self.app.config.fed.max_items_per_cycle)
         page = state.get("page")
@@ -95,6 +102,37 @@ class Reconciliation:
             unavailable = page.get("unavailable", [])
             missing = [item for item in missing if [item["stream"], item["uid"]] not in unavailable]
             if missing:
+                identities = {(item["stream"], item["uid"]) for item in missing}
+                failures = [
+                    entry
+                    for entry in page.get("failures", [])
+                    if (entry["stream"], entry["uid"]) in identities
+                ]
+                cleared = bool(page.get("failures")) and not failures
+                page["failures"] = failures
+                if cleared:
+                    state.update(status="active", reason=None)
+                    await self._save(peer, state)
+                failed = {(entry["stream"], entry["uid"]) for entry in failures}
+                if failures:
+                    state.update(
+                        status="blocked_payload" if identities <= failed else "active",
+                        reason="Payload exceeds radio limits; content not received. "
+                        "Page retained; retry scheduled while peer is online.",
+                    )
+                    await self._save(peer, state)
+                    # In-flight valid items can still arrive. Duplicate negative
+                    # responses neither retry nor push the retry deadline back.
+                    if not retry_failures:
+                        self._due.setdefault(
+                            peer.id,
+                            self.app.clock.monotonic()
+                            + self.app.config.fed.sync_retry_minutes * 60,
+                        )
+                        return
+                self._due[peer.id] = (
+                    self.app.clock.monotonic() + self.app.config.fed.sync_retry_minutes * 60
+                )
                 await self.app._queue_federation_control(
                     peer.mesh_id,
                     MessageType.ITEM_REQ,
@@ -106,10 +144,8 @@ class Reconciliation:
                         "items": missing,
                     },
                 )
-                self._due[peer.id] = (
-                    self.app.clock.monotonic() + self.app.config.fed.sync_retry_minutes * 60
-                )
                 return
+            state.update(status="active", reason=None)
             state["after"] = page["next"]
             state["page"] = None
             if page["done"]:
@@ -160,7 +196,7 @@ class Reconciliation:
             state = await self._load(peer)
             if not state or value.get("cycle") != state.get("cycle"):
                 return  # A delayed page never advances a different cycle.
-            if state["status"] != "active":
+            if state["status"] not in {"active", "blocked_payload"}:
                 return
             epoch = token(value.get("epoch"), "epoch")
             if state.get("epoch") not in (None, epoch):
@@ -268,8 +304,10 @@ class Reconciliation:
             page = state.get("page")
             if (
                 not state
-                or state.get("status") != "active"
+                or state.get("status") not in {"active", "blocked_payload"}
                 or not page
+                or peer.state != "active"
+                or state.get("local_scope") != self.index.scope(peer)
                 or item.get("cycle") != state["cycle"]
                 or item.get("epoch") != state["epoch"]
             ):
@@ -285,8 +323,37 @@ class Reconciliation:
             if expected is None:
                 raise ValueError("unsolicited federation revision item")
             revision = wire_int(item.get("revision"), "revision", minimum=expected["r"])
+            failures = page.get("failures", [])
+            prior = next(
+                (
+                    entry
+                    for entry in failures
+                    if (entry["stream"], entry["uid"]) == (expected["s"], expected["u"])
+                ),
+                None,
+            )
+            if prior and revision < prior["revision"]:
+                return False
             changed = False
-            if item.get("unavailable") is True:
+            if "failure" in item:
+                if not item_failures.supported(peer):
+                    raise ValueError("peer did not negotiate federation item failures")
+                item_failures.validate(item)
+                if (revision == expected["r"] and item["digest"] != expected["d"]) or (
+                    prior and revision == prior["revision"] and item["digest"] != prior["digest"]
+                ):
+                    raise ValueError("failure does not match the advertised producer revision")
+                # A delayed failure for content already stored is not a regression
+                # in delivery. Never create a receipt for a negative response.
+                if not await self.index.missing(peer, state["epoch"], [expected]):
+                    return False
+                entry = {
+                    key: item[key]
+                    for key in ("stream", "uid", "epoch", "revision", "digest", "failure")
+                }
+                page["failures"] = [entry, *(e for e in failures if e is not prior)]
+                await self._save(peer, state)
+            elif item.get("unavailable") is True:
                 # The source was deleted or left the authorized scope after discovery.
                 # Advance this page without exporting new private coordinates. This
                 # is not evidence of replica withdrawal or operator acceptance.
@@ -296,11 +363,12 @@ class Reconciliation:
                     unavailable.append(identity)
                 await self._save(peer, state)
             else:
-                if revision == expected["r"]:
+                if revision == expected["r"] or (prior and revision == prior["revision"]):
                     digest = self.app.federation_sync._payload_digest(
                         json.dumps(item.get("payload"), separators=(",", ":"), sort_keys=True)
                     )
-                    if digest != expected["d"]:
+                    expected_digest = prior["digest"] if prior else expected["d"]
+                    if digest != expected_digest:
                         raise ValueError("payload does not match the advertised producer revision")
                 changed = await self.app.federation_sync.quarantine(
                     peer, item, int(self.app.clock.now().timestamp())

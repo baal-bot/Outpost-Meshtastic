@@ -311,9 +311,11 @@ async def test_hello_advertises_notes_only_with_watch_enabled(nodes, monkeypatch
     await app._queue_federation_hello("^all")
     assert hellos[-1]["capabilities"]["incident_updates"] == 1
     assert hellos[-1]["capabilities"]["reconciliation"] == 2
+    assert hellos[-1]["capabilities"]["item_failures"] == 1
     app.config.modules.watch.enabled = False
     await app._queue_federation_hello("^all")
     assert "incident_updates" not in hellos[-1]["capabilities"]
+    assert hellos[-1]["capabilities"]["item_failures"] == 1
 
 
 @pytest.mark.parametrize("change", ["peer", "capability", "module", "scope", "geographic"])

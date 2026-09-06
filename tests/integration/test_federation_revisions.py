@@ -22,7 +22,7 @@ from outpost.transport.simulated import SimulatedRadioLink
 async def nodes(tmp_path):
     apps = []
 
-    async def make(name="local", *, offset=0, budget=20, capture=True, notes=False):
+    async def make(name="local", *, offset=0, budget=20, capture=True, notes=False, failures=False):
         clock = VirtualClock(epoch=datetime(2026, 1, 1, 12, tzinfo=UTC) + timedelta(seconds=offset))
         config = Config.model_validate(
             {
@@ -44,6 +44,8 @@ async def nodes(tmp_path):
         capabilities = {CAPABILITY: MODE}
         if notes:
             capabilities["incident_updates"] = 1
+        if failures:
+            capabilities["item_failures"] = 1
         peer = await app.federation.discover(remote, remote, 1, capabilities, "radio")
         await app.database.write(
             "UPDATE fed_peer SET state='active',shared_secret=?,boards='[\"gen\"]',"

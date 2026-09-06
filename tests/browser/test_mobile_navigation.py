@@ -1909,7 +1909,7 @@ def test_federation_origin_key_recovery_and_rotation_controls(
         page.close()
 
 
-@pytest.mark.parametrize("width", [390, 1280])
+@pytest.mark.parametrize("width", [320, 390, 1280])
 @pytest.mark.parametrize("theme", THEMES)
 def test_federation_resource_limits_surface_mail_rejections_and_stopped_reconciliation(
     browser: object, dashboard_url: str, width: int, theme: str
@@ -2013,6 +2013,33 @@ def test_federation_resource_limits_surface_mail_rejections_and_stopped_reconcil
         catchup = page.locator(".catchup-strip")
         assert "producer revision 42" in catchup.text_content()
         assert "1970" not in catchup.text_content()
+        # Failure checkpoints are not successful syncs, and data is escaped.
+        failure = {
+            "stream": "incident_updates",
+            "uid": "!remote:" + "x" * 120 + "<img src=x onerror=alert(1)>",
+            "revision": 42,
+            "failure": "payload_too_large",
+        }
+        stopped["transfers"]["encoding_failures"] = [failure] * 9
+        stopped["transfers"]["catch_up"].update(
+            active=False,
+            status="blocked_payload",
+            reason="Payload exceeds radio limits; content not received. Retry scheduled.",
+            failures=[failure],
+        )
+        page.reload(wait_until="networkidle")
+        wait_for_navigation(page)
+        transfer = page.locator(".transfer-card.attention")
+        assert "No successful sync yet" in transfer.text_content()
+        assert "Protocol counters · TX 4 · RX 5" in transfer.text_content()
+        assert "Authenticated frames" not in transfer.text_content()
+        assert "content not received" in transfer.text_content()
+        strips = transfer.locator(".item-failures")
+        assert strips.count() == 2
+        assert strips.first.text_content().count("revision 42") == 8
+        assert "payload not sent" in strips.first.text_content()
+        assert strips.locator("img").count() == 0
+        assert failure["uid"] in strips.last.text_content()
         health.assert_clean()
     finally:
         page.close()

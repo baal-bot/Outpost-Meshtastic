@@ -51,6 +51,10 @@ class FrameError(ValueError):
     pass
 
 
+class FrameTooLarge(FrameError):
+    """An encoded message exceeds the unchanged radio fragment ceiling."""
+
+
 def wire_bytes(value: object, field: str, *, length: int | None = None) -> bytes:
     """Validate a CBOR byte string before handing it to crypto or persistence code."""
     if not isinstance(value, bytes):
@@ -112,7 +116,7 @@ class FrameCodec:
         payload = compressed if flags else encoded
         total = max(1, (len(payload) + FRAGMENT_BODY_SIZE - 1) // FRAGMENT_BODY_SIZE)
         if total > self.max_fragments:
-            raise FrameError("message exceeds federation fragment ceiling")
+            raise FrameTooLarge("message exceeds federation fragment ceiling")
         frames = []
         for index in range(total):
             body = payload[index * FRAGMENT_BODY_SIZE : (index + 1) * FRAGMENT_BODY_SIZE]

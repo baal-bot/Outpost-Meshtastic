@@ -3,6 +3,15 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Visible oversized-item failures — #162 / #135 prerequisite
+
+[Negotiated negative ITEM responses](FEDERATION-ITEM-FAILURES.md) retain a missing
+page and bounded metadata diagnostics without inventing a receipt or successful
+sync. Other items on that page remain receivable, and monotonic retry/reopen paths
+preserve its cursor and budgets. Source diagnostics clear on queue admission, not
+remote delivery. Existing radio limits and governor policy are unchanged. Larger
+payload transport and progress past an oversized page still remain #135.
+
 ## Original-producer incident note content — #161 / #135 prerequisite
 
 [Plain notes have a separate, capability-negotiated revision stream](FEDERATION-INCIDENT-NOTES.md).
