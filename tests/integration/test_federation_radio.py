@@ -394,6 +394,10 @@ async def test_reconciliation_ignores_peer_remaining_and_stops_at_local_cycle_bu
 @pytest.mark.asyncio
 async def test_legitimate_reconciliation_walk_completes_within_local_budget(tmp_path) -> None:
     app, peer = await reconciliation_app(tmp_path, budget=20)
+    # Completion is timestamped when the last page arrives, not when the cycle
+    # starts. Advance explicitly rather than racing the host's second boundary.
+    clock = VirtualClock()
+    app.clock = clock
     now = int(app.clock.now().timestamp())
     await app._store_reconciliation_checkpoint(
         peer.id,
@@ -422,6 +426,7 @@ async def test_legitimate_reconciliation_walk_completes_within_local_budget(tmp_
             "remaining": 100,
         },
     )
+    clock.advance(2)
     await app._handle_sync_manifest(
         "!remote",
         {
@@ -445,7 +450,7 @@ async def test_legitimate_reconciliation_walk_completes_within_local_budget(tmp_
     assert stored["used"] == 5 and stored["rounds"] == 2
     assert (await app.database.read("SELECT last_sync_at FROM fed_peer WHERE id=?", (peer.id,)))[0][
         "last_sync_at"
-    ] == now
+    ] == now + 2
     await app.database.close()
 
 
