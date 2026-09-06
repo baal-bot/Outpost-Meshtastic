@@ -17,6 +17,7 @@ UNIT_PROPERTIES = (
     "LoadState",
     "UnitFileState",
     "ActiveState",
+    "MainPID",
     "NeedDaemonReload",
     "ExecStart",
     "Environment",
@@ -192,7 +193,14 @@ def inspect_boot_schema(database_schema: object) -> dict[str, object]:
             return result("incompatible", "database_newer_than_boot")
         if properties["ActiveState"] == "failed":
             return result("failed", "selected_service_failed")
-        if properties["ActiveState"] != "active":
+        # Type=notify remains activating until this process finishes startup,
+        # including its self-check. This is a static schema pass, not READY=1.
+        own_startup = (
+            properties["ActiveState"] == "activating"
+            and properties["MainPID"] == str(os.getpid())
+            and evidence["source_relation"] == "same_location"
+        )
+        if properties["ActiveState"] != "active" and not own_startup:
             return result("unknown", "selected_service_not_active")
         return result("compatible", "schema_capacity_sufficient")
     except Unavailable as error:

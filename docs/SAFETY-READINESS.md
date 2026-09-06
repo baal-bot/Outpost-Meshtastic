@@ -13,7 +13,7 @@ evidence. Prometheus exports `outpost_self_check_state{check,severity}` for each
 
 | Check | Severity | Capability proved |
 | --- | --- | --- |
-| check: `boot_schema` | Operations | The supported, persistently enabled, active boot selection has sufficient packaged migration capacity for the current database. Unknown evidence does not pass; this is not a reboot test. |
+| check: `boot_schema` | Operations | The supported, persistently enabled boot selection has sufficient packaged migration capacity for the current database. Unknown evidence does not pass; this is not a reboot test. |
 | check: `responder_audience` | Safety | At least one active responder or operator radio can receive targeted urgent traffic. |
 | check: `escalation_audiences` | Safety | Every configured caution, urgent, and critical escalation stage resolves to a destination. |
 | check: `maintenance_freshness` | Operations | Retention maintenance has a valid completion record no more than 48 hours old. |
@@ -45,6 +45,10 @@ Python 3.12/3.13 non-editable package in its venv. Missing, disabled, runtime-on
 inactive, failed, unreadable, custom, ambiguous, or changing service/release evidence does not pass.
 A unit awaiting daemon reload is unknown. A custom environment, environment file, or drop-in needs
 operator review; this checker deliberately does not interpret arbitrary launch wrappers or imports.
+An active service can pass the static check. During normal `Type=notify` startup, `activating` can
+also pass **only** when systemd's main PID is the inspecting process and its package location matches
+the selected boot package. Another process cannot use that exception; it does not claim `READY=1`
+or change systemd state.
 
 `inspector_schema_cap` describes the inspecting source **on disk**, not a queried remote process or
 proof of its loaded bytecode. `source_relation` compares source locations, not artifact identity;

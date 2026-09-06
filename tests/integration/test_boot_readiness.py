@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 import sys
 import threading
@@ -200,6 +201,7 @@ async def test_healthy_developer_http_cannot_hide_incompatible_boot_schema(
         ("DropInPaths", "/private/custom-unit", "custom_unit_environment"),
         ("ActiveState", "failed", "selected_service_failed"),
         ("ActiveState", "inactive", "selected_service_not_active"),
+        ("ActiveState", "activating", "selected_service_not_active"),
     ],
 )
 async def test_unknown_or_failed_boot_selection_never_reports_all_ready(
@@ -219,6 +221,29 @@ async def test_unknown_or_failed_boot_selection_never_reports_all_ready(
         assert "secret-" not in json.dumps(report)
         assert "/private/" not in json.dumps(report)
         assert str(tmp_path) not in json.dumps(check)
+    finally:
+        await service.database.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("same_source", [False, True])
+async def test_own_notify_startup_is_a_static_schema_check_not_a_boot_failure(
+    tmp_path: Path, boot_fixture: BootFixture, monkeypatch: pytest.MonkeyPatch, same_source: bool
+) -> None:
+    boot_fixture.properties.update(ActiveState="activating", MainPID=str(os.getpid()))
+    boot_fixture.save()
+    if same_source:
+        monkeypatch.setattr(boot_readiness, "PACKAGE", boot_fixture.package)
+    service = await ready_service(tmp_path)
+    try:
+        report = await service.run("startup")
+        assert report["status"] == ("ready" if same_source else "degraded")
+        check = next(item for item in report["checks"] if item["name"] == "boot_schema")
+        assert check["passed"] is same_source
+        if same_source:
+            assert "not proof of reboot recovery" in check["detail"]
+        else:
+            assert check["evidence"]["reason"] == "selected_service_not_active"
     finally:
         await service.database.close()
 
