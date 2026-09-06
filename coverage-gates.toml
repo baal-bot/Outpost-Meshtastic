@@ -74,6 +74,10 @@ files = [
 minimum = 90
 files = ["src/outpost/fed/incident_updates.py"]
 
+[production_groups.incident_change_events]
+minimum = 90
+files = ["src/outpost/watch/change_events.py"]
+
 [production_groups.federation_item_failures]
 minimum = 90
 files = ["src/outpost/fed/item_failures.py"]

@@ -204,6 +204,13 @@ TABLE_POLICIES = (
         "fed_revision_lineage", "federation", "preserve", "Producer cursor lineage; one row.", True
     ),
     TablePolicy(
+        "incident_change_event",
+        "federation",
+        "preserve",
+        "Undispatched metadata-only source intent per incident/note identity; not delivery.",
+        True,
+    ),
+    TablePolicy(
         "fed_revision_receipt", "federation", "cascade", "Revision receipt follows its peer.", True
     ),
     TablePolicy("fed_service_circuit", "federation", "preserve", "Bounded state per peer/service."),

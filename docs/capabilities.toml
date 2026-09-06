@@ -270,16 +270,33 @@ limitations = [
   "The six-participant real-radio tabletop and receipt-latency gate remain open.",
   "Reporter location edits require a verified PKI DM or operator assistance. Suppression does not erase prior public history; moving outside a peer's area does not withdraw its older copy. Reference safety follows the database lineage; lost history or old-backup restores require identity precautions.",
   "Clock-independent producer reconciliation is automated-tested on modern links; prompt incident propagation (#135) and acknowledged-data power-loss durability (#137) require separate remediation and evidence.",
+  "Incident/note changes have an atomic coalesced source journal with bounded inspection; it is undispatched metadata, not per-peer queueing or delivery (#165/#135).",
 ]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-09-05"
+date = "2026-09-06"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_incident_transactions.py::test_concurrent_distinct_reports_have_unique_references_and_complete_origins"
 description = "Concurrent reports allocate unique references and commit incident, origin, and initial provenance together."
+
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_change_events.py::test_changes_coalesce_atomically_without_radio_or_wall_clock_order"
+description = "Atomic source intents coalesce incident/note changes without wall-clock ordering or a radio/delivery claim."
+
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_change_events.py::test_interrupted_mutation_rolls_back_intent_and_recovers_after_reopen"
+description = "Source mutations and intents roll back together on write interruption/cancellation; reopening preserves committed state."
+
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_change_events.py::test_upgrade_backfills_current_heads_once_and_full_backup_preserves_intents"
+description = "Upgrade seeds current heads once and full SQLite backup/reopen preserves pending metadata and lineage."
+
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_incident_transactions.py::test_concurrent_reports_through_real_router_and_authenticated_web"

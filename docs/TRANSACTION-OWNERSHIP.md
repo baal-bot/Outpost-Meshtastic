@@ -32,7 +32,8 @@ actual sending belongs to the governed worker after commit.
 
 | Owner / entry points | Atomic local work | Separate work or limitation |
 | --- | --- | --- |
-| [`IncidentService`](../src/outpost/watch/incidents.py): `create`, `react`, `operator_patch`, `operator_update`, location corrections, expiry | Creation binds the permanent reference, incident, origin and provenance together. Reactions allocate a sequence and update the count/provenance together. Corrections and expiry use their domain transactions; expiry rechecks each candidate after acquiring the writer. | Rendering, responder notifications and radio admission follow the mutation. A saved report does not establish a queued reply or prompt peer delivery. The producer revision trigger is discovery state, not a per-peer delivery event (#135). |
+| [`IncidentService`](../src/outpost/watch/incidents.py): `create`, `react`, `operator_patch`, `operator_update`, location corrections, expiry | Creation binds the permanent reference, incident, origin and provenance together. Reactions allocate a sequence and update the count/provenance together. Corrections and expiry use their domain transactions; expiry rechecks each candidate after acquiring the writer. Producer revision writes also capture a coalesced source change intent. | Rendering, responder notifications and radio admission follow the mutation. A saved report does not establish a queued reply or prompt peer delivery. The source intent is not a per-peer delivery event (#135). |
+| [`IncidentChangeEvents`](../src/outpost/watch/change_events.py) / migration 178 | The revision-insert trigger captures incident/note metadata in the source transaction across direct SQL, import, merge and retention writers; supersession retains first-pending order. | Bounded read-only inspection reports head/lineage mismatches. There is no consume/send/receipt API until version-guarded transactional peer handoff exists. See [journal scope and limits](INCIDENT-CHANGE-EVENTS.md). |
 | [`incident_reference`](../src/outpost/store/incident_refs.py) | Uses the caller's transaction for reference identity and retired-number ledger decisions. | Content retention must not turn retired references into new identities. Off-device restore lineage remains #146. |
 | [`MailService.send`](../src/outpost/bbs/mail.py) | The placeholder INSERT, permanent UID and conversation context are committed together. Migration 173 recovers old committed placeholders. | Recipient lookup precedes the transaction; this fix is not a blanket proof of all identity/authorization races. Reading/delivery notification and any transport are separate operations. |
 | [`BBSService.create_thread/reply`](../src/outpost/bbs/service.py) | Thread/post allocation, UID/sequence and aggregate metadata use owned transactions. | Subscriptions, external notifications and federation scheduling are separate. Scope/trust rules must survive extraction; an atomic write is not authorization evidence by itself. |
@@ -69,7 +70,7 @@ The [burst envelope](EMERGENCY-BURST-QUALIFICATION.md) and
 
 ## Concrete extraction slices
 
-The review boundary is now implemented; the others remain planned. Keep #153 open until the slices
+The review boundary and source-journal capture are implemented; dispatch and other extractions remain planned. Keep #153 open until the slices
 actually selected for it meet their evidence gates; do not close #135 on documentation alone.
 
 1. **Federation review service (`fed/review.py`, implemented software slice).** Own preview identity/version, transactional approval/rejection,
@@ -78,8 +79,8 @@ actually selected for it meet their evidence gates; do not close #135 on documen
    refuse changed content; an item ID alone is insufficient. Include two-reviewer races,
    replacement during review, restart, revoked policy, rollback and no-auto-broadcast tests.
    Automatic board imports need a distinct policy entry point, not a token bypass on a human API.
-2. **Incident change publication (`watch/change_events.py`, proposed; #135 prerequisite).** Own a durable, coalescible change intent
-   in the same transaction as each authoritative change. A worker owns peer scope, supersession,
+2. **Incident change publication (`watch/change_events.py`, capture implemented; worker remains #135).** Migration 178 owns a durable, coalescible source change intent
+   in the same transaction as each producer revision. A future worker must own transactional per-peer handoff, scope, supersession,
    retry/expiry and bounded scheduling. Decide and document quiet-hour/priority behavior without
    borrowing critical-alert reserve or implying public-alert approval. Cover local, imported,
    merge/unmerge, expiry and restored-state writers; avoid an in-memory callback as the sole

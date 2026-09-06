@@ -3,6 +3,16 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Atomic source change intents — #165 / #135 and #153 prerequisite
+
+The [incident change journal](INCIDENT-CHANGE-EVENTS.md) captures incident/note producer heads
+in the source transaction, coalesces repeated changes and preserves first-pending order.
+Migration 178 seeds current heads; bounded internal inspection exposes mismatched lineage or
+revisions without inventing delivery. Metadata survives content retention and full backups.
+This is undispatched source work, not a per-peer outbox. Peer scope, transactional handoff,
+event receive/receipts, priority/retry/expiry and physical G6 remain #135. No worker, timer,
+wire policy, dashboard assets or live deployment changes are involved.
+
 ## Local-first map selection — #164 / #139 browser slice
 
 [Shared maps](OFFLINE-MAPS.md) try local tiles before optional Internet fallback, offer a

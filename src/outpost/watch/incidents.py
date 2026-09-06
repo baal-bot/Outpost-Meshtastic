@@ -15,6 +15,7 @@ from outpost.store import Database, Transaction
 from outpost.store.incident_refs import incident_reference
 from outpost.store.members import Member
 
+from .change_events import IncidentChangeEvents
 from .location import parse_location
 
 ACTIVE = ("open", "monitoring")
@@ -94,6 +95,7 @@ class IncidentService:
         dedupe_window_minutes: int = 120,
     ) -> None:
         self.database, self.clock, self.origin_node = database, clock, origin_node
+        self.change_events = IncidentChangeEvents(database)
         self.position_retention_seconds = position_retention_hours * 3_600
         self.history_retention_days = history_retention_days
         self.position_max_age_seconds = position_max_age_minutes * 60
