@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from outpost.audit import write_audit
+from outpost.fed.incident_updates import STREAM as INCIDENT_UPDATES
+from outpost.fed.incident_updates import IncidentUpdates
 from outpost.fed.peers import Peer
 from outpost.fed.revisions import RevisionIndex, source_revision
 from outpost.store import Database, Transaction
@@ -55,12 +57,13 @@ class FederationSyncService:
         self.local_mesh_id = local_mesh_id
         self.module_enabled = module_enabled or (lambda _name: True)
         self.revisions = RevisionIndex(self)
+        self.incident_updates = IncidentUpdates(self)
 
     @staticmethod
     def stream_module(stream: str) -> str | None:
         if stream.startswith("board:"):
             return "bbs"
-        if stream in {"incidents", "alerts"}:
+        if stream in {"incidents", "alerts", INCIDENT_UPDATES}:
             return "watch"
         return None
 
@@ -308,7 +311,11 @@ class FederationSyncService:
             if local_uid is None:
                 continue
             rows: list[Any] = []
-            if stream.startswith("board:") and stream[6:] in peer.boards:
+            if stream == INCIDENT_UPDATES:
+                note = await self.incident_updates.export(peer, local_uid)
+                if note is not None:
+                    rows = [note]
+            elif stream.startswith("board:") and stream[6:] in peer.boards:
                 rows = await self.database.read(
                     """SELECT p.uid,p.seq,p.author_label,p.origin_node,p.body,p.created_at,
                        p.edited_at,t.uid thread_uid,t.subject,b.slug FROM post p
@@ -367,10 +374,15 @@ class FederationSyncService:
             (stream.startswith("board:") and stream[6:] in peer.boards)
             or (stream == "incidents" and peer.sync_incidents)
             or (stream == "alerts" and peer.relay_alerts)
+            or (stream == INCIDENT_UPDATES and self.incident_updates.supported(peer))
         )
         if not allowed or not uid or len(uid) > 160 or not isinstance(payload, dict):
             raise ValueError("inbound item is outside peer sync policy")
         revision = source_revision(item)
+        if stream == INCIDENT_UPDATES:
+            if revision is None:
+                raise ValueError("incident notes require producer revisions")
+            self.incident_updates.validate(peer.mesh_id, uid, payload)
         encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         if len(encoded.encode()) > 12_000:
             raise ValueError("inbound federation item is too large")
@@ -986,6 +998,8 @@ class FederationSyncService:
             if not row["sync_incidents"]:
                 raise ValueError("incident sync is no longer allowed")
             await self._import_incident(transaction, row, uid, payload, operator, now)
+        elif stream == INCIDENT_UPDATES:
+            await self.incident_updates.import_note(transaction, row, payload, operator, now)
         elif stream == "alerts":
             if not row["relay_alerts"]:
                 raise ValueError("alert relay is no longer allowed")

@@ -532,12 +532,13 @@ description = "Operator position lifecycle tests exact-location disclosure, expi
 [[capabilities]]
 id = "federation"
 area = "Outpost federation"
-present = "Pairing, authenticated framing, policy, producer-revision board/incident/alert reconciliation with durable pending-page receipts and bounded indexed discovery, version-bound human import/rejection with atomic audit, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, transactional destination dispatch, and privacy-gated topology health."
+present = "Pairing, authenticated framing, policy, producer-revision board/incident/alert reconciliation and separately negotiated plain incident notes with durable pending-page receipts and bounded indexed discovery, version-bound human import/rejection with atomic audit, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, transactional destination dispatch, and privacy-gated topology health."
 maturity = "two_node_field_tested"
 introduced_commit = "8f7219e"
 limitations = [
   "MQTT-only traffic/fallback and destructive quota exhaustion remain open.",
   "Version-bound review is software-tested; deploy matching backend/assets. Handheld review is metadata-only, and automatic board imports remain a separate policy path.",
+  "Plain incident notes require incident_updates:1 plus reconciliation:2 on both peers and prior original-parent import. They are software/simulation-tested, not prompt delivery or local responder acknowledgement; oversized notes and multi-hop note relay are not qualified.",
   "Signed multi-hop custody is simulation-tested; physical three-node and power-loss exercises remain open.",
   "Topology location exchange is automated-tested; physical multi-node and long-duration stale/recovery exercises remain open.",
   "Federation remains experimental until every acceptance-backlog item passes.",
@@ -570,6 +571,18 @@ description = "Failed or cancelled human audit rolls back imported domain conten
 kind = "operations"
 path = "docs/FEDERATION-REVIEW-SAFETY.md"
 description = "Review transaction ownership, API/handheld compatibility, deployment precautions, automatic-policy distinction and evidence limits."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_federation_incident_notes.py::test_notes_require_parent_review_preserve_content_and_never_act_for_responders"
+description = "Plain notes require original-parent review, retain body and producer identity, and never change local responder state or auto-import."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_federation_incident_notes.py::test_review_note_provenance_and_both_audits_roll_back_together"
+description = "Failures/cancellation roll back reviewed note content, provenance, revision audit, inbox decision and human audit together."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/FEDERATION-INCIDENT-NOTES.md"
+description = "Negotiated note ownership, migration/review contract, payload limits and separation from prompt delivery and physical G6."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_federation_revisions.py::test_clock_skew_and_step_do_not_skip_incident_updates"

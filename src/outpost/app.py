@@ -67,6 +67,8 @@ from outpost.fed import (
     wire_bytes,
     wire_int,
 )
+from outpost.fed.incident_updates import CAPABILITY as INCIDENT_UPDATES_CAPABILITY
+from outpost.fed.incident_updates import MODE as INCIDENT_UPDATES_MODE
 from outpost.fed.reconciliation import Reconciliation
 from outpost.fed.review import FederationReviewService
 from outpost.fed.revisions import CAPABILITY as RECONCILIATION_CAPABILITY
@@ -1143,6 +1145,8 @@ class OutpostApp:
             "ai": self.config.modules.ai.enabled,
             RECONCILIATION_CAPABILITY: RECONCILIATION_MODE,
         }
+        if self.config.modules.watch.enabled:
+            capabilities[INCIDENT_UPDATES_CAPABILITY] = INCIDENT_UPDATES_MODE
         counter = int(self.clock.now().timestamp()) & 0xFFFFFFFF
         hello = {
             "mesh_id": local_id,

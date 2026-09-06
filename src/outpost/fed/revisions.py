@@ -52,6 +52,9 @@ class RevisionIndex:
         self.database = sync.database
 
     def scope(self, peer: Peer) -> str:
+        # Preserve old peers' scope tokens. Opting into notes changes the scope
+        # so retained notes before their last watermark are not skipped.
+        extensions = ["incident_updates:1"] if self.sync.incident_updates.supported(peer) else []
         return self.sync._payload_digest(
             json.dumps(
                 [
@@ -63,6 +66,7 @@ class RevisionIndex:
                     peer.incident_radius_km,
                     self.sync.module_enabled("bbs"),
                     self.sync.module_enabled("watch"),
+                    *extensions,
                 ],
                 separators=(",", ":"),
             )
@@ -73,6 +77,8 @@ class RevisionIndex:
         streams = []
         if peer.sync_incidents and self.sync.module_enabled("watch"):
             streams.append("incidents")
+        if self.sync.incident_updates.supported(peer):
+            streams.append("incident_updates")
         if peer.relay_alerts and self.sync.module_enabled("watch"):
             streams.append("alerts")
         if len(peer.boards) > MAX_BOARDS:

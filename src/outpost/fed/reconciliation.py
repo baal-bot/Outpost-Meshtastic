@@ -237,6 +237,10 @@ class Reconciliation:
                     (stream.startswith("board:") and stream[6:] in peer.boards)
                     or (stream == "incidents" and peer.sync_incidents)
                     or (stream == "alerts" and peer.relay_alerts)
+                    or (
+                        stream == "incident_updates"
+                        and self.app.federation_sync.incident_updates.supported(peer)
+                    )
                 )
                 if not allowed or not self.app.federation_sync.stream_enabled(stream):
                     raise ValueError("manifest is outside peer sync policy")

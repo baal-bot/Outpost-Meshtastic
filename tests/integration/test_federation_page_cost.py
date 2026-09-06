@@ -217,8 +217,11 @@ async def test_disabled_streams_do_not_scan_their_retained_heads(history):
         )
 
 
-async def test_maximum_stream_merge_is_bounded_before_final_limit(history, monkeypatch):
+@pytest.mark.parametrize("notes", [False, True])
+async def test_maximum_stream_merge_is_bounded_before_final_limit(history, monkeypatch, notes):
     database, sync, peer = history
+    if notes:
+        peer = replace(peer, capabilities={"reconciliation": 2, "incident_updates": 1})
     await seed(database, 120)
     slugs = ["gen"]
     for number in range(MAX_BOARDS - 1):
@@ -251,10 +254,56 @@ async def test_maximum_stream_merge_is_bounded_before_final_limit(history, monke
     page = await sync.revisions.page(replace(peer, boards=slugs), {"cycle": "a" * 32})
     assert len(page["items"]) == 8 and page["done"] is False
     sql, params, rows = statements[0]
-    assert sql.count("INDEXED BY idx_fed_revision_stream") == MAX_BOARDS + 2
-    assert sql.count("LIMIT ?") == MAX_BOARDS + 3
+    assert sql.count("INDEXED BY idx_fed_revision_stream") == MAX_BOARDS + 2 + int(notes)
+    assert sql.count("LIMIT ?") == MAX_BOARDS + 3 + int(notes)
     assert len(rows) == SCAN_LIMIT + 1
     assert all(params[offset] == SCAN_LIMIT + 1 for offset in range(3, len(params), 4))
+
+
+async def test_retained_note_history_uses_its_own_bounded_index_seek(history, monkeypatch):
+    database, sync, peer = history
+    await seed(database, 1)
+    await database.write(
+        "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000) "
+        "INSERT INTO incident_update(uid,incident_id,seq,author_label,kind,body,created_at) "
+        "SELECT 'note:'||x,1,x,'Test','update','Test note',1 FROM n"
+    )
+    # This parent is out of area: return an empty page after only 100 notes,
+    # not an unbounded scan in search of eight eligible bodies.
+    peer = replace(peer, capabilities={"reconciliation": 2, "incident_updates": 1})
+    first = (
+        await database.read(
+            "SELECT MIN(revision) r FROM fed_revision WHERE stream='incident_updates'"
+        )
+    )[0]["r"]
+    captured = []
+    read = database._writer_read
+
+    async def capture(sql, params=()):
+        rows = await read(sql, params)
+        if "UNION ALL" in sql:
+            captured.append((sql, params, rows))
+        return rows
+
+    with monkeypatch.context() as patch:
+        patch.setattr(database, "_writer_read", capture)
+        page = await sync.revisions.page(peer, {"cycle": "c" * 32, "after": first - 1})
+    assert page["items"] == [] and page["next"] == first + SCAN_LIMIT - 1
+    assert not page["done"]
+    sql, params, rows = captured[0]
+    assert len(rows) == SCAN_LIMIT + 1
+    details = [r["detail"] for r in await database.read("EXPLAIN QUERY PLAN " + sql, params)]
+    assert (
+        sum(
+            "SEARCH fed_revision USING COVERING INDEX idx_fed_revision_stream" in d for d in details
+        )
+        == 4
+    )
+    legacy = await sync.revisions.page(
+        replace(peer, capabilities={"reconciliation": 2}),
+        {"cycle": "d" * 32, "after": first - 1},
+    )
+    assert legacy["done"] is True and legacy["items"] == []
 
 
 async def test_edits_to_each_stream_move_beyond_snapshot_then_resume(history):

@@ -14,10 +14,13 @@ seeks strictly after the receiver checkpoint and through the producer snapshot u
 that covering index. Unselected streams, disabled modules and globally disabled or
 archived boards are excluded before loading metadata. The existing peer policy allows
 at most 20 boards, so the combined input has at most 22 streams including incidents
-and alerts. Invalid oversized stored policies fail closed.
+and alerts, or 23 when both peers negotiate the separate
+[`incident_updates: 1` note stream](FEDERATION-INCIDENT-NOTES.md) (#161).
+Invalid oversized stored policies fail closed.
 
 Each stream subquery has its own `LIMIT 101` **before** the final ordered `UNION ALL`
-merge; the merged result also has `LIMIT 101`. Thus at most 2,222 metadata heads feed
+merge; the merged result also has `LIMIT 101`. Thus at most 2,222 metadata heads
+(2,323 with the note capability) feed
 the bounded SQL merge, at most 101 reach Python, and at most 100 undergo per-record
 export-policy checks. The extra head determines whether more scoped work remains.
 At most eight permitted records enter the manifest. Index seeks still have normal
@@ -77,8 +80,11 @@ SEARCH fed_revision USING COVERING INDEX idx_fed_revision_stream
 
 SQLite reports `MERGE (UNION ALL)` and `USE TEMP B-TREE FOR ORDER BY` on its bounded
 subquery outputs. Those sorts are expected: each input is already limited to 101,
-not the entire collection. The maximum-20-board regression checks all 22 indexed
-branches and all pre-merge limits, not just the final eight-item network limit.
+not the entire collection. The maximum-20-board regression checks both 22 and 23
+indexed branches and all pre-merge limits, not just the final eight-item network
+limit. A separate 100,000-note regression checks the fourth scoped seek, bounded
+empty geographic pages and exclusion of note history for no-note peers. The table
+above remains the original three-stream measurement, not a new note latency claim.
 
 ## Correctness and scope
 

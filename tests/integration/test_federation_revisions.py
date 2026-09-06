@@ -22,7 +22,7 @@ from outpost.transport.simulated import SimulatedRadioLink
 async def nodes(tmp_path):
     apps = []
 
-    async def make(name="local", *, offset=0, budget=20, capture=True):
+    async def make(name="local", *, offset=0, budget=20, capture=True, notes=False):
         clock = VirtualClock(epoch=datetime(2026, 1, 1, 12, tzinfo=UTC) + timedelta(seconds=offset))
         config = Config.model_validate(
             {
@@ -41,7 +41,10 @@ async def nodes(tmp_path):
         app.federation_sync.local_mesh_id = f"!{name}"
         app.incidents.origin_node = f"!{name}"
         remote = "!remote" if name == "local" else "!local"
-        peer = await app.federation.discover(remote, remote, 1, {CAPABILITY: MODE}, "radio")
+        capabilities = {CAPABILITY: MODE}
+        if notes:
+            capabilities["incident_updates"] = 1
+        peer = await app.federation.discover(remote, remote, 1, capabilities, "radio")
         await app.database.write(
             "UPDATE fed_peer SET state='active',shared_secret=?,boards='[\"gen\"]',"
             "sync_incidents=1,relay_alerts=1,quota_items_per_hour=100,"
@@ -593,10 +596,13 @@ async def test_post_edits_thread_subject_and_alert_cancellation_use_producer_rev
 
 @pytest.mark.production_wiring
 @pytest.mark.parametrize("offset", [-21600, 21600])
-async def test_revision_protocol_crosses_real_framing_and_durable_outbox(nodes, offset):
-    source, sp, _ = await nodes("remote", offset=offset, capture=False)
-    target, tp, _ = await nodes(capture=False)
-    await report(source)
+@pytest.mark.parametrize("notes", [False, True])
+async def test_revision_protocol_crosses_real_framing_and_durable_outbox(nodes, offset, notes):
+    source, sp, _ = await nodes("remote", offset=offset, capture=False, notes=notes)
+    target, tp, _ = await nodes(capture=False, notes=notes)
+    incident = await report(source)
+    if notes:
+        await source.incidents.operator_update(incident.id, "update", "Crew reached the bridge.")
     await report(target, "fire second community report")
     await source._federation_sync_once()
     await target._federation_sync_once()
@@ -639,10 +645,20 @@ async def test_revision_protocol_crosses_real_framing_and_durable_outbox(nodes, 
         ],
     )
     assert frames > 3
-    assert (
-        len(await target.database.read("SELECT id FROM fed_inbox_item WHERE state='pending'")) == 1
-    )
-    assert len(await target.database.read("SELECT * FROM fed_revision_receipt")) == 1
+    assert len(
+        await target.database.read("SELECT id FROM fed_inbox_item WHERE state='pending'")
+    ) == 1 + int(notes)
+    assert len(await target.database.read("SELECT * FROM fed_revision_receipt")) == 1 + int(notes)
+    assert not await target.database.read("SELECT * FROM incident_update")
+    if notes:
+        payload = json.loads(
+            (
+                await target.database.read(
+                    "SELECT payload_json FROM fed_inbox_item WHERE stream='incident_updates'"
+                )
+            )[0]["payload_json"]
+        )
+        assert payload["body"] == "Crew reached the bridge."
     # Each side keeps its local report and quarantines the other; receipt is not approval.
     assert len(await target.database.read("SELECT * FROM incident")) == 1
     assert len(await source.database.read("SELECT * FROM fed_revision_receipt")) == 1

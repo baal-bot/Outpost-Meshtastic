@@ -3,6 +3,15 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Original-producer incident note content — #161 / #135 prerequisite
+
+[Plain notes have a separate, capability-negotiated revision stream](FEDERATION-INCIDENT-NOTES.md).
+Local note content and its producer head commit together; reviewed remote notes preserve source
+identity and require an already imported original parent. They never acknowledge, resolve or
+notify on behalf of a local responder. Scope and version checks, provenance and human audit
+share the import transaction. Migration 177 backfills retained local notes; live deployment is
+not part of this work. Prompt scheduling, oversized payload handling and physical G6 remain #135.
+
 ## Version-bound operator review — #160 / #153 software slice
 
 [The review contract](FEDERATION-REVIEW-SAFETY.md) binds dashboard and handheld decisions to
@@ -23,7 +32,7 @@ survival nor energy/service-level acceptance. Default-policy selection and #44 r
 ## Indexed producer page work — #144
 
 Migration 176 adds a covering stream/revision index. Producer paging now merges at
-most 101 heads from each permitted stream (at most 22), returns at most 101 heads to
+most 101 heads from each permitted stream (originally 22; 23 with #161 notes), returns at most 101 heads to
 Python, and applies export policy to at most 100 before emitting up to eight items.
 Unselected/private history cannot consume catch-up pages. Geographic and hidden-record
 filtering still uses the same policy as export. Legacy board manifests now also honor
