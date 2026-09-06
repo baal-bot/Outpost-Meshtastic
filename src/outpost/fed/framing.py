@@ -38,6 +38,7 @@ class MessageType(IntEnum):
     MAIL_RECEIPT = 0x21
     INCIDENT = 0x30
     ALERT_RELAY = 0x31
+    INCIDENT_RECEIPT = 0x32
     PING = 0x40
     PONG = 0x41
     SERVICE_QUERY = 0x50

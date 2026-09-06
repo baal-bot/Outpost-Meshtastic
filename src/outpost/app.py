@@ -64,6 +64,7 @@ from outpost.fed import (
     Peer,
     Reassembler,
     RelayDispatchContext,
+    incident_events,
     item_failures,
     wire_bytes,
     wire_int,
@@ -1150,6 +1151,7 @@ class OutpostApp:
         }
         if self.config.modules.watch.enabled:
             capabilities[INCIDENT_UPDATES_CAPABILITY] = INCIDENT_UPDATES_MODE
+            capabilities[incident_events.CAPABILITY] = incident_events.MODE
         counter = int(self.clock.now().timestamp()) & 0xFFFFFFFF
         hello = {
             "mesh_id": local_id,
@@ -2427,6 +2429,8 @@ class OutpostApp:
                 MessageType.SYNC_DONE,
                 MessageType.SYNC_NOTIFY,
                 MessageType.ITEM_RECEIPT,
+                MessageType.INCIDENT,
+                MessageType.INCIDENT_RECEIPT,
                 MessageType.MAIL_RELAY,
                 MessageType.MAIL_RECEIPT,
                 MessageType.RELAY_PUT,
@@ -2637,6 +2641,28 @@ class OutpostApp:
                         MessageType.SYNC_DONE,
                         {"mesh_id": self.federation.local_mesh_id, "sent": sent},
                     )
+            elif msg_type is MessageType.INCIDENT:
+                if (
+                    target != self.radio.local_node_id
+                    or not target
+                    or type(value.get("mode")) is not int
+                    or value.get("mode") != incident_events.MODE
+                    or not isinstance(value.get("event"), dict)
+                ):
+                    raise ValueError("invalid targeted incident event")
+                peer = await self.federation.by_mesh_id(sender)
+                event_receipt = await self.federation_sync.incident_events.receive(
+                    peer, value["event"], int(self.clock.now().timestamp())
+                )
+                await self._send_federation_value(
+                    sender,
+                    MessageType.INCIDENT_RECEIPT,
+                    {**event_receipt, "target_mesh_id": sender},
+                )
+            elif msg_type is MessageType.INCIDENT_RECEIPT:
+                # Sender handoff/receipt matching is a separate #135 slice. Never
+                # let this type mark a board delivery or human action complete.
+                raise ValueError("no incident event sender is awaiting a receipt")
             elif msg_type is MessageType.ITEM:
                 incoming_item = value.get("item")
                 if not isinstance(incoming_item, dict):

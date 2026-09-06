@@ -29,6 +29,7 @@ files = [
   "src/outpost/fed/reconciliation.py",
   "src/outpost/fed/incident_updates.py",
   "src/outpost/fed/item_failures.py",
+  "src/outpost/fed/incident_events.py",
 ]
 
 [groups.auth]
@@ -77,6 +78,10 @@ files = ["src/outpost/fed/incident_updates.py"]
 [production_groups.incident_change_events]
 minimum = 90
 files = ["src/outpost/watch/change_events.py"]
+
+[production_groups.incident_event_ingress]
+minimum = 90
+files = ["src/outpost/fed/incident_events.py"]
 
 [production_groups.federation_item_failures]
 minimum = 90

@@ -3,6 +3,16 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Revision-bound incident event ingress — #166 / #135 receiver slice
+
+The [negotiated incident event receiver](FEDERATION-INCIDENT-EVENTS.md) rechecks peer scope,
+lineage and quota inside the quarantine transaction. A separate post-commit receipt identifies
+the exact producer revision and full content digest, never human review or responder action.
+Fresh-counter retries preserve human decisions; a durable per-peer counter bounds repeated
+new revisions of one UID. Ordinary ITEM authorization, airtime and quiet-hours policy stay
+unchanged. No sender worker, journal consumption, live migration or deployment is added;
+prompt end-to-end delivery and held physical G6 qualification remain #135.
+
 ## Atomic source change intents — #165 / #135 and #153 prerequisite
 
 The [incident change journal](INCIDENT-CHANGE-EVENTS.md) captures incident/note producer heads

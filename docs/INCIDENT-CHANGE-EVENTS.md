@@ -63,7 +63,9 @@ and non-starving priority. Deleting a row after an in-memory send would violate 
 The existing bulk reconciliation and governed quiet-hours/airtime policies are unchanged.
 Remote storage, human import/rejection, responder notification and human acknowledgement
 remain separate facts. Authenticated event receive, revision/content-bound positive receipts,
-operator-facing per-peer states and simulation/physical G6 qualification remain #135.
+operator-facing per-peer states and simulation/physical G6 qualification remain #135. The
+separate [#166 event receiver](FEDERATION-INCIDENT-EVENTS.md) now supplies authenticated ingress
+and exact storage receipts; it does not consume this journal or install a sender.
 
 ## Deployment and verification
 

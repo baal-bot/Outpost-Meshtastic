@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from outpost.audit import write_audit
+from outpost.fed.incident_events import IncidentEvents
 from outpost.fed.incident_updates import STREAM as INCIDENT_UPDATES
 from outpost.fed.incident_updates import IncidentUpdates
 from outpost.fed.item_failures import ItemFailures
@@ -60,6 +61,7 @@ class FederationSyncService:
         self.revisions = RevisionIndex(self)
         self.incident_updates = IncidentUpdates(self)
         self.item_failures = ItemFailures(self)
+        self.incident_events = IncidentEvents(self)
 
     @staticmethod
     def stream_module(stream: str) -> str | None:
@@ -368,6 +370,13 @@ class FederationSyncService:
         return exported
 
     async def quarantine(self, peer: Peer, item: dict[str, Any], now: int) -> bool:
+        async with self.database.transaction() as transaction:
+            return await self.quarantine_transaction(transaction, peer, item, now)
+
+    async def quarantine_transaction(
+        self, transaction: Transaction, peer: Peer, item: dict[str, Any], now: int
+    ) -> bool:
+        """Store using the caller's writer; no nested transaction or radio I/O."""
         stream, uid = str(item.get("stream", "")), str(item.get("uid", ""))
         if not self.stream_enabled(stream):
             raise ValueError(f"{self.stream_module(stream)} module is disabled")
@@ -388,73 +397,70 @@ class FederationSyncService:
         encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         if len(encoded.encode()) > 12_000:
             raise ValueError("inbound federation item is too large")
-        async with self.database.transaction() as transaction:
-            digest = self._payload_digest(encoded)
-            receipts = await transaction.read(
-                "SELECT epoch,revision,digest FROM fed_revision_receipt "
-                "WHERE peer_id=? AND stream=? AND uid=?",
-                (peer.id, stream, uid),
-            )
-            if receipts:
-                receipt = receipts[0]
-                if revision is None and digest == receipt["digest"]:
-                    return False  # Legacy delivery retry of identical stored content.
-                if revision is None or revision[0] != receipt["epoch"]:
-                    raise ValueError(
-                        "federation revision lineage changed; operator review required"
-                    )
-                if revision[1] < int(receipt["revision"]):
-                    return False
-                if revision[1] == int(receipt["revision"]):
-                    if digest != receipt["digest"]:
-                        raise ValueError("conflicting payload for the same producer revision")
-                    return False
-            recent = await transaction.read(
-                "SELECT COUNT(*) count FROM fed_inbox_item WHERE peer_id=? AND received_at>?",
-                (peer.id, now - 3600),
-            )
-            if int(recent[0]["count"]) >= peer.quota_items_per_hour:
-                raise ValueError("peer federation item quota exceeded")
-            existing = await transaction.read(
-                "SELECT id,digest FROM fed_inbox_item WHERE peer_id=? AND stream=? AND uid=?",
-                (peer.id, stream, uid),
-            )
-            if existing and str(existing[0]["digest"]) == digest:
-                changed = False
-            elif existing:
-                await transaction.write(
-                    "UPDATE fed_inbox_item SET payload_json=?,digest=?,state='pending',"
-                    "received_at=?,reviewed_at=NULL,reviewed_by=NULL,rejection_reason=NULL "
-                    "WHERE id=?",
-                    (encoded, digest, now, existing[0]["id"]),
-                )
-                changed = True
-            else:
-                await transaction.write(
-                    "INSERT INTO fed_inbox_item(peer_id,stream,uid,payload_json,digest,"
-                    "received_at) VALUES(?,?,?,?,?,?)",
-                    (peer.id, stream, uid, encoded, digest, now),
-                )
-                changed = True
-            if revision is not None:
-                epoch, sequence = revision
-                await transaction.write(
-                    "UPDATE fed_inbox_item SET source_epoch=?,source_revision=? "
-                    "WHERE peer_id=? AND stream=? AND uid=?",
-                    (epoch, sequence, peer.id, stream, uid),
-                )
-                await transaction.write(
-                    "INSERT INTO fed_revision_receipt(peer_id,stream,uid,epoch,revision,digest) "
-                    "VALUES(?,?,?,?,?,?) ON CONFLICT(peer_id,stream,uid) DO UPDATE SET "
-                    "epoch=excluded.epoch,revision=excluded.revision,digest=excluded.digest",
-                    (peer.id, stream, uid, epoch, sequence, digest),
-                )
+        digest = self._payload_digest(encoded)
+        receipts = await transaction.read(
+            "SELECT epoch,revision,digest FROM fed_revision_receipt "
+            "WHERE peer_id=? AND stream=? AND uid=?",
+            (peer.id, stream, uid),
+        )
+        if receipts:
+            receipt = receipts[0]
+            if revision is None and digest == receipt["digest"]:
+                return False  # Legacy delivery retry of identical stored content.
+            if revision is None or revision[0] != receipt["epoch"]:
+                raise ValueError("federation revision lineage changed; operator review required")
+            if revision[1] < int(receipt["revision"]):
+                return False
+            if revision[1] == int(receipt["revision"]):
+                if digest != receipt["digest"]:
+                    raise ValueError("conflicting payload for the same producer revision")
+                return False
+        recent = await transaction.read(
+            "SELECT COUNT(*) count FROM fed_inbox_item WHERE peer_id=? AND received_at>?",
+            (peer.id, now - 3600),
+        )
+        if int(recent[0]["count"]) >= peer.quota_items_per_hour:
+            raise ValueError("peer federation item quota exceeded")
+        existing = await transaction.read(
+            "SELECT id,digest FROM fed_inbox_item WHERE peer_id=? AND stream=? AND uid=?",
+            (peer.id, stream, uid),
+        )
+        if existing and str(existing[0]["digest"]) == digest:
+            changed = False
+        elif existing:
             await transaction.write(
-                "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
-                "VALUES(?,?,'recv',?,?) ON CONFLICT(peer_id,stream,direction) "
-                "DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at",
-                (peer.id, stream, uid, now),
+                "UPDATE fed_inbox_item SET payload_json=?,digest=?,state='pending',"
+                "received_at=?,reviewed_at=NULL,reviewed_by=NULL,rejection_reason=NULL "
+                "WHERE id=?",
+                (encoded, digest, now, existing[0]["id"]),
             )
+            changed = True
+        else:
+            await transaction.write(
+                "INSERT INTO fed_inbox_item(peer_id,stream,uid,payload_json,digest,"
+                "received_at) VALUES(?,?,?,?,?,?)",
+                (peer.id, stream, uid, encoded, digest, now),
+            )
+            changed = True
+        if revision is not None:
+            epoch, sequence = revision
+            await transaction.write(
+                "UPDATE fed_inbox_item SET source_epoch=?,source_revision=? "
+                "WHERE peer_id=? AND stream=? AND uid=?",
+                (epoch, sequence, peer.id, stream, uid),
+            )
+            await transaction.write(
+                "INSERT INTO fed_revision_receipt(peer_id,stream,uid,epoch,revision,digest) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(peer_id,stream,uid) DO UPDATE SET "
+                "epoch=excluded.epoch,revision=excluded.revision,digest=excluded.digest",
+                (peer.id, stream, uid, epoch, sequence, digest),
+            )
+        await transaction.write(
+            "INSERT INTO fed_cursor(peer_id,stream,direction,cursor,updated_at) "
+            "VALUES(?,?,'recv',?,?) ON CONFLICT(peer_id,stream,direction) "
+            "DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at",
+            (peer.id, stream, uid, now),
+        )
         return changed
 
     @staticmethod
