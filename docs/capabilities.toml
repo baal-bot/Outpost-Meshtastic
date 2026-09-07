@@ -621,11 +621,12 @@ description = "Operator position lifecycle tests exact-location disclosure, expi
 [[capabilities]]
 id = "federation"
 area = "Outpost federation"
-present = "Pairing, authenticated framing, policy, producer-revision board/incident/alert reconciliation and separately negotiated plain incident notes with durable pending-page receipts and bounded indexed discovery; automatic incident/note delivery with independent fresh/backlog lanes, finite persistent retries, guarded coalesced storage receipts and operator delivery controls; version-bound human import/rejection with atomic audit, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, transactional destination dispatch, and privacy-gated topology health."
+present = "Pairing, authenticated framing, policy, producer-revision board/incident/alert reconciliation and separately negotiated plain incident notes with durable pending-page receipts and bounded indexed discovery; automatic incident/note delivery with independent fresh/backlog lanes, finite persistent retries, guarded coalesced storage receipts and operator delivery controls; version-bound human import/rejection with atomic audit, signed policy-filtered physical-transfer pages with radio-off commissioned identity and current-key/operator review, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, transactional destination dispatch, and privacy-gated topology health."
 maturity = "two_node_field_tested"
 introduced_commit = "8f7219e"
 limitations = [
   "MQTT-only traffic/fallback and destructive quota exhaustion remain open.",
+  "Physical-transfer bundles are software/browser-tested, not field-media qualified: eight records per signed but unencrypted file, explicit public-text/label/location review, prepared mutually paired stations and trusted pins, 4,096 retained bundle receipts. Private data streams and node adoption are unsupported; old-backup rollback remains #145/#146.",
   "Version-bound review is software-tested; deploy matching backend/assets. Handheld review is metadata-only, and automatic board imports remain a separate policy path.",
   "Plain incident notes require incident_updates:1 plus reconciliation:2 on both peers, current parent storage for event sending and prior original-parent import for human note import. Oversized notes and multi-hop note relay are not qualified.",
   "Oversized ITEM failures are visible and retryable with item_failures:1 plus reconciliation:2. Later pages can still wait behind oversized content; this is not arbitrary-size transport or a delivery guarantee (#135).",
@@ -664,6 +665,18 @@ description = "Failed or cancelled human audit rolls back imported domain conten
 kind = "operations"
 path = "docs/FEDERATION-REVIEW-SAFETY.md"
 description = "Review transaction ownership, API/handheld compatibility, deployment precautions, automatic-policy distinction and evidence limits."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_federation_bundles.py::test_radio_off_restart_preview_atomic_import_and_later_revision_reconciliation"
+description = "Two temporary Outposts import a signed page without RF, retain exact radio-reconciliation digests and later converge a changed producer revision without duplicate incidents."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_bundle_browser.py::test_actual_browser_signed_download_preview_upload_commit_is_offline_and_safe"
+description = "Actual authenticated Chromium download/upload and explicit privacy-bound review at phone/desktop widths, with external requests blocked and no requested RF action."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/FEDERATION-BUNDLES.md"
+description = "Commissioning and existing trust prerequisites, signed plaintext schema, confidentiality scopes, atomic/replay/key/time contract, capacity limits and physical-evidence boundaries."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_domain_adapters.py::test_transient_dispatch_adapters_share_reassembly_counters_and_receipt_owner"

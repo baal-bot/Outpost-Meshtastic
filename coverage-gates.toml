@@ -10,6 +10,15 @@ files = [
   "src/outpost/web/routes/responsibility.py",
 ]
 
+[production_groups.physical_transfer]
+minimum = 90
+per_file_minimum = 90
+files = [
+  "src/outpost/fed/bundle_format.py",
+  "src/outpost/fed/bundles.py",
+  "src/outpost/web/routes/bundles.py",
+]
+
 [groups.safety]
 minimum = 80
 files = [

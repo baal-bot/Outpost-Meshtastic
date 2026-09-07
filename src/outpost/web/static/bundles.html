@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Physical transfer · Outpost</title>
+  <script src="/theme-boot.js"></script>
+  <link rel="stylesheet" href="/base.css">
+  <link rel="stylesheet" href="/layout.css">
+  <link rel="stylesheet" href="/components.css">
+  <link rel="stylesheet" href="/bundles.css">
+</head>
+<body>
+  <main id="bundles">
+    <a href="/federation.html">Back to federation</a>
+    <h1>Signed physical transfer</h1>
+    <p>Carry a small reviewed file by USB or local LAN. Signatures prove a currently trusted producer key, not truth or confidentiality. Files are <strong>not encrypted</strong>. Private mail, welfare, accounts, secrets and responsibility assignments are never supported streams.</p>
+    <p>Commission identities and pair peers before an outage. Verify signing fingerprints through the existing origin-key review. A file never creates trust. No live source, radio or internet is needed to import.</p>
+    <p id="bundle-status" role="status">Loading operator session…</p>
+    <section>
+      <h2>Local identity</h2>
+      <p id="bundle-identity">Unavailable</p>
+      <form id="bundle-commission">
+        <label>Confirm the already observed local node ID <input name="identity" required pattern="![0-9a-f]{8}" maxlength="9" placeholder="!1234abcd"></label>
+        <button type="submit">Commission offline identity</button>
+      </form>
+    </section>
+    <section>
+      <h2>Export a reviewed page</h2>
+      <p>Eight records per file, one stream at a time. Records outside the peer or privacy scope are excluded whole, not silently redacted. Names or locations may also occur in free text: review every field. A signed download is not a delivery receipt.</p>
+      <form id="bundle-export">
+        <label>Paired destination node <input name="destination" required pattern="![0-9a-f]{8}" maxlength="9" placeholder="!1234abcd"></label>
+        <label>Public stream <input name="stream" required maxlength="80" value="incidents" aria-describedby="bundle-stream-help"></label>
+        <p id="bundle-stream-help">Use incidents, incident_updates, alerts or board:SLUG (for example board:gen). The current peer policy must permit it. Import parent incidents before their notes.</p>
+        <label>Revision cursor <input name="after" required type="number" min="0" max="9007199254740991" value="0"></label>
+        <label><input name="labels" type="checkbox"> Include existing public author/reporter labels</label>
+        <label><input name="locations" type="checkbox"> Include structured precise locations and location text</label>
+        <button type="submit">Preview export</button>
+        <button id="bundle-next" type="button" disabled>Next export page</button>
+      </form>
+      <pre id="bundle-export-preview" tabindex="0" aria-label="Complete export preview">No preview</pre>
+      <label><input id="bundle-export-consent" type="checkbox"> I reviewed every record, public text, node provenance and selected privacy scope, and approve carrying this readable file.</label>
+      <button id="bundle-download" type="button" disabled>Sign and download reviewed page</button>
+    </section>
+    <section>
+      <h2>Import a reviewed file</h2>
+      <p>Preview changes nothing. Approval commits the entire page or none of it. Existing newer or already reviewed records are skipped, not resurrected. No pager, alert transmission, acknowledgement or responsibility acceptance is triggered.</p>
+      <form id="bundle-import">
+        <label>Bundle file (maximum 192 KiB) <input name="file" type="file" accept=".opb,application/octet-stream" required></label>
+        <button type="submit">Verify and preview import</button>
+      </form>
+      <pre id="bundle-import-preview" tabindex="0" aria-label="Complete import preview">No preview</pre>
+      <label><input id="bundle-import-consent" type="checkbox"> I reviewed every record and effect and approve its public text and provenance.</label>
+      <label><input id="bundle-import-labels" type="checkbox"> I approve public labels if declared in this file.</label>
+      <label><input id="bundle-import-locations" type="checkbox"> I approve precise locations if declared in this file.</label>
+      <button id="bundle-apply" type="button" disabled>Commit reviewed import</button>
+    </section>
+    <p>After an interrupted or unconfirmed submission, preview again: a committed file is reported as already committed. Do not clear receipts to retry. Reconcile by producer revision, never by wall-clock timestamps. Old backup rollback still needs operator reconciliation.</p>
+  </main>
+  <script type="module" src="/bundles.js"></script>
+</body>
+</html>

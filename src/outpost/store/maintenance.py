@@ -272,6 +272,20 @@ TABLE_POLICIES = (
         "fed_seen", "federation", "retain", "Replay/deduplication history retention.", True
     ),
     TablePolicy(
+        "fed_bundle_identity",
+        "federation",
+        "preserve",
+        "Single explicitly commissioned node identity; no automatic replacement.",
+        True,
+    ),
+    TablePolicy(
+        "fed_bundle_receipt",
+        "federation",
+        "preserve",
+        "Metadata-only replay ledger, bounded to 4096 by admission; never time-pruned.",
+        True,
+    ),
+    TablePolicy(
         "fed_outbox", "federation", "retain", "Sent/long-expired frames; live work protected."
     ),
     TablePolicy(

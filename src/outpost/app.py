@@ -68,6 +68,7 @@ from outpost.fed import (
     item_failures,
     wire_int,
 )
+from outpost.fed.bundles import FederationBundleService
 from outpost.fed.dispatcher import FederationDispatcher
 from outpost.fed.incident_delivery import IncidentDelivery
 from outpost.fed.incident_receipts import IncidentReceipts
@@ -303,6 +304,9 @@ class OutpostApp:
         self.federation_reconciliation = Reconciliation(self)
         self.federation_mail = FederationMailService(self.database, self.federation, self.clock)
         self.federation_relay = FederationRelayService(self.database, self.federation, self.clock)
+        self.federation_bundles = FederationBundleService(
+            self.database, self.clock, self.federation, self.federation_sync
+        )
         self.federation_relay.register_handler("incident", self._dispatch_relay_incident)
         self.federation_relay.register_handler("request", self._dispatch_relay_request)
         self.federation_relay.register_handler("receipt", self._dispatch_relay_receipt)
@@ -448,6 +452,7 @@ class OutpostApp:
             ai_store=self.ai_store,
             ai_test=self.test_ai,
             federation_relay=self.federation_relay,
+            federation_bundles=self.federation_bundles,
             federation_topology=self.federation_topology,
             radio_configuration_status=self.radio_configuration_status,
             radio_configuration_preflight=self.preflight_radio_configuration,
@@ -956,7 +961,8 @@ class OutpostApp:
         posts = await self.database.read("SELECT uid FROM post WHERE id=?", (post_id,))
         if not posts:
             return
-        self.federation_sync.local_mesh_id = self.radio.local_node_id or ""
+        if self.radio.local_node_id:
+            self.federation_sync.local_mesh_id = self.radio.local_node_id
         now = int(self.clock.now().timestamp())
         for peer in await self.federation.list("active"):
             if slug not in peer.boards:
@@ -989,6 +995,7 @@ class OutpostApp:
 
     async def startup(self) -> None:
         await self.database.open()
+        await self.federation_bundles.restore_identity()
         await self.radio_power.restore()
         await self.ai_store.rechunk_stale_documents()
         await self.radio_configuration.initialize()
@@ -1017,7 +1024,8 @@ class OutpostApp:
         await self.governor.recover()
         await self.runtime_settings.load()
         await self.self_check.run("startup")
-        self.federation_sync.local_mesh_id = self.radio.local_node_id
+        if self.radio.local_node_id:
+            self.federation_sync.local_mesh_id = self.radio.local_node_id
         if self.radio.local_node_id:
             await self.federation_sync.import_approved_replies(
                 "federation:auto-thread", int(self.clock.now().timestamp())

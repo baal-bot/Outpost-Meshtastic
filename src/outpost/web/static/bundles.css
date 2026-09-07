@@ -1,0 +1,9 @@
+#bundles {max-width: 64rem; margin: 0 auto; padding: 1rem; overflow-wrap: anywhere;}
+#bundles section {border: 1px solid var(--border, #557064); border-radius: .6rem; margin: 1rem 0; padding: 1rem;}
+#bundles label {display: block; margin: .8rem 0;}
+#bundles input:not([type="checkbox"]), #bundles button {max-width: 100%; min-height: 44px; box-sizing: border-box;}
+#bundles input:not([type="checkbox"]) {display: block; width: 100%;}
+#bundles button {white-space: normal; margin: .25rem; padding: .5rem;}
+#bundles input[type="checkbox"] {min-width: 24px; min-height: 24px; vertical-align: middle;}
+#bundles pre {white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-height: 32rem; overflow-y: auto; padding: .5rem; border: 1px solid var(--border, #557064);}
+#bundle-status {padding: .75rem; border: 1px solid var(--border, #557064);}

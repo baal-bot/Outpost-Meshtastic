@@ -3,6 +3,21 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Signed physical transfer — #143
+
+[Policy-filtered bundle files](FEDERATION-BUNDLES.md) now reuse the retained federation signing
+identity, explicit trusted pins, active peer policy and producer revisions. The operator previews
+an exact small page, approves public text and any labels/locations, then carries the signed,
+unencrypted file. Unsupported private streams never enter the file schema. A prepared station
+can restore its explicitly commissioned identity and import without a source node, WAN or radio.
+
+Import preview changes no domain state. Approval rechecks the current named session, local/peer
+identity, key, scope, inbox state and source revisions in the same writer as all domain imports,
+receipts and audit. Malformed/tampered input, revoked authority, stale review, quota/capacity and
+interruption fail closed. No new sender, trust-on-upload, automatic responder action or alternate
+importer is introduced. Synthetic-store/parser/browser evidence is not physical-media, installed
+recovery, UTC, old-backup fencing or field-network qualification.
+
 ## Accepted incident responsibility — #151
 
 [Local responsibility](INCIDENT-RESPONSIBILITY.md) now distinguishes an offered next action,

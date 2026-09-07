@@ -37,6 +37,7 @@ from outpost.fed import (
     FederationRelayService,
     FederationTopologyService,
 )
+from outpost.fed.bundles import FederationBundleService
 from outpost.fed.incident_delivery import IncidentDelivery
 from outpost.fed.item_failures import CURSOR as ENCODING_FAILURE_CURSOR
 from outpost.fed.item_failures import LIMIT as ENCODING_FAILURE_LIMIT
@@ -57,6 +58,7 @@ from outpost.watch import AlertService, CheckinService, IncidentReportService, I
 from outpost.web.auth import MfaChallenge, WebAuthService
 from outpost.web.member_triage import NEEDS_REVIEW_SQL, MemberTriageError, MemberTriageService
 from outpost.web.operator_inbox import OperatorInboxService
+from outpost.web.routes.bundles import register_bundle_routes
 from outpost.web.routes.federation_review import register_federation_review_routes
 from outpost.web.routes.readiness import register_readiness_routes
 from outpost.web.routes.responsibility import register_responsibility_routes
@@ -738,6 +740,7 @@ def create_web_app(
     ai_store: AIStore | None = None,
     ai_test: Callable[[str], Awaitable[dict[str, object]]] | None = None,
     federation_relay: FederationRelayService | None = None,
+    federation_bundles: FederationBundleService | None = None,
     federation_topology: FederationTopologyService | None = None,
     radio_configuration_status: Callable[[], Awaitable[dict[str, Any]]] | None = None,
     radio_configuration_configure: (
@@ -1530,6 +1533,9 @@ def create_web_app(
 
     if self_check is not None:
         register_readiness_routes(app, self_check)
+
+    if federation_bundles is not None:
+        register_bundle_routes(app, federation_bundles)
 
     if restore_coordinator is not None:
 
