@@ -12,6 +12,8 @@ from outpost.config import Config
 from outpost.fed import MessageType
 from outpost.transport.models import InboundMessage
 
+pytestmark = pytest.mark.production_wiring
+
 
 async def reconciliation_app(tmp_path, *, budget: int = 20):
     config = Config.model_validate(

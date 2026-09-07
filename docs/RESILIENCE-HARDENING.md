@@ -3,6 +3,21 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Explicit domain adapters — #153
+
+The [transaction ownership map](TRANSACTION-OWNERSHIP.md) now includes an authenticated
+federation ingress coordinator and two cohesive HTTP route groups. The application
+borrows its existing domain services, shared reassembler, counters and governed-send
+callbacks; there is no new database, task or radio sender. Readiness and version-bound
+federation review keep their existing routes, request models and shared middleware.
+
+The extracted method bodies, route handlers/decorators and request schemas were AST-compared
+with `38b3580` and match, apart from the ingress entry-point rename. Real service/store
+and browser regressions exercise current role/module gates, shared multipart state,
+pairing, encrypted mail receipts, malformed frames and human review concurrency.
+This is a behavior-preserving software extraction, not physical qualification or a
+claim that every remaining orchestration method is free of races.
+
 ## Truthful outage-readiness assessment — #149
 
 The existing [SelfCheckService](SAFETY-READINESS.md) now separates measured pass/fail,

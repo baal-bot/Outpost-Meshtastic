@@ -117,3 +117,12 @@ files = ["src/outpost/boot_readiness.py"]
 minimum = 90
 per_file_minimum = 90
 files = ["src/outpost/self_check.py", "src/outpost/readiness_probes.py"]
+
+[production_groups.domain_adapters]
+minimum = 90
+per_file_minimum = 90
+files = [
+  "src/outpost/fed/dispatcher.py",
+  "src/outpost/web/routes/readiness.py",
+  "src/outpost/web/routes/federation_review.py",
+]

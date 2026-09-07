@@ -648,6 +648,18 @@ path = "docs/FEDERATION-REVIEW-SAFETY.md"
 description = "Review transaction ownership, API/handheld compatibility, deployment precautions, automatic-policy distinction and evidence limits."
 [[capabilities.evidence]]
 kind = "automated"
+path = "tests/integration/test_domain_adapters.py::test_transient_dispatch_adapters_share_reassembly_counters_and_receipt_owner"
+description = "Extracted ingress borrows actual application owners across multipart frames; remote storage and governed receipt admission do not imply import or RF completion."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_domain_adapters.py::test_pairing_handshake_crosses_dispatch_and_governed_replies_without_duplicate_owners"
+description = "Both simulated Outposts complete the existing authenticated pairing handshake through the extracted coordinator and governed queue, without creating parallel protocol state."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/TRANSACTION-OWNERSHIP.md"
+description = "Current domain owners, behavior-preserving ingress/route extraction, source-equivalence checks, and remaining physical qualification boundaries."
+[[capabilities.evidence]]
+kind = "automated"
 path = "tests/integration/test_federation_incident_events.py::test_event_crosses_real_framing_and_governor_without_import_or_human_ack"
 description = "Negotiated incident ingress commits quarantine before a typed exact-revision/content receipt traverses the governed simulated radio; it never imports or acts for responders."
 [[capabilities.evidence]]

@@ -40,7 +40,6 @@ from outpost.fed import (
 from outpost.fed.incident_delivery import IncidentDelivery
 from outpost.fed.item_failures import CURSOR as ENCODING_FAILURE_CURSOR
 from outpost.fed.item_failures import LIMIT as ENCODING_FAILURE_LIMIT
-from outpost.fed.review import FederationReviewService, ReviewConflict, review_token
 from outpost.member_data import MemberDataService, retention_statement
 from outpost.operator_context import (
     current_actor,
@@ -58,6 +57,8 @@ from outpost.watch import AlertService, CheckinService, IncidentReportService, I
 from outpost.web.auth import MfaChallenge, WebAuthService
 from outpost.web.member_triage import NEEDS_REVIEW_SQL, MemberTriageError, MemberTriageService
 from outpost.web.operator_inbox import OperatorInboxService
+from outpost.web.routes.federation_review import register_federation_review_routes
+from outpost.web.routes.readiness import register_readiness_routes
 from outpost.web.settings import RuntimeSettings
 from outpost.web.tiles import absolute_tile_root, find_tile, inspect_tile_pack
 from outpost.web.transport import WebTransportMiddleware, transport_status
@@ -280,13 +281,6 @@ class PositionPurgeBody(BaseModel):
 
 class MaintenanceRunBody(BaseModel):
     confirmation: str
-
-
-class ReadinessObservationBody(BaseModel, extra="forbid"):
-    check: str = Field(min_length=1, max_length=32, pattern=r"^[a-z_]+$")
-    outcome: Literal["pass", "fail"]
-    observed_at: int = Field(strict=True, ge=0, le=253402300799)
-    review_token: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class PostPatchBody(BaseModel):
@@ -635,12 +629,6 @@ class FederationSyncPolicyBody(BaseModel):
     policy_review_at: datetime | None = None
     enable_boards: list[str] | None = Field(default=None, max_length=20)
     confirm_enable_boards: bool = False
-
-
-class FederationInboxBody(BaseModel):
-    state: Literal["imported", "rejected"]
-    review_token: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(default="Rejected by operator", max_length=160)
 
 
 class FederationMailBody(BaseModel):
@@ -1540,50 +1528,7 @@ def create_web_app(
         }
 
     if self_check is not None:
-
-        @app.post(
-            "/api/v1/diagnostics/readiness",
-            response_class=JSONResponse,
-            response_model=None,
-        )
-        async def diagnostic_readiness(request: Request) -> dict[str, Any] | Response:
-            host = request.client.host if request.client is not None else ""
-            try:
-                local_request = ipaddress.ip_address(host).is_loopback
-            except ValueError:
-                local_request = False
-            if not local_request:
-                return JSONResponse(
-                    {"error": {"code": "loopback_required", "message": "Local access required."}},
-                    status_code=403,
-                )
-            return await self_check.run("diagnostics-cli")
-
-        @app.get("/api/v1/readiness")
-        async def readiness() -> dict[str, Any]:
-            return await self_check.latest()
-
-        @app.post("/api/v1/readiness/run")
-        async def run_readiness() -> dict[str, Any]:
-            return await self_check.run(f"dashboard:{current_actor_ref()}")
-
-        @app.post("/api/v1/readiness/observations", response_model=None)
-        async def readiness_observation(
-            body: ReadinessObservationBody,
-        ) -> dict[str, Any] | Response:
-            try:
-                return await self_check.record_observation(
-                    body.check,
-                    body.outcome,
-                    body.observed_at,
-                    body.review_token,
-                    current_actor_ref(),
-                )
-            except ValueError as error:
-                return JSONResponse(
-                    {"error": {"code": "readiness_observation_conflict", "message": str(error)}},
-                    status_code=409,
-                )
+        register_readiness_routes(app, self_check)
 
     if restore_coordinator is not None:
 
@@ -2231,43 +2176,7 @@ def create_web_app(
                     "outbound": dict(outbound),
                 }
 
-            @app.get("/api/v1/federation/inbox")
-            async def federation_inbox(state: str = "pending") -> dict[str, Any]:
-                rows = await database.read(
-                    "SELECT i.*,p.mesh_id,p.node_name FROM fed_inbox_item i "
-                    "JOIN fed_peer p ON p.id=i.peer_id WHERE i.state=? "
-                    "ORDER BY i.received_at DESC LIMIT 100",
-                    (state,),
-                )
-                items = []
-                for row in rows:
-                    item = dict(row)
-                    item["review_token"] = review_token(item)
-                    item["payload"] = json.loads(item.pop("payload_json"))
-                    items.append(item)
-                return {"items": items}
-
-            @app.patch("/api/v1/federation/inbox/{item_id}", response_model=None)
-            async def federation_inbox_reject(
-                item_id: int, body: FederationInboxBody
-            ) -> dict[str, str] | Response:
-                try:
-                    if body.state == "imported":
-                        if federation_inbox_import is None:
-                            raise ValueError("Import unavailable.")
-                        stream = await federation_inbox_import(item_id, body.review_token)
-                        return {"state": "imported", "stream": stream}
-                    await FederationReviewService(database).reject(
-                        item_id, body.review_token, current_actor(), body.reason, int(time.time())
-                    )
-                    return {"state": "rejected"}
-                except (KeyError, TypeError, ValueError) as error:
-                    code = (
-                        "review_conflict" if isinstance(error, ReviewConflict) else "review_failed"
-                    )
-                    return JSONResponse(
-                        {"error": {"code": code, "message": str(error)}}, status_code=409
-                    )
+            register_federation_review_routes(app, database, federation_inbox_import)
 
         if federation_pair is not None:
 

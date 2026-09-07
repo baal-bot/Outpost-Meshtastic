@@ -8,6 +8,8 @@ from outpost.config import Config
 from outpost.fed import FrameCodec, MessageType
 from outpost.transport.models import InboundMessage, RadioSnapshot
 
+pytestmark = pytest.mark.production_wiring
+
 
 def configure_live_radio(app: OutpostApp, node_id: str) -> None:
     """Match the supervisor state that necessarily exists before a real inbound frame."""
