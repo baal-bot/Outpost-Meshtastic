@@ -78,9 +78,11 @@ its existing explicit retraction behavior; the production appliance uses the dur
 This fixes the shared commit boundary but does **not** connect the [incident staging service](INCIDENT-SENDER-HANDOFF.md)
 to radio admission. Incident integration must still recheck current source/revision/content,
 peer trust/scope and original-parent dependencies before every recovered/retried attempt.
-Ordinary held-work startup release alone is not that authorization. Exact #166 receipt matching,
-receipt coalescing, fresh-versus-backfill scheduling, retries/supersession/expiry, operator delivery
-stages and G6 qualification remain #135. Quiet hours, airtime shares, critical reserve and human
+Ordinary held-work startup release alone is not that authorization. The later
+[#169 admission service](INCIDENT-SENDER-ADMISSION.md) adds explicit association, exact receipts
+and mandatory per-attempt authorization. Receipt-reply coalescing, fresh-versus-backfill scheduling,
+automatic application retry/expiry policy, operator delivery stages and G6 remain #135.
+Quiet hours, airtime shares, critical reserve and human
 review policy are unchanged.
 
 ## Evidence and deployment

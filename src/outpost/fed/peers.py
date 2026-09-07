@@ -593,21 +593,26 @@ class FederationPeerService:
             )
         return await self.by_mesh_id(mesh_id)
 
-    async def secret(self, mesh_id: str) -> bytes:
-        rows = await self.database.read(
+    async def secret(self, mesh_id: str, *, transaction: Transaction | None = None) -> bytes:
+        if transaction is not None:
+            transaction.check_owner(self.database)
+        rows = await (transaction or self.database).read(
             "SELECT shared_secret FROM fed_peer WHERE mesh_id=? AND state='active'", (mesh_id,)
         )
         if not rows or rows[0]["shared_secret"] is None:
             raise ValueError("active federation secret unavailable")
         return bytes(rows[0]["shared_secret"])
 
-    async def next_counter(self, mesh_id: str) -> int:
-        async with self.database.transaction() as transaction:
-            rows = await transaction.read(
-                "UPDATE fed_peer SET tx_counter=tx_counter+1 "
-                "WHERE mesh_id=? AND state='active' RETURNING tx_counter",
-                (mesh_id,),
-            )
+    async def next_counter(self, mesh_id: str, *, transaction: Transaction | None = None) -> int:
+        if transaction is None:
+            async with self.database.transaction() as owned:
+                return await self.next_counter(mesh_id, transaction=owned)
+        transaction.check_owner(self.database)
+        rows = await transaction.read(
+            "UPDATE fed_peer SET tx_counter=tx_counter+1 "
+            "WHERE mesh_id=? AND state='active' RETURNING tx_counter",
+            (mesh_id,),
+        )
         if not rows:
             raise ValueError("federation peer is not active")
         return int(rows[0]["tx_counter"])

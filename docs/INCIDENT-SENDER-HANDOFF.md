@@ -2,7 +2,9 @@
 
 Sender-side staging slice [#167](https://github.com/baal-bot/Outpost-Meshtastic/issues/167),
 following the [source journal](INCIDENT-CHANGE-EVENTS.md) and [event receiver](FEDERATION-INCIDENT-EVENTS.md).
-**There is still no automatic sender loop or radio admission.** This service establishes the
+**This staging service adds no automatic sender loop or radio admission.** The later
+[#169 admission service](INCIDENT-SENDER-ADMISSION.md) provides explicit guarded admission and
+exact receipt handling; automatic scheduling remains open. Staging establishes the
 local commit boundary needed by [#135](https://github.com/baal-bot/Outpost-Meshtastic/issues/135).
 
 ## One peer, one bounded transaction
@@ -95,10 +97,11 @@ not latency bounds, cold-start qualification, arbitrary-origin-list cost or G6 e
 The [#168 shared outbox boundary](OUTBOX-COMMIT-PUBLICATION.md) now publishes in-memory admission
 and supersession only after commit, preserving old work on rollback. It does not activate this
 incident service or make existing held-work recovery a peer/source authorization check.
-The next integration must atomically connect version-checked intents to held governed outbox
-work, reconcile post-commit release/recovery, recheck source/policy before attempts,
-match exact #166 storage receipts, coalesce duplicate receipt replies, and implement parent-first
-notes, retries, supersession and expiry. Radio admission, attempts, remote storage, review, public
+The [#169 integration](INCIDENT-SENDER-ADMISSION.md) now connects exact intents to governed work,
+rechecks source/policy/parent evidence at attempt reservation, matches exact #166 storage receipts,
+and supports explicit fresh-counter re-admission and atomic supersession. Automatic scheduling,
+application retry/expiry policy and duplicate receipt-reply coalescing remain open.
+Radio admission, attempts, remote storage, review, public
 alert approval, responder notification and responder ACK remain distinct facts. Existing frame
 limits, quiet hours, critical reserve and human-review requirements are unchanged.
 

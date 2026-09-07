@@ -5,7 +5,8 @@ following the [source journal](INCIDENT-CHANGE-EVENTS.md). **No automatic sender
 Prompt propagation, transactional peer handoff, sender retries/supersession/expiry, operator
 delivery stages and G6 qualification remain [#135](https://github.com/baal-bot/Outpost-Meshtastic/issues/135).
 The later [#167 staging service](INCIDENT-SENDER-HANDOFF.md) adds atomic per-peer source handoff;
-governed sender admission and receipt matching remain unimplemented.
+[#169](INCIDENT-SENDER-ADMISSION.md) adds explicit guarded sender admission and receipt matching.
+Automatic scheduling and G6 remain unimplemented/unqualified.
 
 ## Negotiation and wire shape
 
@@ -76,8 +77,8 @@ reply admission can leave stored content without a received receipt; a fresh ret
 
 `stored` says nothing about import, current human-review state, responder notification, public
 alert approval, responder ACK or downstream replication. The new receipt type cannot update
-legacy board delivery state. This release deliberately rejects incoming incident receipts:
-there is no sender intent against which to validate them yet.
+legacy board delivery state. The later [sender consumer](INCIDENT-SENDER-ADMISSION.md) matches
+incoming receipts only to exact retained associations and never clears newer pending intents.
 
 ## Bounds, compatibility and evidence limits
 

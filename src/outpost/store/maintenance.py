@@ -228,6 +228,13 @@ TABLE_POLICIES = (
         True,
     ),
     TablePolicy("fed_service_circuit", "federation", "preserve", "Bounded state per peer/service."),
+    TablePolicy(
+        "fed_incident_dispatch",
+        "federation",
+        "cascade",
+        "Current guarded frame association and exact storage evidence follow the peer.",
+        True,
+    ),
     TablePolicy("fed_topology_policy", "federation", "cascade", "Follows its peer."),
     TablePolicy("fed_topology_peer", "federation", "cascade", "Current state follows its peer."),
     TablePolicy(

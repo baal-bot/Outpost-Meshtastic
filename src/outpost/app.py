@@ -70,6 +70,7 @@ from outpost.fed import (
     wire_int,
 )
 from outpost.fed.framing import FrameTooLarge
+from outpost.fed.incident_sender import IncidentSender
 from outpost.fed.incident_updates import CAPABILITY as INCIDENT_UPDATES_CAPABILITY
 from outpost.fed.incident_updates import MODE as INCIDENT_UPDATES_MODE
 from outpost.fed.reconciliation import Reconciliation
@@ -307,6 +308,14 @@ class OutpostApp:
             self.database, self.federation, self.clock
         )
         self.federation_codec = FrameCodec(self.config.fed.max_fragments)
+        self.incident_sender = IncidentSender(
+            self.federation_sync,
+            self.federation,
+            self.governor,
+            self.federation_codec,
+            lambda: self.radio.local_node_id,
+            lambda: (channel_slot(self.config, "outpost", 0), self.config.radio.federation_portnum),
+        )
         self.federation_reassembler = Reassembler(self.config.fed.reassembly_timeout_s)
         self.operations_center = MeshOperationsCenter(
             self.database,
@@ -1221,8 +1230,9 @@ class OutpostApp:
         traffic_class: TrafficClass = TrafficClass.FEDERATION,
     ) -> list[int]:
         # Meshtastic direct custom-app packets can be radio-ACKed without being surfaced to the
-        # destination client. Federation already authenticates and encrypts each peer's frames,
-        # so use the same RF/MQTT-compatible carrier as pairing and rely on application receipts.
+        # destination client. Peer frames are authenticated, not generically encrypted here.
+        # Use the RF/MQTT-compatible carrier and application receipts; confidentiality
+        # depends on the deployment's channel/privacy policy, separately from this HMAC.
         return await self._queue_federation_frames(
             frames,
             "^all",
@@ -2660,9 +2670,8 @@ class OutpostApp:
                     {**event_receipt, "target_mesh_id": sender},
                 )
             elif msg_type is MessageType.INCIDENT_RECEIPT:
-                # Sender handoff/receipt matching is a separate #135 slice. Never
-                # let this type mark a board delivery or human action complete.
-                raise ValueError("no incident event sender is awaiting a receipt")
+                peer = await self.federation.by_mesh_id(sender)
+                await self.incident_sender.receive(peer, value, int(self.clock.now().timestamp()))
             elif msg_type is MessageType.ITEM:
                 incoming_item = value.get("item")
                 if not isinstance(incoming_item, dict):

@@ -3,6 +3,18 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Guarded incident admission and exact receipts — #169 / #135 software slice
+
+The [explicit sender service](INCIDENT-SENDER-ADMISSION.md) commits peer counter, current source
+binding, complete governed frames and exact association together. A durable owner guard rechecks
+identity, peer/source/key/scope and parent-storage evidence at every attempt reservation, including
+recovery and transport retries. Exact authenticated receipts record storage without clearing newer
+intents or changing human review. Explicit lost-receipt retries use fresh counters. Migration 180
+adds retained owner/association metadata and indexed queue lookup; existing traffic and radio
+budgets/quiet hours are unchanged. Fault, process-kill, backup/upgrade and simulated end-to-end
+checks are software evidence. Automatic scheduling/application retry policy, receipt-reply
+coalescing, operator stages and held physical G6 remain #135; no live deployment is performed.
+
 ## Commit-safe governed queue publication — #168 / #135 and #153 prerequisite
 
 The [shared outbox boundary](OUTBOX-COMMIT-PUBLICATION.md) publishes admitted items, supersession,
@@ -12,8 +24,8 @@ is reported as committed storage, blocks egress and requires quiesced recovery. 
 solicitation no longer retracts durable work that committed during cancellation. Original item
 identity/status behavior is preserved with a pre-publication field snapshot. Ownership, queue,
 process-kill, check-in and production supervision regressions cover the boundary. No migration,
-live deployment, automatic incident sending or new radio policy is included; recovered incident
-authorization, exact receipt matching and the other sender/G6 work remain #135.
+live deployment, automatic incident sending or new radio policy is included in #168. The later
+#169 slice adds incident authorization and exact matching; automatic scheduling/G6 remain #135.
 
 ## Atomic per-peer incident staging — #167 / #135 and #153 sender prerequisite
 
@@ -22,8 +34,8 @@ through one writer transaction, stages coalesced exact-version/content metadata,
 that peer's revision cursor atomically. Source rows remain retained for independent peers;
 scope expansion rescans without interpreting the first-pending inspection cursor as a watermark.
 Migration 179 adds metadata tables and indexed bounded seeks. Crash/backup recovery, invalidation
-and supersession are local guarantees, not sending or G6. Worker/outbox integration, initial
-backlog scheduling, receipt matching/coalescing and physical qualification remain #135.
+and supersession are local guarantees, not sending or G6. Explicit outbox/receipt integration
+follows in #169; automatic backlog scheduling, reply coalescing and physical qualification remain #135.
 
 ## Revision-bound incident event ingress — #166 / #135 receiver slice
 

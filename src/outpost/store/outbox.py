@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -47,6 +48,9 @@ class OutboxStore:
 
     def __init__(self, database: Database) -> None:
         self.database = database
+        self.attempt_guards: dict[
+            str, Callable[[Transaction, dict[str, Any]], Awaitable[bool]]
+        ] = {}
 
     @staticmethod
     def _valid_payload_size(record: dict[str, Any]) -> bool:
@@ -125,8 +129,8 @@ class OutboxStore:
                         INSERT INTO outbound_work(
                           uid,batch_uid,state,text,binary_payload,destination,channel,
                           traffic_class,severity,want_ack,priority,created_at,expires_at,
-                          supersedes,queue_key,dedupe_token,dedupe_hash,portnum,multipart
-                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                          supersedes,queue_key,dedupe_token,dedupe_hash,portnum,multipart,guard_kind
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         """,
                         (
                             record["uid"],
@@ -148,6 +152,7 @@ class OutboxStore:
                             record["dedupe_hash"],
                             record["portnum"],
                             int(record["multipart"]),
+                            record.get("guard_kind"),
                         ),
                     )
                 )
@@ -275,13 +280,49 @@ class OutboxStore:
                 (now, now),
             )
 
-    async def start_attempt(self, item_id: int, now: float, estimated_toa_ms: int) -> bool:
+    async def start_attempt(
+        self,
+        item_id: int,
+        now: float,
+        estimated_toa_ms: int,
+        *,
+        expected: dict[str, Any] | None = None,
+    ) -> bool:
         async with self.database.transaction() as transaction:
-            rows = await transaction.read(
-                "SELECT state,attempts FROM outbound_work WHERE id=?", (item_id,)
-            )
+            rows = await transaction.read("SELECT * FROM outbound_work WHERE id=?", (item_id,))
             if not rows or rows[0]["state"] != "pending":
                 return False
+            row = dict(rows[0])
+            if row["guard_kind"] is not None:
+                guard = self.attempt_guards.get(row["guard_kind"])
+                # Bind the exact candidate used for I/O to the durable payload.
+                # An unset/mutated in-memory guard cannot bypass retained ownership.
+                fields = {
+                    "text",
+                    "binary_payload",
+                    "destination",
+                    "channel",
+                    "portnum",
+                    "want_ack",
+                    "priority",
+                    "traffic_class",
+                    "severity",
+                    "guard_kind",
+                }
+                if (
+                    guard is None
+                    or expected is None
+                    or set(expected) != fields
+                    or any(row[key] != expected[key] for key in fields)
+                    or row["expires_at"] <= now
+                    or not await guard(transaction, row)
+                ):
+                    await transaction.write(
+                        "UPDATE outbound_work SET state='failed',completed_at=?,"
+                        "last_error='dispatch authorization denied' WHERE id=?",
+                        (now, item_id),
+                    )
+                    return False
             attempt_no = int(rows[0]["attempts"]) + 1
             await transaction.write(
                 "UPDATE outbound_work SET state='sending',attempts=?,"

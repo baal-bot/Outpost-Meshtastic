@@ -84,6 +84,7 @@ class OutboundItem:
     expires_at_epoch: float = 0.0
     attempts: int = 0
     next_attempt_at: float = 0.0
+    guard_kind: str | None = None
 
     def __post_init__(self) -> None:
         if self.binary_payload is None:
@@ -472,6 +473,7 @@ class AirtimeGovernor:
                     "portnum": item.portnum,
                     "multipart": item.multipart,
                     "byte_len": item.payload_size,
+                    "guard_kind": item.guard_kind,
                 }
             )
         # Callers can retain/mutate their objects while the writer yields. The
@@ -569,6 +571,7 @@ class AirtimeGovernor:
                 created_at_epoch=float(row["created_at"]),
                 expires_at_epoch=float(row["expires_at"]),
                 attempts=int(row["attempts"]),
+                guard_kind=row["guard_kind"],
             )
             age = max(0.0, now_epoch - item.created_at_epoch)
             item.created_at = now_mono - age
@@ -922,29 +925,45 @@ class AirtimeGovernor:
         queue = self.queues[cls]
         queue.remove(item)
         cost = item.estimated_toa
+        dispatch = replace(item)
         if self.outbox is not None:
+            expected = {
+                "text": dispatch.text,
+                "binary_payload": dispatch.binary_payload,
+                "destination": dispatch.dest,
+                "channel": dispatch.channel,
+                "portnum": dispatch.portnum,
+                "want_ack": dispatch.want_ack,
+                "priority": dispatch.priority,
+                "traffic_class": dispatch.traffic_class.value,
+                "severity": dispatch.severity.value,
+                "guard_kind": dispatch.guard_kind,
+            }
             if not await self.outbox.start_attempt(
-                item.item_id, now_epoch, round(item.estimated_toa * 1_000)
+                item.item_id,
+                now_epoch,
+                round(item.estimated_toa * 1_000),
+                **({"expected": expected} if dispatch.guard_kind is not None else {}),
             ):
                 return None
             item.attempts += 1
         self._check_publication()
         try:
-            if item.binary_payload is None:
+            if dispatch.binary_payload is None:
                 item.send_result = await self.link._send_text(
-                    item.text,
-                    dest=item.dest,
-                    channel=item.channel,
-                    want_ack=item.want_ack if item.dest != "^all" else False,
-                    priority=item.priority,
+                    dispatch.text,
+                    dest=dispatch.dest,
+                    channel=dispatch.channel,
+                    want_ack=dispatch.want_ack if dispatch.dest != "^all" else False,
+                    priority=dispatch.priority,
                 )
             else:
                 item.send_result = await self.link._send_data(
-                    item.binary_payload,
-                    dest=item.dest,
-                    channel=item.channel,
-                    portnum=item.portnum or 260,
-                    want_ack=item.want_ack,
+                    dispatch.binary_payload,
+                    dest=dispatch.dest,
+                    channel=dispatch.channel,
+                    portnum=dispatch.portnum or 260,
+                    want_ack=dispatch.want_ack,
                 )
         except Exception as error:
             if self.outbox is None:
