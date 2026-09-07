@@ -70,6 +70,7 @@ VISUAL_PAGES = (
     ("environment", "/environment.html"),
     ("radio", "/radio.html"),
     ("federation", "/federation.html"),
+    ("physical-transfer", "/bundles.html"),
     ("access", "/access.html"),
     ("backups", "/backups.html"),
     ("ai", "/ai.html"),
@@ -554,6 +555,17 @@ def route_visual_content_api(page: object) -> None:
             ),
         )
 
+    fulfill(
+        "**/api/v1/federation/bundles",
+        {
+            "commissioned_identity": "!699c2f30",
+            "observed_identity": "!699c2f30",
+            "fingerprint": "0123456789abcdef" * 4,
+            "receipt_count": 0,
+            "receipt_limit": 4096,
+            "max_file_bytes": 196608,
+        },
+    )
     fulfill(
         "**/api/v1/status",
         {
@@ -1582,7 +1594,10 @@ def test_operator_page_visual_baseline_and_browser_health(
     key = f"{page_name}/{viewport_name}/{theme}"
     try:
         page.goto(f"{dashboard_url}{target}", wait_until="domcontentloaded")
-        wait_for_navigation(page)
+        if page_name == "physical-transfer":
+            page.locator("#bundle-status").filter(has_text="Ready for operator review").wait_for()
+        else:
+            wait_for_navigation(page)
         if page_name == "access":
             wait_for_access_visual_content(page)
         elif page_name == "federation":
