@@ -70,3 +70,15 @@ def test_incomplete_message_expires() -> None:
     reassembler = Reassembler(timeout_s=5)
     assert reassembler.add("!peer", codec.decode_fragment(frames[0], SECRET), now=10) is None
     assert reassembler.expire(now=16) == 1
+
+
+def test_verified_key_contexts_do_not_share_partial_assemblies() -> None:
+    codec, reassembler = FrameCodec(), Reassembler()
+    value = {"data": os.urandom(600)}
+    old = codec.encode(MessageType.ITEM, value, 9, SECRET)
+    new_key = b"replacement synthetic key"
+    new = codec.encode(MessageType.ITEM, value, 9, new_key)
+    assert reassembler.add("!peer", codec.decode_fragment(old[0], SECRET)) is None
+    for frame in new[1:]:
+        assert reassembler.add("!peer", codec.decode_fragment(frame, new_key)) is None
+    assert reassembler.add("!peer", codec.decode_fragment(new[0], new_key)) == value

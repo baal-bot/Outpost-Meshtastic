@@ -834,3 +834,42 @@ async def test_receipt_needs_the_actual_verified_key(nodes, verified_key):
             authenticated_secret=verified_key,
         )
     assert (await saved(source))[0]["stored_at"] is None
+
+
+async def test_receipt_fragments_cannot_mix_across_key_rotation(nodes):
+    from outpost.transport.models import InboundMessage
+
+    source, sp, target, _, incident = await prepare(nodes)
+    await source.incident_sender.admit(sp.id, "incidents", incident.uid)
+    value = await receipt(source)
+    counter = await target.federation.next_counter(source.radio.local_node_id)
+    old = target.federation_codec.encode(
+        MessageType.INCIDENT_RECEIPT, value, counter, bytes(range(32))
+    )
+    assert len(old) > 1
+
+    async def deliver(frame):
+        await source._handle_federation_discovery(
+            InboundMessage(
+                counter,
+                target.radio.local_node_id,
+                "^all",
+                0,
+                260,
+                False,
+                None,
+                frame,
+                source.clock.now(),
+            )
+        )
+
+    await deliver(old[0])
+    new_key = b"k" * 32
+    await source.database.write("UPDATE fed_peer SET shared_secret=?", (new_key,))
+    await source.incident_sender.admit(sp.id, "incidents", incident.uid)
+    new = target.federation_codec.encode(MessageType.INCIDENT_RECEIPT, value, counter, new_key)
+    for frame in new[1:]:
+        await deliver(frame)
+    assert (await saved(source))[0]["stored_at"] is None
+    await deliver(new[0])
+    assert (await saved(source))[0]["stored_at"] is not None

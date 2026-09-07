@@ -86,6 +86,7 @@ class Fragment:
     total: int
     counter: int
     body: bytes
+    authentication_context: bytes | None = None
 
 
 class FrameCodec:
@@ -160,6 +161,7 @@ class FrameCodec:
             total,
             int.from_bytes(frame[6:10], "big"),
             body,
+            hashlib.sha256(secret).digest() if secret is not None else None,
         )
 
     @staticmethod
@@ -173,12 +175,17 @@ class FrameCodec:
 class Reassembler:
     def __init__(self, timeout_s: int = 300) -> None:
         self.timeout_s = timeout_s
-        self._pending: dict[tuple[str, int, int], tuple[float, int, int, dict[int, bytes]]] = {}
+        self._pending: dict[
+            tuple[str, int, int, bytes | None], tuple[float, int, int, dict[int, bytes]]
+        ] = {}
 
     def add(self, sender: str, fragment: Fragment, now: float | None = None) -> Any | None:
         stamp = time.monotonic() if now is None else now
         self.expire(stamp)
-        key = (sender, fragment.counter, int(fragment.msg_type))
+        # Every part of one value must have the same verified credential context.
+        # Counters may be reused after pairing/key replacement; old partial values
+        # must not borrow a final fragment authenticated with the replacement key.
+        key = (sender, fragment.counter, int(fragment.msg_type), fragment.authentication_context)
         created, total, flags, pieces = self._pending.get(
             key, (stamp, fragment.total, fragment.flags, {})
         )

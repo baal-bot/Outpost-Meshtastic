@@ -80,6 +80,10 @@ the **actual key that verified the frame** into the receipt transaction; it must
 current peer key and association. Reloading the current key alone would incorrectly allow an
 old-key receipt to credit a new-key association after concurrent rotation/re-admission. This is
 internal authentication evidence, not a new wire field, stored secret or key-reset mechanism.
+Decoded fragments also carry an internal credential fingerprint. Reassembly partitions partial
+values by that verified context as well as sender/type/counter, so an old-key prefix cannot borrow
+new-key tail fragments after key replacement or counter reuse. The fingerprint is not transmitted
+and contains no raw key; ordinary same-key ordering, expiration and frame limits are unchanged.
 An unknown or mismatched
 version receives no completion credit. Fresh-counter duplicate receipts preserve the first storage
 timestamp and cancel only remaining unsent frames of that exact association, after commit.
