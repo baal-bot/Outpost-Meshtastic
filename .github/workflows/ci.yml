@@ -9,8 +9,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    # Full suite plus production-wiring rerun; leave headroom for resilience cases.
-    timeout-minutes: 30
+    # Full suite plus production rerun exceeded 30 minutes after #169's regressions.
+    # Keep every check and coverage floor; allow runner/runtime variation.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
