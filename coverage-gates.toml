@@ -96,6 +96,15 @@ files = ["src/outpost/fed/incident_handoff.py"]
 minimum = 90
 files = ["src/outpost/fed/incident_sender.py"]
 
+[production_groups.incident_automatic_delivery]
+minimum = 90
+per_file_minimum = 90
+files = [
+  "src/outpost/fed/incident_worker.py",
+  "src/outpost/fed/incident_receipts.py",
+  "src/outpost/fed/incident_delivery.py",
+]
+
 [production_groups.federation_item_failures]
 minimum = 90
 files = ["src/outpost/fed/item_failures.py"]

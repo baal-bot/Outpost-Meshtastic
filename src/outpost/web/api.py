@@ -37,6 +37,7 @@ from outpost.fed import (
     FederationRelayService,
     FederationTopologyService,
 )
+from outpost.fed.incident_delivery import IncidentDelivery
 from outpost.fed.item_failures import CURSOR as ENCODING_FAILURE_CURSOR
 from outpost.fed.item_failures import LIMIT as ENCODING_FAILURE_LIMIT
 from outpost.fed.review import FederationReviewService, ReviewConflict, review_token
@@ -447,6 +448,14 @@ class FederationStateBody(BaseModel):
     state: Literal["pending", "paused", "rejected"]
 
 
+class IncidentDeliveryActionBody(BaseModel):
+    peer_id: int = Field(ge=1)
+    stream: Literal["incidents", "incident_updates"]
+    uid: str = Field(min_length=1, max_length=160)
+    action: Literal["cancel", "retry"]
+    action_token: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class FederationApproveBody(BaseModel):
     confirmation_code: str = Field(pattern=r"^[0-9]{6}$")
 
@@ -750,6 +759,7 @@ def create_web_app(
     tile_path: str | Path = DEFAULT_TILES_PATH,
     incident_reports: IncidentReportService | None = None,
     member_data: MemberDataService | None = None,
+    incident_delivery: IncidentDelivery | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Outpost API",
@@ -1939,6 +1949,47 @@ def create_web_app(
             return peer.__dict__
 
         if database is not None:
+            if incident_delivery is not None:
+
+                @app.get("/api/v1/federation/incident-delivery")
+                async def incident_delivery_status(
+                    response: Response,
+                    after_peer: int = Query(default=0, ge=0),
+                    after_revision: int = Query(default=0, ge=0),
+                    limit: int = Query(default=50, ge=1, le=100),
+                ) -> dict[str, Any]:
+                    response.headers["cache-control"] = "no-store"
+                    return await incident_delivery.status(
+                        after_peer=after_peer, after_revision=after_revision, limit=limit
+                    )
+
+                @app.post("/api/v1/federation/incident-delivery", response_model=None)
+                async def incident_delivery_action(
+                    body: IncidentDeliveryActionBody,
+                    response: Response,
+                ) -> dict[str, bool] | Response:
+                    response.headers["cache-control"] = "no-store"
+                    try:
+                        await incident_delivery.worker.action(
+                            body.peer_id,
+                            body.stream,
+                            body.uid,
+                            body.action,
+                            body.action_token,
+                            current_actor(),
+                        )
+                    except ValueError as error:
+                        return JSONResponse(
+                            {
+                                "error": {
+                                    "code": "incident_delivery_conflict",
+                                    "message": str(error),
+                                }
+                            },
+                            status_code=409,
+                            headers={"cache-control": "no-store"},
+                        )
+                    return {"ok": True}
 
             @app.get("/api/v1/federation/sync-status")
             async def federation_sync_status() -> dict[str, Any]:

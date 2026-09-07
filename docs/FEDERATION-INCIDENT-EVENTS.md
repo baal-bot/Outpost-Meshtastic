@@ -1,12 +1,12 @@
 # Incident event receive contract
 
 Receiver-side software slice [#166](https://github.com/baal-bot/Outpost-Meshtastic/issues/166),
-following the [source journal](INCIDENT-CHANGE-EVENTS.md). **No automatic sender is added.**
-Prompt propagation, transactional peer handoff, sender retries/supersession/expiry, operator
-delivery stages and G6 qualification remain [#135](https://github.com/baal-bot/Outpost-Meshtastic/issues/135).
+following the [source journal](INCIDENT-CHANGE-EVENTS.md). This document describes the
+receiver boundary, not the complete sender policy.
 The later [#167 staging service](INCIDENT-SENDER-HANDOFF.md) adds atomic per-peer source handoff;
 [#169](INCIDENT-SENDER-ADMISSION.md) adds explicit guarded sender admission and receipt matching.
-Automatic scheduling and G6 remain unimplemented/unqualified.
+The [#135 automatic worker](INCIDENT-AUTOMATIC-DELIVERY.md) now supplies bounded scheduling,
+finite retries/expiry, guarded coalesced replies and operator stages. Physical G6 remains held.
 
 ## Negotiation and wire shape
 
@@ -47,7 +47,7 @@ an unlocated incident can be shared. A note's original parent must already be re
 peer's versioned incident inbox in the same epoch; its location supplies the geographic check.
 That parent need not have been human-approved to store the note. Importing the note still
 requires prior original-parent import and fresh human review. An unknown-parent note is refused,
-so a future sender must send/retry the parent first or use bulk catch-up.
+so the automatic sender requires exact current-parent storage evidence before sending a note.
 
 Frames require the existing paired-secret authentication, an explicit matching target and a
 fresh monotonic peer counter. `INCIDENT` receives **no replay exception**. A sender recovering

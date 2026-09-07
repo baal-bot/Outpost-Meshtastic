@@ -1,4 +1,4 @@
-"""Explicit guarded admission and storage receipts; no automatic sender timer."""
+"""Guarded admission and exact receipts shared by explicit and automatic callers."""
 
 from __future__ import annotations
 
@@ -38,6 +38,18 @@ class IncidentAdmission:
     counter: int
 
 
+class IncidentDeferred(ValueError):
+    """A current, recoverable dependency; not authorization to transmit."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(
+            "incident sender requires exact current parent storage receipt"
+            if reason == "parent_storage_pending"
+            else reason
+        )
+
+
 class IncidentSender:
     def __init__(
         self,
@@ -75,9 +87,10 @@ class IncidentSender:
             not local_id
             or local_id != self.sync.local_mesh_id
             or not self.sync.incident_events.supported(peer)
-            or not self.peers.is_online(peer)
         ):
             raise ValueError("incident sender is outside current identity/peer policy")
+        if not self.peers.is_online(peer):
+            raise IncidentDeferred("peer_offline")
         epoch, high = await handoff._lineage(tx)
         scope = handoff._scope(peer)
         rows = await tx.read(
@@ -90,7 +103,7 @@ class IncidentSender:
             (peer_id, stream, uid),
         )
         if not rows:
-            raise ValueError("incident sender intent is not staged")
+            raise IncidentDeferred("source_not_staged")
         row = dict(rows[0])
         if (
             row["state"] != "pending"
@@ -136,7 +149,7 @@ class IncidentSender:
                 or stored["stored_at"] is None
                 or not self._matches(stored, parent_binding)
             ):
-                raise ValueError("incident sender requires exact current parent storage receipt")
+                raise IncidentDeferred("parent_storage_pending")
         if (
             self.identity() != local_id
             or self.sync.local_mesh_id != local_id
@@ -181,6 +194,8 @@ class IncidentSender:
         uid: str,
         *,
         retry: bool = False,
+        transaction: Transaction | None = None,
+        priority: int = 0,
     ) -> IncidentAdmission:
         """Admit one staged identity; explicit retry replaces terminal unreceipted work.
 
@@ -190,81 +205,88 @@ class IncidentSender:
         wire_int(peer_id, "peer id", minimum=1)
         if not isinstance(stream, str) or stream not in STREAMS or not isinstance(uid, str):
             raise ValueError("invalid incident sender identity")
-        async with self.sync.database.transaction() as tx:
-            peer, binding, event, secret = await self._current(tx, peer_id, stream, uid)
-            prior = await self._association(tx, peer_id, stream, uid)
-            if prior and self._matches(prior, binding):
-                ids = tuple(json.loads(prior["frame_ids"]))
-                if prior["stored_at"] is not None:
-                    return IncidentAdmission("stored", ids, prior["counter"])
-                work = await tx.read(
-                    "SELECT state FROM outbound_work WHERE queue_key=?", (prior["queue_key"],)
+        if transaction is None:
+            async with self.sync.database.transaction() as owned:
+                return await self.admit(
+                    peer_id, stream, uid, retry=retry, transaction=owned, priority=priority
                 )
-                if any(row["state"] in {"pending", "held", "sending"} for row in work):
-                    return IncidentAdmission("queued", ids, prior["counter"])
-                if not retry:
-                    state = (
-                        "awaiting_receipt"
-                        if len(work) == len(ids)
-                        and all(row["state"] in {"sent", "acked", "awaiting_ack"} for row in work)
-                        else "retry_required"
-                    )
-                    return IncidentAdmission(state, ids, prior["counter"])
-            counter = await self.peers.next_counter(peer.mesh_id, transaction=tx)
-            frames = self._frames(peer, event, counter, secret)
-            queue_key = "incident-event:" + uuid.uuid4().hex
-            channel, portnum = self.routing()
-            admission = await self.governor.admit_many_result(
-                [
-                    OutboundItem(
-                        text="",
-                        binary_payload=frame,
-                        dest="^all",
-                        channel=channel,
-                        portnum=portnum,
-                        traffic_class=TrafficClass.FEDERATION,
-                        want_ack=False,
-                        multipart=len(frames) > 1,
-                        guard_kind=GUARD,
-                        queue_key=queue_key,
-                        supersedes=prior["queue_key"] if prior else None,
-                    )
-                    for frame in frames
-                ],
-                transaction=tx,
+        transaction.check_owner(self.sync.database)
+        tx = transaction
+        peer, binding, event, secret = await self._current(tx, peer_id, stream, uid)
+        prior = await self._association(tx, peer_id, stream, uid)
+        if prior and self._matches(prior, binding):
+            ids = tuple(json.loads(prior["frame_ids"]))
+            if prior["stored_at"] is not None:
+                return IncidentAdmission("stored", ids, prior["counter"])
+            work = await tx.read(
+                "SELECT state FROM outbound_work WHERE queue_key=?", (prior["queue_key"],)
             )
-            if admission.rejection_reason is not None:
-                raise ValueError(
-                    "incident sender admission rejected: " + admission.rejection_reason
+            if any(row["state"] in {"pending", "held", "sending"} for row in work):
+                return IncidentAdmission("queued", ids, prior["counter"])
+            if not retry:
+                state = (
+                    "awaiting_receipt"
+                    if len(work) == len(ids)
+                    and all(row["state"] in {"sent", "acked", "awaiting_ack"} for row in work)
+                    else "retry_required"
                 )
-            await tx.write(
-                "INSERT INTO fed_incident_dispatch(peer_id,stream,uid,producer_mesh_id,"
-                "peer_mesh_id,"
-                "epoch,revision,digest,scope,secret_digest,queue_key,counter,frame_ids) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(peer_id,stream,uid) DO UPDATE SET "
-                "producer_mesh_id=excluded.producer_mesh_id,peer_mesh_id=excluded.peer_mesh_id,"
-                "epoch=excluded.epoch,revision=excluded.revision,digest=excluded.digest,"
-                "scope=excluded.scope,secret_digest=excluded.secret_digest,queue_key=excluded.queue_key,"
-                "counter=excluded.counter,frame_ids=excluded.frame_ids,stored_at=NULL",
-                (
-                    peer_id,
-                    stream,
-                    uid,
-                    *(binding[key] for key in BINDING),
-                    queue_key,
-                    counter,
-                    json.dumps(admission.item_ids),
-                ),
-            )
-            # Mutable runtime module/identity/routing state can change while SQL yields.
-            if (
-                self.identity() != binding["producer_mesh_id"]
-                or self.sync.local_mesh_id != binding["producer_mesh_id"]
-                or not self.sync.incident_events.supported(peer)
-                or self.sync.incident_handoff._scope(peer) != binding["scope"]
-                or self.routing() != (channel, portnum)
-            ):
-                raise ValueError("incident sender runtime policy changed before commit")
+                return IncidentAdmission(state, ids, prior["counter"])
+        counter = await self.peers.next_counter(peer.mesh_id, transaction=tx)
+        frames = self._frames(peer, event, counter, secret)
+        queue_key = "incident-event:" + uuid.uuid4().hex
+        channel, portnum = self.routing()
+        admission = await self.governor.admit_many_result(
+            [
+                OutboundItem(
+                    text="",
+                    binary_payload=frame,
+                    dest="^all",
+                    channel=channel,
+                    portnum=portnum,
+                    traffic_class=TrafficClass.FEDERATION,
+                    priority=priority,
+                    want_ack=False,
+                    multipart=len(frames) > 1,
+                    guard_kind=GUARD,
+                    queue_key=queue_key,
+                    supersedes=prior["queue_key"] if prior else None,
+                )
+                for frame in frames
+            ],
+            transaction=tx,
+        )
+        if admission.rejection_reason is not None:
+            if admission.rejection_reason == "queue_full":
+                raise IncidentDeferred("queue_full")
+            raise ValueError("incident sender admission rejected: " + admission.rejection_reason)
+        await tx.write(
+            "INSERT INTO fed_incident_dispatch(peer_id,stream,uid,producer_mesh_id,"
+            "peer_mesh_id,"
+            "epoch,revision,digest,scope,secret_digest,queue_key,counter,frame_ids) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(peer_id,stream,uid) DO UPDATE SET "
+            "producer_mesh_id=excluded.producer_mesh_id,peer_mesh_id=excluded.peer_mesh_id,"
+            "epoch=excluded.epoch,revision=excluded.revision,digest=excluded.digest,"
+            "scope=excluded.scope,secret_digest=excluded.secret_digest,queue_key=excluded.queue_key,"
+            "counter=excluded.counter,frame_ids=excluded.frame_ids,stored_at=NULL",
+            (
+                peer_id,
+                stream,
+                uid,
+                *(binding[key] for key in BINDING),
+                queue_key,
+                counter,
+                json.dumps(admission.item_ids),
+            ),
+        )
+        # Mutable runtime module/identity/routing state can change while SQL yields.
+        if (
+            self.identity() != binding["producer_mesh_id"]
+            or self.sync.local_mesh_id != binding["producer_mesh_id"]
+            or not self.sync.incident_events.supported(peer)
+            or self.sync.incident_handoff._scope(peer) != binding["scope"]
+            or self.routing() != (channel, portnum)
+        ):
+            raise ValueError("incident sender runtime policy changed before commit")
         return IncidentAdmission("queued", admission.item_ids, counter)
 
     async def authorize_attempt(self, tx: Transaction, work: dict[str, Any]) -> bool:
@@ -283,6 +305,16 @@ class IncidentSender:
                 saved["uid"],
             )
             if not self._matches(saved, current):
+                return False
+            if current["delivery_state"] in {
+                "expired",
+                "cancelled",
+                "blocked",
+                "retry_exhausted",
+            } or (
+                current["deadline_at"] is not None
+                and current["deadline_at"] <= self.peers.clock.now().timestamp()
+            ):
                 return False
             ids = json.loads(saved["frame_ids"])
             frames = self._frames(peer, event, saved["counter"], secret)
@@ -369,6 +401,20 @@ class IncidentSender:
                 "UPDATE fed_incident_dispatch SET stored_at=COALESCE(stored_at,?) "
                 "WHERE queue_key=?",
                 (now, saved["queue_key"]),
+            )
+            await tx.write(
+                "UPDATE fed_incident_intent SET delivery_state='stored',delivery_reason=NULL,"
+                "next_attempt_at=253402300799 WHERE peer_id=? AND stream=? AND uid=? "
+                "AND epoch=? AND revision=? AND digest=? AND scope=? AND scheduled_at IS NOT NULL",
+                (
+                    peer.id,
+                    receipt["stream"],
+                    local_uid,
+                    saved["epoch"],
+                    saved["revision"],
+                    saved["digest"],
+                    saved["scope"],
+                ),
             )
             await tx.write(
                 "UPDATE outbound_work SET state='cancelled',completed_at=? "

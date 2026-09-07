@@ -125,12 +125,85 @@ class IncidentHandoff:
                 "INSERT INTO fed_incident_handoff(peer_id,producer_mesh_id,peer_mesh_id,epoch,"
                 "scope,after_revision,observed_revision) VALUES(?,?,?,?,?,?,?) "
                 "ON CONFLICT(peer_id) DO UPDATE SET scope=excluded.scope,"
-                "after_revision=excluded.after_revision,observed_revision=excluded.observed_revision",
+                "fresh_revision=CASE WHEN fed_incident_handoff.scope<>excluded.scope "
+                "THEN NULL ELSE fed_incident_handoff.fresh_revision END,"
+                "after_revision=excluded.after_revision,"
+                "observed_revision=excluded.observed_revision "
+                "WHERE fed_incident_handoff.scope<>excluded.scope "
+                "OR fed_incident_handoff.after_revision<>excluded.after_revision "
+                "OR fed_incident_handoff.observed_revision<>excluded.observed_revision",
                 (peer.id, local_id, peer.mesh_id, epoch, scope, after, high),
             )
         return HandoffPage(
             after, min(len(heads), limit), staged, skipped, len(heads) > limit, reset
         )
+
+    async def stage_automatic(self, peer_id: int, *, limit: int = 4) -> None:
+        """Give backlog and fresh heads separate bounded scan opportunities.
+
+        First discovery seeds the most recent page as fresh; older heads retain
+        the ordinary durable backlog cursor. Subsequent fresh pages ascend from
+        their own watermark, so a continuous stream cannot skip an older change.
+        Neither cursor is evidence of radio delivery or all-peer completion.
+        """
+        page = await self.stage(peer_id, limit=limit)
+        async with self.sync.database.transaction() as tx:
+            peer = await self._peer(tx, peer_id)
+            epoch, high = await self._lineage(tx)
+            scope = self._scope(peer)
+            rows = await tx.read("SELECT * FROM fed_incident_handoff WHERE peer_id=?", (peer_id,))
+            checkpoint = rows[0] if rows else None
+            if (
+                not checkpoint
+                or not self.sync.incident_events.supported(peer)
+                or checkpoint["epoch"] != epoch
+                or checkpoint["observed_revision"] > high
+                or checkpoint["scope"] != scope
+                or checkpoint["producer_mesh_id"] != self.sync.local_mesh_id
+                or checkpoint["peer_mesh_id"] != peer.mesh_id
+            ):
+                raise ValueError("automatic incident staging policy/lineage changed")
+            after = checkpoint["fresh_revision"]
+            if after is not None and after > high:
+                raise ValueError("automatic incident fresh cursor rollback requires review")
+            if after is None or page.scope_reset:
+                heads = await tx.read(
+                    "SELECT c.*,r.revision AS current_revision FROM incident_change_event c "
+                    "INDEXED BY idx_incident_change_revision LEFT JOIN fed_revision r "
+                    "ON r.stream=c.stream AND r.uid=c.uid ORDER BY c.revision DESC LIMIT ?",
+                    (limit,),
+                )
+                heads = list(reversed(heads))
+                next_revision = high
+            else:
+                heads = await tx.read(
+                    "SELECT c.*,r.revision AS current_revision FROM incident_change_event c "
+                    "INDEXED BY idx_incident_change_revision LEFT JOIN fed_revision r "
+                    "ON r.stream=c.stream AND r.uid=c.uid WHERE c.revision>? "
+                    "ORDER BY c.revision LIMIT ?",
+                    (after, limit),
+                )
+                next_revision = heads[-1]["revision"] if heads else high
+            for head in heads:
+                if (
+                    head["epoch"] != epoch
+                    or head["revision"] != head["current_revision"]
+                    or head["revision"] > high
+                ):
+                    raise ValueError("automatic incident source head mismatch requires review")
+                await self._stage_head(tx, peer, dict(head), scope)
+                await tx.write(
+                    "UPDATE fed_incident_intent SET lane='fresh' "
+                    "WHERE peer_id=? AND stream=? AND uid=?",
+                    (peer_id, head["stream"], head["uid"]),
+                )
+            if not self.sync.incident_events.supported(peer) or self._scope(peer) != scope:
+                raise ValueError("automatic incident module policy changed before commit")
+            await tx.write(
+                "UPDATE fed_incident_handoff SET fresh_revision=?,observed_revision=? "
+                "WHERE peer_id=? AND (fresh_revision IS NOT ? OR observed_revision<>?)",
+                (next_revision, high, peer_id, next_revision, high),
+            )
 
     async def _stage_head(
         self, tx: Transaction, peer: Peer, head: dict[str, Any], scope: str
@@ -157,9 +230,11 @@ class IncidentHandoff:
             else []
         )
         digest = parent = None
+        urgency = 3
         state = "not_exportable"
         if items:
             payload = items[0]["payload"]
+            urgency = {"critical": 0, "urgent": 1, "caution": 2}.get(payload.get("severity"), 3)
             parent = payload.get("incident_uid") if head["stream"] == "incident_updates" else None
             try:
                 digest = content_digest(payload)
@@ -176,6 +251,15 @@ class IncidentHandoff:
             and existing[0]["digest"] != digest
         ):
             raise ValueError("incident handoff content conflicts at the same revision")
+        # A genuinely new version/scope starts a new finite automatic policy.
+        # Re-scanning the same head never revives cancelled/expired/invalid work.
+        await tx.write(
+            "UPDATE fed_incident_intent SET scheduled_at=NULL,deadline_at=NULL,"
+            "next_attempt_at=0,application_attempts=0,delivery_state='pending',"
+            "delivery_reason=NULL WHERE peer_id=? AND stream=? AND uid=? "
+            "AND (revision<>? OR scope<>?)",
+            (peer.id, head["stream"], head["uid"], head["revision"], scope),
+        )
         await tx.write(
             "INSERT INTO fed_incident_intent(peer_id,stream,uid,epoch,revision,first_revision,"
             "scope,digest,parent_uid,state) VALUES(?,?,?,?,?,?,?,?,?,?) "
@@ -194,6 +278,10 @@ class IncidentHandoff:
                 parent,
                 state,
             ),
+        )
+        await tx.write(
+            "UPDATE fed_incident_intent SET urgency_rank=? WHERE peer_id=? AND stream=? AND uid=?",
+            (urgency, peer.id, head["stream"], head["uid"]),
         )
         return True
 

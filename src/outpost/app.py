@@ -70,9 +70,12 @@ from outpost.fed import (
     wire_int,
 )
 from outpost.fed.framing import FrameTooLarge
+from outpost.fed.incident_delivery import IncidentDelivery
+from outpost.fed.incident_receipts import IncidentReceipts
 from outpost.fed.incident_sender import IncidentSender
 from outpost.fed.incident_updates import CAPABILITY as INCIDENT_UPDATES_CAPABILITY
 from outpost.fed.incident_updates import MODE as INCIDENT_UPDATES_MODE
+from outpost.fed.incident_worker import POLL_SECONDS, IncidentWorker
 from outpost.fed.reconciliation import Reconciliation
 from outpost.fed.review import FederationReviewService
 from outpost.fed.revisions import CAPABILITY as RECONCILIATION_CAPABILITY
@@ -316,6 +319,9 @@ class OutpostApp:
             lambda: self.radio.local_node_id,
             lambda: (channel_slot(self.config, "outpost", 0), self.config.radio.federation_portnum),
         )
+        self.incident_worker = IncidentWorker(self.incident_sender)
+        self.incident_receipts = IncidentReceipts(self.incident_sender)
+        self.incident_delivery = IncidentDelivery(self.incident_worker)
         self.federation_reassembler = Reassembler(self.config.fed.reassembly_timeout_s)
         self.operations_center = MeshOperationsCenter(
             self.database,
@@ -451,6 +457,7 @@ class OutpostApp:
             tile_path=self.config.store.tiles_path,
             incident_reports=self.incident_reports,
             member_data=self.member_data,
+            incident_delivery=self.incident_delivery,
         )
 
     def _start_background_task(
@@ -1111,6 +1118,9 @@ class OutpostApp:
                         "federation-sync",
                         self._federation_sync_loop,
                         TaskFailureDomain.OPTIONAL_PROVIDER,
+                    ),
+                    self._start_background_task(
+                        "incident-delivery", self._incident_delivery_loop, TaskFailureDomain.CORE
                     ),
                     self._start_background_task(
                         "federation-delivery",
@@ -2229,6 +2239,17 @@ class OutpostApp:
             self._task_progress("federation-sync")
             await self.clock.sleep(30)
 
+    async def _incident_delivery_once(self) -> None:
+        if self.radio.local_node_id:
+            self.federation_sync.local_mesh_id = self.radio.local_node_id
+        await self.incident_worker.tick()
+
+    async def _incident_delivery_loop(self) -> None:
+        while True:
+            await self._incident_delivery_once()
+            self._task_progress("incident-delivery")
+            await self.clock.sleep(POLL_SECONDS)
+
     async def _federation_delivery_loop(self) -> None:
         while True:
             if self.config.modules.fed.enabled and self.radio.local_node_id:
@@ -2664,11 +2685,9 @@ class OutpostApp:
                 event_receipt = await self.federation_sync.incident_events.receive(
                     peer, value["event"], int(self.clock.now().timestamp())
                 )
-                await self._send_federation_value(
-                    sender,
-                    MessageType.INCIDENT_RECEIPT,
-                    {**event_receipt, "target_mesh_id": sender},
-                )
+                reply_ids = await self.incident_receipts.admit(peer.id, event_receipt)
+                if not reply_ids:
+                    raise ValueError("incident receipt reply has no governed frames")
             elif msg_type is MessageType.INCIDENT_RECEIPT:
                 peer = await self.federation.by_mesh_id(sender)
                 await self.incident_sender.receive(

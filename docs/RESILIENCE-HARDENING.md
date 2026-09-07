@@ -3,6 +3,20 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Automatic incident delivery — #135
+
+The [automatic worker](INCIDENT-AUTOMATIC-DELIVERY.md) connects source changes to guarded
+admission through independent fresh/backlog lanes and bounded peer pages. Finite retry/deadline
+state survives recovery; explicit cancellation is not automatically revived. Fresh-counter
+retries recover loss and counter overtaking. Exact receipt replies coalesce atomically and
+retain current-evidence attempt guards. The operator-only, non-cacheable view separates
+queue/radio/storage from human action, with version/queue-bound audited cancel/retry controls.
+Migration 182 retains this metadata without changing payloads, opt-ins or wire capabilities.
+The contract records the simulated timing envelope, field-command/map-feed evidence and
+remaining boundaries. Physical G6 remains held; no live deployment or radio restart occurred.
+Historical prerequisite sections below describe each original slice, not the current absence
+of a worker.
+
 ## Current dispatch timing — #170
 
 The [shared timing boundary](DISPATCH-TIMING.md) rechecks eligibility after awaited

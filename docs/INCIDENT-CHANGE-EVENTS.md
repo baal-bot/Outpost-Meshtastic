@@ -3,7 +3,8 @@
 Software slice [#165](https://github.com/baal-bot/Outpost-Meshtastic/issues/165), a prerequisite
 to [prompt federation #135](https://github.com/baal-bot/Outpost-Meshtastic/issues/135) and the
 [transaction ownership work](TRANSACTION-OWNERSHIP.md). This is **undispatched source work**,
-not prompt transport. No peer worker, timer, wire capability or delivery claim is added.
+not prompt transport by itself. #165 added no worker; the later
+[automatic sender](INCIDENT-AUTOMATIC-DELIVERY.md) now drains these retained heads.
 
 ## Commit and supersession contract
 
@@ -62,15 +63,16 @@ and non-starving priority. Deleting a row after an in-memory send would violate 
 
 The existing bulk reconciliation and governed quiet-hours/airtime policies are unchanged.
 Remote storage, human import/rejection, responder notification and human acknowledgement
-remain separate facts. Authenticated event receive, revision/content-bound positive receipts,
-operator-facing per-peer states and simulation/physical G6 qualification remain #135. The
+remain separate facts. The [automatic worker](INCIDENT-AUTOMATIC-DELIVERY.md) now supplies
+operator-facing per-peer states and declares the software timing envelope; physical G6 remains held. The
 separate [#166 event receiver](FEDERATION-INCIDENT-EVENTS.md) now supplies authenticated ingress
 and exact storage receipts; it does not consume this journal or install a sender.
 
 The [#167 per-peer handoff](INCIDENT-SENDER-HANDOFF.md) now stages scoped, exact-version metadata
 and scan progress atomically using a separate revision-seek index. It deliberately retains this
 journal: one peer's checkpoint is not all-peer completion. The source inspection API and its
-first-pending cursor semantics are unchanged. There is still no automatic sender or consume API.
+first-pending cursor semantics are unchanged. The automatic sender retains these heads;
+there is still no single-peer consume API.
 
 ## Deployment and verification
 

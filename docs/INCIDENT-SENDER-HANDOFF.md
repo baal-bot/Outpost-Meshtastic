@@ -2,9 +2,10 @@
 
 Sender-side staging slice [#167](https://github.com/baal-bot/Outpost-Meshtastic/issues/167),
 following the [source journal](INCIDENT-CHANGE-EVENTS.md) and [event receiver](FEDERATION-INCIDENT-EVENTS.md).
-**This staging service adds no automatic sender loop or radio admission.** The later
+**This staging service alone adds no automatic sender loop or radio admission.** The later
 [#169 admission service](INCIDENT-SENDER-ADMISSION.md) provides explicit guarded admission and
-exact receipt handling; automatic scheduling remains open. Staging establishes the
+exact receipt handling; [#135 now supplies automatic scheduling](INCIDENT-AUTOMATIC-DELIVERY.md).
+Staging establishes the
 local commit boundary needed by [#135](https://github.com/baal-bot/Outpost-Meshtastic/issues/135).
 
 ## One peer, one bounded transaction
@@ -25,7 +26,8 @@ resolve to a different local record after prefix stripping.
 Exportable changes upsert `fed_incident_intent`, keyed by peer/stream/local UID. The row contains
 producer epoch/revision, full payload SHA-256 using the receiver's encoding contract, scope
 fingerprint, first-staged revision and, for notes, the original parent wire UID. It contains no
-payload, coordinates, author, timestamp, radio counter or receipt. Supersession replaces the
+payload, coordinates, author, radio counter or receipt in its staging fields. Migration 182
+adds automatic timing/attempt/state metadata described in the worker contract. Supersession replaces the
 current revision/digest while retaining its first-staged position. It does not preserve an edit
 history or transmit an intermediate version that was superseded before observation.
 
@@ -68,7 +70,7 @@ The underlying staging states are `pending`, `not_exportable` and `invalid_paylo
 Its `first_revision` cursor is only for paging within an inspection pass. Repeat passes from zero
 to observe supersession; **do not use it as the durable producer-revision scan watermark**.
 Inspection does not re-export/hash every payload and is never authorization to transmit. The
-future sender must recheck current trust/scope, producer revision, exact payload/digest and
+sender must recheck current trust/scope, producer revision, exact payload/digest and
 parent dependencies inside its governed admission transaction. `pending` does not assert that
 the payload fits the radio envelope or that the remote parent has been stored.
 
@@ -84,8 +86,9 @@ Bounds apply to source heads and returned intent rows per call, not lifetime sto
 retained content/origin-list size of an individual source record. There is no per-peer history
 row per edit, but retained identities times peers can still grow (#148). Each new peer or scope
 rescan starts at zero. Large initial backlogs require repeated bounded calls and can delay newer
-heads; separating catch-up from fresh/urgent scheduling and qualifying that latency remain #135.
-This slice makes no 60-second or all-peer fairness claim and installs no timer.
+heads. The [#135 worker](INCIDENT-AUTOMATIC-DELIVERY.md) adds separate bounded fresh/backlog
+lanes and documents its simulated timing envelope. This staging service alone makes no
+60-second or all-peer fairness claim and installs no timer.
 
 An isolated aarch64/Python 3.13.5 probe on the development Pi used 120,000 synthetic incident
 heads and 30 successive 100-head staging pages while local regressions were also running.
@@ -99,8 +102,8 @@ and supersession only after commit, preserving old work on rollback. It does not
 incident service or make existing held-work recovery a peer/source authorization check.
 The [#169 integration](INCIDENT-SENDER-ADMISSION.md) now connects exact intents to governed work,
 rechecks source/policy/parent evidence at attempt reservation, matches exact #166 storage receipts,
-and supports explicit fresh-counter re-admission and atomic supersession. Automatic scheduling,
-application retry/expiry policy and duplicate receipt-reply coalescing remain open.
+and supports explicit fresh-counter re-admission and atomic supersession. The later worker adds
+automatic scheduling, finite application retry/expiry and pending exact receipt-reply coalescing.
 Radio admission, attempts, remote storage, review, public
 alert approval, responder notification and responder ACK remain distinct facts. Existing frame
 limits, quiet hours, critical reserve and human-review requirements are unchanged.

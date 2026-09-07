@@ -229,6 +229,13 @@ TABLE_POLICIES = (
     ),
     TablePolicy("fed_service_circuit", "federation", "preserve", "Bounded state per peer/service."),
     TablePolicy(
+        "fed_incident_receipt_reply",
+        "federation",
+        "cascade",
+        "One guarded exact storage-receipt reply per peer/source identity; follows its peer.",
+        True,
+    ),
+    TablePolicy(
         "fed_incident_dispatch",
         "federation",
         "cascade",

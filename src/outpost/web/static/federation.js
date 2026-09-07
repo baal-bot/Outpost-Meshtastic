@@ -6,6 +6,7 @@ let topologyMap = null;
 let topologyItems = [];
 let topologyIncidents = [];
 let topologyFitted = false;
+let refreshIncidentDelivery = async () => {};
 const api = createApiClient(() => csrf);
 const age = (epoch) => relativeAge(epoch, {epochSeconds:true, empty:"Never", immediate:"Just now", immediateSeconds:90, suffix:" ago"});
 function serviceProvenance(item) {
@@ -337,5 +338,5 @@ async function refresh() {
   const unconfigured = all.find(peer => peer.state === "active" && !peer.policy_configured);
   if (unconfigured && !policyWizardOpen) await showPolicyWizard(unconfigured);
 }
-async function initialize() { const response = await fetch("/api/v1/auth/session"); if (!response.ok) { location.href = "/"; return; } csrf = (await response.json()).csrf_token; await refresh(); await loadMqtt(); await loadServices(); await loadInbox(); await loadSyncStatus(); await loadOriginHistory(); await loadRelayMail(); await loadStoreForward(); await loadTopology(); const {scheduler}=await import("/refresh-scheduler.js"); scheduler.schedule("federation-main",()=>Promise.all([refresh(),refreshServices(),refreshSyncStatus(),refreshStoreForward(),refreshTopology()]),{interval:15000}); }
+async function initialize() { const response = await fetch("/api/v1/auth/session"); if (!response.ok) { location.href = "/"; return; } csrf = (await response.json()).csrf_token; await refresh(); await loadMqtt(); await loadServices(); await loadInbox(); await loadSyncStatus(); const {loadIncidentDelivery} = await import("/incident-delivery.js"); refreshIncidentDelivery = await loadIncidentDelivery(api); await loadOriginHistory(); await loadRelayMail(); await loadStoreForward(); await loadTopology(); document.documentElement.dataset.federationReady = "true"; const {scheduler}=await import("/refresh-scheduler.js"); scheduler.schedule("federation-main",()=>Promise.all([refresh(),refreshServices(),refreshSyncStatus(),refreshIncidentDelivery(),refreshStoreForward(),refreshTopology()]),{interval:15000}); }
 $("refresh-fed").addEventListener("click", refresh); $("peer-filter").addEventListener("change", refresh); initialize();

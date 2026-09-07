@@ -962,6 +962,18 @@ def route_visual_content_api(page: object) -> None:
     fulfill("**/api/v1/federation/services*", {"items": []})
     fulfill("**/api/v1/federation/inbox*", {"items": []})
     fulfill(
+        "**/api/v1/federation/incident-delivery*",
+        {
+            "items": [],
+            "next": None,
+            "policy_enabled": True,
+            "quiet_hours_active": False,
+            "maximum_application_attempts": 3,
+            "delivery_window_seconds": 1800,
+            "storage_receipt_is_human_ack": False,
+        },
+    )
+    fulfill(
         "**/api/v1/federation/sync-status",
         {"items": [], "outbound": {"frames_24h": 0, "last_at": None}},
     )
@@ -1556,6 +1568,8 @@ def test_operator_page_visual_baseline_and_browser_health(
         wait_for_navigation(page)
         if page_name == "access":
             wait_for_access_visual_content(page)
+        elif page_name == "federation":
+            page.locator('html[data-federation-ready="true"]').wait_for(state="attached")
         page.wait_for_timeout(100)
         page.add_style_tag(
             content=(
@@ -5009,6 +5023,85 @@ def test_operations_inbox_reviews_verified_member_removal_without_overflow(
         page.close()
 
 
+@pytest.mark.parametrize("width", (390, 1280))
+def test_incident_delivery_panel_keeps_storage_and_human_stages_separate(
+    browser: object, dashboard_url: str, width: int
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme="dark")
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    state = {"value": "queued", "token": "a" * 64}
+    writes: list[dict[str, object]] = []
+
+    def delivery(route: object) -> None:
+        if route.request.method == "POST":
+            value = route.request.post_data_json
+            writes.append(value)
+            assert value["action_token"] == state["token"]
+            state["value"] = "cancelled" if value["action"] == "cancel" else "queued"
+            state["token"] = "b" * 64 if state["value"] == "cancelled" else "c" * 64
+            route.fulfill(status=200, content_type="application/json", body='{"ok":true}')
+            return
+        current = state["value"]
+        item = {
+            "peer_id": 1,
+            "peer_mesh_id": "!bbbbbbbb",
+            "peer_name": "<img src=x onerror=alert(1)> Relay B",
+            "stream": "incidents",
+            "uid": "synthetic-incident",
+            "revision": 15,
+            "state": current,
+            "reason": "quiet_hours" if current == "queued" else None,
+            "queued_frames": 3 if current == "queued" else 0,
+            "radio_completed_frames": 3 if current == "stored" else 0,
+            "remote_storage": "observed" if current == "stored" else "not_confirmed",
+            "application_attempts": 1,
+            "lane": "fresh",
+            "action_token": state["token"],
+            "can_cancel": current == "queued",
+            "can_retry": current == "cancelled",
+        }
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": [item],
+                    "next": None,
+                    "policy_enabled": True,
+                    "quiet_hours_active": True,
+                    "maximum_application_attempts": 3,
+                    "delivery_window_seconds": 1800,
+                    "storage_receipt_is_human_ack": False,
+                }
+            ),
+        )
+
+    page.route("**/api/v1/federation/incident-delivery*", delivery)
+    health = BrowserHealth(page)
+    page.on("dialog", lambda dialog: dialog.accept())
+    try:
+        page.goto(f"{dashboard_url}/federation.html", wait_until="domcontentloaded")
+        panel = page.locator("#incident-delivery")
+        playwright.expect(panel).to_contain_text("Queued, not confirmed remotely")
+        playwright.expect(panel).to_contain_text("Responder acknowledgement: not reported")
+        assert panel.locator("img").count() == 0
+        panel.get_by_role("button", name="Cancel this version").click()
+        playwright.expect(panel.get_by_role("button", name="Explicit retry")).to_be_visible()
+        panel.get_by_role("button", name="Explicit retry").click()
+        playwright.expect(panel.get_by_role("button", name="Cancel this version")).to_be_visible()
+        assert [item["action"] for item in writes] == ["cancel", "retry"]
+        state["value"] = "stored"
+        panel.get_by_role("button", name="Refresh", exact=True).click()
+        playwright.expect(panel).to_contain_text("Exact remote storage observed")
+        playwright.expect(panel).to_contain_text("Remote human review: not reported")
+        assert panel.get_by_role("button", name="Explicit retry").count() == 0
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        health.assert_clean()
+    finally:
+        page.close()
+
+
 def route_federation_policy_workspace(
     page: object, applied: list[dict[str, object]], *, offline: bool = False
 ) -> None:
@@ -5089,6 +5182,22 @@ def route_federation_policy_workspace(
             "/api/v1/federation/mail",
         }:
             route.fulfill(status=200, content_type="application/json", body='{"items":[]}')
+        elif path == "/api/v1/federation/incident-delivery":
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "items": [],
+                        "next": None,
+                        "policy_enabled": True,
+                        "quiet_hours_active": False,
+                        "maximum_application_attempts": 3,
+                        "delivery_window_seconds": 1800,
+                        "storage_receipt_is_human_ack": False,
+                    }
+                ),
+            )
         elif path == "/api/v1/federation/sync-status":
             route.fulfill(
                 status=200,

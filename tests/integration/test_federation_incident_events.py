@@ -279,16 +279,16 @@ async def test_failed_reply_admission_leaves_committed_content_for_a_fresh_retry
     nodes, monkeypatch
 ):
     source, _, target, _, _, event = await prepare(nodes)
-    original = target._send_federation_value
+    original = target.incident_receipts.admit
 
     async def fail(*args, **kwargs):
         assert await target.database.read("SELECT * FROM fed_revision_receipt")
         raise ValueError("injected governor rejection")
 
-    monkeypatch.setattr(target, "_send_federation_value", fail)
+    monkeypatch.setattr(target.incident_receipts, "admit", fail)
     await wire(source, target, MessageType.INCIDENT, envelope(event))
     assert not await target.database.read("SELECT * FROM outbound_work")
-    monkeypatch.setattr(target, "_send_federation_value", original)
+    monkeypatch.setattr(target.incident_receipts, "admit", original)
     await wire(source, target, MessageType.INCIDENT, envelope(event))
     await flush_radio(target, source)
     assert len(await receipts(target)) == 1

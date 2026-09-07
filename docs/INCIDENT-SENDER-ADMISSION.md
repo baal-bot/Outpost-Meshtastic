@@ -2,9 +2,9 @@
 
 Software slice [#169](https://github.com/baal-bot/Outpost-Meshtastic/issues/169), following
 [#167 staging](INCIDENT-SENDER-HANDOFF.md) and [#168 commit publication](OUTBOX-COMMIT-PUBLICATION.md).
-There is **no automatic sender timer**. [#135](https://github.com/baal-bot/Outpost-Meshtastic/issues/135)
-still owns bounded scheduling, automatic application retries/expiry, fresh-versus-backfill fairness,
-receipt-reply coalescing, operator delivery-stage presentation and end-to-end/physical G6 acceptance.
+The later [automatic sender in #135](INCIDENT-AUTOMATIC-DELIVERY.md) now uses this service for
+bounded scheduling, finite application retries/expiry, fresh/backlog lanes, coalesced replies
+and operator delivery stages. Original #169 added no timer; physical G6 remains open.
 
 ## Explicit admission
 
@@ -98,7 +98,8 @@ requires current exact evidence, so an older receipt cannot authorize a newer no
 public alert approval, responder notification/acknowledgement, downstream replication or continued
 remote retention. Remote deletion/restore can invalidate previously observed storage; refusal of a
 note then requires catch-up/recovery policy, not an invented positive receipt. Receiver reply
-coalescing is not added here; duplicate event retries can still queue multiple governed replies.
+coalescing was not part of #169; the later #135 reply owner coalesces exact pending replies
+and revalidates retained storage evidence before recovered/retried attempts.
 
 ## Compatibility, retention and limits
 
