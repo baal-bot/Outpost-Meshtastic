@@ -15,9 +15,9 @@ from tests.support.incident_mesh import incident_mesh, synthetic_tiles
 pytestmark = pytest.mark.production_wiring
 
 
-async def operator_client(app, stack):
+async def operator_client(app, stack, *, role="operator", username="coordinator"):
     password = secrets.token_urlsafe(24)
-    await app.web_auth.create_account("coordinator", "Coordinator", "operator", password, "test:g6")
+    await app.web_auth.create_account(username, "Coordinator", role, password, "test:g6")
     client = await stack.enter_async_context(
         httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app.web),
@@ -25,7 +25,7 @@ async def operator_client(app, stack):
         )
     )
     login = await client.post(
-        "/api/v1/auth/login", json={"username": "coordinator", "password": password}
+        "/api/v1/auth/login", json={"username": username, "password": password}
     )
     assert login.status_code == 200, login.text
     changed = await client.post(
@@ -35,7 +35,7 @@ async def operator_client(app, stack):
     )
     assert changed.status_code == 200, changed.text
     login = await client.post(
-        "/api/v1/auth/login", json={"username": "coordinator", "password": password + "-changed"}
+        "/api/v1/auth/login", json={"username": username, "password": password + "-changed"}
     )
     assert login.status_code == 200 and not login.json()["must_change"]
     return client

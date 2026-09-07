@@ -18,7 +18,7 @@ from outpost import boot_readiness, diagnostics
 from outpost.clock import VirtualClock
 from outpost.config import Config
 from outpost.router.intents import IntentResolver
-from outpost.self_check import SelfCheckService
+from outpost.self_check import ATTESTABLE, SelfCheckService
 from outpost.store import Database
 from outpost.store.backups import BackupService
 from outpost.store.members import MemberRepo
@@ -96,7 +96,10 @@ async def ready_service(tmp_path: Path) -> SelfCheckService:
     intents = tmp_path / "intents.yaml"
     intents.write_text("[]\n")
     config = Config.model_validate(
-        {"store": {"path": str(tmp_path / "outpost.db")}, "router": {"intents_file": str(intents)}}
+        {
+            "store": {"path": str(tmp_path / "outpost.db"), "tiles_path": str(tmp_path / "tiles")},
+            "router": {"intents_file": str(intents)},
+        }
     )
     database = Database(config.store.path)
     await database.open()
@@ -122,7 +125,8 @@ async def test_boot_schema_uses_real_readiness_and_persists_scoped_evidence(
     service = await ready_service(tmp_path)
     try:
         report = await service.run("startup")
-        assert report["status"] == "ready"
+        assert report["status"] == "degraded"
+        assert set(report["failed_checks"]) == ATTESTABLE | {"radio_power"}
         check = next(item for item in report["checks"] if item["name"] == "boot_schema")
         assert check["passed"] is True
         assert check["evidence"]["state"] == "compatible"
@@ -162,7 +166,7 @@ async def test_healthy_developer_http_cannot_hide_incompatible_boot_schema(
         assert local.get("/api/v1/health").json()["status"] == "ok"
         report = local.post("/api/v1/diagnostics/readiness").json()
         assert report["status"] == "degraded"
-        assert report["failed_checks"] == ["boot_schema"]
+        assert set(report["failed_checks"]) == ATTESTABLE | {"radio_power", "boot_schema"}
         check = next(item for item in report["checks"] if item["name"] == "boot_schema")
         assert check["evidence"]["state"] == "incompatible"
         assert check["evidence"]["boot_schema_cap"] == 153
@@ -185,7 +189,9 @@ async def test_healthy_developer_http_cannot_hide_incompatible_boot_schema(
         )
         # A later explicit run recovers the warning without restoring any data.
         migration.with_name("0153_old.sql").rename(migration)
-        assert (await service.run("maintenance"))["status"] == "ready"
+        recovered = await service.run("maintenance")
+        assert recovered["status"] == "degraded"
+        assert set(recovered["failed_checks"]) == ATTESTABLE | {"radio_power"}
     finally:
         await service.database.close()
 
@@ -223,7 +229,7 @@ async def test_unknown_or_failed_boot_selection_never_reports_all_ready(
     try:
         report = await service.run("manual")
         assert report["status"] == "degraded"
-        assert report["failed_checks"] == ["boot_schema"]
+        assert set(report["failed_checks"]) == ATTESTABLE | {"radio_power", "boot_schema"}
         check = next(item for item in report["checks"] if item["name"] == "boot_schema")
         assert check["passed"] is False
         assert check["evidence"]["reason"] == reason
@@ -247,7 +253,7 @@ async def test_own_notify_startup_is_a_static_schema_check_not_a_boot_failure(
     service = await ready_service(tmp_path)
     try:
         report = await service.run("startup")
-        assert report["status"] == ("ready" if same_source else "degraded")
+        assert report["status"] == "degraded"
         check = next(item for item in report["checks"] if item["name"] == "boot_schema")
         assert check["passed"] is same_source
         if same_source:
@@ -294,7 +300,9 @@ async def test_boot_probe_does_not_block_radio_event_loop(
             )
         release.set()
         report = await pending
-        assert report["status"] == ("degraded" if schema_changes else "ready")
+        assert report["status"] == "degraded"
+        check = next(item for item in report["checks"] if item["name"] == "boot_schema")
+        assert check["passed"] is not schema_changes
         if schema_changes:
             check = next(item for item in report["checks"] if item["name"] == "boot_schema")
             assert check["evidence"]["reason"] == "database_schema_changed"
@@ -437,7 +445,7 @@ async def test_unreadable_database_schema_is_not_a_pass(
         await service.database.write("DROP TABLE schema_version")
         report = await service.run("manual")
         assert report["status"] == "degraded"
-        assert report["failed_checks"] == ["boot_schema"]
+        assert set(report["failed_checks"]) == ATTESTABLE | {"radio_power", "boot_schema"}
         check = next(item for item in report["checks"] if item["name"] == "boot_schema")
         assert check["evidence"]["reason"] == "database_schema_unavailable"
     finally:
@@ -481,7 +489,9 @@ async def test_cancelled_readiness_keeps_single_flight_until_probe_exits(
         release.set()
         with pytest.raises(asyncio.CancelledError):
             await first
-        assert (await second)["status"] == "ready"
+        report = await second
+        assert report["status"] == "degraded"
+        assert set(report["failed_checks"]) == ATTESTABLE | {"radio_power"}
         assert calls == 4
     finally:
         release.set()

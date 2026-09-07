@@ -112,3 +112,8 @@ files = ["src/outpost/fed/item_failures.py"]
 [production_groups.boot_readiness]
 minimum = 90
 files = ["src/outpost/boot_readiness.py"]
+
+[production_groups.outage_readiness]
+minimum = 90
+per_file_minimum = 90
+files = ["src/outpost/self_check.py", "src/outpost/readiness_probes.py"]

@@ -68,7 +68,7 @@ async def test_no_battery_is_recorded_and_reported_without_a_false_alarm(tmp_pat
         IntentResolver(str(intents)),
     )
     check = await self_check._radio_power()
-    assert check.passed
+    assert not check.passed and check.state == "unknown"
     assert check.evidence["condition"] == "not_reported"
 
     situation = SituationBriefingService(

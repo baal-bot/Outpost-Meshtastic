@@ -1,22 +1,26 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import sqlite3
 import uuid
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from prometheus_client import Gauge
 from pydantic import BaseModel
 
+from outpost.audit import write_audit
 from outpost.boot_readiness import describe_boot_schema, inspect_boot_schema
 from outpost.clock import Clock
 from outpost.config import Config
 from outpost.radio_power import normalize_battery_level, power_condition
+from outpost.readiness_probes import map_inventory, storage_inventory
 from outpost.store import Database
 
 
@@ -29,6 +33,23 @@ class IntentInventory(Protocol):
 
 
 Severity = Literal["safety", "operations", "configuration"]
+EvidenceState = Literal["pass", "fail", "stale", "unknown", "attested"]
+EVIDENCE_STATES = ("pass", "fail", "stale", "unknown", "attested")
+REPORT_SCHEMA = 2
+MAX_REPORT_AGE = 900
+OBSERVATION_TTL = 86_400
+ATTESTABLE = frozenset(
+    {
+        "offline_maps",
+        "time_confidence",
+        "backup_restore",
+        "station_power",
+        "local_access",
+        "peer_path",
+        "same_reception",
+    }
+)
+OBSERVATION_PREFIX = "readiness.observation."
 
 
 @dataclass(frozen=True)
@@ -50,6 +71,8 @@ class CheckResult:
     impact: str
     remediation: str
     evidence: dict[str, object]
+    state: EvidenceState = "unknown"
+    review_token: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -67,7 +90,7 @@ CHECK_DEFINITIONS = (
     CheckDefinition(
         "responder_audience",
         "safety",
-        "A responder can receive urgent help",
+        "A responder audience is configured",
         "HELPME and targeted urgent alerts cannot reach another person.",
         "Review a known radio in Members and grant it Responder or Operator trust.",
     ),
@@ -107,6 +130,70 @@ CHECK_DEFINITIONS = (
         "Open Mail for the failed delivery record, correct its audience, and retry the alert.",
     ),
     CheckDefinition(
+        "storage_reserve",
+        "operations",
+        "Storage has immediate byte and inode headroom",
+        "Exhausted storage can stop recording reports and recovery metadata.",
+        "Review storage usage and retention before arranging a backed-up cleanup or expansion. "
+        "This check never deletes data or proves write endurance or outage duration.",
+    ),
+    CheckDefinition(
+        "offline_maps",
+        "operations",
+        "Regional offline map coverage is qualified",
+        "An available tile or manifest does not establish useful maps throughout the service area.",
+        "Provision and independently verify a licensed regional pack, bounds and zoom coverage. "
+        "This check does not download maps or certify a sampled tile.",
+    ),
+    CheckDefinition(
+        "time_confidence",
+        "operations",
+        "Network-independent timekeeping is qualified",
+        "An untrusted clock can invalidate expiry, quiet hours and evidence freshness.",
+        "Verify the clock source and RTC holdover under an approved procedure. "
+        "A valid timezone or a recent internet sync is not offline holdover proof.",
+    ),
+    CheckDefinition(
+        "backup_restore",
+        "operations",
+        "A recent off-device recovery restore is qualified",
+        "Local snapshot rotation does not prove a recoverable copy survives loss of this node.",
+        "Verify an encrypted off-device copy and an approved isolated replacement-node restore. "
+        "This checker does not create, export or restore a backup.",
+    ),
+    CheckDefinition(
+        "station_power",
+        "operations",
+        "Whole-station energy reserve is qualified",
+        "The host, access point, storage and radios can fail even when one radio has battery.",
+        "Measure the complete station load and usable energy under an approved power test. "
+        "Connected-radio telemetry is not whole-station autonomy.",
+    ),
+    CheckDefinition(
+        "local_access",
+        "operations",
+        "Replacement-client access works without WAN or cell service",
+        "A working developer browser does not prove a new community device can reach the node.",
+        "Use an approved offline replacement-device access exercise to verify local discovery, "
+        "authentication and assets. This check does not disconnect any network.",
+    ),
+    CheckDefinition(
+        "peer_path",
+        "operations",
+        "A WAN-independent community peer path is qualified",
+        "Discovery and past storage receipts do not prove an available radio-only community path.",
+        "Review active peers and arrange a scoped offline peer-path exercise when hardware is "
+        "available. This check sends no pings, reports or radio packets.",
+    ),
+    CheckDefinition(
+        "same_reception",
+        "operations",
+        "SAME reception is qualified for the installed receiver",
+        "A connected SDR or an audio buffer does not prove weather-alert decoding and handling.",
+        "Review receiver configuration and an approved independent SAME qualification record. "
+        "This check does not tune, restart, transmit or inject an alert.",
+    ),
+    CheckDefinition(
         "intent_map",
         "configuration",
         "The tolerant command map parsed cleanly",
@@ -144,6 +231,11 @@ SELF_CHECK_STATE = Gauge(
 SELF_CHECK_LAST_RUN = Gauge(
     "outpost_self_check_last_run_timestamp_seconds",
     "Unix timestamp of the most recent readiness self-check",
+)
+SELF_CHECK_EVIDENCE = Gauge(
+    "outpost_self_check_evidence_state",
+    "Evidence classification for a named readiness assertion (one hot)",
+    ("check", "state"),
 )
 
 
@@ -186,11 +278,20 @@ class SelfCheckService:
         self.backups = backups
         self.intents = intents
         self._run_lock = asyncio.Lock()
+        self._session = uuid.uuid4().hex
+        self._initial_wall = clock.now().timestamp()
+        try:
+            self._initial_mono: float | None = clock.monotonic()
+        except RuntimeError:
+            # CLI inventory constructs the app before an event loop exists.
+            # Establish the paired baseline when an assessment actually runs.
+            self._initial_mono = None
         self._cached: dict[str, Any] = self._empty_report()
 
     @staticmethod
     def _empty_report() -> dict[str, Any]:
         return {
+            "schema": REPORT_SCHEMA,
             "status": "never_run",
             "generated_at": None,
             "trigger": None,
@@ -200,7 +301,32 @@ class SelfCheckService:
         }
 
     def snapshot(self) -> dict[str, Any]:
-        return deepcopy(self._cached)
+        report = deepcopy(self._cached)
+        stamp = report.get("generated_at")
+        if stamp is None:
+            self._metrics(report)
+            return report
+        now = int(self.clock.now().timestamp())
+        age = now - stamp
+        stale = (
+            not 0 <= age <= MAX_REPORT_AGE
+            or report.get("generation") != self._scope()
+            or self._clock_changed()
+        )
+        for check in report["checks"]:
+            deadlines = [
+                check["evidence"].get(name)
+                for name in ("observation_valid_until", "measurement_valid_until")
+            ]
+            expired = any(type(deadline) is int and now >= deadline for deadline in deadlines)
+            if check["state"] in {"pass", "attested"} and (stale or expired):
+                check.update(state="stale", passed=False)
+                check["detail"] = "Evidence needs a fresh check. " + check["detail"]
+        report["age_seconds"] = age
+        report["cached_evidence_stale"] = stale
+        report = self._summarize(report)
+        self._metrics(report)
+        return report
 
     async def latest(self) -> dict[str, Any]:
         if self._cached.get("generated_at") is not None:
@@ -211,11 +337,80 @@ class SelfCheckService:
         if rows:
             try:
                 value = json.loads(rows[0]["value"])
-                if isinstance(value, dict):
+                if (
+                    isinstance(value, dict)
+                    and value.get("schema") == REPORT_SCHEMA
+                    and type(value.get("generated_at")) is int
+                    and isinstance(value.get("checks"), list)
+                    and len(value["checks"]) == len(CHECK_NAMES)
+                    and {row.get("name") for row in value["checks"] if isinstance(row, dict)}
+                    == CHECK_NAMES
+                    and all(
+                        isinstance(row, dict)
+                        and row.get("state") in EVIDENCE_STATES
+                        and row.get("passed") is (row["state"] == "pass")
+                        and row.get("severity") == _DEFINITION[row["name"]].severity
+                        and isinstance(row.get("evidence"), dict)
+                        and all(
+                            isinstance(row.get(field), str)
+                            for field in ("title", "detail", "impact", "remediation")
+                        )
+                        for row in value["checks"]
+                    )
+                ):
                     self._cached = value
             except (json.JSONDecodeError, TypeError):
                 pass
         return self.snapshot()
+
+    def _clock_changed(self) -> bool:
+        if self._initial_mono is None:
+            self._initial_wall = self.clock.now().timestamp()
+            self._initial_mono = self.clock.monotonic()
+            return False
+        elapsed = self.clock.monotonic() - self._initial_mono
+        return abs(self.clock.now().timestamp() - self._initial_wall - elapsed) > 5
+
+    def _scope(self) -> str:
+        # No credentials, locations or paths are exported. A process restart or
+        # relevant loaded policy change invalidates cached certification/observations.
+        value = [
+            self._session,
+            self.config.store.path,
+            self.config.store.tiles_path,
+            self.config.node.location.model_dump() if self.config.node.location else None,
+            self.config.radio.transport,
+            self.config.radio.federation_portnum,
+            self.config.modules.model_dump(),
+        ]
+        return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+    @staticmethod
+    def _summarize(report: dict[str, Any]) -> dict[str, Any]:
+        checks = report["checks"]
+        failed = [row for row in checks if not row["passed"]]
+        safety = sum(row["severity"] == "safety" and row["state"] == "fail" for row in failed)
+        report.update(
+            status="failed" if safety else "degraded" if failed else "ready",
+            safety_failures=safety,
+            safety_unverified=sum(
+                row["severity"] == "safety" and row["state"] != "fail" for row in failed
+            ),
+            failed_checks=[row["name"] for row in failed],
+            state_counts={
+                state: sum(row["state"] == state for row in checks) for state in EVIDENCE_STATES
+            },
+        )
+        return report
+
+    @staticmethod
+    def _metrics(report: dict[str, Any]) -> None:
+        available = {check["name"]: check for check in report["checks"]}
+        for definition in CHECK_DEFINITIONS:
+            check = available.get(definition.name, {"state": "unknown", "passed": False})
+            SELF_CHECK_STATE.labels(definition.name, definition.severity).set(int(check["passed"]))
+            for state in EVIDENCE_STATES:
+                SELF_CHECK_EVIDENCE.labels(definition.name, state).set(int(check["state"] == state))
 
     @staticmethod
     def _result(
@@ -223,17 +418,21 @@ class SelfCheckService:
         passed: bool,
         detail: str,
         evidence: dict[str, object],
+        *,
+        state: EvidenceState | None = None,
     ) -> CheckResult:
         definition = _DEFINITION[name]
+        state = state or ("pass" if passed else "fail")
         return CheckResult(
             name,
             definition.severity,
             definition.title,
-            passed,
+            state == "pass",
             detail,
             definition.impact,
             definition.remediation,
             evidence,
+            state,
         )
 
     async def _responder_audience(self) -> CheckResult:
@@ -245,7 +444,8 @@ class SelfCheckService:
         return self._result(
             "responder_audience",
             count > 0,
-            f"{count} active radio{'s' if count != 1 else ''} can receive responder traffic.",
+            f"{count} active radio{'s' if count != 1 else ''} are eligible for responder traffic; "
+            "actual reachability is not established by directory membership.",
             {"recipient_count": count},
         )
 
@@ -307,7 +507,13 @@ class SelfCheckService:
             "maintenance_freshness",
             passed,
             detail,
-            {"last_run_at": recorded_at, "age_seconds": age},
+            {
+                "last_run_at": recorded_at,
+                "age_seconds": age,
+                "measurement_valid_until": recorded_at + 48 * 3600 + 1
+                if recorded_at is not None
+                else None,
+            },
         )
 
     def _backup_rotation(self) -> CheckResult:
@@ -341,14 +547,21 @@ class SelfCheckService:
             },
         )
 
-    async def _radio_power(self) -> CheckResult:
+    async def _radio_power(self, now: int | None = None) -> CheckResult:
+        now = int(self.clock.now().timestamp()) if now is None else now
         rows = await self.database.read(
             "SELECT captured_at,battery_level FROM radio_power_sample "
             "ORDER BY captured_at DESC,id DESC LIMIT 1"
         )
         level = normalize_battery_level(rows[0]["battery_level"]) if rows else None
         condition = power_condition(level, self.config.radio.power)
-        passed = condition in {"normal", "not_reported"}
+        age = now - int(rows[0]["captured_at"]) if rows else None
+        max_age = 2 * self.config.radio.power.sample_interval_s + 60
+        state: EvidenceState = "pass" if condition == "normal" else "fail"
+        if age is None or age < 0 or level is None:
+            state = "unknown"
+        elif age > max_age:
+            state = "stale"
         if not rows:
             detail = "No connected-radio power sample has been recorded yet."
         elif level is None:
@@ -361,7 +574,7 @@ class SelfCheckService:
             detail = f"Radio battery is {level}%."
         return self._result(
             "radio_power",
-            passed,
+            state == "pass",
             detail,
             {
                 "battery_level": level,
@@ -369,7 +582,13 @@ class SelfCheckService:
                 "captured_at": int(rows[0]["captured_at"]) if rows else None,
                 "warning_percent": self.config.radio.power.warning_percent,
                 "critical_percent": self.config.radio.power.critical_percent,
+                "age_seconds": age,
+                "max_age_seconds": max_age,
+                "measurement_valid_until": int(rows[0]["captured_at"]) + max_age + 1
+                if rows
+                else None,
             },
+            state=state,
         )
 
     async def _alert_delivery_history(self, now: int) -> CheckResult:
@@ -471,7 +690,223 @@ class SelfCheckService:
             evidence["state"] == "compatible",
             describe_boot_schema(evidence),
             evidence,
+            state="pass"
+            if evidence["state"] == "compatible"
+            else "unknown"
+            if evidence["state"] == "unknown"
+            else "fail",
         )
+
+    async def _outage_checks(self, now: int) -> list[CheckResult]:
+        def local() -> tuple[dict[str, object], dict[str, object]]:
+            return map_inventory(self.config.store.tiles_path), storage_inventory(
+                self.config.store.path
+            )
+
+        probe = asyncio.create_task(asyncio.to_thread(local))
+        cancelled = False
+        while True:
+            try:
+                maps, storage = await asyncio.shield(probe)
+                break
+            except asyncio.CancelledError:
+                if probe.cancelled():
+                    raise
+                cancelled = True
+        if cancelled:
+            raise asyncio.CancelledError
+        receipts = await self.database.read(
+            "SELECT d.stored_at FROM fed_incident_dispatch d WHERE d.peer_id IN "
+            "(SELECT id FROM fed_peer WHERE state='active' AND sync_incidents=1 "
+            "ORDER BY id LIMIT 20) "
+            "ORDER BY d.peer_id,d.stream,d.uid LIMIT 100"
+        )
+        stamps = [row["stored_at"] for row in receipts if row["stored_at"] is not None]
+        stamp = max(stamps) if stamps else None
+        age = now - stamp if stamp is not None else None
+        peer_state: EvidenceState = "stale" if age is not None and age > 3600 else "unknown"
+        return [
+            self._result(
+                "offline_maps",
+                False,
+                "Offline map metadata is missing or invalid."
+                if maps["state"] == "fail"
+                else "Manifest present; regional coverage, zooms and integrity are unverified.",
+                maps,
+                state=cast(EvidenceState, maps["state"]),
+            ),
+            self._result(
+                "storage_reserve",
+                storage["state"] == "pass",
+                "Immediate headroom only; outage duration and write endurance are unverified.",
+                storage,
+                state=cast(EvidenceState, storage["state"]),
+            ),
+            self._result(
+                "time_confidence",
+                False,
+                "A wall-clock step was observed during this process."
+                if self._clock_changed()
+                else "No qualified network-independent clock/RTC holdover evidence is available.",
+                {"wall_step_observed": self._clock_changed(), "holdover_verified": False},
+                state="fail" if self._clock_changed() else "unknown",
+            ),
+            self._result(
+                "backup_restore",
+                False,
+                "Local snapshots do not prove an encrypted off-device recovery restore.",
+                {"off_device_restore_verified": False},
+                state="unknown",
+            ),
+            self._result(
+                "station_power",
+                False,
+                "No whole-station load and usable-energy qualification is available.",
+                {"station_autonomy_verified": False, "radio_battery_is_station_power": False},
+                state="unknown",
+            ),
+            self._result(
+                "local_access",
+                False,
+                "Developer HTTP health does not prove replacement-client access without WAN/cell.",
+                {"replacement_client_verified": False},
+                state="unknown",
+            ),
+            self._result(
+                "peer_path",
+                False,
+                f"{len(stamps)} sampled stored receipt(s); radio-only path remains unqualified. "
+                "The sample is not an exhaustive inventory or current reachability check.",
+                {
+                    "sampled_dispatches": len(receipts),
+                    "stored_in_sample": len(stamps),
+                    "latest_sampled_receipt_at": stamp,
+                    "age_seconds": age,
+                    "wan_independent_path_verified": False,
+                },
+                state=peer_state,
+            ),
+            self._result(
+                "same_reception",
+                False,
+                "An SDR connection or audio buffer does not establish qualified SAME reception.",
+                {"same_reception_verified": False},
+                state="unknown",
+            ),
+        ]
+
+    def _observation_token(self, name: str, raw: str | None) -> str:
+        return hashlib.sha256(json.dumps([self._scope(), name, raw]).encode()).hexdigest()
+
+    def _with_observation(self, result: CheckResult, raw: str | None, now: int) -> CheckResult:
+        if result.name not in ATTESTABLE:
+            return result
+        token = self._observation_token(result.name, raw)
+        if raw is None:
+            return replace(result, review_token=token)
+        evidence = dict(result.evidence)
+        state: EvidenceState = "unknown"
+        detail = "Stored operator observation is invalid; review and record it again."
+        try:
+            observation = json.loads(raw)
+            if (
+                not isinstance(observation, dict)
+                or type(observation.get("schema")) is not int
+                or observation["schema"] != 1
+                or type(observation.get("observed_at")) is not int
+                or type(observation.get("valid_until")) is not int
+                or observation["valid_until"] != observation["observed_at"] + OBSERVATION_TTL
+                or observation.get("outcome") not in ("pass", "fail")
+            ):
+                raise ValueError("invalid observation")
+            evidence.update(
+                observation_outcome=observation["outcome"],
+                observed_at=observation["observed_at"],
+                observation_valid_until=observation["valid_until"],
+            )
+            if observation.get("generation") != self._scope() or now >= observation["valid_until"]:
+                state, detail = (
+                    "stale",
+                    "Operator observation expired or belongs to an earlier process/policy.",
+                )
+            elif now < observation["observed_at"] or self._clock_changed():
+                detail = "Clock uncertainty prevents evaluating the observation's freshness."
+            elif observation["outcome"] == "fail":
+                state, detail = "fail", "An operator reported that this qualification check failed."
+            else:
+                state = "attested"
+                detail = (
+                    "An operator reported a successful check; not independently measured proof."
+                )
+        except (ValueError, TypeError):
+            pass
+        # An operator statement can never override a measured local failure.
+        if result.state == "fail":
+            state = "fail"
+            detail = "The local check failed; an operator observation cannot override it. " + detail
+        return replace(
+            result,
+            state=state,
+            passed=False,
+            detail=detail + " " + result.detail,
+            evidence=evidence,
+            review_token=token,
+        )
+
+    async def record_observation(
+        self, name: str, outcome: str, observed_at: int, review_token: str, actor: str
+    ) -> dict[str, Any]:
+        """Record a human statement, never execute the qualification procedure."""
+        if (
+            not isinstance(name, str)
+            or name not in ATTESTABLE
+            or outcome not in ("pass", "fail")
+            or type(observed_at) is not int
+            or not isinstance(review_token, str)
+            or len(review_token) != 64
+        ):
+            raise ValueError("Invalid readiness observation")
+        async with self._run_lock:
+            now = int(self.clock.now().timestamp())
+            if self._clock_changed() or not now - OBSERVATION_TTL < observed_at <= now:
+                raise ValueError(
+                    "Observation must be within the last day with a stable local clock"
+                )
+            generation = self._scope()
+            key = OBSERVATION_PREFIX + name
+            async with self.database.transaction() as tx:
+                rows = await tx.read("SELECT value FROM runtime_setting WHERE key=?", (key,))
+                raw = rows[0]["value"] if rows else None
+                if not hmac.compare_digest(review_token, self._observation_token(name, raw)):
+                    raise ValueError("Readiness observation changed; refresh before recording")
+                observation = {
+                    "schema": 1,
+                    "outcome": outcome,
+                    "observed_at": observed_at,
+                    "valid_until": observed_at + OBSERVATION_TTL,
+                    "generation": generation,
+                }
+                await tx.write(
+                    "INSERT INTO runtime_setting(key,value,updated_at) VALUES(?,?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value,"
+                    "updated_at=excluded.updated_at",
+                    (key, json.dumps(observation, sort_keys=True), now),
+                )
+                await write_audit(
+                    tx,
+                    actor_kind="web",
+                    actor_ref=actor,
+                    action="readiness.observation",
+                    target=name,
+                    detail={k: observation[k] for k in ("outcome", "observed_at", "valid_until")},
+                    created_at=now,
+                )
+                # Invalidate the old report in the same commit as the observation.
+                await tx.write("DELETE FROM runtime_setting WHERE key='readiness.self_check'")
+                tx.after_commit(lambda: setattr(self, "_cached", self._empty_report()))
+                if self._scope() != generation or self._clock_changed():
+                    raise ValueError("Readiness policy or clock changed before recording")
+        return await self.run("operator-observation")
 
     async def _sync_inbox(self, results: list[CheckResult], now: int) -> None:
         for result in results:
@@ -524,28 +959,41 @@ class SelfCheckService:
     async def run(self, trigger: str = "manual") -> dict[str, Any]:
         async with self._run_lock:
             now = int(self.clock.now().timestamp())
+            generation = self._scope()
             results = [
                 await self._responder_audience(),
                 await self._escalation_audiences(),
                 await self._boot_schema(),
                 await self._maintenance_freshness(now),
                 self._backup_rotation(),
-                await self._radio_power(),
+                await self._radio_power(now),
                 await self._alert_delivery_history(now),
                 self._intent_map(),
                 self._configured_keys_effective(),
                 self._timezone(),
+                *(await self._outage_checks(now)),
             ]
-            failed = [result for result in results if not result.passed]
-            safety_failures = sum(result.severity == "safety" for result in failed)
-            report = {
-                "status": "failed" if safety_failures else "degraded" if failed else "ready",
-                "generated_at": now,
-                "trigger": trigger[:40],
-                "safety_failures": safety_failures,
-                "failed_checks": [result.name for result in failed],
-                "checks": [result.as_dict() for result in results],
+            observations = await self.database.read(
+                "SELECT key,value FROM runtime_setting WHERE key IN (?,?,?,?,?,?,?)",
+                tuple(OBSERVATION_PREFIX + name for name in ATTESTABLE),
+            )
+            by_name = {
+                row["key"].removeprefix(OBSERVATION_PREFIX): row["value"] for row in observations
             }
+            results = [
+                self._with_observation(result, by_name.get(result.name), now) for result in results
+            ]
+            report = self._summarize(
+                {
+                    "schema": REPORT_SCHEMA,
+                    "generation": generation,
+                    "generated_at": now,
+                    "age_seconds": 0,
+                    "cached_evidence_stale": False,
+                    "trigger": trigger[:40],
+                    "checks": [result.as_dict() for result in results],
+                }
+            )
             await self.database.write(
                 "INSERT INTO runtime_setting(key,value,updated_at) "
                 "VALUES('readiness.self_check',?,?) ON CONFLICT(key) DO UPDATE SET "
@@ -553,8 +1001,6 @@ class SelfCheckService:
                 (json.dumps(report, separators=(",", ":")), now),
             )
             await self._sync_inbox(results, now)
-            for result in results:
-                SELF_CHECK_STATE.labels(result.name, result.severity).set(int(result.passed))
             SELF_CHECK_LAST_RUN.set(now)
             self._cached = report
             return self.snapshot()

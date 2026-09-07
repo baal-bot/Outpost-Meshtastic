@@ -43,7 +43,7 @@ revision on which CI runs this manifest check.
 | Outpost federation | Pairing, authenticated framing, policy, producer-revision board/incident/alert reconciliation and separately negotiated plain incident notes with durable pending-page receipts and bounded indexed discovery; automatic incident/note delivery with independent fresh/backlog lanes, finite persistent retries, guarded coalesced storage receipts and operator delivery controls; version-bound human import/rejection with atomic audit, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, transactional destination dispatch, and privacy-gated topology health. | Two-node field-tested | unreleased @ `HEAD` (2026-09-07); introduced `8f7219e` |
 | Meshtastic MQTT federation path | Optional radio-firmware MQTT discovery, targeted bootstrap, transport observation, and resilient pairing approvals. | Two-node field-tested | unreleased @ `HEAD` (2026-08-26); introduced `f75f8af` |
 | Local AI assistant | ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, native HailoRT Qwen3-VL provider, bounded device reacquisition, and explicit readiness state. | Hardware-gated | unreleased @ `HEAD` (2026-08-27); introduced `6b3d01a` |
-| Installation and diagnostics | Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, fail-closed static boot-schema readiness evidence, authenticated releases, health-gated Hailo handoff, and hardened service tooling. | Automated-tested | unreleased @ `HEAD` (2026-09-05); introduced `d614d85` |
+| Installation and diagnostics | Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, health-gated Hailo handoff, and hardened service tooling. | Automated-tested | unreleased @ `HEAD` (2026-09-05); introduced `d614d85` |
 
 ## Evidence and limitations
 
@@ -399,12 +399,16 @@ Evidence:
 - Operations: [docs/ONBOARDING.md](ONBOARDING.md) — Field checklist, local access, wallboard isolation, and redacted diagnostic procedure.
 - Automated: [tests/integration/test_boot_readiness.py::test_healthy_developer_http_cannot_hide_incompatible_boot_schema](../tests/integration/test_boot_readiness.py) — Healthy HTTP cannot mask an incompatible selected boot package; cached readiness, metrics and loopback diagnostics preserve a scoped warning without migrations or radio work.
 - Automated: [tests/integration/test_boot_readiness.py::test_unknown_or_failed_boot_selection_never_reports_all_ready](../tests/integration/test_boot_readiness.py) — Unknown, disabled, custom, inactive and failed service selections degrade readiness without exporting raw unit values.
-- Operations: [docs/SAFETY-READINESS.md](SAFETY-READINESS.md) — Boot evidence boundaries, collection budgets and non-destructive remediation.
+- Operations: [docs/SAFETY-READINESS.md](SAFETY-READINESS.md) — All-check evidence states, finite operator observations, cache/sample freshness, collection budgets and non-destructive remediation; physical qualification remains separate.
+- Automated: [tests/integration/test_outage_readiness.py::test_healthy_local_checks_do_not_certify_unknown_outage_prerequisites](../tests/integration/test_outage_readiness.py) — Actual service/store assessment preserves unknown outage prerequisites despite healthy narrow checks, with no radio, alert or destructive exercise.
+- Automated: [tests/integration/test_outage_readiness.py::test_post_commit_cancellation_invalidates_the_old_in_memory_report](../tests/integration/test_outage_readiness.py) — Audited observations and cache invalidation commit together; cancellation, stale guards, clock changes, expiry, rollback and restart cannot invent measured certification.
+- Automated: [tests/browser/test_outage_readiness_ui.py::test_operator_can_review_all_evidence_and_record_an_explicit_observation](../tests/browser/test_outage_readiness_ui.py) — Real authenticated ASGI/Chromium supports all-check review and explicit operator observations on 320px and desktop layouts; CSRF/viewer/stale-input boundaries are exercised.
 
 Known limitations:
 
 - A recorded fresh-Pi mDNS/hotspot onboarding drill and extended unattended wallboard soak remain field gates.
 - Boot-schema evidence compares static package capacity with the inspected database; it does not prove configuration, import integrity, migration success, or unattended reboot/radio recovery. Custom or unavailable selections remain unknown.
+- Outage assessment cannot certify missing regional maps, clock holdover, off-device restoration, station energy, replacement-client access, radio-only peer paths or SAME reception. Operator observations remain unverified, finite and context-bound; no qualification exercise runs automatically.
 
 ## Global boundaries
 

@@ -847,10 +847,10 @@ description = "Opt-in hardware release-gate assertion for the full guarded corpu
 [[capabilities]]
 id = "installation_operations"
 area = "Installation and diagnostics"
-present = "Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, fail-closed static boot-schema readiness evidence, authenticated releases, health-gated Hailo handoff, and hardened service tooling."
+present = "Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, health-gated Hailo handoff, and hardened service tooling."
 maturity = "automated_tested"
 introduced_commit = "d614d85"
-limitations = ["A recorded fresh-Pi mDNS/hotspot onboarding drill and extended unattended wallboard soak remain field gates.", "Boot-schema evidence compares static package capacity with the inspected database; it does not prove configuration, import integrity, migration success, or unattended reboot/radio recovery. Custom or unavailable selections remain unknown."]
+limitations = ["A recorded fresh-Pi mDNS/hotspot onboarding drill and extended unattended wallboard soak remain field gates.", "Boot-schema evidence compares static package capacity with the inspected database; it does not prove configuration, import integrity, migration success, or unattended reboot/radio recovery. Custom or unavailable selections remain unknown.", "Outage assessment cannot certify missing regional maps, clock holdover, off-device restoration, station energy, replacement-client access, radio-only peer paths or SAME reception. Operator observations remain unverified, finite and context-bound; no qualification exercise runs automatically."]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
@@ -879,4 +879,16 @@ description = "Unknown, disabled, custom, inactive and failed service selections
 [[capabilities.evidence]]
 kind = "operations"
 path = "docs/SAFETY-READINESS.md"
-description = "Boot evidence boundaries, collection budgets and non-destructive remediation."
+description = "All-check evidence states, finite operator observations, cache/sample freshness, collection budgets and non-destructive remediation; physical qualification remains separate."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_outage_readiness.py::test_healthy_local_checks_do_not_certify_unknown_outage_prerequisites"
+description = "Actual service/store assessment preserves unknown outage prerequisites despite healthy narrow checks, with no radio, alert or destructive exercise."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_outage_readiness.py::test_post_commit_cancellation_invalidates_the_old_in_memory_report"
+description = "Audited observations and cache invalidation commit together; cancellation, stale guards, clock changes, expiry, rollback and restart cannot invent measured certification."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_outage_readiness_ui.py::test_operator_can_review_all_evidence_and_record_an_explicit_observation"
+description = "Real authenticated ASGI/Chromium supports all-check review and explicit operator observations on 320px and desktop layouts; CSRF/viewer/stale-input boundaries are exercised."

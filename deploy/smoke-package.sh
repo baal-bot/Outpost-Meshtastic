@@ -26,6 +26,8 @@ wheel = sys.argv[1]
 required = {
     "outpost/__main__.py",
     "outpost/diagnostics.py",
+    "outpost/self_check.py",
+    "outpost/readiness_probes.py",
     "outpost/onboarding.py",
     "outpost/setup_token.py",
     "outpost/store/migrations/0000_core.sql",
@@ -43,6 +45,7 @@ required = {
     "outpost/web/static/favicon.svg",
     "outpost/web/static/index.html",
     "outpost/web/static/incident-delivery.js",
+    "outpost/web/static/readiness.js",
     "outpost/web/static/layout.css",
     "outpost/web/static/nav.js",
     "outpost/web/static/radio.html",

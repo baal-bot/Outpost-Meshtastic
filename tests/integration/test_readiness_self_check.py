@@ -11,7 +11,7 @@ import outpost.self_check as self_check
 from outpost.clock import VirtualClock
 from outpost.config import Config
 from outpost.router.intents import IntentResolver
-from outpost.self_check import CHECK_NAMES, SelfCheckService
+from outpost.self_check import ATTESTABLE, CHECK_NAMES, SelfCheckService
 from outpost.store import Database
 from outpost.store.backups import BackupService
 from outpost.store.members import MemberRepo
@@ -25,7 +25,7 @@ def readiness_config(tmp_path: Path) -> Config:
     intents.write_text("[]\n", encoding="utf-8")
     return Config.model_validate(
         {
-            "store": {"path": str(tmp_path / "outpost.db")},
+            "store": {"path": str(tmp_path / "outpost.db"), "tiles_path": str(tmp_path / "tiles")},
             "router": {"intents_file": str(intents)},
         }
     )
@@ -64,7 +64,8 @@ async def test_self_check_persists_failures_recovers_and_detects_delivery_histor
     failed = await service.run("startup")
     assert failed["status"] == "failed"
     assert failed["safety_failures"] == 2
-    assert set(failed["failed_checks"]) == {
+    unqualified = ATTESTABLE | {"radio_power"}
+    assert set(failed["failed_checks"]) == unqualified | {
         "responder_audience",
         "escalation_audiences",
         "maintenance_freshness",
@@ -92,12 +93,13 @@ async def test_self_check_persists_failures_recovers_and_detects_delivery_histor
     )
 
     ready = await service.run("dashboard:web:operator")
-    assert ready["status"] == "ready"
+    assert ready["status"] == "degraded"
+    assert set(ready["failed_checks"]) == unqualified
     assert ready["safety_failures"] == 0
     persisted = await database.read(
         "SELECT value FROM runtime_setting WHERE key='readiness.self_check'"
     )
-    assert json.loads(persisted[0]["value"])["status"] == "ready"
+    assert json.loads(persisted[0]["value"])["status"] == "degraded"
     inbox = await database.read(
         "SELECT state,operator_read_at FROM mail WHERE conversation_key LIKE 'system:self-check:%'"
     )
@@ -111,7 +113,7 @@ async def test_self_check_persists_failures_recovers_and_detects_delivery_histor
     delivery_failure = await service.run("maintenance")
     assert delivery_failure["status"] == "failed"
     assert delivery_failure["safety_failures"] == 1
-    assert delivery_failure["failed_checks"] == ["alert_delivery_history"]
+    assert set(delivery_failure["failed_checks"]) == unqualified | {"alert_delivery_history"}
     metrics = generate_latest().decode()
     assert (
         'outpost_self_check_state{check="alert_delivery_history",severity="safety"} 0.0' in metrics

@@ -2,6 +2,7 @@ import {initTheme} from "/theme.js";
 import "/a11y.js";
 import {scheduler} from "/refresh-scheduler.js";
 import {escapeHtml, safeLocalHref} from "/ui-primitives.js";
+import {readinessDetails} from "/readiness.js";
 
 initTheme();
 const nativeFetch = window.fetch.bind(window);
@@ -565,9 +566,21 @@ async function refreshOperationsInboxBadge() {
 operatorIdentity.then(refreshOperationsInboxBadge);
 window.addEventListener("outpost:mail-updated", refreshOperationsInboxBadge);
 
-function renderReadinessBanner(report) {
+function renderReadinessBanner(report, openDetails = false) {
+  const existing = document.querySelector(".readiness-banner");
+  if (!openDetails && existing?.querySelector(".readiness-observation:focus-within")) return;
+  const wasOpen = openDetails || document.querySelector(".readiness-details")?.open;
   document.querySelector(".readiness-banner")?.remove();
   if (document.body.dataset.operatorRole === "viewer") return;
+  if (!report?.checks?.length && report?.status !== "ready") {
+    report = {checks: [{
+      name: "readiness_evidence", severity: "operations", state: "unknown", passed: false,
+      title: "Outage readiness has not been measured",
+      detail: "No current compatible readiness report is available.",
+      impact: "A working page is not proof of off-grid readiness.",
+      remediation: "Run a readiness check and review its scoped evidence and remaining unknowns.",
+    }]};
+  }
   const failures = (report?.checks || []).filter(check => check.passed === false);
   const failed = failures.find(check => check.severity === "safety") || failures[0];
   const main = document.querySelector("main");
@@ -578,7 +591,8 @@ function renderReadinessBanner(report) {
   const copy = document.createElement("div");
   const eyebrow = document.createElement("p");
   eyebrow.className = "eyebrow";
-  eyebrow.textContent = failed.severity === "safety"
+  const safetyFailure = failed.severity === "safety" && (failed.state || "fail") === "fail";
+  eyebrow.textContent = safetyFailure
     ? "SAFETY READINESS FAILED"
     : "READINESS DEGRADED";
   const title = document.createElement("b");
@@ -588,8 +602,11 @@ function renderReadinessBanner(report) {
   const remediation = document.createElement("small");
   remediation.textContent = failed.remediation;
   copy.append(eyebrow, title, detail, remediation);
+  const evidence = readinessDetails(report, renderReadinessBanner);
+  evidence.open = Boolean(wasOpen);
+  copy.append(evidence);
   const actions = document.createElement("div");
-  if (failed.severity === "safety") {
+  if (safetyFailure) {
     const mail = document.createElement("a");
     mail.href = "/mail.html";
     mail.textContent = "Open operator inbox";

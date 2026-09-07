@@ -282,6 +282,13 @@ class MaintenanceRunBody(BaseModel):
     confirmation: str
 
 
+class ReadinessObservationBody(BaseModel, extra="forbid"):
+    check: str = Field(min_length=1, max_length=32, pattern=r"^[a-z_]+$")
+    outcome: Literal["pass", "fail"]
+    observed_at: int = Field(strict=True, ge=0, le=253402300799)
+    review_token: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class PostPatchBody(BaseModel):
     hidden: bool
     reason: str = "operator moderation"
@@ -902,6 +909,8 @@ def create_web_app(
             "/api/v1/diagnostics/readiness",
             "/api/v1/diagnostics/status",
         }:
+            response.headers["Cache-Control"] = "no-store"
+        if request.url.path.startswith("/api/v1/readiness/"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -1557,6 +1566,24 @@ def create_web_app(
         @app.post("/api/v1/readiness/run")
         async def run_readiness() -> dict[str, Any]:
             return await self_check.run(f"dashboard:{current_actor_ref()}")
+
+        @app.post("/api/v1/readiness/observations", response_model=None)
+        async def readiness_observation(
+            body: ReadinessObservationBody,
+        ) -> dict[str, Any] | Response:
+            try:
+                return await self_check.record_observation(
+                    body.check,
+                    body.outcome,
+                    body.observed_at,
+                    body.review_token,
+                    current_actor_ref(),
+                )
+            except ValueError as error:
+                return JSONResponse(
+                    {"error": {"code": "readiness_observation_conflict", "message": str(error)}},
+                    status_code=409,
+                )
 
     if restore_coordinator is not None:
 
@@ -5204,6 +5231,10 @@ def create_web_app(
         "/metrics", methods=["GET", "HEAD"], include_in_schema=False, response_model=None
     )
     async def prometheus_metrics() -> Response:
+        if self_check is not None:
+            # Scrapes must age evidence even when no dashboard/status reader runs.
+            # This projects cached state only; it does not execute local probes.
+            self_check.snapshot()
         return Response(generate_latest(), headers={"Content-Type": CONTENT_TYPE_LATEST})
 
     static_dir = Path(__file__).parent / "static"

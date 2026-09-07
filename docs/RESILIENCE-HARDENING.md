@@ -3,6 +3,24 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Truthful outage-readiness assessment — #149
+
+The existing [SelfCheckService](SAFETY-READINESS.md) now separates measured pass/fail,
+stale, unknown and operator-attested evidence across 18 checks. A compatible boot
+package, directory responder role, local snapshot, tile manifest, connected radio
+or SDR buffer cannot turn missing whole-outage qualification into an all-ready claim.
+Cached checks and individual sample deadlines age honestly; original safety inbox
+behavior, operator-only access and diagnostics remain in place.
+
+Bounded local collectors observe map metadata, immediate filesystem headroom and
+a limited historical peer-receipt sample without RF/network/disruptive tests.
+Version-bound structured operator observations and their audit commit together,
+with post-commit cache invalidation. They expire, survive only as stale evidence
+across process/policy changes, and never override a measured failure. The actual
+ASGI/browser flow supports desktop/phone review and explicit observations with
+role, CSRF, concurrency, clock/expiry, rollback and no-radio regression coverage.
+This needs no migration or live deployment; physical qualification remains separate.
+
 ## Automatic incident delivery — #135
 
 The [automatic worker](INCIDENT-AUTOMATIC-DELIVERY.md) connects source changes to guarded

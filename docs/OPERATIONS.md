@@ -150,6 +150,11 @@ a zero-percent alarm. Warning/critical crossings update readiness immediately. P
 `outpost_radio_battery_reported`. Low-power traffic shedding is opt-in under `radio.power`; if
 enabled, verify that only AI, bulletins, and digests pause and that alert delivery remains live.
 
+The [outage-readiness assessment](SAFETY-READINESS.md) treats missing/non-battery telemetry
+as unknown and old samples as stale. It keeps radio condition separate from whole-station
+energy reserve. Its all-check disclosure explains missing map, clock, recovery, local-access,
+peer-path and SAME qualifications; an operator observation is never a measured pass.
+
 For normal changes, use **Radio → Configure radio**. Before confirmation, Outpost reconnects to read
 fresh device state and shows a redacted field diff plus operational impact. Apply is bound to that
 exact preflight for ten minutes and follows `preflight → applying → reconnecting → verifying →
