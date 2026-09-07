@@ -9,6 +9,8 @@ import pytest
 import outpost.watch.responsibility as responsibility_module
 from outpost.situation import BriefingCapability
 from outpost.store import Transaction
+from outpost.store.backups import BackupService
+from outpost.store.maintenance import MaintenanceService
 from outpost.store.members import MemberRepo
 from outpost.watch.responsibility import (
     IncidentResponsibilityService,
@@ -72,6 +74,44 @@ async def owned(ctx):
         next_action="Check road closure",
     )
     return await decide(ctx, actors[1], "accept")
+
+
+@pytest.mark.parametrize("accepted", [False, True])
+async def test_terminal_retention_preserves_offers_and_owners_until_explicit_release(
+    coordination, accepted
+):
+    app, incident, actors, group = coordination
+    app.config.store.backup.enabled = False
+    await decide(
+        coordination,
+        actors[0],
+        "offer",
+        target_kind="group",
+        target_ref=group,
+        next_action="Retain this unresolved responsibility",
+    )
+    if accepted:
+        await decide(coordination, actors[1], "accept")
+    await app.incidents.operator_patch(
+        incident.id,
+        status="resolved",
+        severity=None,
+        resolution="Public incident resolved",
+        actor="web:coordinator",
+    )
+    app.clock.advance(31 * 86400)
+    maintenance = MaintenanceService(
+        app.database, BackupService(app.database), app.clock, app.config
+    )
+    result = await maintenance.run()
+    assert not result.failures and result.removed.get("incidents", 0) == 0
+    assert await app.database.read("SELECT 1 FROM incident_responsibility_event")
+    await decide(coordination, actors[0], "release" if accepted else "cancel")
+    result = await maintenance.run()
+    assert not result.failures and result.removed["incidents"] == 1
+    assert not await app.database.read("SELECT 1 FROM incident_responsibility")
+    assert not await app.database.read("SELECT 1 FROM incident_responsibility_event")
+    assert await app.database.read("SELECT 1 FROM incident_responsibility_target")
 
 
 async def test_team_handoff_preserves_owner_until_explicit_acceptance(coordination):

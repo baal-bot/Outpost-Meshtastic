@@ -695,6 +695,23 @@ def route_visual_content_api(page: object) -> None:
     fulfill("**/api/v1/incidents/history*", {"items": []})
     fulfill("**/api/v1/incidents*", {"items": []})
     fulfill(
+        "**/api/v1/incidents/7/responsibility",
+        {
+            "owner": None,
+            "offer": None,
+            "state": "unassigned",
+            "version": 0,
+            "next_action": "",
+            "offer_action": "",
+            "verified_at": None,
+            "verification": "unknown",
+            "review_token": "a" * 24,
+            "allowed_actions": ["offer"],
+        },
+    )
+    fulfill("**/api/v1/incidents/7/responsibility/history*", {"items": []})
+    fulfill("**/api/v1/incidents/responsibility/targets*", {"items": []})
+    fulfill(
         "**/api/v1/incidents/7/timeline",
         {
             "report_version": 1,
@@ -6401,6 +6418,7 @@ def test_incident_report_is_responsive_printable_and_shows_delivery_reality(
             },
         ],
     }
+    route_visual_content_api(page)
     page.route(
         "**/api/v1/incidents/7/handover",
         lambda route: route.fulfill(

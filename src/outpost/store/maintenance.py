@@ -125,7 +125,10 @@ TABLE_POLICIES = (
         True,
     ),
     TablePolicy(
-        "incident", "watch", "retain", "Terminal incidents only; active incidents protected."
+        "incident",
+        "watch",
+        "retain",
+        "Terminal incidents only; active incidents, accepted owners and pending offers protected.",
     ),
     TablePolicy(
         "incident_reference",
@@ -135,6 +138,27 @@ TABLE_POLICIES = (
         True,
     ),
     TablePolicy("incident_update", "watch", "cascade", "Follows its incident."),
+    TablePolicy(
+        "incident_responsibility",
+        "watch",
+        "cascade",
+        "Local accepted ownership follows its retained incident; no time-based reassignment.",
+        True,
+    ),
+    TablePolicy(
+        "incident_responsibility_event",
+        "watch",
+        "cascade",
+        "Versioned private decisions follow their incident; approved member removal redacts text.",
+        True,
+    ),
+    TablePolicy(
+        "incident_responsibility_target",
+        "watch",
+        "preserve",
+        "Non-reusable target bindings prevent old offers acquiring a recreated identity.",
+        True,
+    ),
     TablePolicy("incident_origin", "watch", "cascade", "Follows its retained incident."),
     TablePolicy("incident_provenance", "watch", "cascade", "Follows its retained incident."),
     TablePolicy(
@@ -809,11 +833,14 @@ class MaintenanceService:
                 "Terminal incident history",
                 "watch",
                 "incident",
-                "(merged_into_id IS NOT NULL AND updated_at<?) OR "
+                "((merged_into_id IS NOT NULL AND updated_at<?) OR "
                 "(status IN ('resolved','false_alarm','expired') "
                 "AND COALESCE(resolved_at,expires_at,updated_at)<? "
                 "AND NOT EXISTS (SELECT 1 FROM incident child "
-                "WHERE child.merged_into_id=incident.id))",
+                "WHERE child.merged_into_id=incident.id))) "
+                "AND NOT EXISTS (SELECT 1 FROM incident_responsibility r "
+                "WHERE r.incident_id=incident.id AND (r.owner_id IS NOT NULL "
+                "OR r.offer_id IS NOT NULL))",
                 (incident_cutoff, incident_cutoff),
             ),
             CleanupRule(

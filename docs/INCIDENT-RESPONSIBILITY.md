@@ -90,6 +90,11 @@ attributable decision history and redacted audit. It performs no network or radi
 There is no second database, worker, automatic retry timer or distributed lock.
 
 Migration 183 adds current responsibility, decision history and non-reusable target identities.
+Maintenance preserves a terminal incident while any accepted owner or pending offer remains,
+even when its normal history window has elapsed. Explicit release/completion and cancellation
+must remove that responsibility first; incident resolution never silently erases an unfinished
+handoff. Once eligible incident retention runs, state/history cascade with the incident, while
+non-reusable target bindings and the normal redacted audit remain protected.
 Target identities are backfilled and created by member/group/account insert triggers; deleting
 and recreating a source row cannot rebind an old target selection, even with the same name and
 database number. Foreign-key deletion makes old targets unavailable. Read-only catalog views
