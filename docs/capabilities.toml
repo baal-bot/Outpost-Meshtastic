@@ -662,6 +662,10 @@ kind = "automated"
 path = "tests/integration/test_incident_sender.py::test_queue_deadline_is_current_after_awaited_reservation_validation"
 description = "A deadline crossed before/during awaited authorization prevents a radio attempt despite an older governor tick timestamp."
 [[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_sender.py::test_old_authenticated_key_cannot_credit_new_key_association"
+description = "A receipt verified before a concurrent key rotation cannot credit a new-key association; a governed reply verified with the new key succeeds."
+[[capabilities.evidence]]
 kind = "operations"
 path = "docs/INCIDENT-SENDER-ADMISSION.md"
 description = "Explicit admission, per-attempt authorization, exact receipts, migration/privacy bounds and remaining automatic scheduling/field acceptance."

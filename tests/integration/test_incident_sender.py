@@ -50,6 +50,16 @@ async def receipt(app):
     }
 
 
+async def accept_receipt(app, peer, value, now):
+    # Direct domain tests carry the same synthetic key used by the wire fixture.
+    return await app.incident_sender.receive(
+        peer,
+        value,
+        now,
+        authenticated_secret=bytes(range(32)),
+    )
+
+
 async def test_sender_to_receiver_and_exact_receipt_never_imply_human_acceptance(nodes):
     source, sp, target, _, incident = await prepare(nodes)
     result = await source.incident_sender.admit(sp.id, "incidents", incident.uid)
@@ -247,7 +257,7 @@ async def test_lost_receipt_requires_explicit_fresh_counter_and_duplicate_storag
     assert dict((await target.database.read("SELECT * FROM fed_inbox_item"))[0]) == inbox
     await flush_radio(target, source)
     old = await saved(source)
-    assert await source.incident_sender.receive(sp, await receipt(source), 123)
+    assert await accept_receipt(source, sp, await receipt(source), 123)
     assert await saved(source) == old
 
 
@@ -263,7 +273,7 @@ async def test_old_receipt_cannot_clear_newer_intent_or_newer_dispatch(nodes, ad
     intents = await source.federation_sync.incident_handoff.pending(sp.id)
     if admit_new:
         await source.incident_sender.admit(sp.id, "incidents", incident.uid)
-    assert await source.incident_sender.receive(sp, old_receipt, 100) is not admit_new
+    assert await accept_receipt(source, sp, old_receipt, 100) is not admit_new
     assert await source.federation_sync.incident_handoff.pending(sp.id) == intents
     assert (await source.incident_sender.admit(sp.id, "incidents", incident.uid)).state == "queued"
     assert (await saved(source))[0]["stored_at"] is None
@@ -292,7 +302,7 @@ async def test_malformed_receipts_never_change_association(nodes, change):
     value[key] = replacement
     before = await saved(source)
     with pytest.raises(ValueError):
-        await source.incident_sender.receive(sp, value, 100)
+        await accept_receipt(source, sp, value, 100)
     if change != "sender":  # wire() deliberately inserts the real authenticated sender ID.
         await wire(target, source, MessageType.INCIDENT_RECEIPT, value)
     assert await saved(source) == before
@@ -474,7 +484,7 @@ async def test_runtime_change_at_final_write_rolls_back(nodes, monkeypatch, phas
         if phase == "admit":
             await source.incident_sender.admit(sp.id, "incidents", incident.uid)
         else:
-            await source.incident_sender.receive(sp, value, 100)
+            await accept_receipt(source, sp, value, 100)
     assert await saved(source) == before
     assert bool(source.governor.queued_items()) is (phase == "receipt")
 
@@ -484,7 +494,7 @@ async def test_receipt_cancels_only_unsent_frames_and_keeps_source_intent(nodes)
     result = await source.incident_sender.admit(sp.id, "incidents", incident.uid)
     await source.governor.tick()
     assert len(source.radio.sent) == 1
-    assert await source.incident_sender.receive(sp, await receipt(source), 100)
+    assert await accept_receipt(source, sp, await receipt(source), 100)
     assert not source.governor.queued_items()
     states = [
         row[0] for row in await source.database.read("SELECT state FROM outbound_work ORDER BY id")
@@ -510,9 +520,9 @@ async def test_receipts_bind_current_peer_secret_and_retained_dispatch(nodes, ch
         source.federation_sync.local_mesh_id = "!changed"
     if change in {"peer", "empty_uid", "identity"}:
         with pytest.raises(ValueError):
-            await source.incident_sender.receive(sp, value, 100)
+            await accept_receipt(source, sp, value, 100)
     else:
-        assert not await source.incident_sender.receive(sp, value, 100)
+        assert not await accept_receipt(source, sp, value, 100)
     assert (await saved(source))[0]["stored_at"] is None
 
 
@@ -615,7 +625,7 @@ async def test_commit_cancellation_preserves_association_and_publication(nodes, 
         task = asyncio.create_task(
             source.incident_sender.admit(sp.id, "incidents", incident.uid)
             if phase == "admit"
-            else source.incident_sender.receive(sp, value, 100)
+            else accept_receipt(source, sp, value, 100)
         )
         try:
             await asyncio.wait_for(reached.wait(), 5)
@@ -776,3 +786,51 @@ async def test_queue_deadline_is_current_after_awaited_reservation_validation(
         )
     )[0]
     assert tuple(work) == ("failed", "dispatch authorization denied")
+
+
+async def test_old_authenticated_key_cannot_credit_new_key_association(nodes, monkeypatch):
+    source, sp, target, _, incident = await prepare(nodes)
+    await source.incident_sender.admit(sp.id, "incidents", incident.uid)
+    value = await receipt(source)
+    original = source.federation.accept_counter
+    new_key = b"k" * 32
+
+    async def rotate_after_auth(*args, **kwargs):
+        accepted = await original(*args, **kwargs)
+        await source.database.write("UPDATE fed_peer SET shared_secret=?", (new_key,))
+        await source.incident_sender.admit(sp.id, "incidents", incident.uid)
+        return accepted
+
+    with monkeypatch.context() as patch:
+        patch.setattr(source.federation, "accept_counter", rotate_after_auth)
+        await wire(target, source, MessageType.INCIDENT_RECEIPT, value)
+    rows = await saved(source)
+    assert rows[0]["counter"] == 2 and rows[0]["stored_at"] is None
+    assert source.governor.queued_items()  # An old-key receipt did not cancel new work.
+    # A governed fresh reply authenticated with the new key still succeeds.
+    await target.database.write("UPDATE fed_peer SET shared_secret=?", (new_key,))
+    await target._send_federation_value(
+        source.radio.local_node_id,
+        MessageType.INCIDENT_RECEIPT,
+        value,
+    )
+    await flush_radio(target, source)
+    assert (await saved(source))[0]["stored_at"] is not None
+
+
+@pytest.mark.parametrize("verified_key", [None, b"wrong key"])
+async def test_receipt_needs_the_actual_verified_key(nodes, verified_key):
+    source, sp, _, _, incident = await prepare(nodes)
+    await source.incident_sender.admit(sp.id, "incidents", incident.uid)
+    value = await receipt(source)
+    if verified_key is None:
+        with pytest.raises(ValueError, match="verified authentication key"):
+            await source.incident_sender.receive(sp, value, 100, authenticated_secret=None)
+    else:
+        assert not await source.incident_sender.receive(
+            sp,
+            value,
+            100,
+            authenticated_secret=verified_key,
+        )
+    assert (await saved(source))[0]["stored_at"] is None

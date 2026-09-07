@@ -75,7 +75,12 @@ Normal recovery must still quiesce egress/admissions before rebuilding the gover
 
 The authenticated dispatcher accepts the existing targeted `INCIDENT_RECEIPT` shape. The consumer
 checks integer mode/revision, epoch, full lowercase digest, producer UID, explicit target, current
-peer permission/identity and paired secret against a retained association. An unknown or mismatched
+peer permission/identity and paired secret against a retained association. The dispatcher passes
+the **actual key that verified the frame** into the receipt transaction; it must still match the
+current peer key and association. Reloading the current key alone would incorrectly allow an
+old-key receipt to credit a new-key association after concurrent rotation/re-admission. This is
+internal authentication evidence, not a new wire field, stored secret or key-reset mechanism.
+An unknown or mismatched
 version receives no completion credit. Fresh-counter duplicate receipts preserve the first storage
 timestamp and cancel only remaining unsent frames of that exact association, after commit.
 

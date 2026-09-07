@@ -2671,7 +2671,12 @@ class OutpostApp:
                 )
             elif msg_type is MessageType.INCIDENT_RECEIPT:
                 peer = await self.federation.by_mesh_id(sender)
-                await self.incident_sender.receive(peer, value, int(self.clock.now().timestamp()))
+                await self.incident_sender.receive(
+                    peer,
+                    value,
+                    int(self.clock.now().timestamp()),
+                    authenticated_secret=secret,
+                )
             elif msg_type is MessageType.ITEM:
                 incoming_item = value.get("item")
                 if not isinstance(incoming_item, dict):

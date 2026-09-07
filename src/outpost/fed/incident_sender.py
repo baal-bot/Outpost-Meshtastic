@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import uuid
 from collections.abc import Callable
@@ -300,9 +301,18 @@ class IncidentSender:
         except ValueError:
             return False  # Policy/content denial; storage faults still fail the core task.
 
-    async def receive(self, peer: Peer, receipt: dict[str, Any], now: int) -> bool:
+    async def receive(
+        self,
+        peer: Peer,
+        receipt: dict[str, Any],
+        now: int,
+        *,
+        authenticated_secret: bytes | None,
+    ) -> bool:
         """Authenticated dispatcher only. A stored version is not reviewed or acknowledged."""
         wire_int(now, "incident receipt time")
+        if not isinstance(authenticated_secret, bytes):
+            raise ValueError("incident receipt requires its verified authentication key")
         fields = {
             "mode",
             "mesh_id",
@@ -348,6 +358,7 @@ class IncidentSender:
             secret = await self.peers.secret(peer.mesh_id, transaction=tx)
             if (
                 not saved
+                or not hmac.compare_digest(secret, authenticated_secret)
                 or any(saved[key] != receipt[key] for key in ("epoch", "revision", "digest"))
                 or saved["peer_mesh_id"] != peer.mesh_id
                 or saved["producer_mesh_id"] != local_id
