@@ -24,6 +24,24 @@ def test_text_payload_is_truncated_by_utf8_bytes_before_admission() -> None:
     assert item.payload_size <= MAX_PAYLOAD_BYTES
 
 
+async def test_volatile_queue_also_rechecks_expiry_after_telemetry(monkeypatch) -> None:
+    clock = VirtualClock()
+    radio = SimulatedRadioLink(clock)
+    await radio.connect()
+    governor = AirtimeGovernor(radio, AirtimeConfig(), clock)
+    governor.enqueue(OutboundItem("timing probe", "^all", 0, TrafficClass.REPLY))
+    original = radio.local_telemetry
+
+    async def delayed():
+        clock.advance(301)
+        return await original()
+
+    monkeypatch.setattr(radio, "local_telemetry", delayed)
+    assert await governor.tick() is None
+    assert not radio.sent
+    assert not governor.queued_items()
+
+
 def test_governor_tracks_live_preset_and_regional_ceiling() -> None:
     config = AirtimeConfig(budget_percent=8, emergency_reserve_percent=4)
     governor = AirtimeGovernor(

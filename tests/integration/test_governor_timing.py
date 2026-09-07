@@ -6,11 +6,11 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from outpost.clock import VirtualClock
-from outpost.config import AirtimeConfig, RadioPowerConfig
+from outpost.config import RadioPowerConfig
 from outpost.store import Database
 from outpost.store.database import Transaction
 from outpost.store.outbox import OutboxStore
-from outpost.transport.governor import AirtimeGovernor, OutboundItem
+from outpost.transport.governor import OutboundItem
 from outpost.transport.models import LinkState, Severity, TrafficClass
 from outpost.transport.simulated import SimulatedRadioLink
 from tests.support.application import production_governor
@@ -420,18 +420,6 @@ async def test_failure_writer_wait_sets_future_retry_from_current_time(queue, mo
     row = (await database.read("SELECT next_attempt_at FROM outbound_work"))[0]
     assert row[0] == clock.now().timestamp() + 5
     assert item.next_attempt_at == clock.monotonic() + 5
-
-
-async def test_volatile_queue_also_rechecks_expiry_after_telemetry(monkeypatch):
-    clock = VirtualClock()
-    radio = SimulatedRadioLink(clock)
-    await radio.connect()
-    governor = AirtimeGovernor(radio, AirtimeConfig(), clock)
-    governor.enqueue(packet("telemetry"))
-    delay_once(monkeypatch, governor, radio, "telemetry", lambda: clock.advance(301))
-    assert await governor.tick() is None
-    assert not radio.sent
-    assert not governor.queued_items()
 
 
 async def test_accounting_index_upgrades_existing_attempts_without_changing_them(tmp_path):
