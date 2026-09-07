@@ -611,7 +611,7 @@ limitations = [
   "Version-bound review is software-tested; deploy matching backend/assets. Handheld review is metadata-only, and automatic board imports remain a separate policy path.",
   "Plain incident notes require incident_updates:1 plus reconciliation:2 on both peers, current parent storage for event sending and prior original-parent import for human note import. Oversized notes and multi-hop note relay are not qualified.",
   "Oversized ITEM failures are visible and retryable with item_failures:1 plus reconciliation:2. Later pages can still wait behind oversized content; this is not arbitrary-size transport or a delivery guarantee (#135).",
-  "Automatic incident_events:1 delivery is software/simulation-tested, not physically qualified. Short single-peer examples reach exact storage receipts in 25 seconds (30 including full poll phase); parent plus note takes 55/60 seconds. These are declared-envelope samples, not arbitrary-load or mesh-wide/map G6 guarantees (#135).",
+  "Automatic incident delivery is software/simulation-tested, not physically qualified. Compact-capable two/three-Outpost browser cases reach reviewed maps within 60 seconds for a short report with separate five-second human review, empty queues and inactive quiet hours. Legacy storage-only examples remain 25/30 seconds, parent plus note 55/60. No arbitrary-load, firmware or physical G6 guarantee (#135).",
   "Fresh/backlog source pages and peer visits are bounded; per-peer intents retain a finite 30-minute window and at most three application admissions. Quiet hours, offline peers, saturation, unsupported versions and oversized content can prevent prompt delivery or expire work; cancel/retry is explicit and audited.",
   "Current source/key/scope/parent authority is revalidated at admission and attempt reservation. Pending exact receipt replies coalesce. Queue admission, radio completion and observed remote storage are separate; remote human review/notification/acknowledgement are not reported by this protocol.",
   "Signed multi-hop custody is simulation-tested; physical three-node and power-loss exercises remain open.",
@@ -706,6 +706,18 @@ description = "Pending exact replies coalesce atomically; changed evidence/key/s
 kind = "automated"
 path = "tests/integration/test_incident_delivery_api.py::test_field_report_to_reviewed_map_feed_measures_human_delay_separately"
 description = "Operator-only paged delivery stages, stale-action and audit safety, plus a REPORT-command to reviewed map-feed simulation with separately modeled human delay."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_incident_g6.py::test_field_report_only_reaches_reviewed_browser_maps_without_wan"
+description = "Real ASGI/Chromium, pairwise-key simulated radios, modeled application airtime, blocked WAN requests and loaded synthetic local tiles: two/three-Outpost reviewed maps within 60 seconds under the declared envelope; no review means no remote map import."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_compact.py::test_negotiation_preserves_legacy_and_exact_storage_without_human_import"
+description = "Lossless negotiated payload-name encoding preserves exact receipts/content and legacy fallback; malformed codes, capability transitions and writer-time policy revocation fail closed."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_worker.py::test_continuous_fresh_arrivals_cannot_replenish_ahead_of_admitted_backlog"
+description = "Higher numeric urgency is exercised on actual governor dispatch, with admitted backlog protected against continuous fresh-lane replenishment."
 [[capabilities.evidence]]
 kind = "operations"
 path = "docs/INCIDENT-AUTOMATIC-DELIVERY.md"

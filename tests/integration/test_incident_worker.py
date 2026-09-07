@@ -153,7 +153,8 @@ async def test_notes_wait_for_current_parent_then_progress_without_human_import(
     assert not await target.database.read("SELECT * FROM incident_update")
 
 
-async def test_fresh_urgent_head_and_backlog_each_have_a_bounded_lane(nodes):
+@pytest.mark.parametrize("severity,priority", [("urgent", 20), ("critical", 30)])
+async def test_fresh_urgent_head_and_backlog_each_have_a_bounded_lane(nodes, severity, priority):
     source, sp, _, _ = await pair(nodes)
     oldest = await report(source, "road oldest backlog record")
     for index in range(24):
@@ -162,7 +163,7 @@ async def test_fresh_urgent_head_and_backlog_each_have_a_bounded_lane(nodes):
     await source.incidents.operator_patch(
         urgent.id,
         status=None,
-        severity="urgent",
+        severity=severity,
         resolution=None,
         actor="web:test",
     )
@@ -176,6 +177,37 @@ async def test_fresh_urgent_head_and_backlog_each_have_a_bounded_lane(nodes):
         TrafficClass.FEDERATION
     }
     assert not await source.database.read("SELECT * FROM alert")
+
+    # The governor uses higher numeric priorities first. Admission order alone
+    # does not prove that an urgent report actually precedes the backlog on air.
+    first = await source.governor.tick()
+    assert first is not None and first.priority == priority
+    urgent_work = await source.database.read(
+        "SELECT frame_ids FROM fed_incident_dispatch WHERE uid=?", (urgent.uid,)
+    )
+    assert first.item_id in json.loads(urgent_work[0][0])
+
+
+async def test_continuous_fresh_arrivals_cannot_replenish_ahead_of_admitted_backlog(nodes):
+    source, _, _, _ = await pair(nodes)
+    oldest = await report(source, "road oldest backlog")
+    for index in range(8):
+        await report(source, f"road newer {index}")
+    await source._incident_delivery_once()
+    assert len(await source.database.read("SELECT * FROM fed_incident_dispatch")) == 2
+
+    for elapsed in range(85):
+        if elapsed % 5 == 0:
+            await report(source, f"fire fresh arrival {elapsed}")
+            await source._incident_delivery_once()
+        await source.governor.tick()
+        source.clock.advance(1)
+    backlog = await source.database.read(
+        "SELECT w.state FROM outbound_work w JOIN fed_incident_dispatch d "
+        "ON d.queue_key=w.queue_key WHERE d.uid=?",
+        (oldest.uid,),
+    )
+    assert backlog and all(row[0] == "sent" for row in backlog)
 
 
 @pytest.mark.parametrize("blocked", ["offline", "queue_full", "quiet"])

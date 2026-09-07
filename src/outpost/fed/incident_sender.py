@@ -11,7 +11,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from outpost.fed.framing import FrameCodec, MessageType, wire_int
-from outpost.fed.incident_events import MODE, STREAMS, content_digest
+from outpost.fed.incident_events import (
+    COMPACT_MODE,
+    MODE,
+    STREAMS,
+    compact_payload,
+    compact_supported,
+    content_digest,
+)
 from outpost.fed.peers import FederationPeerService, Peer
 from outpost.fed.revisions import source_revision
 from outpost.fed.sync import FederationSyncService
@@ -173,15 +180,24 @@ class IncidentSender:
         return dict(rows[0]) if rows else None
 
     def _frames(
-        self, peer: Peer, event: dict[str, Any], counter: int, secret: bytes
+        self,
+        peer: Peer,
+        event: dict[str, Any],
+        counter: int,
+        secret: bytes,
+        *,
+        legacy: bool = False,
     ) -> list[bytes]:
+        compact = not legacy and compact_supported(peer)
         return self.codec.encode(
             MessageType.INCIDENT,
             {
                 "mesh_id": self.sync.local_mesh_id,
                 "target_mesh_id": peer.mesh_id,
-                "mode": MODE,
-                "event": event,
+                "mode": COMPACT_MODE if compact else MODE,
+                "event": {**event, "payload": compact_payload(event["payload"])}
+                if compact
+                else event,
             },
             counter,
             secret,
@@ -318,11 +334,25 @@ class IncidentSender:
                 return False
             ids = json.loads(saved["frame_ids"])
             frames = self._frames(peer, event, saved["counter"], secret)
-            return (
+            matches = (
                 isinstance(ids, list)
                 and len(ids) == len(frames)
                 and work["id"] in ids
                 and frames[ids.index(work["id"])] == work["binary_payload"]
+            )
+            if not matches and compact_supported(peer):
+                # A new HELLO must not invalidate already-queued v1 work. The
+                # reverse is intentionally denied: a downgraded peer cannot
+                # receive compact bytes it no longer advertises understanding.
+                frames = self._frames(peer, event, saved["counter"], secret, legacy=True)
+                matches = (
+                    isinstance(ids, list)
+                    and len(ids) == len(frames)
+                    and work["id"] in ids
+                    and frames[ids.index(work["id"])] == work["binary_payload"]
+                )
+            return (
+                matches
                 and work["destination"] == "^all"
                 and not work["want_ack"]
                 and work["traffic_class"] == TrafficClass.FEDERATION.value

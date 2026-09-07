@@ -16,8 +16,63 @@ if TYPE_CHECKING:
 
 CAPABILITY = "incident_events"
 MODE = 1
+COMPACT_CAPABILITY = "incident_compact"
+COMPACT_VERSION = 1
+COMPACT_MODE = 2
+# Stable wire codes: never reorder/reuse these entries. Only field names change;
+# every value (including nulls, extensions and full-precision positions) survives.
+PAYLOAD_FIELDS = (
+    "uid",
+    "type",
+    "severity",
+    "status",
+    "title",
+    "body",
+    "lat",
+    "lon",
+    "location_text",
+    "radius_m",
+    "reporter_label",
+    "origin_node",
+    "created_at",
+    "updated_at",
+    "expires_at",
+    "resolved_at",
+    "resolution_note",
+    "origin_uids",
+    "incident_uid",
+    "kind",
+    "author_label",
+)
+PAYLOAD_CODES = {name: code for code, name in enumerate(PAYLOAD_FIELDS)}
 RATE_CURSOR = "_incident_event_rate"
 STREAMS = {"incidents", "incident_updates"}
+
+
+def compact_supported(peer: Peer) -> bool:
+    version = peer.capabilities.get(COMPACT_CAPABILITY)
+    return type(version) is int and version == COMPACT_VERSION
+
+
+def compact_payload(payload: dict[str, Any]) -> dict[int | str, Any]:
+    if any(not isinstance(key, str) for key in payload):
+        raise ValueError("incident payload field names must be strings")
+    return {PAYLOAD_CODES.get(key, key): value for key, value in payload.items()}
+
+
+def expand_payload(payload: object) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("compact incident payload must be a map")
+    expanded = {}
+    for key, value in payload.items():
+        if type(key) is int and 0 <= key < len(PAYLOAD_FIELDS):
+            name = PAYLOAD_FIELDS[key]
+        elif isinstance(key, str) and key not in PAYLOAD_CODES:
+            name = key  # Preserve extension fields, never silently discard them.
+        else:
+            raise ValueError("invalid or aliased compact incident field")
+        expanded[name] = value
+    return expanded
 
 
 def content_digest(payload: dict[str, Any]) -> str:
@@ -44,7 +99,27 @@ class IncidentEvents:
             and self.sync.module_enabled("watch")
         )
 
-    async def receive(self, peer: Peer, event: dict[str, Any], now: int) -> dict[str, Any]:
+    async def receive_wire(self, peer: Peer, value: dict[str, Any], now: int) -> dict[str, Any]:
+        mode, event = value.get("mode"), value.get("event")
+        if (
+            not self.sync.local_mesh_id
+            or value.get("target_mesh_id") != self.sync.local_mesh_id
+            or value.get("mesh_id") != peer.mesh_id
+            or type(mode) is not int
+            or mode not in (MODE, COMPACT_MODE)
+            or not isinstance(event, dict)
+        ):
+            raise ValueError("invalid targeted incident event")
+        compact = mode == COMPACT_MODE
+        if compact:
+            if not compact_supported(peer):
+                raise ValueError("compact incident capability is required")
+            event = {**event, "payload": expand_payload(event.get("payload"))}
+        return await self.receive(peer, event, now, compact=compact)
+
+    async def receive(
+        self, peer: Peer, event: dict[str, Any], now: int, *, compact: bool = False
+    ) -> dict[str, Any]:
         """Called only after framing authentication, target and fresh-counter checks.
 
         The current policy, quota, inbox and revision receipt share one writer.
@@ -74,7 +149,11 @@ class IncidentEvents:
             if not rows:
                 raise ValueError("incident event peer no longer exists")
             current = FederationPeerService._peer(rows[0])
-            if current.mesh_id != peer.mesh_id or not self.supported(current):
+            if (
+                current.mesh_id != peer.mesh_id
+                or not self.supported(current)
+                or (compact and not compact_supported(current))
+            ):
                 raise ValueError("incident event is outside current peer policy")
             checkpoints = await tx.read(
                 "SELECT cursor FROM fed_cursor WHERE peer_id=? AND stream='_reconcile' "

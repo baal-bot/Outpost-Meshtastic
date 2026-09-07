@@ -1171,6 +1171,7 @@ class OutpostApp:
         if self.config.modules.watch.enabled:
             capabilities[INCIDENT_UPDATES_CAPABILITY] = INCIDENT_UPDATES_MODE
             capabilities[incident_events.CAPABILITY] = incident_events.MODE
+            capabilities[incident_events.COMPACT_CAPABILITY] = incident_events.COMPACT_VERSION
         counter = int(self.clock.now().timestamp()) & 0xFFFFFFFF
         hello = {
             "mesh_id": local_id,
@@ -2673,17 +2674,9 @@ class OutpostApp:
                         {"mesh_id": self.federation.local_mesh_id, "sent": sent},
                     )
             elif msg_type is MessageType.INCIDENT:
-                if (
-                    target != self.radio.local_node_id
-                    or not target
-                    or type(value.get("mode")) is not int
-                    or value.get("mode") != incident_events.MODE
-                    or not isinstance(value.get("event"), dict)
-                ):
-                    raise ValueError("invalid targeted incident event")
                 peer = await self.federation.by_mesh_id(sender)
-                event_receipt = await self.federation_sync.incident_events.receive(
-                    peer, value["event"], int(self.clock.now().timestamp())
+                event_receipt = await self.federation_sync.incident_events.receive_wire(
+                    peer, value, int(self.clock.now().timestamp())
                 )
                 reply_ids = await self.incident_receipts.admit(peer.id, event_receipt)
                 if not reply_ids:

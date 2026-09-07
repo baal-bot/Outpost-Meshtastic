@@ -11,9 +11,16 @@ state survives recovery; explicit cancellation is not automatically revived. Fre
 retries recover loss and counter overtaking. Exact receipt replies coalesce atomically and
 retain current-evidence attempt guards. The operator-only, non-cacheable view separates
 queue/radio/storage from human action, with version/queue-bound audited cancel/retry controls.
-Migration 182 retains this metadata without changing payloads, opt-ins or wire capabilities.
-The contract records the simulated timing envelope, field-command/map-feed evidence and
-remaining boundaries. Physical G6 remains held; no live deployment or radio restart occurred.
+Migration 182 retains this metadata without changing payloads or sharing opt-ins.
+The browser G6 follow-up adds opt-in `incident_compact:1` field-name encoding with
+unchanged content, legacy fallback and guarded capability transitions. It corrects
+reversed urgency priorities and prevents a continuous fresh lane from starving an
+admitted backlog batch. Three simulated Outposts now pass the 60-second reviewed-map
+gate for the documented short-report/daylight/empty-queue envelope; withholding human
+review keeps remote maps empty despite stored receipts. Actual ASGI/Chromium and local
+synthetic tiles are used with external browser requests blocked. This is not real
+geographic coverage or firmware/RF qualification. Physical G6 remains held; no live
+deployment or radio restart occurred.
 Historical prerequisite sections below describe each original slice, not the current absence
 of a worker.
 

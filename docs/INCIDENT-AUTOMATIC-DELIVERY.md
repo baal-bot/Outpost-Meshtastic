@@ -16,7 +16,13 @@ Subsequent fresh pages ascend a separate durable revision cursor.
 
 Each lane considers at most two due intents per visit, with at most one active
 automatic batch per lane and two per peer. The shared queue limit still applies.
-Fresh critical/urgent/other work uses priorities -30/-20/-10; backlog uses 0.
+Fresh critical/urgent/other work uses priorities 30/20/10; backlog uses 0
+(the governor selects higher numeric priorities first). Once a backlog batch is
+admitted, a completed fresh lane is not replenished until that backlog batch has
+finished its transport attempts. This prevents continuous new reports from
+consuming the entire class share ahead of admitted history; a fresh arrival may
+therefore wait for one bounded backlog batch. No backlog-free timing is promised
+when that condition applies.
 Every frame remains `FEDERATION`: there is no critical-alert reserve access,
 quiet-hours exemption, new sharing opt-in, or automatic human approval.
 
@@ -82,6 +88,22 @@ inbox still requires version-bound human review. Remote resolution cannot silent
 resolve a locally monitored incident, even after approved import. Public alert
 approval and local responder acknowledgement remain separate workflows.
 
+## Lossless compact events
+
+Watch-enabled peers additionally advertise `incident_compact:1`. Only that exact
+integer capability selects INCIDENT `mode:2`: known payload field names become
+stable integer CBOR keys. Values, nulls, full-precision positions, extensions,
+provenance, UIDs, revision and content digests are unchanged. Receivers expand the
+map before the existing validation/quarantine transaction, rechecking capability
+inside the writer. Unknown numeric codes, boolean/float codes and aliases are
+rejected. The [wire contract](FEDERATION-INCIDENT-EVENTS.md) fixes the mapping.
+
+Peers without the capability retain mode 1. Capability upgrade preserves queued
+legacy frames; downgrade blocks unsent compact frames at reservation. Operators
+must refresh/retry blocked work after resolving the mismatch. Exact mode-1 storage
+receipts and their authorization remain unchanged. This is no new sharing opt-in,
+schema migration, truncation, larger frame ceiling or pacing exemption.
+
 ## Test envelope and limits
 
 The deterministic tests use two opted-in simulated Outposts with
@@ -102,6 +124,38 @@ The handheld REPORT-command → reviewed map API feed test separately measures
 Browser refresh, RF contention/loss, multi-hop topology and actual human response
 times are not covered by that number. These are samples within a declared envelope,
 not arbitrary-payload/load SLAs or complete G6 qualification.
+
+The additional browser G6 regression starts with a verified synthetic handheld
+REPORT, then uses two or three independent temporary Outposts, pairwise keys,
+the actual inbound pipeline, automatic sender, shared governor, framing and
+authenticated receiver. A lossless single-hop medium serializes application packet
+arrival using LONG_FAST airtime. The first handheld hop (0.682 seconds) is added to
+the end-to-end bound. The full initial five-second worker phase, actual report reply,
+storage replies, and existing 12-second multipart pacing are included.
+
+Actual Chromium pages use production ASGI authentication, assets, inbox review,
+map APIs, ten-second refresh with maximum scheduler jitter, positioned markers
+and successfully loaded local tiles. Every nonlocal browser request is blocked
+and fails the test. The tile pack is explicitly synthetic rendering data, **not
+geographic coverage qualification**. A simulated human opens the full quarantined
+record and approves through the real version-bound UI after five seconds.
+
+The new test exposed the cost of separate authenticated peer copies: a
+three-Outpost network needed six source fragments and reached its last map at
+79 seconds after intake. Compact mode reduces this short report to four source
+fragments. The regression requires every map within 60 seconds including first-hop
+airtime; observed compact three-Outpost runs reached the last map at 53–55 seconds
+after intake. With no human approval, all peers store the report but their maps
+stay empty at 60 seconds and the source still reports human review as unknown.
+Automatic storage is not approval.
+
+This browser envelope assumes an already loaded dashboard, fast local HTTP,
+one short report, mutually compact-capable paired peers, empty queues, inactive
+quiet hours, synchronized clocks and immediate inbox attention. Firmware routing
+ACKs are represented at the routing-event boundary, not separately costed RF.
+There is no firmware/CSMA/collision, real propagation, multi-hop or human-response
+qualification. Saturation, unattended review, legacy encoding and larger reports
+can exceed 60 seconds; the test is not a universal G6 guarantee.
 
 Fault tests cover loss, counter overtaking, finite exhaustion, pending/interrupted/
 unreceipted restart, rollback/cancellation, expiry during waits, fresh/backlog
@@ -124,8 +178,9 @@ Remaining boundaries:
 - Existing mixed-version bulk-sync and oversized-page limitations remain. The
   automatic path neither requires nor claims completion of the hourly cycle.
 
-Migration 182 adds policy metadata/indexes and one retained receipt association
-per peer/source identity. Payloads and wire capabilities are unchanged. Backups
+The original automatic-worker migration 182 adds policy metadata/indexes and one
+retained receipt association per peer/source identity. The compact follow-up
+changes only negotiated wire field names, with no further migration. Backups
 retain these tables; peer deletion cascades their metadata. Older binaries reject
 newer schemas. Deploy only through the approved backup/migration/release procedure.
 This implementation did not access/migrate the live store, deploy a release,

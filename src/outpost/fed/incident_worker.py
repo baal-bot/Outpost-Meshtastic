@@ -288,8 +288,13 @@ class IncidentWorker:
                 (peer.id, prior["queue_key"] if prior else "", MAX_ACTIVE_PER_PEER),
             )
             if len(active) >= MAX_ACTIVE_PER_PEER or any(
-                row["lane"] == item["lane"] for row in active
+                row["lane"] == item["lane"]
+                or (item["lane"] == "fresh" and row["lane"] == "backfill")
+                for row in active
             ):
+                # Finish an admitted backlog batch before replenishing the fresh
+                # lane. Otherwise a continuous fresh stream can spend the whole
+                # federation share while the lower-priority backlog never sends.
                 await self._set(tx, item, "waiting", "peer_queue_full")
                 return
             if item["application_attempts"] >= MAX_APPLICATION_ATTEMPTS:
@@ -298,7 +303,7 @@ class IncidentWorker:
             if self._now() >= item["deadline_at"]:
                 await self._stop(tx, item, "expired", "delivery_deadline", prior)
                 return
-            priority = {"critical": -30, "urgent": -20}.get(event["payload"].get("severity"), -10)
+            priority = {"critical": 30, "urgent": 20}.get(event["payload"].get("severity"), 10)
             result = await self.sender.admit(
                 *self._key(item),
                 retry=retry,

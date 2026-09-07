@@ -173,7 +173,7 @@ rationale = "The later operator-policy flow duplicated the original secret-stora
 issues = [154]
 
 [requirements.REQ-FED-034]
-rationale = "Prompt event-driven incident propagation remains #135. Producer-owned catch-up revisions and a bounded indexed query do not establish the original mesh-wide/map 60-second outcome."
+rationale = "Bounded automatic incident propagation is implemented in #135. Two/three-Outpost browser simulations qualify a declared short-report compact-mode envelope with separate human-review time, not arbitrary payload/load, firmware or physical mesh-wide G6 acceptance."
 issues = [135, 157]
 
 [requirements.REQ-FED-041]
@@ -262,6 +262,6 @@ issues = [136, 137, 145, 148, 158, 44]
 
 [goals.G6]
 state = "open"
-rationale = "The original 60-second field incident-to-community/map outcome is not satisfied by hourly catch-up, quarantine receipt, or a 10-ms manifest query. Event-driven delivery and measured multi-node field acceptance remain open."
+rationale = "The automatic sender and actual-browser two/three-Outpost simulations pass a declared compact-mode 60-second reviewed-map envelope. Unattended review remains pending, not approved. Firmware/radio, multi-hop and real human timing are not simulated by this result; multi-node physical acceptance remains open and held."
 related = ["docs/PHASE3-ACCEPTANCE.md", "docs/FEDERATION-ACCEPTANCE-BACKLOG.md"]
 issues = [135, 151, 157]

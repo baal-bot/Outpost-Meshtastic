@@ -55,6 +55,39 @@ a lost receipt must re-encode the same event with a fresh counter. Partial/inval
 frames cannot store content. Ordinary revisioned `ITEM` still needs an authorized reconciliation
 page; event support does not create an unsolicited ITEM bypass.
 
+### Negotiated compact payload names
+
+Watch-enabled HELLOs also advertise `incident_compact:1`. When the current peer
+advertises that exact integer version, the sender may use INCIDENT `mode:2`, with
+the same envelope/event shape and integer keys **only inside `event.payload`**:
+
+```text
+0 uid             1 type              2 severity       3 status
+4 title           5 body              6 lat            7 lon
+8 location_text   9 radius_m         10 reporter_label 11 origin_node
+12 created_at    13 updated_at       14 expires_at     15 resolved_at
+16 resolution_note  17 origin_uids   18 incident_uid   19 kind
+20 author_label
+```
+
+These codes are fixed, not derived from sorted keys. Unknown string extension
+names remain strings and their full values survive. Known names must use their
+integer code in mode 2: string aliases, boolean/float keys and unknown numeric
+codes are rejected, not coerced or ignored. Nulls and all other values are
+unchanged. Canonical CBOR, optional zlib compression, HMAC, counters and the
+188-byte/eight-fragment limits still apply. The decoded canonical JSON and its
+SHA-256 digest are identical to mode 1; there is no data truncation or alternate
+receipt meaning.
+
+Expansion happens before existing content validation and the current-capability
+check is repeated inside the receive transaction. All original trust, geographic,
+lineage, quota, original-parent and human-review rules remain. Missing/unknown
+capabilities use legacy mode 1, and receipts always retain mode 1. Attempt guards
+permit pending legacy work after a capability upgrade but deny compact work after
+a downgrade. This change needs no schema migration. See the
+[browser timing envelope](INCIDENT-AUTOMATIC-DELIVERY.md) for its measured benefit
+and limits; advertising compact support is not physical qualification.
+
 ## Storage receipt, not approval
 
 `IncidentEvents.receive` owns a transaction containing current policy/lineage checks, a quota
