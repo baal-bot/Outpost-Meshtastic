@@ -54,10 +54,13 @@ class IncidentUpdates:
         # represent instead of letting a reviewed note break the whole timeline.
         wire_int(payload.get("created_at"), "incident note timestamp", maximum=253402300799)
 
-    async def export(self, peer: Peer, local_uid: str) -> dict[str, Any] | None:
+    async def export(
+        self, peer: Peer, local_uid: str, *, transaction: Transaction | None = None
+    ) -> dict[str, Any] | None:
         if not self.supported(peer) or not self.sync.local_mesh_id:
             return None
-        rows = await self.sync.database.read(
+        reader = transaction or self.sync.database
+        rows = await reader.read(
             "SELECT u.uid,u.origin_incident_uid,u.body,u.author_label,u.created_at,"
             "i.lat,i.lon FROM incident_update u JOIN incident i ON i.id=u.incident_id "
             "WHERE u.uid=? AND u.source_node IS NULL AND u.kind='update' "

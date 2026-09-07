@@ -4,6 +4,8 @@ Receiver-side software slice [#166](https://github.com/baal-bot/Outpost-Meshtast
 following the [source journal](INCIDENT-CHANGE-EVENTS.md). **No automatic sender is added.**
 Prompt propagation, transactional peer handoff, sender retries/supersession/expiry, operator
 delivery stages and G6 qualification remain [#135](https://github.com/baal-bot/Outpost-Meshtastic/issues/135).
+The later [#167 staging service](INCIDENT-SENDER-HANDOFF.md) adds atomic per-peer source handoff;
+governed sender admission and receipt matching remain unimplemented.
 
 ## Negotiation and wire shape
 

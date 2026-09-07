@@ -3,6 +3,16 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Atomic per-peer incident staging — #167 / #135 and #153 sender prerequisite
+
+The [handoff service](INCIDENT-SENDER-HANDOFF.md) observes current source/peer policy and exports
+through one writer transaction, stages coalesced exact-version/content metadata, and advances
+that peer's revision cursor atomically. Source rows remain retained for independent peers;
+scope expansion rescans without interpreting the first-pending inspection cursor as a watermark.
+Migration 179 adds metadata tables and indexed bounded seeks. Crash/backup recovery, invalidation
+and supersession are local guarantees, not sending or G6. Worker/outbox integration, initial
+backlog scheduling, receipt matching/coalescing and physical qualification remain #135.
+
 ## Revision-bound incident event ingress — #166 / #135 receiver slice
 
 The [negotiated incident event receiver](FEDERATION-INCIDENT-EVENTS.md) rechecks peer scope,

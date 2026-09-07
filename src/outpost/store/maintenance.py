@@ -213,6 +213,20 @@ TABLE_POLICIES = (
     TablePolicy(
         "fed_revision_receipt", "federation", "cascade", "Revision receipt follows its peer.", True
     ),
+    TablePolicy(
+        "fed_incident_handoff",
+        "federation",
+        "cascade",
+        "Source staging cursor follows its peer.",
+        True,
+    ),
+    TablePolicy(
+        "fed_incident_intent",
+        "federation",
+        "cascade",
+        "Coalesced sender intent follows its peer; not delivery.",
+        True,
+    ),
     TablePolicy("fed_service_circuit", "federation", "preserve", "Bounded state per peer/service."),
     TablePolicy("fed_topology_policy", "federation", "cascade", "Follows its peer."),
     TablePolicy("fed_topology_peer", "federation", "cascade", "Current state follows its peer."),

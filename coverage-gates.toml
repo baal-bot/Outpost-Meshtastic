@@ -30,6 +30,7 @@ files = [
   "src/outpost/fed/incident_updates.py",
   "src/outpost/fed/item_failures.py",
   "src/outpost/fed/incident_events.py",
+  "src/outpost/fed/incident_handoff.py",
 ]
 
 [groups.auth]
@@ -82,6 +83,10 @@ files = ["src/outpost/watch/change_events.py"]
 [production_groups.incident_event_ingress]
 minimum = 90
 files = ["src/outpost/fed/incident_events.py"]
+
+[production_groups.incident_sender_handoff]
+minimum = 90
+files = ["src/outpost/fed/incident_handoff.py"]
 
 [production_groups.federation_item_failures]
 minimum = 90

@@ -67,6 +67,11 @@ operator-facing per-peer states and simulation/physical G6 qualification remain 
 separate [#166 event receiver](FEDERATION-INCIDENT-EVENTS.md) now supplies authenticated ingress
 and exact storage receipts; it does not consume this journal or install a sender.
 
+The [#167 per-peer handoff](INCIDENT-SENDER-HANDOFF.md) now stages scoped, exact-version metadata
+and scan progress atomically using a separate revision-seek index. It deliberately retains this
+journal: one peer's checkpoint is not all-peer completion. The source inspection API and its
+first-pending cursor semantics are unchanged. There is still no automatic sender or consume API.
+
 ## Deployment and verification
 
 Back up before an approved deployment. Opening a database with this release applies migration

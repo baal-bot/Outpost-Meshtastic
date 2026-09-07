@@ -9,6 +9,7 @@ from typing import Any
 
 from outpost.audit import write_audit
 from outpost.fed.incident_events import IncidentEvents
+from outpost.fed.incident_handoff import IncidentHandoff
 from outpost.fed.incident_updates import STREAM as INCIDENT_UPDATES
 from outpost.fed.incident_updates import IncidentUpdates
 from outpost.fed.item_failures import ItemFailures
@@ -62,6 +63,7 @@ class FederationSyncService:
         self.incident_updates = IncidentUpdates(self)
         self.item_failures = ItemFailures(self)
         self.incident_events = IncidentEvents(self)
+        self.incident_handoff = IncidentHandoff(self)
 
     @staticmethod
     def stream_module(stream: str) -> str | None:
@@ -302,10 +304,15 @@ class FederationSyncService:
         return requested
 
     async def export_items(
-        self, peer: Peer, requests: list[dict[str, Any]]
+        self,
+        peer: Peer,
+        requests: list[dict[str, Any]],
+        *,
+        transaction: Transaction | None = None,
     ) -> list[dict[str, Any]]:
         if peer.state != "active":
             raise ValueError("item export requires an active peer")
+        reader = transaction or self.database
         exported: list[dict[str, Any]] = []
         for request in requests[:8]:
             stream, uid = str(request.get("stream", "")), str(request.get("uid", ""))
@@ -316,11 +323,11 @@ class FederationSyncService:
                 continue
             rows: list[Any] = []
             if stream == INCIDENT_UPDATES:
-                note = await self.incident_updates.export(peer, local_uid)
+                note = await self.incident_updates.export(peer, local_uid, transaction=transaction)
                 if note is not None:
                     rows = [note]
             elif stream.startswith("board:") and stream[6:] in peer.boards:
-                rows = await self.database.read(
+                rows = await reader.read(
                     """SELECT p.uid,p.seq,p.author_label,p.origin_node,p.body,p.created_at,
                        p.edited_at,t.uid thread_uid,t.subject,b.slug FROM post p
                        JOIN thread t ON t.id=p.thread_id JOIN board b ON b.id=t.board_id
@@ -329,7 +336,7 @@ class FederationSyncService:
                     (local_uid, stream[6:]),
                 )
             elif stream == "incidents" and peer.sync_incidents:
-                rows = await self.database.read(
+                rows = await reader.read(
                     "SELECT id,uid,type,severity,status,title,body,lat,lon,location_text,radius_m,"
                     "reporter_label,origin_node,created_at,updated_at,expires_at,resolved_at,"
                     "resolution_note FROM incident WHERE uid=? AND merged_into_id IS NULL",
@@ -338,7 +345,7 @@ class FederationSyncService:
                 if rows and not self.incident_allowed(peer, rows[0]["lat"], rows[0]["lon"]):
                     rows = []
             elif stream == "alerts" and peer.relay_alerts:
-                rows = await self.database.read(
+                rows = await reader.read(
                     "SELECT uid,severity,headline,body,source,source_ref,raised_by,raised_at,"
                     "effective_at,expires_at,cancelled_at FROM alert WHERE uid=?",
                     (local_uid,),
@@ -351,7 +358,7 @@ class FederationSyncService:
                     payload["thread_uid"] = self._wire_uid(str(payload["thread_uid"]))
                     payload["origin_node"] = uid.split(":", 1)[0]
                 elif stream == "incidents" and incident_id is not None:
-                    origins = await self.database.read(
+                    origins = await reader.read(
                         "SELECT origin_uid FROM incident_origin WHERE incident_id=? "
                         "ORDER BY origin_uid",
                         (incident_id,),
