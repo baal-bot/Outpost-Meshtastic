@@ -737,3 +737,42 @@ async def test_association_lookups_are_indexed_and_peer_deletion_cannot_release_
     await source.governor.recover()
     await flush_radio(source, target)
     assert not source.radio.sent
+
+
+@pytest.mark.parametrize("phase", ["before_guard", "during_guard"])
+async def test_queue_deadline_is_current_after_awaited_reservation_validation(
+    nodes, monkeypatch, phase
+):
+    source, sp, _, _, incident = await prepare(nodes)
+    result = await source.incident_sender.admit(sp.id, "incidents", incident.uid)
+    selected, release = asyncio.Event(), asyncio.Event()
+    owner = source.governor.outbox if phase == "before_guard" else source.incident_sender
+    method = "start_attempt" if phase == "before_guard" else "_current"
+    original = getattr(owner, method)
+
+    async def delayed(*args, **kwargs):
+        validated = await original(*args, **kwargs) if phase == "during_guard" else None
+        selected.set()
+        await release.wait()
+        return validated if phase == "during_guard" else await original(*args, **kwargs)
+
+    monkeypatch.setattr(owner, method, delayed)
+    task = asyncio.create_task(source.governor.tick())
+    try:
+        await asyncio.wait_for(selected.wait(), 5)
+        source.clock.advance(1801)
+        release.set()
+        await task
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert not source.radio.sent
+    assert not await source.database.read("SELECT * FROM outbound_attempt")
+    work = (
+        await source.database.read(
+            "SELECT state,last_error FROM outbound_work WHERE id=?", (result.frame_ids[0],)
+        )
+    )[0]
+    assert tuple(work) == ("failed", "dispatch authorization denied")

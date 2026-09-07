@@ -54,6 +54,9 @@ Inside the attempt reservation transaction the guard checks current source/expor
 peer/producer identity, active/online trust, capabilities, geographic scope, key, parent storage
 and current radio channel/port. It reconstructs the exact authenticated frame and checks its
 position in the retained frame-ID list. A previously received receipt prevents more attempts.
+Queue expiry is rechecked against the current clock after awaited owner validation, rather than
+trusting the governor's earlier tick timestamp. A deadline passed during a writer/validation wait
+is a dispatch denial; this does not make wall-clock time trustworthy or guarantee physical timing.
 The candidate used for I/O is snapshotted and matched to the durable payload/routing/class fields;
 mutating an in-memory payload or clearing its guard cannot bypass the persisted requirement.
 

@@ -294,6 +294,8 @@ class IncidentSender:
                 and not work["want_ack"]
                 and work["traffic_class"] == TrafficClass.FEDERATION.value
                 and (work["channel"], work["portnum"]) == self.routing()
+                # The governor's tick-start timestamp may predate writer waits.
+                and work["expires_at"] > self.peers.clock.now().timestamp()
             )
         except ValueError:
             return False  # Policy/content denial; storage faults still fail the core task.
