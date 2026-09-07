@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from outpost.commands.responsibility import specs as responsibility_specs
 from outpost.router.models import (
     ChannelUse,
     CommandContext,
@@ -223,6 +224,11 @@ def specs(service: IncidentService) -> list[CommandSpec]:
                     TuiChoice("Dispute this report", f"MENU DISPUTE {value.local_ref}"),
                     TuiChoice("Acknowledge", f"MENU ACK {value.local_ref}"),
                     *(
+                        (TuiChoice("Responsibility", f"TASK {value.local_ref}"),)
+                        if TrustLevel.parse(ctx.member.trust) >= TrustLevel.RESPONDER
+                        else ()
+                    ),
+                    *(
                         (TuiChoice("Correct my location", f"MENU UPD {value.local_ref}"),)
                         if value.reporter_id == ctx.member.id
                         and value.status in {"open", "monitoring"}
@@ -240,6 +246,7 @@ def specs(service: IncidentService) -> list[CommandSpec]:
         rate_key="incidents",
     )
     return [
+        *responsibility_specs(service),
         CommandSpec(
             "REPORT",
             (),

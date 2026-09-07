@@ -305,7 +305,7 @@ description = "Idempotent migration repairs legacy placeholder mail while preser
 [[capabilities]]
 id = "community_watch"
 area = "Community Watch"
-present = "Transactional incident intake, authorized public-location corrections, reactions, operator changes and expiry with permanent local reference bindings; cross-Outpost origin/provenance reconciliation, human merge/unmerge, delivery-accountable and proximity-targeted responder alerts, member-relative mesh listings, retrying zero-recipient escalation, per-stage bounded repeats, all-clear, and maps."
+present = "Transactional incident intake, authorized public-location corrections, reactions, operator changes and expiry with permanent local reference bindings; explicit local responsibility and accepted handoffs through version-bound web/verified-DM workflows; cross-Outpost origin/provenance reconciliation, human merge/unmerge, delivery-accountable and proximity-targeted responder alerts, member-relative mesh listings, retrying zero-recipient escalation, per-stage bounded repeats, all-clear, and maps."
 maturity = "simulated"
 introduced_commit = "8323143"
 limitations = [
@@ -313,16 +313,34 @@ limitations = [
   "Reporter location edits require a verified PKI DM or operator assistance. Suppression does not erase prior public history; moving outside a peer's area does not withdraw its older copy. Reference safety follows the database lineage; lost history or old-backup restores require identity precautions.",
   "Clock-independent producer reconciliation and bounded automatic incident delivery are software-tested on modern links; complete physical G6 (#135) and acknowledged-data power-loss durability (#137) remain unqualified.",
   "Incident/note changes have an atomic coalesced source journal drained through independent per-peer cursors; source recording and staging alone are not remote delivery (#165/#135).",
+  "Responsibility is local to a coordinating Outpost, not globally exclusive during a partition. Offers require explicit retrieval and acceptance, not an alert ACK; no automatic paging or physical responder-availability claim is made (#151).",
 ]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-09-06"
+date = "2026-09-07"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_incident_transactions.py::test_concurrent_distinct_reports_have_unique_references_and_complete_origins"
 description = "Concurrent reports allocate unique references and commit incident, origin, and initial provenance together."
+
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_incident_responsibility.py::test_concurrent_offers_and_replayed_accept_do_not_replace_newer_owner"
+description = "Real writer transactions separate offers from accepted responsibility and reject competing/replayed decisions without overwriting the newer owner."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_responsibility_mesh.py::test_handheld_private_task_transcript_crosses_real_intake_and_governed_replies"
+description = "Verified private TASK intake and TUI choices cannot become public pending-position/emergency reports; all bounded replies use the normal governor."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_responsibility_browser.py::test_phone_desktop_offer_accept_handoff_and_no_xss"
+description = "Actual authenticated ASGI/Chromium forms support explicit offers, team/account acceptance and completion at 320px/desktop widths, without HTML execution."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/INCIDENT-RESPONSIBILITY.md"
+description = "Local authority, decision semantics, bounded workflows, reviewed identities, time/restart/restore limits, privacy and physical-qualification boundaries."
 
 [[capabilities.evidence]]
 kind = "automated"

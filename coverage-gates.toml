@@ -1,6 +1,15 @@
 [global]
 minimum = 72
 
+[production_groups.incident_responsibility]
+minimum = 90
+per_file_minimum = 90
+files = [
+  "src/outpost/watch/responsibility.py",
+  "src/outpost/commands/responsibility.py",
+  "src/outpost/web/routes/responsibility.py",
+]
+
 [groups.safety]
 minimum = 80
 files = [

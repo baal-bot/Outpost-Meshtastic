@@ -6,3 +6,11 @@
 @media(max-width:620px){.report-kpis{grid-template-columns:1fr 1fr}.report-overview{padding:18px}.timeline-panel>.heading{align-items:flex-start;flex-direction:column}.timeline-panel>.heading>span{max-width:none;text-align:left}.timeline-item{grid-template-columns:1fr;gap:7px;padding:15px 18px}.timeline-category{grid-row:1}.timeline-time{grid-row:2}.timeline-body{grid-row:3}.report-actions{display:grid;grid-template-columns:1fr 1fr;width:100%}.report-actions a,.report-actions button{text-align:center}}
 @media print{.rail,.report-actions,footer{display:none!important}.shell{margin:0}.shell>header{padding:0 0 16px}.shell main{padding:0}.report-kpis,.report-overview,.timeline-item{break-inside:avoid}.timeline-panel{border:0}.timeline-item{grid-template-columns:140px 110px 1fr}.privacy-note{margin-top:15px}}
 .report-overview dd{overflow-wrap:anywhere}
+:root .responsibility-panel{padding:1rem;margin:1rem 0;overflow-wrap:anywhere;min-width:0}
+.responsibility-panel form,.responsibility-panel fieldset{display:grid;gap:.7rem;min-width:0}
+.responsibility-panel label{display:grid;gap:.3rem;min-width:0}
+.responsibility-panel select,.responsibility-panel input:not([type=checkbox]){width:100%;max-width:100%;min-width:0;box-sizing:border-box}
+.responsibility-panel button{min-height:44px;white-space:normal}
+.responsibility-panel [hidden]{display:none}
+.responsibility-panel ol{padding-left:1.3rem}
+@media print{.responsibility-panel form,.responsibility-panel button{display:none!important}}

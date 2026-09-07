@@ -59,6 +59,7 @@ from outpost.web.member_triage import NEEDS_REVIEW_SQL, MemberTriageError, Membe
 from outpost.web.operator_inbox import OperatorInboxService
 from outpost.web.routes.federation_review import register_federation_review_routes
 from outpost.web.routes.readiness import register_readiness_routes
+from outpost.web.routes.responsibility import register_responsibility_routes
 from outpost.web.settings import RuntimeSettings
 from outpost.web.tiles import absolute_tile_root, find_tile, inspect_tile_pack
 from outpost.web.transport import WebTransportMiddleware, transport_status
@@ -765,7 +766,7 @@ def create_web_app(
     )
     effective_web_config = web_config or WebConfig()
     effective_incident_reports = incident_reports or (
-        IncidentReportService(database, incidents.clock)
+        IncidentReportService(database, incidents.clock, responsibility=incidents.responsibility)
         if database is not None and incidents is not None
         else None
     )
@@ -2991,6 +2992,8 @@ def create_web_app(
                     value["origin_name"] = peers.get(mesh_id, mesh_id) if mesh_id else None
                     value["origins"] = origins
                 return values
+
+            register_responsibility_routes(app, incidents.responsibility)
 
             @app.get("/api/v1/incidents")
             async def incident_list(

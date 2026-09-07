@@ -14,6 +14,7 @@ from typing import Any, Literal, Protocol
 from outpost.clock import Clock
 from outpost.router.models import TrustLevel
 from outpost.store import Database
+from outpost.watch.responsibility import IncidentResponsibilityService
 
 NARRATION_NAMESPACE = "situation_narration"
 NARRATION_FAILURE_TTL = 5 * 60
@@ -242,11 +243,13 @@ class SituationBriefingService:
         *,
         narrator: SituationNarrator | None = None,
         modules: Callable[[], Mapping[str, bool]] | None = None,
+        responsibility: IncidentResponsibilityService | None = None,
     ) -> None:
         self.database = database
         self.clock = clock
         self.status_provider = status_provider
         self.narrator = narrator
+        self.responsibility = responsibility or IncidentResponsibilityService(database, clock)
         self.modules = modules or (lambda: {name: True for name in ("bbs", "watch", "env", "fed")})
         self._snapshot_lock = asyncio.Lock()
 
@@ -358,7 +361,7 @@ class SituationBriefingService:
             section_items, section_sources = await self._alerts(now)
             items.extend(section_items)
             sources.extend(section_sources)
-            section_items, section_sources = await self._incidents(now)
+            section_items, section_sources = await self._incidents(now, capability)
             items.extend(section_items)
             sources.extend(section_sources)
             section_items, section_sources = await self._welfare(capability, now)
@@ -467,7 +470,11 @@ class SituationBriefingService:
             )
         return items, sources
 
-    async def _incidents(self, now: int) -> tuple[list[BriefingItem], list[BriefingSource]]:
+    async def _incidents(
+        self,
+        now: int,
+        capability: BriefingCapability = BriefingCapability.PUBLIC,
+    ) -> tuple[list[BriefingItem], list[BriefingSource]]:
         rows = await self.database.read(
             """
             SELECT id,local_ref,type,severity,status,title,updated_at,confirm_count,dispute_count,
@@ -488,6 +495,12 @@ class SituationBriefingService:
             source_id = f"incident:{reference}"
             updated_at = int(row["updated_at"])
             stale = now - updated_at > STALE_AFTER["incidents"]
+            responsibility_text = ""
+            if capability.trust >= TrustLevel.RESPONDER:
+                responsibility = await self.responsibility.snapshot(item_id)
+                responsibility_text = " · " + _safe_text(
+                    self.responsibility.summary(responsibility), 500
+                )
             uncertainty = (
                 "disputed"
                 if int(row["dispute_count"] or 0)
@@ -507,7 +520,7 @@ class SituationBriefingService:
                     str(row["severity"]),
                     _safe_text(row["title"]),
                     f"{_safe_text(row['type'], 40)} · {row['status']} · "
-                    f"{int(row['confirm_count'])} confirmed",
+                    f"{int(row['confirm_count'])} confirmed{responsibility_text}",
                     str(row["status"]),
                     (source_id,),
                     f"/watch.html?incident={item_id}",
@@ -1612,7 +1625,16 @@ class SituationBriefingService:
             authorized = {
                 "generated_at": snapshot["generated_at"],
                 "capability": snapshot["capability"],
-                "items": snapshot["items"],
+                # Responsibility is for deterministic local coordination, never AI transport.
+                "items": [
+                    {
+                        **item,
+                        "detail": "See the reviewed incident record for coordination details.",
+                    }
+                    if item["section"] == "incidents"
+                    else item
+                    for item in snapshot["items"]
+                ],
                 "sources": snapshot["sources"],
                 "changes": snapshot["changes"],
             }

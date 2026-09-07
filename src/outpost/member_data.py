@@ -15,6 +15,7 @@ REMOVAL_POLICY = {
     "deleted": (
         "Exact and pending positions, mesh packet content and keys, AI question/answer content, "
         "mail content, subscriptions, and read cursors are removed immediately."
+        " Linked responsibility next-action text is redacted."
     ),
     "pseudonymized": (
         "The member directory identity and author labels on retained board, welfare, and incident "
@@ -151,6 +152,14 @@ class MemberDataService:
             ),
         )
         value = dict(rows[0])
+        responsibility = await self.database.read(
+            "SELECT COUNT(*) count FROM incident_responsibility_event e "
+            "WHERE e.actor_member_id=? OR e.target_id IN ("
+            "SELECT id FROM incident_responsibility_target WHERE member_id=?) OR e.owner_id IN ("
+            "SELECT id FROM incident_responsibility_target WHERE member_id=?)",
+            (member.id, member.id, member.id),
+        )
+        value["incidents"] += int(responsibility[0]["count"])
         value["position_expires_at"] = (
             int(value["position_expires_at"]) if value["position_expires_at"] is not None else None
         )
@@ -338,6 +347,21 @@ class MemberDataService:
         )
         await transaction.write(
             "UPDATE incident_update SET author_label=? WHERE author_id=?", (pseudonym, member_id)
+        )
+        await transaction.write(
+            "UPDATE incident_responsibility SET next_action='',offer_action='',"
+            "verification_epoch=NULL WHERE owner_id IN ("
+            "SELECT id FROM incident_responsibility_target WHERE member_id=?) OR offer_id IN ("
+            "SELECT id FROM incident_responsibility_target WHERE member_id=?) OR incident_id IN ("
+            "SELECT incident_id FROM incident_responsibility_event WHERE actor_member_id=?)",
+            (member_id, member_id, member_id),
+        )
+        await transaction.write(
+            "UPDATE incident_responsibility_event SET next_action='[removed after member request]' "
+            "WHERE actor_member_id=? OR target_id IN ("
+            "SELECT id FROM incident_responsibility_target WHERE member_id=?) OR owner_id IN ("
+            "SELECT id FROM incident_responsibility_target WHERE member_id=?)",
+            (member_id, member_id, member_id),
         )
         await transaction.write(
             """

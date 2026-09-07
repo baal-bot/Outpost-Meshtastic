@@ -15,6 +15,7 @@ from outpost.clock import Clock
 from outpost.config import RetentionConfig
 from outpost.csv_safety import csv_safe_row
 from outpost.store import Database
+from outpost.watch.responsibility import IncidentResponsibilityService
 
 ALERT_STAGE_TOKEN = re.compile(r"^alert:(\d+):stage:(\d+):repeat:(\d+)$")
 ALERT_TOKEN = re.compile(r"^alert:(\d+):")
@@ -42,11 +43,13 @@ class IncidentReportService:
         retention: RetentionConfig | None = None,
         *,
         coarse_precision_m: int = 500,
+        responsibility: IncidentResponsibilityService | None = None,
     ) -> None:
         self.database = database
         self.clock = clock
         self.retention = retention or RetentionConfig()
         self.coarse_precision_m = coarse_precision_m
+        self.responsibility = responsibility or IncidentResponsibilityService(database, clock)
 
     @staticmethod
     def _decode(value: object) -> Any:
@@ -781,6 +784,57 @@ class IncidentReportService:
                     )
                 )
 
+        responsibility = await self.responsibility.snapshot(canonical_id)
+        responsibility_text = self.responsibility.summary(responsibility)
+        for scoped_id in incident_ids:
+            through = (await self.responsibility.snapshot(scoped_id))["version"]
+            after_version = 0
+            while after_version < through:
+                history = await self.responsibility.history(
+                    scoped_id, after=after_version, through=through
+                )
+                if not history:
+                    break
+                for entry in history:
+                    target = entry["target"]
+                    owner = entry["owner"]
+                    events.append(
+                        self._event(
+                            f"responsibility:{scoped_id}:{entry['version']:020d}",
+                            entry["created_at"],
+                            "responsibility",
+                            entry["action"],
+                            f"Local responsibility: {entry['action']}",
+                            actor=entry["actor"],
+                            detail=(
+                                f"Decision {entry['version']}; target {target['label'] if target else 'none'}; "
+                                f"owner after decision {owner['label'] if owner else 'none'}; "
+                                f"next action {entry['next_action'] or 'none'}. Local coordination only."
+                            ),
+                        )
+                    )
+                after_version = history[-1]["version"]
+        # Include current responsibility even in an empty handover change window.
+        # Mutation tokens and private target IDs never belong in exported reports.
+        responsibility_value = {
+            key: responsibility[key]
+            for key in (
+                "scope",
+                "state",
+                "acceptance_pending",
+                "next_action",
+                "offer_action",
+                "accepted_at",
+                "verified_at",
+                "verification",
+                "version",
+            )
+        }
+        responsibility_value.update(
+            owner=responsibility["owner"]["label"] if responsibility["owner"] else None,
+            offer=responsibility["offer"]["label"] if responsibility["offer"] else None,
+            summary=responsibility_text,
+        )
         category_order = {
             "incident": 10,
             "mesh": 20,
@@ -791,6 +845,7 @@ class IncidentReportService:
             "transmission": 70,
             "audit": 80,
             "provenance": 90,
+            "responsibility": 95,
         }
         events.sort(
             key=lambda item: (
@@ -862,6 +917,7 @@ class IncidentReportService:
             "generated_at": now,
             "generated_at_iso": _iso(now),
             "incident": incident_value,
+            "responsibility": responsibility_value,
             "change_window": {
                 "kind": window_kind,
                 "since": since,
@@ -952,6 +1008,7 @@ class IncidentReportService:
             "source_node",
             "source_updated_at",
             "target",
+            "current_responsibility",
         )
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=fields)
@@ -1001,8 +1058,18 @@ class IncidentReportService:
                 "source_node": event.get("source_node"),
                 "source_updated_at": event.get("source_updated_at"),
                 "target": event.get("target"),
+                "current_responsibility": report.get("responsibility", {}).get("summary"),
             }
             writer.writerow(csv_safe_row(row))
+        if not report["timeline"] and report.get("responsibility"):
+            writer.writerow(
+                csv_safe_row(
+                    {
+                        "category": "responsibility_snapshot",
+                        "current_responsibility": report["responsibility"]["summary"],
+                    }
+                )
+            )
         return output.getvalue()
 
     @staticmethod
@@ -1064,7 +1131,7 @@ th{{background:#eef3f1}}time,small{{color:#5c6d66}}p{{margin:.35rem 0;white-spac
 <div class="meta">{severity} · {status} · opened {opened} · generated {generated}</div></header>
 <p class="notice">{window}. Locations are coarsened to {precision} metres. Handles are preferred; unnamed mesh identifiers are suppressed.</p>
 <section class="summary"><div><b>{events}</b>events</div><div><b>{alerts}</b>alerts</div><div><b>{zero}</b>zero-recipient stages</div><div><b>{acks}</b>acknowledgements</div><div><b>{airtime}</b>actual airtime (ms)</div></section>
-<section><h2>Incident overview</h2><p><b>Reporter:</b> {reporter}</p><p>{narrative}</p>{location}{resolution}</section>
+<section><h2>Incident overview</h2><p><b>Reporter:</b> {reporter}</p><p>{narrative}</p>{location}{resolution}<p>{responsibility}</p></section>
 <h2>Ordered timeline</h2><table><thead><tr><th>Time (UTC)</th><th>Type</th><th>Record</th></tr></thead><tbody>{rows}</tbody></table>
 <footer>Self-contained offline record · report schema v{version} · incident evidence retained with the incident for {retention} days.</footer></body></html>""".format(
             ref=esc(incident["local_ref"]),
@@ -1081,6 +1148,7 @@ th{{background:#eef3f1}}time,small{{color:#5c6d66}}p{{margin:.35rem 0;white-spac
             acks=esc(summary["acknowledged_count"]),
             airtime=esc(summary["actual_airtime_ms"]),
             reporter=esc(incident["reporter"]),
+            responsibility=esc(report.get("responsibility", {}).get("summary", "")),
             narrative=esc(
                 incident["body"] or incident["location_text"] or "No additional narrative recorded."
             ),

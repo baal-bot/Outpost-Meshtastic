@@ -3,6 +3,24 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Accepted incident responsibility — #151
+
+[Local responsibility](INCIDENT-RESPONSIBILITY.md) now distinguishes an offered next action,
+explicit acceptance, accepted ownership, verified update, handoff, cancellation, release and
+responsibility completion. The existing SQLite writer atomically rechecks canonical identity,
+current roles/PKI/web session and the reviewed version before recording state/history/audit.
+Migration 183 gives targets non-reusable identities; deleted/recreated rows cannot inherit
+old selections. Time/restart uncertainty invalidates freshness and old tags, not the owner.
+
+Actual operator web forms and verified `TASK` direct messages share this service. Private task
+text and its TUI continuations bypass public pending-position/emergency intake. Reports and
+authorized briefings include local responsibility with existing privacy controls; public/member
+views, AI narration and federation do not receive its private action text. Unaccepted offers
+remain visible; this operation does not page responders or claim globally exclusive ownership
+during partitions. No alert/receipt/ACK, incident resolution or expiry completes responsibility.
+Temporary-store, governed simulated-radio, concurrency/fault and browser tests are software
+evidence only; no live migration/deployment or physical handoff qualification is claimed.
+
 ## Explicit domain adapters — #153
 
 The [transaction ownership map](TRANSACTION-OWNERSHIP.md) now includes an authenticated

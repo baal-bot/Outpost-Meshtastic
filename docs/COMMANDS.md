@@ -82,6 +82,7 @@ configured channel capability, available local data, or a higher role for a sens
 | `SUB`<br>Aliases: `SUBSCRIBE` | `SUB <board> [cadence]` | Guest | BBS write | reply | Changes state |
 | `SUM` | `SUM <board\|thread\|incident>` | Member | Local AI | ai | Read-only |
 | `SUN`<br>Aliases: `ASTRO` | `SUN` · sunrise, twilight, and moon | Guest | General | reply | Read-only |
+| `TASK` | `TASK <inc> [NEXT\|TARGETS member\|group\|account [after]\|<action> <token> [kind:id next action]]` | Responder | General | reply | Changes state |
 | `TR`<br>Aliases: `TRANSLATE` | `TR <language> <text>` · translate with the local assistant | Member | Local AI | ai | Read-only |
 | `UNSUB`<br>Aliases: `UNSUBSCRIBE` | `UNSUB <board>` | Guest | BBS write | reply | Changes state |
 | `UPD` | `UPD <inc> <place\|-share lat lon\|-share -wp name\|-nopos>` · correct own report; verified DM only (else ask operator). Public; no cached GPS. -share consents to coordinates. | Guest | Incident report | reply | Changes state |

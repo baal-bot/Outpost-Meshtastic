@@ -1,4 +1,5 @@
 import {byId as $, safeLocalHref} from "/ui-primitives.js";
+import {mountResponsibility} from "/responsibility.js";
 
 const query=new URLSearchParams(location.search),incidentId=Number(query.get("id")),handover=query.get("mode")==="handover",since=query.get("since");
 const element=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined&&text!==null)node.textContent=String(text);return node;};
@@ -57,3 +58,4 @@ async function load(){
 function showError(message){$("report-error").hidden=false;$("report-error").textContent=message;$("incident-timeline").replaceChildren();$("report-boundary").textContent=message;}
 
 $("print-report").addEventListener("click",()=>window.print());load();
+if(Number.isInteger(incidentId)&&incidentId>0){const root=element("section","ui-card responsibility-panel");root.id="incident-responsibility";root.setAttribute("aria-label","Local incident responsibility");document.querySelector(".timeline-panel").before(root);mountResponsibility(root,incidentId);}

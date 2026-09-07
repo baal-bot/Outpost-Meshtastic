@@ -270,6 +270,7 @@ class OutpostApp:
             self.clock,
             self.config.store.retention,
             coarse_precision_m=self.config.security.coarse_precision_m,
+            responsibility=self.incidents.responsibility,
         )
         self.weather = WeatherService(
             self.database,
@@ -336,6 +337,7 @@ class OutpostApp:
             self.status,
             narrator=self.ai_service,
             modules=self.config.modules.enabled_map,
+            responsibility=self.incidents.responsibility,
         )
         command_groups = (
             (
@@ -3014,6 +3016,21 @@ class OutpostApp:
                 ACK_OUTCOME.labels(outcome).inc()
             return
         if (
+            self.config.modules.watch.enabled
+            and message.text
+            and (
+                self.router.command_token(message) == "TASK"
+                or (
+                    message.is_direct
+                    and self.router.sessions.get(message.from_id, -1).tui_screen
+                    in {"responsibility", "result-task"}
+                )
+            )
+        ):
+            # Private task text and its numeric TUI continuations must not become
+            # public reports through pending-position or emergency-keyword intake.
+            response = await self.router.dispatch(message, ordered=ordered, trace=trace)
+        elif (
             self.config.modules.watch.enabled
             and message.latitude is not None
             and message.longitude is not None

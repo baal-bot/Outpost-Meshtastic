@@ -17,6 +17,7 @@ from outpost.store.members import Member
 
 from .change_events import IncidentChangeEvents
 from .location import parse_location
+from .responsibility import IncidentResponsibilityService
 
 ACTIVE = ("open", "monitoring")
 TERMINAL = ("resolved", "false_alarm", "expired")
@@ -96,6 +97,7 @@ class IncidentService:
     ) -> None:
         self.database, self.clock, self.origin_node = database, clock, origin_node
         self.change_events = IncidentChangeEvents(database)
+        self.responsibility = IncidentResponsibilityService(database, clock)
         self.position_retention_seconds = position_retention_hours * 3_600
         self.history_retention_days = history_retention_days
         self.position_max_age_seconds = position_max_age_minutes * 60
@@ -638,6 +640,12 @@ class IncidentService:
                 raise ValueError("incident not found")
             if source.merged_into_id is not None or target.merged_into_id is not None:
                 raise ValueError("only canonical incidents can be merged")
+            if await transaction.read(
+                "SELECT 1 FROM incident_responsibility WHERE incident_id IN (?,?) "
+                "AND (owner_id IS NOT NULL OR offer_id IS NOT NULL)",
+                (source_id, target_id),
+            ):
+                raise ValueError("Release responsibility and cancel pending offers before merging.")
             severity = max((target.severity, source.severity), key=SEVERITY_RANK.__getitem__)
             expires = max(
                 (value for value in (target.expires_at, source.expires_at) if value is not None),

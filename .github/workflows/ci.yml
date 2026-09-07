@@ -9,9 +9,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    # Full suite plus production rerun exceeded 30 minutes after #169's regressions.
-    # Keep every check and coverage floor; allow runner/runtime variation.
-    timeout-minutes: 40
+    # #149's full suite + production rerun took 38 minutes on Python 3.12.
+    # #151 adds real-browser/identity/fault coverage; retain every check and floor.
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -63,7 +63,8 @@ jobs:
 
   locked-runtime:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    # #153's locked suite took 21 minutes before #151's added acceptance cases.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

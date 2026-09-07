@@ -70,6 +70,14 @@ included whenever a domain invariant changes.
 
 ## Delivery vocabulary
 
+`IncidentResponsibilityService` now owns a separate local coordination transaction for
+current responder/web-session authorization, version comparison, pending/accepted owner,
+next action, decision history and redacted audit. `TASK` and `web.routes.responsibility`
+translate intent; only the normal reply path touches the governor. Target identities are
+non-reusable; merge and member-removal paths preserve the responsibility boundary. See
+[accepted handoffs](INCIDENT-RESPONSIBILITY.md). Assignment acceptance/completion is not
+any delivery stage below, and federation never owns this local record.
+
 The following stages need separate evidence and must not collapse into one “sent” flag:
 
 1. Local authoritative record committed.
