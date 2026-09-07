@@ -126,19 +126,20 @@ description = "Operator safety boundary, replay, redaction, drill, and limitatio
 [[capabilities]]
 id = "airtime_delivery"
 area = "Airtime and outbound delivery"
-present = "Durable priority queue with commit-safe admission/supersession publication, budget-aware candidate selection, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, restart recovery, and a delivery-health briefing comparing confirmed 24-hour channel outcomes and enrolled-radio receive quality with the preceding 14 days."
+present = "Durable priority queue with commit-safe publication, current dispatch eligibility after waits, serialized egress, completion-based conservative airtime/retry accounting, recovered pacing, emergency reserve, quiet hours, dedupe, receipts, and delivery-health trends."
 maturity = "automated_tested"
 introduced_commit = "3d65058"
 limitations = [
   "A 24-hour comparison with the deployed radio preset and destructive power-loss campaign remain open.",
   "Synthetic emergency bursts qualify finite-load admission and explicit overload recovery, not unlimited intake, physical delivery capacity or independent human consensus.",
-  "Post-commit publication failure blocks egress until quiesced recovery; cancellation may still leave committed work. Shared outbox safety does not implement incident sender authorization or exact receipt matching (#135).",
+  "Post-commit publication failure blocks egress until quiesced recovery; cancellation may still leave committed or uncertain work. Explicit incident admission/receipts exist, but automatic scheduling remains #135.",
+  "Reservation is not an atomic physical RF instant. Recovery conservatively retains future-dated airtime after backward wall steps; arbitrary forward clock changes across restart still require #141 time-confidence work.",
 ]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-09-06"
+date = "2026-09-07"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_delivery_health_briefing.py::test_delivery_health_is_healthy_then_cautions_on_durable_trends"
@@ -211,6 +212,26 @@ description = "Test-owned SIGKILL before/after commit and temporary-store restar
 kind = "operations"
 path = "docs/OUTBOX-COMMIT-PUBLICATION.md"
 description = "Post-commit local publication, ownership/cancellation, fail-closed egress, quiesced recovery, compatibility and remaining incident integration limits."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_governor_timing.py::test_deadline_passed_during_await_cannot_start_radio_work"
+description = "Current expiry rejects work delayed across telemetry, observer, reservation, writer and owner-validation waits without radio attempts."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_governor_timing.py::test_policy_changes_while_waiting_preserve_pending_work"
+description = "Current budget/share/quiet/link/power/utilisation/pacing/profile deferral preserves pending work without consuming an attempt."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_governor_timing.py::test_slow_radio_accounting_uses_completion_not_tick_start"
+description = "Slow success, failure and cancellation retain conservative airtime through recovery and backward wall-clock steps."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_governor_timing.py::test_recovery_preserves_dispatch_gap"
+description = "Recovered normal/multipart work cannot bypass the remaining dispatch gap."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/DISPATCH-TIMING.md"
+description = "Current-clock reservation and outcome boundaries, conservative accounting, index migration, compatibility and explicit physical/time-confidence limits."
 
 [[capabilities]]
 id = "identity_directory"

@@ -120,6 +120,8 @@ async def test_interrupted_pre_send_attempt_is_requeued(tmp_path) -> None:
     restarted_db, restarted, radio = await durable_governor(path, clock)
     assert await restarted.recover() == 1
     await radio.connect()
+    assert await restarted.tick() is None  # An uncertain attempt retains its pacing gap.
+    clock.advance(restarted._next_tx_at - clock.monotonic())
     assert await restarted.tick() is not None
     row = (
         await restarted_db.read("SELECT state,attempts FROM outbound_work WHERE id=?", (item_id,))
@@ -202,6 +204,8 @@ async def test_interrupted_post_send_logging_recovers_idempotently(tmp_path) -> 
     restarted_db, restarted, restarted_radio = await durable_governor(path, clock)
     assert await restarted.recover() == 1
     await restarted_radio.connect()
+    assert await restarted.tick() is None  # Logging interruption cannot bypass pacing.
+    clock.advance(restarted._next_tx_at - clock.monotonic())
     assert await restarted.tick() is not None
     rows = await restarted_db.read(
         "SELECT id,outbox_id,outcome FROM message_log WHERE outbox_id=?", (item_id,)

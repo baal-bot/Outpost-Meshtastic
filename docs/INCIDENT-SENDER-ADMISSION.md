@@ -48,7 +48,8 @@ for a future worker to revive cancelled work.
 `outbound_work.guard_kind` retains required owner validation across restart, held-work recovery,
 uncertain sends, transport retries and operator requeueing. The production app wires the incident
 guard during construction. A missing/unknown handler fails closed, as does a missing/deleted or
-superseded association. Unguarded existing traffic retains its previous behavior.
+superseded association. Other traffic does not acquire an incident owner guard; the later
+[#170 shared timing checks](DISPATCH-TIMING.md) apply current dispatch policy to all work.
 
 Inside the attempt reservation transaction the guard checks current source/export/digest,
 peer/producer identity, active/online trust, capabilities, geographic scope, key, parent storage

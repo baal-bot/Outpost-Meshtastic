@@ -3,6 +3,17 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Current dispatch timing — #170
+
+The [shared timing boundary](DISPATCH-TIMING.md) rechecks eligibility after awaited
+telemetry/observation and inside attempt reservation after writer/owner validation.
+Policy deferral preserves pending work without a phantom attempt. Serialized ticks,
+current outcome/retry times, conservative success/failure/cancellation accounting and
+recovered pacing prevent waits from backdating airtime or bypassing gaps. Migration 181
+indexes the later of attempt start/completion for recovery. Class shares, critical reserve,
+quiet-hour settings, trust and approval remain unchanged. Clock confidence and physical
+qualification remain open; automatic incident scheduling still belongs to #135.
+
 ## Guarded incident admission and exact receipts — #169 / #135 software slice
 
 The [explicit sender service](INCIDENT-SENDER-ADMISSION.md) commits peer counter, current source

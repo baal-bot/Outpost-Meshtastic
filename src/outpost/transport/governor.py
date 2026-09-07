@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import uuid
 from collections import defaultdict, deque
@@ -13,7 +14,7 @@ from outpost.clock import Clock
 from outpost.config import AirtimeConfig, RadioPowerConfig
 from outpost.radio_power import normalize_battery_level
 from outpost.store.database import StoreError
-from outpost.store.outbox import OutboxRejected, OutboxStore
+from outpost.store.outbox import OutboxDeferred, OutboxRejected, OutboxStore
 from outpost.transport.chunker import truncate_utf8
 
 if TYPE_CHECKING:
@@ -158,6 +159,7 @@ class AirtimeGovernor:
         self._recent: dict[tuple[str, int, str], float] = {}
         self._held_ids: set[int] = set()
         self._publication_failed = False
+        self._dispatch_lock = asyncio.Lock()
         self._next_id = 1
         self._next_tx_at = 0.0
         self._last_toa = 0.0
@@ -539,16 +541,23 @@ class AirtimeGovernor:
             return 0
         self._publication_failed = True
         now_epoch = self.clock.now().timestamp()
-        now_mono = self.clock.monotonic()
         rows = await self.outbox.recover(now_epoch)
         self.queues = {cls: deque() for cls in TrafficClass}
         self._held_ids.clear()
         self.history.clear()
-        for record in await self.outbox.recent_airtime(now_epoch):
+        airtime = await self.outbox.recent_airtime(self.clock.now().timestamp())
+        now_epoch = self.clock.now().timestamp()
+        now_mono = self.clock.monotonic()
+        self._next_tx_at = 0.0
+        for record in airtime:
             traffic_class = TrafficClass(str(record["airtime_class"]))
             severity = Severity(str(record["severity"]))
             sent_at = now_mono - max(0.0, now_epoch - float(record["created_at"]))
-            self.history.append((sent_at, float(record["toa_ms"]) / 1_000, traffic_class, severity))
+            cost = float(record["toa_ms"]) / 1_000
+            self.history.append((sent_at, cost, traffic_class, severity))
+            self._next_tx_at = max(
+                self._next_tx_at, sent_at + self._attempt_gap(cost, bool(record["multipart"]))
+            )
         for row in rows:
             item = OutboundItem(
                 text=str(row["text"]),
@@ -785,9 +794,7 @@ class AirtimeGovernor:
     def _available(self, item: OutboundItem, now: float) -> bool:
         return item.item_id not in self._held_ids and item.next_attempt_at <= now
 
-    def _dispatch_candidates(
-        self, *, only_critical: bool, high_util: bool, low_power: bool, now: float
-    ) -> Iterator[OutboundItem]:
+    def _dispatch_candidates(self) -> Iterator[OutboundItem]:
         """Visit each available candidate once, without reordering deferred work.
 
         Airtime preflight may reject a candidate without blocking later work. Stable
@@ -795,44 +802,104 @@ class AirtimeGovernor:
         Round-robin advances only as far as the class visited by the caller.
         """
         yield from sorted(
-            (
-                item
-                for item in self.queues[TrafficClass.ALERT]
-                if self._available(item, now)
-                and (not only_critical or item.severity == Severity.CRITICAL)
-            ),
+            (item for item in self.queues[TrafficClass.ALERT]),
             key=lambda item: (ALERT_SEVERITY_ORDER.index(item.severity), -item.priority),
         )
-        if only_critical or high_util:
-            return
         for _ in range(len(self._rr)):
             cls = self._rr[0]
             self._rr.rotate(-1)
-            if (low_power and cls in DISCRETIONARY_POWER_CLASSES) or self._quiet(cls):
-                continue
             yield from sorted(
-                (item for item in self.queues[cls] if self._available(item, now)),
+                self.queues[cls],
                 key=lambda item: -item.priority,
             )
 
-    async def tick(self) -> OutboundItem | None:
+    def _expired(self, item: OutboundItem) -> bool:
+        return item.expires_at <= self.clock.monotonic() or (
+            self.outbox is not None and item.expires_at_epoch <= self.clock.now().timestamp()
+        )
+
+    def _dispatch_policy(self, item: OutboundItem, cost: float) -> str | None:
+        """Current, synchronous eligibility evidence at selection/reservation."""
         self._check_publication()
         now = self.clock.monotonic()
-        now_epoch = self.clock.now().timestamp()
+        if self._expired(item):
+            return "expired"
+        if (
+            self.link.state != LinkState.UP
+            or now < self._next_tx_at
+            or not self._available(item, now)
+        ):
+            return "unavailable"
+        cls = item.traffic_class
+        critical = cls == TrafficClass.ALERT and item.severity == Severity.CRITICAL
+        budget = 3_600 * self.budget_percent / 100
+        total = 3_600 * (self.budget_percent + self.reserve_percent) / 100
+        if self.used_airtime + cost > (total if critical else budget) or (
+            not critical
+            and self.class_airtime(cls) + cost > budget * self.config.class_shares.get(cls.value, 0)
+        ):
+            return "budget"
+        if (
+            cls != TrafficClass.ALERT
+            and self.channel_utilisation is not None
+            and self.channel_utilisation >= self.config.utilisation_ceiling
+        ):
+            return "utilisation"
+        if (
+            cls in DISCRETIONARY_POWER_CLASSES
+            and self.power_config.shed_discretionary
+            and self.battery_level is not None
+            and self.battery_level <= self.power_config.shed_below_percent
+        ):
+            return "low_power"
+        if self._quiet(cls):
+            return "unavailable"
+        portnum = item.portnum or (1 if item.binary_payload is None else 260)
+        if cost != self.estimate_toa(item.payload_size, portnum=portnum):
+            return "profile_changed"
+        return None
+
+    def _account_attempt(self, item: OutboundItem, cost: float) -> None:
+        # RF may happen anywhere inside the awaited call, even if it raises or is
+        # cancelled. Retain the cost for a full hour after the latest known end.
+        now = self.clock.monotonic()
+        self.history.append((now, cost, item.traffic_class, item.severity))
+        AIRTIME_USED.set(self.used_airtime / 3_600)
+        self._last_toa, self._next_tx_at = cost, now + self._attempt_gap(cost, item.multipart)
+
+    def _attempt_gap(self, cost: float, multipart: bool) -> float:
+        gap = max(self.config.min_gap_s, 4 * cost)
+        if multipart:
+            gap = max(gap, self.config.interpart_delay_s)
+        return gap
+
+    async def tick(self) -> OutboundItem | None:
+        # Preserve the sole-egress contract across all awaits, including callers
+        # outside the normal supervised loop. Admission and cancellation stay free.
+        async with self._dispatch_lock:
+            return await self._tick()
+
+    async def _tick(self) -> OutboundItem | None:
+        self._check_publication()
+        now = self.clock.monotonic()
         self._prune_history(now)
         for traffic_class, pending in self.queues.items():
-            for expired in tuple(item for item in pending if item.expires_at <= now):
+            for expired in tuple(item for item in pending if self._expired(item)):
+                if expired not in pending:
+                    continue  # Cancellation/supersession can run during an earlier expiry write.
                 pending.remove(expired)
                 self._held_ids.discard(expired.item_id)
                 self.metrics.dropped[(traffic_class, "expired")] += 1
                 OUTBOUND_DROPPED.labels(traffic_class.value, "expired").inc()
                 if self.outbox is not None:
-                    await self.outbox.expire(expired.item_id, now_epoch)
+                    await self.outbox.expire(expired.item_id, self.clock.now().timestamp())
             QUEUE_DEPTH.labels(traffic_class.value).set(len(pending))
         if self.outbox is not None and now >= self._next_outbox_sweep_at:
-            await self.outbox.expire_ack_waits(now_epoch)
-            self._next_outbox_sweep_at = now + 30
-        if self.link.state != LinkState.UP or now < self._next_tx_at:
+            await self.outbox.expire_ack_waits(
+                self.clock.now().timestamp(), current_time=lambda: self.clock.now().timestamp()
+            )
+            self._next_outbox_sweep_at = self.clock.monotonic() + 30
+        if self.link.state != LinkState.UP or self.clock.monotonic() < self._next_tx_at:
             return None
         telemetry = await self.link.local_telemetry()
         self._check_publication()
@@ -850,32 +917,25 @@ class AirtimeGovernor:
             except Exception:
                 # Power history must never become a new failure boundary for alert egress.
                 RADIO_POWER_OBSERVATION_FAILURES.inc()
-        budget_s = 3_600 * self.budget_percent / 100
         total_s = 3_600 * (self.budget_percent + self.reserve_percent) / 100
         if self.used_airtime >= total_s:
             self.metrics.hard_stops += 1
             return None
-        only_critical = self.noncritical_airtime >= budget_s or self.used_airtime >= budget_s
-        high_util = telemetry.channel_utilisation >= self.config.utilisation_ceiling
-        low_power = bool(
-            self.power_config.shed_discretionary
-            and self.battery_level is not None
-            and self.battery_level <= self.power_config.shed_below_percent
-        )
-        used = self.used_airtime
-        class_used = self.airtime_breakdown()
         throttled_classes: set[TrafficClass] = set()
+        reason = "unavailable"
         item = None
-        for candidate in self._dispatch_candidates(
-            only_critical=only_critical,
-            high_util=high_util,
-            low_power=low_power,
-            now=now,
-        ):
+        for candidate in self._dispatch_candidates():
             cls = candidate.traffic_class
             # Persisting a rejected payload below yields to other work. A later
             # candidate in the snapshot may have been cancelled or superseded.
-            if candidate not in self.queues[cls] or not self._available(candidate, now):
+            if candidate not in self.queues[cls]:
+                continue
+            if self._expired(candidate):
+                self._remove_ids({candidate.item_id})
+                self.metrics.dropped[(cls, "expired")] += 1
+                OUTBOUND_DROPPED.labels(cls.value, "expired").inc()
+                if self.outbox is not None:
+                    await self.outbox.expire(candidate.item_id, self.clock.now().timestamp())
                 continue
             try:
                 portnum = candidate.portnum or (1 if candidate.binary_payload is None else 260)
@@ -888,19 +948,17 @@ class AirtimeGovernor:
                 if self.outbox is not None:
                     await self.outbox.fail_unstarted(
                         candidate.item_id,
-                        now_epoch,
+                        self.clock.now().timestamp(),
                         f"{type(error).__name__}: {error}",
                     )
                 continue
             # Both ceilings are admission-to-transmit checks, not reasons to stop
             # looking. Another class or a smaller packet may still fit this tick.
-            critical = cls == TrafficClass.ALERT and candidate.severity == Severity.CRITICAL
-            ceiling = total_s if critical else budget_s
-            class_ceiling = budget_s * self.config.class_shares.get(cls.value, 0.0)
-            if used + cost > ceiling or (
-                not critical and class_used[cls.value] + cost > class_ceiling
-            ):
-                throttled_classes.add(cls)
+            current_reason = self._dispatch_policy(candidate, cost)
+            if current_reason is not None:
+                reason = current_reason
+                if reason == "budget":
+                    throttled_classes.add(cls)
                 continue
             candidate.estimated_toa = cost
             item = candidate
@@ -909,21 +967,11 @@ class AirtimeGovernor:
             self.metrics.throttled[throttled_class] += 1
         if item is None:
             if any(self.queues.values()) and not throttled_classes:
-                reason = (
-                    "budget"
-                    if only_critical
-                    else "utilisation"
-                    if high_util
-                    else "low_power"
-                    if low_power
-                    else "unavailable"
-                )
                 self.metrics.throttled[reason] += 1
             return None
         cls = item.traffic_class
         self._check_publication()
         queue = self.queues[cls]
-        queue.remove(item)
         cost = item.estimated_toa
         dispatch = replace(item)
         if self.outbox is not None:
@@ -939,14 +987,22 @@ class AirtimeGovernor:
                 "severity": dispatch.severity.value,
                 "guard_kind": dispatch.guard_kind,
             }
-            if not await self.outbox.start_attempt(
-                item.item_id,
-                now_epoch,
-                round(item.estimated_toa * 1_000),
-                **({"expected": expected} if dispatch.guard_kind is not None else {}),
-            ):
+            try:
+                started = await self.outbox.start_attempt(
+                    item.item_id,
+                    self.clock.now().timestamp(),
+                    round(cost * 1_000),
+                    current_time=lambda: self.clock.now().timestamp(),
+                    dispatch_policy=lambda: self._dispatch_policy(dispatch, cost),
+                    **({"expected": expected} if dispatch.guard_kind is not None else {}),
+                )
+            except OutboxDeferred:
+                return None
+            if not started:
+                self._remove_ids({item.item_id})
                 return None
             item.attempts += 1
+        self._remove_ids({item.item_id})
         self._check_publication()
         try:
             if dispatch.binary_payload is None:
@@ -965,52 +1021,55 @@ class AirtimeGovernor:
                     portnum=dispatch.portnum or 260,
                     want_ack=dispatch.want_ack,
                 )
-        except Exception as error:
+        except BaseException as error:
+            self._account_attempt(dispatch, cost)
+            if not isinstance(error, Exception):
+                # Leave the durable started attempt for fail-closed recovery.
+                raise
             if self.outbox is None:
                 queue.appendleft(item)
                 raise
             # The radio call may have crossed the physical transmit boundary before raising.
             # Count it conservatively so retries cannot bypass the rolling airtime ceiling.
-            self.history.append((now, cost, cls, item.severity))
-            AIRTIME_USED.set(self.used_airtime / 3_600)
             state, retry_epoch, attempts = await self.outbox.fail_attempt(
-                item.item_id, now_epoch, f"{type(error).__name__}: {error}"
+                item.item_id,
+                self.clock.now().timestamp(),
+                f"{type(error).__name__}: {error}",
+                current_time=lambda: self.clock.now().timestamp(),
             )
             item.attempts = attempts
             if state == "pending" and retry_epoch is not None:
-                item.next_attempt_at = now + max(0.0, retry_epoch - now_epoch)
+                item.next_attempt_at = self.clock.monotonic() + max(
+                    0.0, retry_epoch - self.clock.now().timestamp()
+                )
                 queue.append(item)
             else:
                 self.metrics.dropped[(cls, "send_failed")] += 1
                 OUTBOUND_DROPPED.labels(cls.value, "send_failed").inc()
             QUEUE_DEPTH.labels(cls.value).set(len(queue))
             return None
-        self.history.append((now, cost, cls, item.severity))
+        self._account_attempt(dispatch, cost)
         self.metrics.sent[cls] += 1
         TOA_SECONDS.observe(cost)
         AIRTIME_USED.set(self.used_airtime / 3_600)
         OUTBOUND_SENT.labels(cls.value, "broadcast" if item.dest == "^all" else "direct").inc()
         QUEUE_DEPTH.labels(cls.value).set(len(queue))
-        gap = max(self.config.min_gap_s, 4 * cost)
-        if item.multipart:
-            gap = max(gap, self.config.interpart_delay_s)
-        self._last_toa, self._next_tx_at = cost, now + gap
         if self.outbox is not None:
             result = item.send_result
             await self.outbox.complete_attempt(
                 item.item_id,
-                now=now_epoch,
+                now=self.clock.now().timestamp(),
                 packet_id=result.packet_id if result else None,
                 outcome=result.outcome if result else "timeout",
-                peer_mesh_id=item.dest,
-                channel=item.channel,
-                portnum=item.portnum or 1,
-                text=item.text if item.binary_payload is None else None,
-                byte_len=item.payload_size,
-                toa_ms=round(item.estimated_toa * 1_000),
-                airtime_class=item.traffic_class.value,
-                is_direct=item.dest != "^all",
-                wait_for_ack=item.want_ack and item.dest != "^all",
+                peer_mesh_id=dispatch.dest,
+                channel=dispatch.channel,
+                portnum=dispatch.portnum or (1 if dispatch.binary_payload is None else 260),
+                text=dispatch.text if dispatch.binary_payload is None else None,
+                byte_len=dispatch.payload_size,
+                toa_ms=round(cost * 1_000),
+                airtime_class=dispatch.traffic_class.value,
+                is_direct=dispatch.dest != "^all",
+                wait_for_ack=dispatch.want_ack and dispatch.dest != "^all",
             )
         return item
 

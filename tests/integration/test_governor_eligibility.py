@@ -242,6 +242,9 @@ async def test_restart_keeps_class_eligibility_and_expired_work_has_no_false_sen
             outcome="sent",
             is_direct=False,
         )
+        # This row models aggregate class usage, not one recent giant packet.
+        # Keep it within the rolling hour but outside the recovered pacing gap.
+        await database.write("UPDATE message_log SET created_at=created_at-900")
         blocked_id = await governor.admit(
             OutboundItem("urgent", "^all", 0, TrafficClass.ALERT, Severity.URGENT)
         )

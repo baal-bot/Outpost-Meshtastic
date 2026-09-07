@@ -32,6 +32,10 @@ class OutboxRejected(ValueError):
         super().__init__(reason)
 
 
+class OutboxDeferred(ValueError):
+    """Current dispatch policy defers pending work without consuming an attempt."""
+
+
 @dataclass(frozen=True)
 class Admission:
     ids: list[int]
@@ -208,22 +212,23 @@ class OutboxStore:
     async def recent_airtime(self, now: float) -> list[dict[str, Any]]:
         rows = await self.database.read(
             """
-            SELECT created_at,toa_ms,airtime_class,severity FROM (
-              SELECT a.started_at created_at,a.estimated_toa_ms toa_ms,
-                     w.traffic_class airtime_class,w.severity,a.id sort_id
+            SELECT created_at,toa_ms,airtime_class,severity,multipart FROM (
+              SELECT MAX(a.started_at,COALESCE(a.completed_at,a.started_at)) created_at,
+                     a.estimated_toa_ms toa_ms,
+                     w.traffic_class airtime_class,w.severity,w.multipart,a.id sort_id
               FROM outbound_attempt a
               JOIN outbound_work w ON w.id=a.outbox_id
               WHERE a.state IN ('sent','uncertain')
-                AND a.started_at>? AND a.started_at<=?
+                AND MAX(a.started_at,COALESCE(a.completed_at,a.started_at))>?
               UNION ALL
-              SELECT m.created_at,m.toa_ms,m.airtime_class,'info',m.id
+              SELECT m.created_at,m.toa_ms,m.airtime_class,'info',0,m.id
               FROM message_log m
               WHERE m.direction='out' AND m.outbox_id IS NULL AND m.toa_ms IS NOT NULL
                 AND m.airtime_class IN ('alert','reply','ai','bulletin','digest','federation')
-                AND m.created_at>? AND m.created_at<=?
+                AND m.created_at>?
             ) ORDER BY created_at,sort_id
             """,
-            (now - 3_600, now, now - 3_600, now),
+            (now - 3_600, now - 3_600),
         )
         return [dict(row) for row in rows]
 
@@ -265,8 +270,11 @@ class OutboxStore:
             (now, item_id),
         )
 
-    async def expire_ack_waits(self, now: float) -> None:
+    async def expire_ack_waits(
+        self, now: float, *, current_time: Callable[[], float] | None = None
+    ) -> None:
         async with self.database.transaction() as transaction:
+            now = current_time() if current_time is not None else now
             await transaction.write(
                 "UPDATE message_log SET outcome='timeout',drop_reason='ack timeout' "
                 "WHERE outcome='pending' AND outbox_id IN ("
@@ -287,7 +295,15 @@ class OutboxStore:
         estimated_toa_ms: int,
         *,
         expected: dict[str, Any] | None = None,
+        current_time: Callable[[], float] | None = None,
+        dispatch_policy: Callable[[], str | None] | None = None,
     ) -> bool:
+        """Reserve against current owner/policy evidence, never perform radio I/O.
+
+        The policy callback is synchronous and runs after awaited owner checks.
+        False means terminal/missing work; OutboxDeferred leaves pending work intact.
+        The following writes/commit may still take time: reservation is not RF.
+        """
         async with self.database.transaction() as transaction:
             rows = await transaction.read("SELECT * FROM outbound_work WHERE id=?", (item_id,))
             if not rows or rows[0]["state"] != "pending":
@@ -309,20 +325,31 @@ class OutboxStore:
                     "severity",
                     "guard_kind",
                 }
-                if (
+                denied = (
                     guard is None
                     or expected is None
                     or set(expected) != fields
                     or any(row[key] != expected[key] for key in fields)
-                    or row["expires_at"] <= now
                     or not await guard(transaction, row)
-                ):
+                )
+                now = current_time() if current_time is not None else now
+                if denied or row["expires_at"] <= now:
                     await transaction.write(
                         "UPDATE outbound_work SET state='failed',completed_at=?,"
                         "last_error='dispatch authorization denied' WHERE id=?",
                         (now, item_id),
                     )
                     return False
+            now = current_time() if current_time is not None else now
+            reason = dispatch_policy() if dispatch_policy is not None else None
+            if row["expires_at"] <= now or reason == "expired":
+                await transaction.write(
+                    "UPDATE outbound_work SET state='expired',completed_at=? WHERE id=?",
+                    (now, item_id),
+                )
+                return False
+            if reason is not None or (row["next_attempt_at"] or 0) > now:
+                raise OutboxDeferred(reason or "retry_not_due")
             attempt_no = int(rows[0]["attempts"]) + 1
             await transaction.write(
                 "UPDATE outbound_work SET state='sending',attempts=?,"
@@ -344,7 +371,13 @@ class OutboxStore:
         )
 
     async def fail_attempt(
-        self, item_id: int, now: float, error: str, *, retry_limit: int = 3
+        self,
+        item_id: int,
+        now: float,
+        error: str,
+        *,
+        retry_limit: int = 3,
+        current_time: Callable[[], float] | None = None,
     ) -> tuple[str, float | None, int]:
         async with self.database.transaction() as transaction:
             rows = await transaction.read(
@@ -353,6 +386,7 @@ class OutboxStore:
             )
             if not rows:
                 return "failed", None, retry_limit
+            now = current_time() if current_time is not None else now
             attempts = int(rows[0]["attempts"])
             expires_at = float(rows[0]["expires_at"])
             retry_at = now + min(60, 2 ** max(0, attempts - 1) * 5)
