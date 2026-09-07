@@ -72,6 +72,10 @@ files = [
   "src/outpost/store/backups.py",
 ]
 
+[production_groups.transaction_store]
+minimum = 90
+files = ["src/outpost/store/database.py"]
+
 [production_groups.incident_note_import]
 minimum = 90
 files = ["src/outpost/fed/incident_updates.py"]

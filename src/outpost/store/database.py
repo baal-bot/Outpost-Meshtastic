@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import sqlite3
 import threading
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from prometheus_client import Counter, Gauge
 
@@ -27,16 +28,61 @@ class StoreError(RuntimeError):
     pass
 
 
+class PostCommitError(StoreError):
+    """SQLite committed, but a local publication failed; do not report rollback."""
+
+
 class Transaction:
     """Operations executed on the serialized writer inside one SQLite transaction."""
 
     def __init__(self, database: Database) -> None:
         self._database = database
+        self._owner = asyncio.current_task()
+        self._active = True
+        self._publications: list[Callable[[], None]] = []
+
+    def check_owner(self, database: Database) -> None:
+        if not self._active or asyncio.current_task() is not self._owner:
+            raise StoreError("transaction is closed or used outside its owning task")
+        if database is not self._database:
+            raise StoreError("transaction belongs to a different database")
+        if database._active_transaction is not self:
+            raise StoreError("transaction is not the active owned writer")
+
+    def after_commit(self, publication: Callable[[], None]) -> None:
+        """Register synchronous local publication; never SQL, radio or async I/O."""
+        self.check_owner(self._database)
+        if (
+            not callable(publication)
+            or inspect.iscoroutinefunction(publication)
+            or inspect.iscoroutinefunction(type(publication).__call__)
+        ):
+            raise TypeError("post-commit publication must be synchronous")
+        self._publications.append(publication)
+
+    def _publish(self) -> None:
+        publications, self._publications = self._publications, []
+        errors: list[BaseException] = []
+        for publication in publications:
+            try:
+                result = cast(Callable[[], object], publication)()
+                if inspect.iscoroutine(result):
+                    result.close()
+                if result is not None:
+                    raise TypeError("post-commit publication must return None, not async work")
+            except (Exception, asyncio.CancelledError) as error:
+                # One broken local consumer must not suppress the others. SQLite
+                # is already committed; rollback would be a misleading promise.
+                errors.append(error)
+        if errors:
+            raise PostCommitError("transaction committed; local publication failed") from errors[0]
 
     async def write(self, sql: str, params: Sequence[Any] = ()) -> int:
+        self.check_owner(self._database)
         return await self._database._writer_write(sql, params)
 
     async def read(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        self.check_owner(self._database)
         return await self._database._writer_read(sql, params)
 
 
@@ -54,6 +100,7 @@ class Database:
         self._read_connection_opens = 0
         self._read_queries = 0
         self._transaction_lock = asyncio.Lock()
+        self._active_transaction: Transaction | None = None
 
     @staticmethod
     def _configure(connection: sqlite3.Connection) -> None:
@@ -150,10 +197,10 @@ class Database:
         async with self._transaction_lock:
             try:
                 row_id = await self._writer_write(sql, params)
-                await self._writer_call(self._commit)
+                await self._settle(self._writer_call(self._commit))
                 return row_id
             except BaseException:
-                await asyncio.shield(self._writer_call(self._rollback))
+                await self._settle(self._writer_call(self._rollback))
                 raise
 
     def _commit(self) -> None:
@@ -170,24 +217,53 @@ class Database:
             raise StoreError("database is not open")
         self._writer.execute("BEGIN IMMEDIATE")
 
+    async def _settle(self, operation: Awaitable[None]) -> None:
+        """Keep writer ownership until cleanup/publication finishes, then cancel.
+
+        Shield alone returns early on cancellation. Repeated cancellation must not
+        let the next writer overtake commit/rollback or post-commit publication.
+        """
+        task = asyncio.ensure_future(operation)
+        cancellation = None
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as error:
+                cancellation = error
+        task.result()
+        if cancellation is not None:
+            raise cancellation
+
+    async def _commit_transaction(self, transaction: Transaction) -> None:
+        try:
+            await self._writer_call(self._commit)
+        except BaseException:
+            transaction._publications.clear()
+            await self._writer_call(self._rollback)
+            raise
+        transaction._publish()
+
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[Transaction]:
         """Hold the sole writer and commit all enclosed operations as one unit."""
         async with self._transaction_lock:
+            transaction = Transaction(self)
+            self._active_transaction = transaction
             try:
                 # Cancelling the await cannot stop a BEGIN already running on the
                 # writer thread. Roll it back before another task gets the lock.
                 await self._writer_call(self._begin)
-                yield Transaction(self)
+                yield transaction
             except BaseException:
-                await asyncio.shield(self._writer_call(self._rollback))
+                transaction._active = False
+                self._active_transaction = None
+                transaction._publications.clear()
+                await self._settle(self._writer_call(self._rollback))
                 raise
             else:
-                try:
-                    await asyncio.shield(self._writer_call(self._commit))
-                except BaseException:
-                    await asyncio.shield(self._writer_call(self._rollback))
-                    raise
+                transaction._active = False
+                self._active_transaction = None
+                await self._settle(self._commit_transaction(transaction))
 
     async def read(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
         if self._writer is None:

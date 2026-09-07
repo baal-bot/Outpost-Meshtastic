@@ -126,18 +126,19 @@ description = "Operator safety boundary, replay, redaction, drill, and limitatio
 [[capabilities]]
 id = "airtime_delivery"
 area = "Airtime and outbound delivery"
-present = "Durable priority queue with budget-aware candidate selection, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, restart recovery, and a delivery-health briefing comparing confirmed 24-hour channel outcomes and enrolled-radio receive quality with the preceding 14 days."
+present = "Durable priority queue with commit-safe admission/supersession publication, budget-aware candidate selection, strict airtime configuration, emergency reserve, quiet hours, dedupe, pacing, receipts, restart recovery, and a delivery-health briefing comparing confirmed 24-hour channel outcomes and enrolled-radio receive quality with the preceding 14 days."
 maturity = "automated_tested"
 introduced_commit = "3d65058"
 limitations = [
   "A 24-hour comparison with the deployed radio preset and destructive power-loss campaign remain open.",
   "Synthetic emergency bursts qualify finite-load admission and explicit overload recovery, not unlimited intake, physical delivery capacity or independent human consensus.",
+  "Post-commit publication failure blocks egress until quiesced recovery; cancellation may still leave committed work. Shared outbox safety does not implement incident sender authorization or exact receipt matching (#135).",
 ]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-09-05"
+date = "2026-09-06"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_delivery_health_briefing.py::test_delivery_health_is_healthy_then_cautions_on_durable_trends"
@@ -190,6 +191,26 @@ description = "Smaller eligible packets can pass temporarily budget-blocked work
 kind = "automated"
 path = "tests/integration/test_governor_eligibility.py::test_restart_keeps_class_eligibility_and_expired_work_has_no_false_send"
 description = "Recovered airtime history still permits eligible replies, while expired work remains terminal without a false send or attempt."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_outbox_commit_publication.py::test_supersession_is_invisible_until_commit_and_rollback_preserves_original"
+description = "Real durable queue supersession stays invisible before commit, and rollback preserves previously queued work without phantom admission metrics."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_outbox_commit_publication.py::test_repeated_cancellation_settles_commit_and_publication_before_next_writer"
+description = "Repeated cancellation cannot release writer ownership before commit and synchronous publication settle."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_outbox_commit_publication.py::test_checkin_commit_cancellation_keeps_solicitations_and_held_work_for_recovery"
+description = "Committed recipient and held outbox rows survive solicitation cancellation without incorrect queue retraction or duplicate solicitation."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_outbox_commit_publication.py::test_test_owned_process_kill_recovers_only_committed_queue_and_domain_work"
+description = "Test-owned SIGKILL before/after commit and temporary-store restart preserve the committed domain/outbox boundary without physical-radio claims."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/OUTBOX-COMMIT-PUBLICATION.md"
+description = "Post-commit local publication, ownership/cancellation, fail-closed egress, quiesced recovery, compatibility and remaining incident integration limits."
 
 [[capabilities]]
 id = "identity_directory"

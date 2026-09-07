@@ -3,6 +3,18 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Commit-safe governed queue publication — #168 / #135 and #153 prerequisite
+
+The [shared outbox boundary](OUTBOX-COMMIT-PUBLICATION.md) publishes admitted items, supersession,
+held IDs and successful-admission metrics only after SQLite commit. Rollback preserves previously
+queued work; repeated cancellation waits for writer settlement. A post-commit publication failure
+is reported as committed storage, blocks egress and requires quiesced recovery. Existing check-in
+solicitation no longer retracts durable work that committed during cancellation. Original item
+identity/status behavior is preserved with a pre-publication field snapshot. Ownership, queue,
+process-kill, check-in and production supervision regressions cover the boundary. No migration,
+live deployment, automatic incident sending or new radio policy is included; recovered incident
+authorization, exact receipt matching and the other sender/G6 work remain #135.
+
 ## Atomic per-peer incident staging — #167 / #135 and #153 sender prerequisite
 
 The [handoff service](INCIDENT-SENDER-HANDOFF.md) observes current source/peer policy and exports

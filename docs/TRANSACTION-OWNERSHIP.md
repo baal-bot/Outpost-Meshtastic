@@ -28,6 +28,13 @@ sends, model requests and human review must remain outside that lock. Immutable 
 intent can be inserted inside it when the domain operation requires durable post-commit work;
 actual sending belongs to the governed worker after commit.
 
+`Transaction.after_commit` now publishes trusted synchronous local queue changes only after
+commit, before releasing the writer. The handle is bound to the active writer and owning task;
+closed/foreign/cross-task use is refused. Commit/rollback settlement withstands repeated
+cancellation. `PostCommitError` means storage committed but local publication failed, not rollback.
+See the [commit-safe outbox contract](OUTBOX-COMMIT-PUBLICATION.md) for snapshot/identity semantics,
+bounded non-I/O callbacks, cancellation ambiguity and quiesced recovery requirements.
+
 ## Current boundaries
 
 | Owner / entry points | Atomic local work | Separate work or limitation |
@@ -37,8 +44,9 @@ actual sending belongs to the governed worker after commit.
 | [`incident_reference`](../src/outpost/store/incident_refs.py) | Uses the caller's transaction for reference identity and retired-number ledger decisions. | Content retention must not turn retired references into new identities. Off-device restore lineage remains #146. |
 | [`MailService.send`](../src/outpost/bbs/mail.py) | The placeholder INSERT, permanent UID and conversation context are committed together. Migration 173 recovers old committed placeholders. | Recipient lookup precedes the transaction; this fix is not a blanket proof of all identity/authorization races. Reading/delivery notification and any transport are separate operations. |
 | [`BBSService.create_thread/reply`](../src/outpost/bbs/service.py) | Thread/post allocation, UID/sequence and aggregate metadata use owned transactions. | Subscriptions, external notifications and federation scheduling are separate. Scope/trust rules must survive extraction; an atomic write is not authorization evidence by itself. |
-| [`OutboxStore.admit_many`](../src/outpost/store/outbox.py) | Queue bounds, dedupe, supersession and batch insertion are one transaction, or participate in an explicitly supplied domain transaction. | In-memory governor state must follow committed admission. `pending`/`held` is not transmitted or delivered. |
+| [`OutboxStore.admit_many`](../src/outpost/store/outbox.py) | Queue bounds, dedupe, supersession and batch insertion are one transaction, or participate in an explicitly supplied domain transaction. Durable governor queue publication now follows commit through the same owner. | IDs are provisional inside a caller transaction. Rollback publishes nothing; publication failure blocks egress until quiesced recovery. `pending`/`held` is not transmitted or delivered. |
 | [`AirtimeGovernor`](../src/outpost/transport/governor.py) with `OutboxStore` | Attempt reservation, persisted outcomes, expiry and restart recovery have their own transaction boundaries. | The radio side effect is necessarily outside SQLite. Interrupted attempts can be uncertain; RF ACK, application receipt and a person's acknowledgement are different facts. Critical reserve remains governed, not available to arbitrary high-priority work. |
+| [`CheckinService.solicit`](../src/outpost/watch/checkin.py) | Solicitation recipients and held outbox work share one writer transaction, with queue publication after commit. | Release follows commit. Cancellation during commit can retain held work and recipient rows; rollback cleanup does not retract a committed durable batch. Existing restart recovery remains distinct from future incident policy checks. |
 | [`FederationSyncService.quarantine`](../src/outpost/fed/sync.py) | Modern inbox content and producer-revision receipt are persisted together after validation. | A durable receipt permits reconciliation progress; it is not import approval, responder notification or community visibility. Legacy compatibility has different ordering limits. |
 | [`IncidentEvents`](../src/outpost/fed/incident_events.py) / [`quarantine_transaction`](../src/outpost/fed/sync.py) | Event receive owns current-peer/lineage/scope checks, durable per-peer quota, exact quarantine content and revision receipt in one writer transaction. The shared quarantine core uses that writer. | Typed storage receipts are admitted only after commit; failed admission is recovered by a fresh-counter identical retry. No automatic sender or human action. See [receive contract](FEDERATION-INCIDENT-EVENTS.md). |
 | [`IncidentHandoff`](../src/outpost/fed/incident_handoff.py) | Current peer/source/scope checks, writer-connected exports, coalesced exact-version/content sender intents and a per-peer scan checkpoint share a bounded transaction. | Source rows are retained; staging is not all-peer completion or radio admission. The future worker must revalidate and hand to the governed outbox atomically. See [handoff contract](INCIDENT-SENDER-HANDOFF.md). |

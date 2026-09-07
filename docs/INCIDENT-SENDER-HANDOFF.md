@@ -92,8 +92,11 @@ Staging measured median 69.141 ms / maximum 93.339 ms; 100-intent inspection mea
 zero radio work. These are observed temporary-store timings with small synthetic payloads,
 not latency bounds, cold-start qualification, arbitrary-origin-list cost or G6 evidence.
 
+The [#168 shared outbox boundary](OUTBOX-COMMIT-PUBLICATION.md) now publishes in-memory admission
+and supersession only after commit, preserving old work on rollback. It does not activate this
+incident service or make existing held-work recovery a peer/source authorization check.
 The next integration must atomically connect version-checked intents to held governed outbox
-work, reconcile post-commit in-memory release/recovery, recheck source/policy before attempts,
+work, reconcile post-commit release/recovery, recheck source/policy before attempts,
 match exact #166 storage receipts, coalesce duplicate receipt replies, and implement parent-first
 notes, retries, supersession and expiry. Radio admission, attempts, remote storage, review, public
 alert approval, responder notification and responder ACK remain distinct facts. Existing frame

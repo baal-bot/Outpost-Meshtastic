@@ -61,6 +61,9 @@ class OutboxStore:
         dedupe_window_s: int,
         transaction: Transaction | None = None,
     ) -> Admission:
+        if transaction is not None:
+            transaction.check_owner(self.database)
+
         async def admit(store: _StoreTransaction) -> Admission:
             if not all(self._valid_payload_size(record) for record in records):
                 raise OutboxRejected("payload_too_large")

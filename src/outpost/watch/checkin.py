@@ -560,7 +560,10 @@ class CheckinService:
                             (event.id, recipient["member_id"], queue_id, queued_at),
                         )
             except BaseException:
-                if queue_ids is not None:
+                # Durable publication follows commit, including a commit that
+                # completed during cancellation. Never retract that committed
+                # work; pre-commit rollback has no queue mirror to undo.
+                if queue_ids is not None and not self.governor.durable:
                     await self.governor.retract_work(queue_ids, persisted=False)
                 raise
             await self.governor.release_work(queue_ids)

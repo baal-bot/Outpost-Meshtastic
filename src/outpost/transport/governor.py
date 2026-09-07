@@ -4,7 +4,7 @@ import hashlib
 import uuid
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import time
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from outpost.clock import Clock
 from outpost.config import AirtimeConfig, RadioPowerConfig
 from outpost.radio_power import normalize_battery_level
+from outpost.store.database import StoreError
 from outpost.store.outbox import OutboxRejected, OutboxStore
 from outpost.transport.chunker import truncate_utf8
 
@@ -104,7 +105,7 @@ class GovernorMetrics:
 
 @dataclass(frozen=True)
 class AdmissionResult:
-    """The durable outcome of one atomic admission attempt."""
+    """Admission outcome; caller-transaction IDs remain provisional until commit."""
 
     item_ids: tuple[int, ...] = ()
     rejection_reason: str | None = None
@@ -155,6 +156,7 @@ class AirtimeGovernor:
         self.history: deque[tuple[float, float, TrafficClass, Severity]] = deque()
         self._recent: dict[tuple[str, int, str], float] = {}
         self._held_ids: set[int] = set()
+        self._publication_failed = False
         self._next_id = 1
         self._next_tx_at = 0.0
         self._last_toa = 0.0
@@ -426,6 +428,10 @@ class AirtimeGovernor:
         """Persist a batch and retain the reason when queue policy rejects it."""
         if self.outbox is None:
             return self._enqueue_many_result(items, hold=hold)
+        if transaction is None:
+            async with self.outbox.database.transaction() as owned:
+                return await self.admit_many_result(items, hold=hold, transaction=owned)
+        transaction.check_owner(self.outbox.database)
         if not items:
             return AdmissionResult()
         oversized = [item for item in items if item.payload_size > MAX_PAYLOAD_BYTES]
@@ -468,6 +474,9 @@ class AirtimeGovernor:
                     "byte_len": item.payload_size,
                 }
             )
+        # Callers can retain/mutate their objects while the writer yields. The
+        # committed queue must use the same immutable field snapshot as SQLite.
+        prepared = tuple((item, replace(item)) for item in items)
         try:
             result = await self.outbox.admit_many(
                 records,
@@ -481,22 +490,52 @@ class AirtimeGovernor:
                 OUTBOUND_DROPPED.labels(item.traffic_class.value, error.reason).inc()
             return AdmissionResult(rejection_reason=error.reason)
 
-        superseded = set(result.superseded_ids)
+        for (original, snapshot), item_id in zip(prepared, result.ids, strict=True):
+            original.item_id = snapshot.item_id = item_id
+
+        def publish() -> None:
+            try:
+                self._publish_committed(prepared, tuple(result.superseded_ids), hold=hold)
+            except BaseException:
+                # A partial mirror is unsafe. The core egress task must fail
+                # visibly and recover only after it has been quiesced/restarted.
+                self._publication_failed = True
+                raise
+
+        transaction.after_commit(publish)
+        return AdmissionResult(tuple(result.ids))
+
+    def _publish_committed(
+        self,
+        items: tuple[tuple[OutboundItem, OutboundItem], ...],
+        superseded_ids: tuple[int, ...],
+        *,
+        hold: bool,
+    ) -> None:
+        """Non-yielding local mirror publication, called only after SQLite commit."""
+        superseded = set(superseded_ids)
         if superseded:
             self._remove_ids(superseded)
-        for item, item_id in zip(items, result.ids, strict=True):
-            item.item_id = item_id
+        for item, snapshot in items:
+            # Keep the existing item identity/status API, but publish the field
+            # values actually admitted. After publication the governor owns it.
+            vars(item).update(vars(snapshot))
             self.queues[item.traffic_class].append(item)
             if hold:
-                self._held_ids.add(item_id)
+                self._held_ids.add(item.item_id)
             self.metrics.enqueued[item.traffic_class] += 1
             OUTBOUND_ENQUEUED.labels(item.traffic_class.value).inc()
             QUEUE_DEPTH.labels(item.traffic_class.value).set(len(self.queues[item.traffic_class]))
-        return AdmissionResult(tuple(result.ids))
+
+    def _check_publication(self) -> None:
+        if self._publication_failed:
+            raise StoreError("outbox publication failed; quiesce egress and recover before sending")
 
     async def recover(self) -> int:
+        """Rebuild the committed mirror with egress and admissions quiesced."""
         if self.outbox is None:
             return 0
+        self._publication_failed = True
         now_epoch = self.clock.now().timestamp()
         now_mono = self.clock.monotonic()
         rows = await self.outbox.recover(now_epoch)
@@ -541,6 +580,7 @@ class AirtimeGovernor:
             QUEUE_DEPTH.labels(item.traffic_class.value).set(len(self.queues[item.traffic_class]))
         if rows:
             self._next_id = max(int(row["id"]) for row in rows) + 1
+        self._publication_failed = False
         return len(rows)
 
     def enqueue_many(self, items: list[OutboundItem], *, hold: bool = False) -> list[int] | None:
@@ -773,6 +813,7 @@ class AirtimeGovernor:
             )
 
     async def tick(self) -> OutboundItem | None:
+        self._check_publication()
         now = self.clock.monotonic()
         now_epoch = self.clock.now().timestamp()
         self._prune_history(now)
@@ -791,6 +832,7 @@ class AirtimeGovernor:
         if self.link.state != LinkState.UP or now < self._next_tx_at:
             return None
         telemetry = await self.link.local_telemetry()
+        self._check_publication()
         self.channel_utilisation = telemetry.channel_utilisation
         CHANNEL_UTIL.set(telemetry.channel_utilisation / 100)
         AIR_UTIL_TX.set(telemetry.air_util_tx / 100)
@@ -876,6 +918,7 @@ class AirtimeGovernor:
                 self.metrics.throttled[reason] += 1
             return None
         cls = item.traffic_class
+        self._check_publication()
         queue = self.queues[cls]
         queue.remove(item)
         cost = item.estimated_toa
@@ -885,6 +928,7 @@ class AirtimeGovernor:
             ):
                 return None
             item.attempts += 1
+        self._check_publication()
         try:
             if item.binary_payload is None:
                 item.send_result = await self.link._send_text(
