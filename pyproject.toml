@@ -45,6 +45,7 @@ outpost = "outpost.__main__:main"
 outpost-diagnostics = "outpost.diagnostics:main"
 outpost-onboarding = "outpost.onboarding:main"
 outpost-replay = "outpost.replay_cli:main"
+outpost-recovery = "outpost.recovery:main"
 outpost-setup-token = "outpost.setup_token:main"
 
 [tool.hatch.build.targets.wheel]

@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from collections.abc import Sequence
 from typing import Any, Literal, Protocol
 
 
 class AuditStore(Protocol):
     async def write(self, sql: str, params: Sequence[Any] = ()) -> int: ...
+
+
+_AUDIT_INSERT = (
+    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at,outcome) "
+    "VALUES(?,?,?,?,?,COALESCE(?,unixepoch()),?)"
+)
 
 
 _SECRET_KEY = re.compile(
@@ -70,8 +77,7 @@ async def write_audit(
     outcome: Literal["success", "denied", "failure"] = "success",
 ) -> int:
     return await store.write(
-        "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at,outcome) "
-        "VALUES(?,?,?,?,?,COALESCE(?,unixepoch()),?)",
+        _AUDIT_INSERT,
         (
             actor_kind[:32],
             actor_ref[:160],
@@ -80,5 +86,21 @@ async def write_audit(
             encode_audit_detail(detail),
             created_at,
             outcome,
+        ),
+    )
+
+
+def write_recovery_audit(connection: sqlite3.Connection, *, digest: str, created_at: int) -> None:
+    """Only the offline restore caller's unpublished memory image; never commit here."""
+    connection.execute(
+        _AUDIT_INSERT,
+        (
+            "system",
+            "local-recovery",
+            "recovery.restore",
+            None,
+            encode_audit_detail({"bundle_digest": digest, "state": "review_required"}),
+            created_at,
+            "success",
         ),
     )

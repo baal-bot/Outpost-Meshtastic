@@ -71,6 +71,7 @@ VISUAL_PAGES = (
     ("radio", "/radio.html"),
     ("federation", "/federation.html"),
     ("physical-transfer", "/bundles.html"),
+    ("recovery", "/recovery.html"),
     ("access", "/access.html"),
     ("backups", "/backups.html"),
     ("ai", "/ai.html"),
@@ -1596,6 +1597,8 @@ def test_operator_page_visual_baseline_and_browser_health(
         page.goto(f"{dashboard_url}{target}", wait_until="domcontentloaded")
         if page_name == "physical-transfer":
             page.locator("#bundle-status").filter(has_text="Ready for operator review").wait_for()
+        elif page_name == "recovery":
+            page.locator("#recovery-login").wait_for(state="visible")
         else:
             wait_for_navigation(page)
         if page_name == "access":

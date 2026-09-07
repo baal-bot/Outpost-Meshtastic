@@ -30,6 +30,14 @@ required = {
     "outpost/readiness_probes.py",
     "outpost/onboarding.py",
     "outpost/setup_token.py",
+    "outpost/recovery.py",
+    "outpost/recovery_format.py",
+    "outpost/recovery_fence.py",
+    "outpost/store/recovery_snapshot.py",
+    "outpost/store/migrations/0185_recovery_fence.sql",
+    "outpost/web/static/recovery.html",
+    "outpost/web/static/recovery.js",
+    "outpost/web/static/recovery.css",
     "outpost/store/migrations/0000_core.sql",
     "outpost/store/migrations/0104_digests.sql",
     "outpost/store/migrations/0139_web_setup_secret.sql",
@@ -75,7 +83,7 @@ with zipfile.ZipFile(wheel) as archive:
 missing = sorted(required - names)
 if missing:
     raise SystemExit(f"wheel is missing runtime files: {', '.join(missing)}")
-for command in ("outpost-diagnostics", "outpost-onboarding", "outpost-replay", "outpost-setup-token"):
+for command in ("outpost-diagnostics", "outpost-onboarding", "outpost-replay", "outpost-setup-token", "outpost-recovery"):
     if command not in entry_points:
         raise SystemExit(f"wheel is missing console command: {command}")
 PY

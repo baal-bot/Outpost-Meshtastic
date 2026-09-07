@@ -19,6 +19,16 @@ files = [
   "src/outpost/web/routes/bundles.py",
 ]
 
+[production_groups.encrypted_recovery]
+minimum = 90
+per_file_minimum = 90
+files = [
+  "src/outpost/recovery.py",
+  "src/outpost/recovery_format.py",
+  "src/outpost/recovery_fence.py",
+  "src/outpost/store/recovery_snapshot.py",
+]
+
 [groups.safety]
 minimum = 80
 files = [

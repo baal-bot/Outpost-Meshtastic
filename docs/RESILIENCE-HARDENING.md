@@ -3,6 +3,19 @@
 Implementation evidence for the [resilience tracker](https://github.com/baal-bot/Outpost-Meshtastic/issues/130).
 Automated evidence here is not physical-radio, power-loss, or deployment qualification.
 
+## Encrypted offline recovery — #145
+
+The [recovery workflow](ENCRYPTED-RECOVERY.md) exports authenticated passphrase
+bundles without plaintext scratch backups, validates database/schema/configuration
+and selected support material, and restores only into a new protected directory.
+Fresh application and browser tests prove actual operator access and retained
+identity/private-data/revision evidence. A durable default-deny fence prevents any
+radio, provider, retention or delivery workers from starting. Wrong-key, tamper,
+incompatibility, no-space and interruption cases leave existing nodes untouched.
+Return-to-service and old-node exclusion remain #146; physical recovery/flush
+qualification, external appliance assets and key custody are not certified by
+these synthetic tests. The original specifications and live node remain unchanged.
+
 ## Signed physical transfer — #143
 
 [Policy-filtered bundle files](FEDERATION-BUNDLES.md) now reuse the retained federation signing

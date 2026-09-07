@@ -9,9 +9,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    # #149's full suite + production rerun took 38 minutes on Python 3.12.
-    # #151 adds real-browser/identity/fault coverage; retain every check and floor.
-    timeout-minutes: 50
+    # #143's full Python 3.12 coverage run alone took 28 minutes. Preserve the
+    # production rerun/package/audit gates as #145 adds real recovery/browser cases.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -63,8 +63,8 @@ jobs:
 
   locked-runtime:
     runs-on: ubuntu-24.04
-    # #153's locked suite took 21 minutes before #151's added acceptance cases.
-    timeout-minutes: 30
+    # Leave headroom above #143's measured 22-minute suite for recovery and packaging.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:

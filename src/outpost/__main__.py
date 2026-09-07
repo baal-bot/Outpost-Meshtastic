@@ -5,14 +5,14 @@ import asyncio
 import uvicorn
 
 from outpost.app import OutpostApp
-from outpost.config import load_config
+from outpost.config import Config, load_config
 from outpost.systemd import notify, watchdog
 from outpost.web.tiles import inspect_tile_pack
 from outpost.web.transport import uvicorn_options
 
 
-def main() -> None:
-    config = load_config()
+def main(config: Config | None = None) -> None:
+    config = config if config is not None else load_config()
     if config.environment_overrides:
         print(
             "Outpost configuration overridden by environment: "

@@ -316,6 +316,22 @@ class Database:
         async with self._transaction_lock:
             await self._writer_call(operation)
 
+    async def recovery_snapshot(self) -> bytes:
+        """Capture the same serialized owner without any plaintext export file."""
+        from .recovery_snapshot import snapshot
+
+        result: list[bytes] = []
+
+        def operation() -> None:
+            if self._writer is None:
+                raise StoreError("database is not open")
+            result.append(snapshot(self._writer))
+
+        async with self._transaction_lock:
+            # Cancellation must not release the writer while SQLite still owns it.
+            await self._settle(self._writer_call(operation))
+        return result[0]
+
     async def validate_backup(self, source: str | Path) -> dict[str, int | str]:
         source_path = Path(source)
 

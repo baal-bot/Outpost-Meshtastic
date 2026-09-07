@@ -71,6 +71,16 @@ included whenever a domain invariant changes.
 
 ## Delivery vocabulary
 
+Encrypted recovery uses the shared `store.recovery_snapshot` validator and SQLite
+memory backup. `Database.recovery_snapshot` holds its serialized writer lock
+through completion/cancellation. The separate operator CLI opens only a read-only
+source connection and never migrates it; it is not another application writer.
+Decryption/configuration/schema checks precede target creation. Only a fresh
+destination image is modified, in memory, to discard cloned sessions, write the
+durable identity fence and record the restore audit before publication. Startup
+then owns only the local review heartbeat; no queue publication or external I/O
+is authorized by restoring identity material. See [recovery](ENCRYPTED-RECOVERY.md).
+
 `IncidentResponsibilityService` now owns a separate local coordination transaction for
 current responder/web-session authorization, version comparison, pending/accepted owner,
 next action, decision history and redacted audit. `TASK` and `web.routes.responsibility`

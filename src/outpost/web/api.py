@@ -49,6 +49,7 @@ from outpost.operator_context import (
     set_current_actor,
 )
 from outpost.radio_operations import RadioOperations
+from outpost.recovery_fence import RecoveryFence
 from outpost.self_check import SelfCheckService
 from outpost.situation import BriefingCapability, BriefingViewer, SituationBriefingService
 from outpost.store import Database
@@ -759,6 +760,7 @@ def create_web_app(
     incident_reports: IncidentReportService | None = None,
     member_data: MemberDataService | None = None,
     incident_delivery: IncidentDelivery | None = None,
+    recovery_fence: RecoveryFence | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Outpost API",
@@ -1077,6 +1079,33 @@ def create_web_app(
                 if gated_request:
                     await restore_coordinator.leave_mutation()
 
+    if recovery_fence is not None:
+
+        @app.middleware("http")
+        async def restored_identity_fence(request: Request, call_next: Any) -> Response:
+            if not recovery_fence.permits(request.method, request.url.path):
+                return JSONResponse(
+                    {
+                        "error": {
+                            "code": "recovery_review_required",
+                            "message": "Restored identity is offline. "
+                            "Use the local recovery review workbench.",
+                        }
+                    },
+                    status_code=423,
+                    headers={"Cache-Control": "no-store"},
+                )
+            return cast(Response, await call_next(request))
+
+        @app.get("/api/v1/recovery/review", response_model=None)
+        async def recovery_review(request: Request) -> Response:
+            session = getattr(request.state, "web_session", None)
+            if session is None or session.role not in {"administrator", "operator"}:
+                return JSONResponse({"error": {"code": "operator_required"}}, status_code=403)
+            return JSONResponse(
+                await recovery_fence.review(), headers={"Cache-Control": "no-store"}
+            )
+
     # Registered after all response-generating middleware so denials and
     # maintenance responses receive the same browser policy as route responses.
     @app.middleware("http")
@@ -1369,6 +1398,11 @@ def create_web_app(
     @app.get("/api/v1/health", response_class=JSONResponse, response_model=None)
     async def health() -> dict[str, str] | Response:
         status = status_provider()
+        fence = status.get("recovery_fence")
+        if isinstance(fence, dict) and fence.get("active") is True:
+            return JSONResponse(
+                {"status": "recovery_review_required", "version": __version__}, status_code=503
+            )
         recovery = status.get("recovery")
         if isinstance(recovery, dict) and recovery.get("active") is True:
             return JSONResponse({"status": "maintenance", "version": __version__}, status_code=503)

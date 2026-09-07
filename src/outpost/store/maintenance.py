@@ -33,6 +33,13 @@ class TablePolicy:
 TABLE_POLICIES = (
     TablePolicy("schema_version", "system", "preserve", "Migration evidence; bounded by releases."),
     TablePolicy("runtime_setting", "system", "preserve", "Current durable configuration only."),
+    TablePolicy(
+        "recovery_fence",
+        "system",
+        "preserve",
+        "Restored identity stays offline pending review.",
+        True,
+    ),
     TablePolicy("web_credential", "system", "preserve", "Legacy setup credential bridge.", True),
     TablePolicy("web_account", "system", "preserve", "Named operator identities and roles.", True),
     TablePolicy("web_session", "system", "expire", "Delete immediately after session expiry."),

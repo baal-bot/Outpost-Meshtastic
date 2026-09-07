@@ -86,6 +86,8 @@ from outpost.operator_context import current_actor
 from outpost.radio_configuration import RadioConfigurationManager
 from outpost.radio_operations import RadioOperations
 from outpost.radio_power import RadioPowerMonitor
+from outpost.recovery_fence import RecoveryFence
+from outpost.recovery_format import RecoveryError
 from outpost.render.renderer import render_response
 from outpost.router.models import DispatchTrace, Line, Response, ResponseKind
 from outpost.router.router import Router
@@ -167,6 +169,7 @@ class OutpostApp:
         self._inbound_backlog_dropped = 0
         self._federation_control_locks: dict[str, asyncio.Lock] = {}
         self.database = Database(self.config.store.path)
+        self.recovery_fence = RecoveryFence(self.database)
         self.radio_power = RadioPowerMonitor(self.database, self.clock, self.config.radio.power)
         if self.radio is None:
             self.radio = MeshtasticRadioLink(self.config.radio, self.clock)
@@ -463,6 +466,7 @@ class OutpostApp:
             incident_reports=self.incident_reports,
             member_data=self.member_data,
             incident_delivery=self.incident_delivery,
+            recovery_fence=self.recovery_fence,
         )
 
     def _start_background_task(
@@ -995,6 +999,17 @@ class OutpostApp:
 
     async def startup(self) -> None:
         await self.database.open()
+        await self.recovery_fence.load()
+        if self.recovery_fence.active:
+            if self.config.web.bind not in {"127.0.0.1", "::1"}:
+                raise RecoveryError("Restored identity review requires a loopback web bind")
+            await self.runtime_settings.load()
+            self._tasks = [
+                self._start_background_task(
+                    "recovery-review", self._recovery_review_loop, TaskFailureDomain.CORE
+                )
+            ]
+            return
         await self.federation_bundles.restore_identity()
         await self.radio_power.restore()
         await self.ai_store.rechunk_stale_documents()
@@ -1150,6 +1165,12 @@ class OutpostApp:
                 else []
             ),
         ]
+
+    async def _recovery_review_loop(self) -> None:
+        while True:
+            await self.database.read("SELECT 1")
+            self._task_progress("recovery-review")
+            await self.clock.sleep(30)
 
     async def _federation_hello_loop(self) -> None:
         while True:
@@ -3233,7 +3254,11 @@ class OutpostApp:
                 "simulated": self.runtime_mode != "live",
                 "source": self.runtime_source,
                 "store": "scratch" if self.runtime_mode != "live" else "live",
-                "transmit": "simulated" if self.runtime_mode != "live" else "radio",
+                "transmit": "disabled"
+                if self.recovery_fence.active
+                else "simulated"
+                if self.runtime_mode != "live"
+                else "radio",
             },
             "modules": {
                 name: {"enabled": enabled, "restart_required_to_change": True}
@@ -3252,6 +3277,7 @@ class OutpostApp:
             "readiness": self.self_check.snapshot(),
             "intents": self.router.intents.status(),
             "recovery": self.restore_coordinator.maintenance_status(),
+            "recovery_fence": {"active": self.recovery_fence.active},
             "tasks": {name: dict(health) for name, health in self._task_health.items()},
             "inbound": {
                 "workers": self.config.router.inbound_workers,

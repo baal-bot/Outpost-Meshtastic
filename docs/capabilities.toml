@@ -564,22 +564,39 @@ description = "Local-first/offline-only behavior, retry and persistence boundari
 [[capabilities]]
 id = "backup_recovery"
 area = "Backup, restore, upgrade, and rollback"
-present = "Online verified backups, rotation, quiesced web restore, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback."
+present = "Online verified backups, rotation, quiesced web restore, passphrase-encrypted off-device bundles with configuration and selected secrets, fresh-directory offline restoration into a durable identity-fenced operator workbench, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback."
 maturity = "automated_tested"
 introduced_commit = "df0ee14"
 limitations = [
-  "Destructive power-loss, integrated encrypted backup and full fresh-host recovery drills remain open.",
+  "Encrypted recovery is synthetic-store/browser-tested, not a physical off-device or fresh-Pi drill. The memory-only format is limited to 256 MiB SQLite images and a compatible installed runtime; external maps, models, OS/network/device assets need the separate recovery kit.",
+  "Restored identities remain fenced: no radio/provider/background queues start, copied sessions are discarded, and actual named-operator access is verified locally. Return-to-service, former-node exclusion and stale identity/revocation reconciliation belong to #146; backup custody is not proof of exclusive identity.",
   "Temporary NORMAL/FULL writer latency measurements do not prove power-loss survival, flush compliance, energy cost or sustained service latency. The live and repository default remain NORMAL; #137/#44 are open.",
 ]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-27"
+date = "2026-09-07"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_backups.py::test_failed_restore_automatically_recovers_safety_snapshot"
 description = "A failed restore automatically returns to the verified safety snapshot."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_encrypted_recovery.py::test_memory_snapshot_and_complete_fenced_restore"
+description = "Actual encrypted round trip retains private records, identity and revision evidence; a fresh app and repeated restart remain fenced, with named-operator access and no RF."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_encrypted_recovery.py::test_disk_full_interruption_and_publication_are_fresh_only"
+description = "Wrong targets, insufficient space and interruption at each publication boundary never overwrite the source or preexisting nodes."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_recovery_browser.py::test_actual_restored_browser_login_verification_and_logout_are_offline"
+description = "Real Chromium verifies restored operator login/password change, protected recovery evidence and logout offline at 320/1280 pixels."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/ENCRYPTED-RECOVERY.md"
+description = "Encrypted copy, offline key custody, second-operator restoration, compatibility/asset limits, interruption handling and identity-fencing procedure."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/unit/test_deploy_install.py::test_installer_harness_rejects_safety_mutants"

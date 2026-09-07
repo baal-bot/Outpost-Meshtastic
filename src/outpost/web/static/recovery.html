@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Recovery review · Outpost</title>
+  <script src="/theme-boot.js"></script>
+  <link rel="stylesheet" href="/base.css?v=1">
+  <link rel="stylesheet" href="/layout.css?v=1">
+  <link rel="stylesheet" href="/components.css?v=2">
+  <link rel="stylesheet" href="/recovery.css">
+</head>
+<body class="recovery-workbench">
+  <main>
+    <h1>Offline recovery review</h1>
+    <p>A fenced restored identity runs no radio, provider, maintenance or delivery workers. Its health remains unavailable for community service. Verify the state below: this page itself does not stop a live node. Record counts and public key evidence do not authorize reactivation.</p>
+    <p>Sign in using a named operator account from the backup. Use this page only on the recovery machine or through an authenticated local tunnel. The destination contains private, unencrypted working data and must remain protected.</p>
+    <form id="recovery-login">
+      <label>Username <input name="username" autocomplete="username" required maxlength="64"></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <label>MFA or recovery code, if enabled <input name="code" autocomplete="one-time-code" maxlength="128"></label>
+      <label>New password, only if this account requires a change <input name="new_password" type="password" autocomplete="new-password"></label>
+      <button type="submit">Sign in and verify restored access</button>
+    </form>
+    <p id="recovery-status" role="status">Sign in to inspect the restored store.</p>
+    <pre id="recovery-evidence" tabindex="0" aria-label="Verified recovery evidence">No authenticated evidence yet.</pre>
+    <button id="recovery-logout" type="button" disabled>Sign out</button>
+    <p>Before any return to service, independently fence the former node, reconcile key and revision history with peers, review queued actions and privacy revocations, and verify radio configuration. Do not remove the fence or restore a raw database to bypass that review.</p>
+  </main>
+  <script type="module" src="/recovery.js"></script>
+</body>
+</html>
