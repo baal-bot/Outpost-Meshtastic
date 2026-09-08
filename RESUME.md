@@ -1,5 +1,28 @@
 # Session resume point — 2026-09-08 (America/New_York)
 
+## In progress: #141 offline time confidence
+
+The owner authorized #141. Runtime changes add read-only OS time evidence, bounded
+process holdover, latched wall-step detection, guarded custody/retention/recovery,
+elapsed queue accounting, and visible time holds. Local replies/alerts continue
+within retained budgets during in-process uncertainty; uncertain cold-start radio
+recovery needs a usable OS source. See [OFFLINE-TIME.md](docs/OFFLINE-TIME.md).
+
+Local checks: 45 new clock/browser cases passed (all three themes, phone/desktop),
+329 initial regressions passed, and 64 final custody/browser cases passed. New
+`timekeeping.py` production coverage is 94%; a new 90% floor is enforced. Format,
+lint, mypy, strict-debt ratchet, catalogues, requirements, static markup and package
+smoke passed. All 181 final queue/worker/maintenance/diagnostics cases passed.
+The 300s visible + 300s hidden idle measurement is running; evidence is tracked in private `.data/clock-141-2026-09-08/STATE.json`.
+
+No new release is installed yet. The live regional-map release below is still
+selected. The owner has since selected regional detail; live map readiness passes.
+Pi inspection reports synchronized UTC, RTC boot use, charging voltage zero and
+RTC battery-input voltage 0V. This is not a battery-presence or retention verdict.
+The owner's RTC-battery confirmation is pending. No clock, charging, network, power,
+recovery USB or second-node change has been made. #141 must remain open for physical
+RTC retention and the intended offline source/cold-start exercise.
+
 ## Installed: #139 regional maps with world overview; field acceptance remains open
 
 The owner selected regional detail plus a small world overview and explicitly excluded

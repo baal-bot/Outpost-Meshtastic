@@ -106,6 +106,7 @@ from outpost.store.members import Member, MemberRepo
 from outpost.store.message_log import MessageLogRepo
 from outpost.store.outbox import OutboxStore
 from outpost.task_supervision import TaskFailureDomain, restart_delay
+from outpost.timekeeping import TimeUncertain, time_status
 from outpost.transport.chunker import chunk_text
 from outpost.transport.governor import (
     AirtimeGovernor,
@@ -2369,12 +2370,21 @@ class OutpostApp:
     async def _federation_relay_loop(self) -> None:
         while True:
             local_id = self.radio.local_node_id
-            if self.config.modules.fed.enabled and local_id:
+            if (
+                self.config.modules.fed.enabled
+                and local_id
+                and time_status(self.clock).timestamp_safe
+            ):
                 self.federation.local_mesh_id = local_id
                 now = int(self.clock.now().timestamp())
-                await self.federation_relay.expire(now=now)
-                await self.federation_relay.recover_stalled(now=now)
-                await self.federation_relay.recover_pending_dispatches()
+                try:
+                    await self.federation_relay.expire(now=now)
+                    await self.federation_relay.recover_stalled(now=now)
+                    await self.federation_relay.recover_pending_dispatches()
+                except TimeUncertain:
+                    self._task_progress("federation-relay")
+                    await self.clock.sleep(30)
+                    continue
                 for receipt in await self.federation_relay.pending_receipts():
                     try:
                         receipt_peer = await self.federation.by_mesh_id(receipt["previous_hop"])
@@ -2429,6 +2439,8 @@ class OutpostApp:
                         if not reserved:
                             continue
                         await self._queue_trusted_federation_frames(frames)
+                    except TimeUncertain:
+                        continue
                     except (FrameError, ValueError) as error:
                         await self.federation_relay.mark_failed(envelope_id, str(error), now=now)
             self._task_progress("federation-relay")

@@ -1,6 +1,11 @@
 [global]
 minimum = 72
 
+[production_groups.time_confidence]
+minimum = 90
+per_file_minimum = 90
+files = ["src/outpost/timekeeping.py"]
+
 [production_groups.incident_responsibility]
 minimum = 90
 per_file_minimum = 90

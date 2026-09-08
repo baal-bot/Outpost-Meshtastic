@@ -270,3 +270,10 @@ incidental upgrade step.
 
 Use a distinct identity, radio, database, and password. Do not copy the first database or peer
 secret. Once both nodes pass independent verification, follow [Federation](FEDERATION.md).
+
+## Offline timekeeping
+
+Review [offline time confidence and RTC acceptance](OFFLINE-TIME.md). Pi 5 provides
+an RTC but requires separate battery-retention qualification. Outpost reads OS time
+evidence without setting the clock or charging voltage. Cold-start radio recovery
+waits for a usable OS source; qualify a locally powered source for offline cold starts.

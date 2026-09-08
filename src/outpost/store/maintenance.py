@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.config import Config
+from outpost.timekeeping import TIME_REMEDIATION, require_time, time_status
 
 from .backups import BackupService, release_inventory
 from .database import Database
@@ -488,6 +489,8 @@ class MaintenanceService:
         return self._run_lock.locked()
 
     async def due(self) -> bool:
+        if not time_status(self.clock).timestamp_safe:
+            return False
         local = self.clock.now().astimezone(ZoneInfo(self.config.node.timezone))
         if local.hour < self.config.store.maintenance_hour:
             return False
@@ -497,6 +500,12 @@ class MaintenanceService:
         return not rows or json.loads(rows[0]["value"]) != local.date().isoformat()
 
     async def health(self) -> dict[str, Any]:
+        if not time_status(self.clock).timestamp_safe:
+            return {
+                "status": "degraded",
+                "completed_at": None,
+                "failures": {"time_confidence": TIME_REMEDIATION},
+            }
         rows = await self.database.read(
             "SELECT value FROM runtime_setting WHERE key='maintenance.last_health'"
         )
@@ -1113,6 +1122,7 @@ class MaintenanceService:
 
     async def _delete_batch(self, rule: CleanupRule, limit: int) -> int:
         async with self.database.transaction() as transaction:
+            require_time(self.clock)
             rows = await transaction.read(
                 f'SELECT rowid rid FROM "{rule.table}" WHERE {rule.predicate} '  # noqa: S608
                 "ORDER BY rowid LIMIT ?",
@@ -1152,6 +1162,7 @@ class MaintenanceService:
                         "DELETE FROM runtime_setting "
                         "WHERE key='maintenance.allow_relay_event_delete'"
                     )
+            require_time(self.clock)
         return len(ids)
 
     async def _save_storage_snapshot(self, report: dict[str, Any], now: int) -> None:
@@ -1177,6 +1188,7 @@ class MaintenanceService:
     async def run(
         self, *, actor_kind: str = "system", actor_ref: str = "maintenance"
     ) -> MaintenanceResult:
+        require_time(self.clock)
         if self._run_lock.locked():
             raise RuntimeError("Maintenance is already running.")
         async with self._run_lock:

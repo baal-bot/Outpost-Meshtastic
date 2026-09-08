@@ -14,12 +14,14 @@ import urllib.error
 import urllib.request
 import zipfile
 from collections.abc import Iterable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from outpost import __version__
 from outpost.boot_readiness import inspect_boot_schema
 from outpost.config import Config, load_config
+from outpost.timekeeping import kernel_time, rtc_inventory
 
 REDACTED = "[REDACTED]"
 SENSITIVE_ASSIGNMENT = re.compile(
@@ -235,6 +237,8 @@ def runtime_evidence(config: Config) -> dict[str, object]:
         "service": _service_status(),
         "live": live,
         "self_check": readiness,
+        "time_source": asdict(kernel_time()),
+        "rtc": rtc_inventory(),
     }
 
 

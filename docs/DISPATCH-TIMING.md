@@ -77,3 +77,11 @@ late-completion recovery indexed without changing records, states, payloads or p
 Back up before an approved upgrade; older binaries correctly reject a newer schema. No
 live database was opened/migrated, package deployed, service/radio restarted, WAN disconnected,
 power cut or inactive additional node activated by this work.
+
+## #141 time-confidence follow-up
+
+The earlier wall-clock policy above is superseded by [offline time confidence](OFFLINE-TIME.md).
+Queue TTL, retry and accounting epochs now advance with monotonic elapsed time.
+Uncertain cold-start recovery waits without expiring retained work; in-process local
+replies and alerts retain their elapsed limits and airtime budgets. Timestamp-sensitive
+federation and scheduled traffic wait for source recovery. Physical RTC retention is open.

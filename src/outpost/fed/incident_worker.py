@@ -12,6 +12,7 @@ from outpost.audit import write_audit
 from outpost.fed.framing import FrameTooLarge
 from outpost.fed.incident_sender import IncidentDeferred, IncidentSender
 from outpost.store import Transaction
+from outpost.timekeeping import ElapsedTime, time_status
 
 POLL_SECONDS = 5
 PEERS_PER_TICK = 4
@@ -32,23 +33,14 @@ class IncidentWorker:
         self.clock = sender.peers.clock
         self._lock = asyncio.Lock()
         self._after_peer = 0
-        self._last_mono: float | None = None
-        self._policy_time = self.clock.now().timestamp()
+        self._elapsed = ElapsedTime(self.clock)
 
     def _now(self) -> int:
-        """A backward wall step cannot shorten in-process backoff or extend TTL.
+        return int(self._elapsed.now())
 
-        Persisted future deadlines remain conservative across restart. This is
-        not RTC/forward-clock-step qualification or a trusted remote timestamp.
-        """
-        mono = self.clock.monotonic()
-        self._policy_time = max(
-            self.clock.now().timestamp(),
-            self._policy_time
-            + (max(0, mono - self._last_mono) if self._last_mono is not None else 0),
-        )
-        self._last_mono = mono
-        return int(self._policy_time)
+    def _require_time(self) -> None:
+        if not time_status(self.clock).timestamp_safe:
+            raise IncidentDeferred("time_uncertain")
 
     async def tick(self) -> None:
         async with self._lock:
@@ -70,6 +62,9 @@ class IncidentWorker:
             self._after_peer = rows[-1]["id"] if len(rows) == PEERS_PER_TICK else 0
             for row in rows:
                 peer_id = row["id"]
+                if not time_status(self.clock).timestamp_safe:
+                    await self._peer_status(peer_id, "time_uncertain")
+                    continue
                 try:
                     await self.sender.sync.incident_handoff.stage_automatic(
                         peer_id, limit=HEADS_PER_LANE
@@ -112,6 +107,7 @@ class IncidentWorker:
         *,
         due: int | None = None,
     ) -> None:
+        self._require_time()
         await tx.write(
             "UPDATE fed_incident_intent SET delivery_state=?,delivery_reason=?,next_attempt_at=? "
             "WHERE peer_id=? AND stream=? AND uid=?",
@@ -122,6 +118,7 @@ class IncidentWorker:
                 *self._key(item),
             ),
         )
+        self._require_time()
 
     async def _stop(
         self,
@@ -145,8 +142,12 @@ class IncidentWorker:
             )
             ids = {row["id"] for row in rows}
             tx.after_commit(lambda: self.sender.governor._remove_ids(ids))
+        self._require_time()
 
     async def _deliver(self, selected: dict[str, Any]) -> None:
+        if not time_status(self.clock).timestamp_safe:
+            await self._peer_status(selected["peer_id"], "time_uncertain")
+            return
         # Arm before fallible encoding/admission. Queue rejection, cancellation or
         # a long writer wait cannot restart the finite window on every poll.
         now = self._now()
@@ -167,6 +168,9 @@ class IncidentWorker:
         try:
             await self._attempt(selected)
         except (FrameTooLarge, IncidentDeferred, ValueError) as error:
+            if not time_status(self.clock).timestamp_safe:
+                await self._peer_status(selected["peer_id"], "time_uncertain")
+                return
             if isinstance(error, FrameTooLarge):
                 state, reason = "blocked", "payload_too_large"
             elif isinstance(error, IncidentDeferred):
@@ -211,6 +215,7 @@ class IncidentWorker:
 
     async def _attempt(self, selected: dict[str, Any]) -> None:
         async with self.database.transaction() as tx:
+            self._require_time()
             rows = await tx.read(
                 "SELECT * FROM fed_incident_intent WHERE peer_id=? AND stream=? AND uid=?",
                 self._key(selected),

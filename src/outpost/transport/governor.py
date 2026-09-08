@@ -15,6 +15,7 @@ from outpost.config import AirtimeConfig, RadioPowerConfig
 from outpost.radio_power import normalize_battery_level
 from outpost.store.database import StoreError
 from outpost.store.outbox import OutboxDeferred, OutboxRejected, OutboxStore
+from outpost.timekeeping import ElapsedTime, TimeUncertain, require_time, time_status
 from outpost.transport.chunker import truncate_utf8
 
 if TYPE_CHECKING:
@@ -135,6 +136,7 @@ class AirtimeGovernor:
         timezone: str = "UTC",
     ) -> None:
         self.link, self.config, self.clock = link, config, clock
+        self._elapsed = ElapsedTime(clock)
         self.timezone = ZoneInfo(timezone)
         self.outbox = outbox
         self.power_config = power_config or RadioPowerConfig()
@@ -159,6 +161,8 @@ class AirtimeGovernor:
         self._recent: dict[tuple[str, int, str], float] = {}
         self._held_ids: set[int] = set()
         self._publication_failed = False
+        self._time_recovery_pending = False
+        self._time_started_safe = time_status(clock).timestamp_safe
         self._dispatch_lock = asyncio.Lock()
         self._next_id = 1
         self._next_tx_at = 0.0
@@ -437,6 +441,8 @@ class AirtimeGovernor:
         transaction.check_owner(self.outbox.database)
         if not items:
             return AdmissionResult()
+        if any(self._time_blocked(item.traffic_class) for item in items):
+            return AdmissionResult(rejection_reason="time_uncertain")
         oversized = [item for item in items if item.payload_size > MAX_PAYLOAD_BYTES]
         if oversized:
             for item in items:
@@ -444,7 +450,7 @@ class AirtimeGovernor:
                 OUTBOUND_DROPPED.labels(item.traffic_class.value, "payload_too_large").inc()
             return AdmissionResult(rejection_reason="payload_too_large")
         now_mono = self.clock.monotonic()
-        now_epoch = self.clock.now().timestamp()
+        now_epoch = self._elapsed.now()
         batch_uid = str(uuid.uuid4()) if len(items) > 1 else None
         records: list[dict[str, object]] = []
         for item in items:
@@ -539,14 +545,23 @@ class AirtimeGovernor:
         """Rebuild the committed mirror with egress and admissions quiesced."""
         if self.outbox is None:
             return 0
+        if not time_status(self.clock).timestamp_safe:
+            self._time_recovery_pending = True
+            return 0
         self._publication_failed = True
-        now_epoch = self.clock.now().timestamp()
-        rows = await self.outbox.recover(now_epoch)
+        self._elapsed.reset()
+        now_epoch = self._elapsed.now()
+        try:
+            rows = await self.outbox.recover(now_epoch, time_guard=lambda: require_time(self.clock))
+        except TimeUncertain:
+            self._time_recovery_pending = True
+            self._publication_failed = False
+            return 0
         self.queues = {cls: deque() for cls in TrafficClass}
         self._held_ids.clear()
         self.history.clear()
-        airtime = await self.outbox.recent_airtime(self.clock.now().timestamp())
-        now_epoch = self.clock.now().timestamp()
+        airtime = await self.outbox.recent_airtime(self._elapsed.now())
+        now_epoch = self._elapsed.now()
         now_mono = self.clock.monotonic()
         self._next_tx_at = 0.0
         for record in airtime:
@@ -593,6 +608,8 @@ class AirtimeGovernor:
         if rows:
             self._next_id = max(int(row["id"]) for row in rows) + 1
         self._publication_failed = False
+        self._time_recovery_pending = False
+        self._time_started_safe = True
         return len(rows)
 
     def enqueue_many(self, items: list[OutboundItem], *, hold: bool = False) -> list[int] | None:
@@ -684,7 +701,7 @@ class AirtimeGovernor:
     async def cancel_work(self, item_id: int) -> bool:
         if self.outbox is None:
             return self.cancel(item_id)
-        cancelled = await self.outbox.cancel(item_id, self.clock.now().timestamp())
+        cancelled = await self.outbox.cancel(item_id, self._elapsed.now())
         if cancelled:
             self._remove_ids({item_id})
         return cancelled
@@ -726,7 +743,7 @@ class AirtimeGovernor:
             raise ValueError("cannot retract queue items that are no longer pending")
         self._remove_ids(set(item_ids))
         if persisted:
-            await self.outbox.retract_many(item_ids, self.clock.now().timestamp())
+            await self.outbox.retract_many(item_ids, self._elapsed.now())
 
     def release_many(self, item_ids: list[int]) -> None:
         item_set = set(item_ids)
@@ -814,13 +831,27 @@ class AirtimeGovernor:
             )
 
     def _expired(self, item: OutboundItem) -> bool:
+        if self._time_blocked(item.traffic_class):
+            return False
         return item.expires_at <= self.clock.monotonic() or (
-            self.outbox is not None and item.expires_at_epoch <= self.clock.now().timestamp()
+            self.outbox is not None and item.expires_at_epoch <= self._elapsed.now()
+        )
+
+    def _time_blocked(self, traffic_class: TrafficClass) -> bool:
+        if time_status(self.clock).timestamp_safe:
+            self._time_started_safe = True
+            return False
+        return (
+            not self._time_started_safe
+            or self._time_recovery_pending
+            or traffic_class not in {TrafficClass.REPLY, TrafficClass.ALERT}
         )
 
     def _dispatch_policy(self, item: OutboundItem, cost: float) -> str | None:
         """Current, synchronous eligibility evidence at selection/reservation."""
         self._check_publication()
+        if self._time_blocked(item.traffic_class):
+            return "time_uncertain"
         now = self.clock.monotonic()
         if self._expired(item):
             return "expired"
@@ -881,6 +912,15 @@ class AirtimeGovernor:
 
     async def _tick(self) -> OutboundItem | None:
         self._check_publication()
+        if not time_status(self.clock).timestamp_safe and (
+            not self._time_started_safe or self._time_recovery_pending
+        ):
+            self.metrics.throttled["time_uncertain"] += 1
+            return None
+        if self._time_recovery_pending:
+            await self.recover()
+            if self._time_recovery_pending:
+                return None
         now = self.clock.monotonic()
         self._prune_history(now)
         for traffic_class, pending in self.queues.items():
@@ -892,11 +932,12 @@ class AirtimeGovernor:
                 self.metrics.dropped[(traffic_class, "expired")] += 1
                 OUTBOUND_DROPPED.labels(traffic_class.value, "expired").inc()
                 if self.outbox is not None:
-                    await self.outbox.expire(expired.item_id, self.clock.now().timestamp())
+                    await self.outbox.expire(expired.item_id, self._elapsed.now())
             QUEUE_DEPTH.labels(traffic_class.value).set(len(pending))
         if self.outbox is not None and now >= self._next_outbox_sweep_at:
             await self.outbox.expire_ack_waits(
-                self.clock.now().timestamp(), current_time=lambda: self.clock.now().timestamp()
+                self._elapsed.now(),
+                current_time=lambda: self._elapsed.now(),
             )
             self._next_outbox_sweep_at = self.clock.monotonic() + 30
         if self.link.state != LinkState.UP or self.clock.monotonic() < self._next_tx_at:
@@ -935,7 +976,7 @@ class AirtimeGovernor:
                 self.metrics.dropped[(cls, "expired")] += 1
                 OUTBOUND_DROPPED.labels(cls.value, "expired").inc()
                 if self.outbox is not None:
-                    await self.outbox.expire(candidate.item_id, self.clock.now().timestamp())
+                    await self.outbox.expire(candidate.item_id, self._elapsed.now())
                 continue
             try:
                 portnum = candidate.portnum or (1 if candidate.binary_payload is None else 260)
@@ -948,7 +989,7 @@ class AirtimeGovernor:
                 if self.outbox is not None:
                     await self.outbox.fail_unstarted(
                         candidate.item_id,
-                        self.clock.now().timestamp(),
+                        self._elapsed.now(),
                         f"{type(error).__name__}: {error}",
                     )
                 continue
@@ -990,9 +1031,9 @@ class AirtimeGovernor:
             try:
                 started = await self.outbox.start_attempt(
                     item.item_id,
-                    self.clock.now().timestamp(),
+                    self._elapsed.now(),
                     round(cost * 1_000),
-                    current_time=lambda: self.clock.now().timestamp(),
+                    current_time=lambda: self._elapsed.now(),
                     dispatch_policy=lambda: self._dispatch_policy(dispatch, cost),
                     **({"expected": expected} if dispatch.guard_kind is not None else {}),
                 )
@@ -1033,14 +1074,14 @@ class AirtimeGovernor:
             # Count it conservatively so retries cannot bypass the rolling airtime ceiling.
             state, retry_epoch, attempts = await self.outbox.fail_attempt(
                 item.item_id,
-                self.clock.now().timestamp(),
+                self._elapsed.now(),
                 f"{type(error).__name__}: {error}",
-                current_time=lambda: self.clock.now().timestamp(),
+                current_time=lambda: self._elapsed.now(),
             )
             item.attempts = attempts
             if state == "pending" and retry_epoch is not None:
                 item.next_attempt_at = self.clock.monotonic() + max(
-                    0.0, retry_epoch - self.clock.now().timestamp()
+                    0.0, retry_epoch - self._elapsed.now()
                 )
                 queue.append(item)
             else:
@@ -1058,7 +1099,7 @@ class AirtimeGovernor:
             result = item.send_result
             await self.outbox.complete_attempt(
                 item.item_id,
-                now=self.clock.now().timestamp(),
+                now=self._elapsed.now(),
                 packet_id=result.packet_id if result else None,
                 outcome=result.outcome if result else "timeout",
                 peer_mesh_id=dispatch.dest,

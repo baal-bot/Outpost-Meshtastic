@@ -167,8 +167,12 @@ class OutboxStore:
         async with self.database.transaction() as owned:
             return await admit(owned)
 
-    async def recover(self, now: float) -> list[dict[str, Any]]:
+    async def recover(
+        self, now: float, *, time_guard: Callable[[], None] | None = None
+    ) -> list[dict[str, Any]]:
         async with self.database.transaction() as transaction:
+            if time_guard is not None:
+                time_guard()
             await transaction.write(
                 "UPDATE outbound_attempt SET state='uncertain',completed_at=?,error=? "
                 "WHERE state='started'",
@@ -207,6 +211,8 @@ class OutboxStore:
                 "SELECT * FROM outbound_work WHERE state='pending' "
                 "ORDER BY CASE traffic_class WHEN 'alert' THEN 0 ELSE 1 END,created_at,id"
             )
+            if time_guard is not None:
+                time_guard()
         return [dict(row) for row in rows]
 
     async def recent_airtime(self, now: float) -> list[dict[str, Any]]:
@@ -271,7 +277,10 @@ class OutboxStore:
         )
 
     async def expire_ack_waits(
-        self, now: float, *, current_time: Callable[[], float] | None = None
+        self,
+        now: float,
+        *,
+        current_time: Callable[[], float] | None = None,
     ) -> None:
         async with self.database.transaction() as transaction:
             now = current_time() if current_time is not None else now
@@ -309,6 +318,8 @@ class OutboxStore:
             if not rows or rows[0]["state"] != "pending":
                 return False
             row = dict(rows[0])
+            if dispatch_policy is not None and dispatch_policy() == "time_uncertain":
+                raise OutboxDeferred("time_uncertain")
             if row["guard_kind"] is not None:
                 guard = self.attempt_guards.get(row["guard_kind"])
                 # Bind the exact candidate used for I/O to the durable payload.
@@ -333,6 +344,8 @@ class OutboxStore:
                     or not await guard(transaction, row)
                 )
                 now = current_time() if current_time is not None else now
+                if dispatch_policy is not None and dispatch_policy() == "time_uncertain":
+                    raise OutboxDeferred("time_uncertain")
                 if denied or row["expires_at"] <= now:
                     await transaction.write(
                         "UPDATE outbound_work SET state='failed',completed_at=?,"
@@ -342,6 +355,8 @@ class OutboxStore:
                     return False
             now = current_time() if current_time is not None else now
             reason = dispatch_policy() if dispatch_policy is not None else None
+            if reason == "time_uncertain":
+                raise OutboxDeferred(reason)
             if row["expires_at"] <= now or reason == "expired":
                 await transaction.write(
                     "UPDATE outbound_work SET state='expired',completed_at=? WHERE id=?",

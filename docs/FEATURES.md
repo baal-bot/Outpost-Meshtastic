@@ -43,7 +43,7 @@ revision on which CI runs this manifest check.
 | Outpost federation | Pairing, authenticated framing, policy, producer-revision board/incident/alert reconciliation and separately negotiated plain incident notes with durable pending-page receipts and bounded indexed discovery; automatic incident/note delivery with independent fresh/backlog lanes, finite persistent retries, guarded coalesced storage receipts and operator delivery controls; version-bound human import/rejection with atomic audit, signed policy-filtered physical-transfer pages with radio-off commissioned identity and current-key/operator review, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, transactional destination dispatch, and privacy-gated topology health. | Two-node field-tested | unreleased @ `HEAD` (2026-09-07); introduced `8f7219e` |
 | Meshtastic MQTT federation path | Optional radio-firmware MQTT discovery, targeted bootstrap, transport observation, and resilient pairing approvals. | Two-node field-tested | unreleased @ `HEAD` (2026-08-26); introduced `f75f8af` |
 | Local AI assistant | ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, native HailoRT Qwen3-VL provider, bounded device reacquisition, and explicit readiness state. | Hardware-gated | unreleased @ `HEAD` (2026-08-27); introduced `6b3d01a` |
-| Installation and diagnostics | Resumable field checklist, GPS-assisted regional map setup and bounded overview downloads with verified USB import/export, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, explicit forward recovery from incompatible boot releases, installed-store ownership guards, health-gated Hailo handoff, and hardened service tooling. | Automated-tested | unreleased @ `HEAD` (2026-09-08); introduced `d614d85` |
+| Installation and diagnostics | Resumable field checklist, GPS-assisted regional map setup and bounded overview downloads with verified USB import/export, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, explicit forward recovery from incompatible boot releases, installed-store ownership guards, health-gated Hailo handoff, and hardened service tooling. Read-only OS/RTC time diagnostics distinguish synchronization, bounded process holdover and clock steps; uncertain time gates destructive retention and timestamp-sensitive work. | Automated-tested | unreleased @ `HEAD` (2026-09-08); introduced `d614d85` |
 
 ## Evidence and limitations
 
@@ -129,7 +129,7 @@ Known limitations:
 - A 24-hour comparison with the deployed radio preset and destructive power-loss campaign remain open.
 - Synthetic emergency bursts qualify finite-load admission and explicit overload recovery, not unlimited intake, physical delivery capacity or independent human consensus.
 - Post-commit publication failure blocks egress until quiesced recovery; cancellation may still leave committed or uncertain work. Automatic incident delivery uses this boundary; physical G6 remains held (#135).
-- Reservation is not an atomic physical RF instant. Recovery conservatively retains future-dated airtime after backward wall steps; arbitrary forward clock changes across restart still require #141 time-confidence work.
+- Reservation is not an atomic physical RF instant. #141 adds elapsed-time queue accounting and gates uncertain cold-start recovery on usable OS time; in-process local replies/alerts continue within retained budgets. RTC battery retention and offline cold-start time-source qualification remain open.
 
 ### Identity and member directory
 
@@ -390,6 +390,7 @@ Known limitations:
 - Topology location exchange is automated-tested; physical multi-node and long-duration stale/recovery exercises remain open.
 - Federation remains experimental until every acceptance-backlog item passes.
 - Revision reconciliation is automated-tested; mixed-version links retain clock-sensitive legacy ordering. Upgrade both peers for clock-independent cursors.
+- Signed custody, federation egress and automatic incident scheduling pause under uncertain UTC with visible reasons. Existing signatures, replay checks and expiry bounds remain enforced; #141 RTC/source hardware qualification is pending.
 - Large-history paging is qualified only for producer-revision links; the legacy timestamp adapter retains its collection-scaling limitation.
 - Replica withdrawal, backup-lineage/node-loss recovery and hardware qualification remain open (#135/#145/#146/#157). An observed receipt does not prove continued remote retention. Quiet hours, liveness and expiry still need time-confidence work (#141); backward-step handling is not trusted-time qualification.
 
@@ -443,6 +444,9 @@ Evidence:
 - Automated: [tests/integration/test_outage_readiness.py::test_healthy_local_checks_do_not_certify_unknown_outage_prerequisites](../tests/integration/test_outage_readiness.py) — Actual service/store assessment preserves unknown outage prerequisites despite healthy narrow checks, with no radio, alert or destructive exercise.
 - Automated: [tests/integration/test_outage_readiness.py::test_post_commit_cancellation_invalidates_the_old_in_memory_report](../tests/integration/test_outage_readiness.py) — Audited observations and cache invalidation commit together; cancellation, stale guards, clock changes, expiry, rollback and restart cannot invent measured certification.
 - Automated: [tests/browser/test_outage_readiness_ui.py::test_operator_can_review_all_evidence_and_record_an_explicit_observation](../tests/browser/test_outage_readiness_ui.py) — Real authenticated ASGI/Chromium supports all-check review and explicit operator observations on 320px and desktop layouts; CSRF/viewer/stale-input boundaries are exercised.
+- Automated: [tests/integration/test_time_confidence.py::test_queue_wall_steps_do_not_expire_or_dispatch_retained_work](../tests/integration/test_time_confidence.py) — Synthetic OS clock evidence, six-hour offsets/steps, guarded recovery/custody, retained intents, elapsed local reply/alert operation and unchanged lifetime rejection through production stores.
+- Automated: [tests/browser/test_time_confidence_ui.py::test_operator_sees_time_hold_and_create_never_claims_queued](../tests/browser/test_time_confidence_ui.py) — Actual authenticated Federation page reports time holds and rejects creation without claiming queued or delivered; mobile/desktop across all themes.
+- Operations: [docs/OFFLINE-TIME.md](OFFLINE-TIME.md) — UTC confidence policy, cold-start limitations, read-only RTC witness and physical retention/source acceptance procedure; hardware remains unqualified.
 
 Known limitations:
 

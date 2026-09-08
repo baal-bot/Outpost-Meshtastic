@@ -19,6 +19,7 @@ from outpost.clock import Clock
 from outpost.fed.framing import wire_bytes, wire_int
 from outpost.fed.peers import FederationPeerService
 from outpost.store import Database, Transaction
+from outpost.timekeeping import TIME_REMEDIATION, require_time, time_status
 
 NODE_ID = re.compile(r"^![0-9a-fA-F]{8}$")
 SCOPES = {"incident", "request", "receipt", "opaque"}
@@ -387,6 +388,7 @@ class FederationRelayService:
         idempotency_key: str | None = None,
         actor: str = "system",
     ) -> str:
+        require_time(self.clock)
         origin = self._local_id()
         destination = destination.lower()
         if not NODE_ID.fullmatch(destination) or destination == origin:
@@ -416,33 +418,37 @@ class FederationRelayService:
         envelope_id = self._envelope_id(encoded)
         private, public, rotation_from, rotation_signature = await self._identity()
         signature = private.sign(encoded)
+        require_time(self.clock)
         try:
-            await self.database.write(
-                "INSERT INTO fed_relay_envelope(envelope_id,direction,origin_node,"
-                "destination_node,scope,idempotency_key,created_at,expires_at,hop_limit,"
-                "payload_cbor,payload_bytes,origin_public_key,origin_signature,route_json,state,"
-                "rotation_from_public_key,rotation_signature,stored_at,updated_at) "
-                "VALUES(?,'origin',?,?,?,?,?,?,?,?,?,?,?,?, 'queued',?,?,?,?)",
-                (
-                    envelope_id,
-                    origin,
-                    destination,
-                    scope,
-                    key,
-                    now,
-                    now + expires_in,
-                    hop_limit,
-                    payload_bytes,
-                    len(payload_bytes),
-                    public,
-                    signature,
-                    json.dumps([origin], separators=(",", ":")),
-                    rotation_from,
-                    rotation_signature,
-                    now,
-                    now,
-                ),
-            )
+            async with self.database.transaction() as transaction:
+                require_time(self.clock)
+                await transaction.write(
+                    "INSERT INTO fed_relay_envelope(envelope_id,direction,origin_node,"
+                    "destination_node,scope,idempotency_key,created_at,expires_at,hop_limit,"
+                    "payload_cbor,payload_bytes,origin_public_key,origin_signature,route_json,state,"
+                    "rotation_from_public_key,rotation_signature,stored_at,updated_at) "
+                    "VALUES(?,'origin',?,?,?,?,?,?,?,?,?,?,?,?, 'queued',?,?,?,?)",
+                    (
+                        envelope_id,
+                        origin,
+                        destination,
+                        scope,
+                        key,
+                        now,
+                        now + expires_in,
+                        hop_limit,
+                        payload_bytes,
+                        len(payload_bytes),
+                        public,
+                        signature,
+                        json.dumps([origin], separators=(",", ":")),
+                        rotation_from,
+                        rotation_signature,
+                        now,
+                        now,
+                    ),
+                )
+                require_time(self.clock)
         except Exception as error:
             if "UNIQUE constraint failed" in str(error):
                 rows = await self.database.read(
@@ -633,6 +639,7 @@ class FederationRelayService:
         return result
 
     async def _dispatch_destination(self, transaction: Transaction, row: Any, now: int) -> str:
+        require_time(self.clock)
         envelope_id = str(row["envelope_id"])
         scope = str(row["scope"])
         peer_id = int(row["received_from_peer_id"])
@@ -652,6 +659,7 @@ class FederationRelayService:
             await self._event(
                 transaction, envelope_id, peer_id, "dispatch_ignored", detail, now, "federation"
             )
+            require_time(self.clock)
             return "delivered"
 
         handler = self._dispatch_handlers.get(scope)
@@ -707,6 +715,7 @@ class FederationRelayService:
                 now,
                 "federation",
             )
+            require_time(self.clock)
             return "rejected"
 
         detail = self._dispatch_detail(result)
@@ -730,6 +739,7 @@ class FederationRelayService:
             now,
             "federation",
         )
+        require_time(self.clock)
         return "delivered"
 
     async def accept(
@@ -740,6 +750,7 @@ class FederationRelayService:
         now: int | None = None,
         transport: str = "radio",
     ) -> tuple[str, str]:
+        require_time(self.clock)
         stamp = int(self.clock.now().timestamp()) if now is None else now
         peer = None
         try:
@@ -775,7 +786,10 @@ class FederationRelayService:
                 or expires_at <= created_at
                 or expires_at - created_at > MAX_LIFETIME_SECONDS
             ):
-                raise ValueError("invalid or expired relay timestamps")
+                raise ValueError(
+                    "invalid or expired relay timestamps; verify UTC/time confidence "
+                    "on both stations before retrying"
+                )
             if not 1 <= hop_limit <= 4 or not route or len(route) > hop_limit:
                 raise ValueError("relay hop limit is exhausted")
             if route[0] != origin or route[-1] != sender_mesh_id.lower():
@@ -1056,6 +1070,7 @@ class FederationRelayService:
                         stamp,
                         "federation",
                     )
+            require_time(self.clock)
         if duplicate_state is not None:
             return envelope_id, duplicate_state
         if denial is not None:
@@ -1112,6 +1127,7 @@ class FederationRelayService:
                 json.loads(str(dispatch_result)) if dispatch_result is not None else None
             )
             value["history"] = history[str(row["envelope_id"])]
+            value["time_blocked"] = not time_status(self.clock).timestamp_safe
             values.append(value)
         return values
 
@@ -1282,6 +1298,7 @@ class FederationRelayService:
     async def _retry_dispatch(
         self, envelope_id: str, actor: str, *, pending_only: bool = False
     ) -> str:
+        require_time(self.clock)
         now = int(self.clock.now().timestamp())
         async with self.database.transaction() as transaction:
             rows = await transaction.read(
@@ -1324,6 +1341,8 @@ class FederationRelayService:
         return state
 
     async def recover_pending_dispatches(self, limit: int = 4) -> int:
+        if not time_status(self.clock).timestamp_safe:
+            return 0
         rows = await self.database.read(
             "SELECT envelope_id FROM fed_relay_envelope WHERE direction='destination' "
             "AND dispatch_status='pending' AND payload_cbor IS NOT NULL AND expires_at>? "
@@ -1344,6 +1363,8 @@ class FederationRelayService:
     async def item_action(self, envelope_id: str, action: str, actor: str) -> None:
         if action not in {"pause", "resume", "purge", "retry"}:
             raise ValueError("unsupported relay queue action")
+        if action in {"resume", "retry"}:
+            require_time(self.clock)
         if action == "retry":
             await self._retry_dispatch(envelope_id, actor)
             return
@@ -1385,8 +1406,12 @@ class FederationRelayService:
                 detail=action,
                 created_at=now,
             )
+            if action == "resume":
+                require_time(self.clock)
 
     async def next_hop(self, envelope_id: str, *, now: int | None = None) -> dict[str, str] | None:
+        if not time_status(self.clock).timestamp_safe:
+            return None
         stamp = int(self.clock.now().timestamp()) if now is None else now
         rows = await self.database.read(
             "SELECT destination_node,scope,route_json,state,expires_at,next_attempt_at "
@@ -1427,6 +1452,7 @@ class FederationRelayService:
         now: int | None = None,
         path: str | None = None,
     ) -> bool:
+        require_time(self.clock)
         stamp = int(self.clock.now().timestamp()) if now is None else now
         policy = await self.policy(next_hop)
         if not policy.enabled or policy.paused:
@@ -1460,6 +1486,7 @@ class FederationRelayService:
         if quota_error is not None:
             retry_at = window + 3_600
             async with self.database.transaction() as transaction:
+                require_time(self.clock)
                 await transaction.write(
                     "UPDATE fed_relay_envelope SET next_attempt_at=?,updated_at=?,last_error=? "
                     "WHERE envelope_id=? AND state='queued'",
@@ -1478,8 +1505,10 @@ class FederationRelayService:
                     stamp,
                     "system",
                 )
+                require_time(self.clock)
             return False
         async with self.database.transaction() as transaction:
+            require_time(self.clock)
             await transaction.write(
                 "INSERT INTO fed_relay_usage(peer_id,window_start,forwarded,airtime_seconds) "
                 "VALUES(?,?,1,?) ON CONFLICT(peer_id,window_start) DO UPDATE SET "
@@ -1502,6 +1531,7 @@ class FederationRelayService:
                 stamp,
                 "system",
             )
+            require_time(self.clock)
         return True
 
     @staticmethod
@@ -1672,6 +1702,8 @@ class FederationRelayService:
         )
 
     async def recover_stalled(self, *, now: int | None = None, after: int = 300) -> int:
+        if not time_status(self.clock).timestamp_safe:
+            return 0
         stamp = int(self.clock.now().timestamp()) if now is None else now
         rows = await self.database.read(
             "SELECT envelope_id FROM fed_relay_envelope WHERE state='forwarding' "
@@ -1679,12 +1711,15 @@ class FederationRelayService:
             (stamp - max(30, after), stamp),
         )
         for row in rows:
+            require_time(self.clock)
             await self.mark_failed(
                 str(row["envelope_id"]), "custody acknowledgement timed out", now=stamp
             )
         return len(rows)
 
     async def expire(self, *, now: int | None = None) -> int:
+        if not time_status(self.clock).timestamp_safe:
+            return 0
         stamp = int(self.clock.now().timestamp()) if now is None else now
         rows = await self.database.read(
             "SELECT envelope_id FROM fed_relay_envelope WHERE expires_at<=? "
@@ -1693,6 +1728,7 @@ class FederationRelayService:
         )
         for row in rows:
             async with self.database.transaction() as transaction:
+                require_time(self.clock)
                 await transaction.write(
                     "UPDATE fed_relay_envelope SET state='expired',payload_cbor=NULL,"
                     "payload_bytes=0,updated_at=? WHERE envelope_id=?",
@@ -1707,6 +1743,7 @@ class FederationRelayService:
                     stamp,
                     "system",
                 )
+                require_time(self.clock)
         return len(rows)
 
     async def summary(self) -> dict[str, Any]:
@@ -1721,6 +1758,8 @@ class FederationRelayService:
         )
         return {
             "counts": {str(row["state"]): int(row["count"]) for row in counts},
+            "time_confidence": time_status(self.clock).as_dict(),
+            "time_warning": None if time_status(self.clock).timestamp_safe else TIME_REMEDIATION,
             "stored_bytes": sum(int(row["bytes"]) for row in counts),
             "events": [
                 {

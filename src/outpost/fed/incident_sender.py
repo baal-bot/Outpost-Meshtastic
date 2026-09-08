@@ -23,6 +23,8 @@ from outpost.fed.peers import FederationPeerService, Peer
 from outpost.fed.revisions import source_revision
 from outpost.fed.sync import FederationSyncService
 from outpost.store import Transaction
+from outpost.store.outbox import OutboxDeferred
+from outpost.timekeeping import time_status
 from outpost.transport.governor import AirtimeGovernor, OutboundItem
 from outpost.transport.models import TrafficClass
 
@@ -87,6 +89,8 @@ class IncidentSender:
         uid: str,
     ) -> tuple[Peer, dict[str, Any], dict[str, Any], bytes]:
         """One writer view of current intent, payload, lineage and parent evidence."""
+        if not time_status(self.peers.clock).timestamp_safe:
+            raise IncidentDeferred("time_uncertain")
         handoff = self.sync.incident_handoff
         peer = await handoff._peer(tx, peer_id)
         local_id = self.identity()
@@ -272,8 +276,8 @@ class IncidentSender:
             transaction=tx,
         )
         if admission.rejection_reason is not None:
-            if admission.rejection_reason == "queue_full":
-                raise IncidentDeferred("queue_full")
+            if admission.rejection_reason in {"queue_full", "time_uncertain"}:
+                raise IncidentDeferred(admission.rejection_reason)
             raise ValueError("incident sender admission rejected: " + admission.rejection_reason)
         await tx.write(
             "INSERT INTO fed_incident_dispatch(peer_id,stream,uid,producer_mesh_id,"
@@ -303,10 +307,14 @@ class IncidentSender:
             or self.routing() != (channel, portnum)
         ):
             raise ValueError("incident sender runtime policy changed before commit")
+        if not time_status(self.peers.clock).timestamp_safe:
+            raise IncidentDeferred("time_uncertain")
         return IncidentAdmission("queued", admission.item_ids, counter)
 
     async def authorize_attempt(self, tx: Transaction, work: dict[str, Any]) -> bool:
         """Called inside durable attempt reservation, including startup/transport retry."""
+        if not time_status(self.peers.clock).timestamp_safe:
+            raise OutboxDeferred("time_uncertain")
         rows = await tx.read(
             "SELECT * FROM fed_incident_dispatch WHERE queue_key=?", (work["queue_key"],)
         )
@@ -320,6 +328,8 @@ class IncidentSender:
                 saved["stream"],
                 saved["uid"],
             )
+            if not time_status(self.peers.clock).timestamp_safe:
+                raise OutboxDeferred("time_uncertain")
             if not self._matches(saved, current):
                 return False
             if current["delivery_state"] in {
@@ -360,6 +370,10 @@ class IncidentSender:
                 # The governor's tick-start timestamp may predate writer waits.
                 and work["expires_at"] > self.peers.clock.now().timestamp()
             )
+        except IncidentDeferred as error:
+            if error.reason == "time_uncertain":
+                raise OutboxDeferred("time_uncertain") from error
+            return False
         except ValueError:
             return False  # Policy/content denial; storage faults still fail the core task.
 

@@ -27,7 +27,7 @@ and operator-attested evidence; none of the latter three means all-ready.
 | check: `timezone` | Configuration | `node.timezone` resolves through the installed IANA timezone database. |
 | check: `storage_reserve` | Operations | Current unprivileged byte and inode headroom meet the diagnostic floor: at least the larger of 1 GiB or 5% free bytes, and 5% free inodes. Not write endurance or outage-duration proof. |
 | check: `offline_maps` | Operations | Missing/invalid/bounded-file violations fail. A readable manifest is only availability metadata; regional bounds, zooms, integrity and geographic coverage remain unqualified. |
-| check: `time_confidence` | Operations | An observed in-process wall step fails. Otherwise offline clock/RTC holdover remains unknown without qualification; a timezone is not a time source. |
+| check: `time_confidence` | Operations | An observed in-process wall step fails. Read-only OS evidence reports synchronization, bounded process holdover or uncertainty, plus RTC hints. Physical RTC retention remains unknown; see [offline time policy](OFFLINE-TIME.md). |
 | check: `backup_restore` | Operations | Off-device encrypted recovery and an isolated replacement-node restore remain unknown without qualification. Local rotation cannot pass this check. |
 | check: `station_power` | Operations | Whole-station usable energy and measured load remain unknown without qualification; one radio's battery is not the host/AP/storage reserve. |
 | check: `local_access` | Operations | Replacement-client access without WAN/cell remains unknown without qualification; developer HTTP is not a substitute. |
@@ -74,9 +74,9 @@ that report; absent or invalid telemetry stays unknown. The separate `station_po
 check still requires whole-station energy evidence. See [radio power](RADIO-POWER.md)
 for persistence, compatibility and validation details.
 
-This is an assessment, not an implementation of the missing RTC, encrypted backup,
-regional-map or physical qualification work. Unknowns remain visible until those
-separate requirements provide suitable evidence. External hardware changes are not
+This assessment includes OS time-confidence guards. Physical RTC retention, off-device
+restoration and other field checks remain separate. Unknowns remain visible until
+those requirements provide suitable evidence. External hardware changes are not
 automatically detected, and persisted metadata is not cryptographic proof for a
 restored/forked appliance lineage.
 

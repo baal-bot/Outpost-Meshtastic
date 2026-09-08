@@ -22,6 +22,7 @@ from outpost.config import Config
 from outpost.radio_power import normalize_battery_level, power_condition
 from outpost.readiness_probes import map_inventory, storage_inventory
 from outpost.store import Database
+from outpost.timekeeping import rtc_inventory, time_status
 
 
 class BackupInventory(Protocol):
@@ -364,6 +365,8 @@ class SelfCheckService:
         return self.snapshot()
 
     def _clock_changed(self) -> bool:
+        if time_status(self.clock).state == "stepped":
+            return True
         if self._initial_mono is None:
             self._initial_wall = self.clock.now().timestamp()
             self._initial_mono = self.clock.monotonic()
@@ -702,17 +705,21 @@ class SelfCheckService:
         )
 
     async def _outage_checks(self, now: int) -> list[CheckResult]:
-        def local() -> tuple[dict[str, object], dict[str, object]]:
+        def local() -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
             location = self.config.node.location
-            return map_inventory(
-                self.config.store.tiles_path, (location.lat, location.lon) if location else None
-            ), storage_inventory(self.config.store.path)
+            return (
+                map_inventory(
+                    self.config.store.tiles_path, (location.lat, location.lon) if location else None
+                ),
+                storage_inventory(self.config.store.path),
+                rtc_inventory(),
+            )
 
         probe = asyncio.create_task(asyncio.to_thread(local))
         cancelled = False
         while True:
             try:
-                maps, storage = await asyncio.shield(probe)
+                maps, storage, rtc = await asyncio.shield(probe)
                 break
             except asyncio.CancelledError:
                 if probe.cancelled():
@@ -756,10 +763,15 @@ class SelfCheckService:
             self._result(
                 "time_confidence",
                 False,
-                "A wall-clock step was observed during this process."
+                "A wall-clock step was observed. " + time_status(self.clock).detail
                 if self._clock_changed()
-                else "No qualified network-independent clock/RTC holdover evidence is available.",
-                {"wall_step_observed": self._clock_changed(), "holdover_verified": False},
+                else time_status(self.clock).detail,
+                {
+                    **time_status(self.clock).as_dict(),
+                    "rtc": rtc,
+                    "wall_step_observed": self._clock_changed(),
+                    "holdover_verified": False,
+                },
                 state="fail" if self._clock_changed() else "unknown",
             ),
             self._result(
@@ -840,7 +852,11 @@ class SelfCheckService:
                     "stale",
                     "Operator observation expired or belongs to an earlier process/policy.",
                 )
-            elif now < observation["observed_at"] or self._clock_changed():
+            elif (
+                now < observation["observed_at"]
+                or self._clock_changed()
+                or not time_status(self.clock).timestamp_safe
+            ):
                 detail = "Clock uncertainty prevents evaluating the observation's freshness."
             elif observation["outcome"] == "fail":
                 state, detail = "fail", "An operator reported that this qualification check failed."
@@ -879,7 +895,11 @@ class SelfCheckService:
             raise ValueError("Invalid readiness observation")
         async with self._run_lock:
             now = int(self.clock.now().timestamp())
-            if self._clock_changed() or not now - OBSERVATION_TTL < observed_at <= now:
+            if (
+                self._clock_changed()
+                or not time_status(self.clock).timestamp_safe
+                or not now - OBSERVATION_TTL < observed_at <= now
+            ):
                 raise ValueError(
                     "Observation must be within the last day with a stable local clock"
                 )

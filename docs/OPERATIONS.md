@@ -263,3 +263,10 @@ sensitive because they may contain location data captured before expiry.
 
 During WAN outages, avoid repeated forced refreshes. Cached data may be stale—use its timestamp.
 Radio federation can still work. Peer/AI fallback must remain bounded and source-attributed.
+
+## Uncertain station time
+
+[Offline time policy and recovery](OFFLINE-TIME.md) explains the readiness evidence,
+which operations wait, and how to capture a read-only RTC witness. Correct and verify
+the OS source before restarting after a clock step. Keep #141 open until the intended
+RTC battery and offline source pass the physical exercise.
