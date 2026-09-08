@@ -1,82 +1,92 @@
 # Session resume point — 2026-09-08 (America/New_York)
 
-## Current task: #136
+## Current task: #136 controlled reboot acceptance
 
-The user authorized continuing with installed-service alignment and unattended reboot
-recovery on this machine. The second node is a separate machine; the user updates it.
-No local or remote service restart, deployment, radio test or reboot has occurred in
-this task yet. GitHub CLI was installed as an updater prerequisite.
+The local repair is deployed and passed pre-reboot checks. The user authorized the
+controlled reboot; do not ask for approval again. The second node is a separate
+machine and the user updates it.
 
-Read `.data/reboot-136-2026-09-08/STATE.json` for the final repair commit, CI state,
-checks and deployment checkpoint recorded after this commit. Preserve the distinction
-between a prepared repair and a verified live deployment.
+The selected, running packaged release is `20260908T160830Z-045130381360`, source
+`045130381360e23aa89e093b8afb0c87613cef6d`, database schema **185**. Exact-commit CI
+`34242955400` completed successfully in all four jobs: 2,261 full-suite tests per job,
+and 1,209 production-mode tests per Python version. Normal `deploy/update.sh`
+completed successfully with the native HailoRT wheel. The working checkout's later
+documentation commit is not the installed release's CI identity.
 
-The independent-backup prerequisite is pending: the user was asked where a validated
-off-device copy exists, or which external destination should receive one. No external
-filesystem was mounted at inspection. Do not treat the verified local snapshot as an
-off-device copy. Continue independent preparation while awaiting that information.
+Read `.data/reboot-136-2026-09-08/STATE.json` for the latest operational checkpoint.
+After reboot, the persistent witness below takes precedence over its pre-boot state.
+Keep #136 open until the actual post-boot evidence passes and is recorded on GitHub.
 
-## Observed failure and prepared repair
+## Resume after the reboot
 
-Read-only inspection found `outpost.service` enabled and failed, selecting release
-`20260829T012425Z-ff11ed8dd99b`, whose migration capacity is 153. The live database is
-schema 172 and passed `quick_check`. The source supports schema 185. No checkout
-Outpost process was running at inspection.
+A temporary, enabled systemd unit `outpost-qualify-reboot-136.service` runs after the
+enabled Outpost boot service, only when its private `armed` file exists. It waits up
+to five minutes for recovery, then records observations without starting Outpost or
+a checkout server. It must see a new boot ID and the intended packaged process,
+green release evidence, live health/web/radio/core tasks/required AI, schema integrity,
+a fresh boot-schema check and retained authoritative records/durable work.
 
-The repair adds:
+Read these local files with sudo; never publish raw record IDs or configuration:
 
-- Explicit `OUTPOST_RECOVER_INCOMPATIBLE_BOOT=1` support in the normal verified
-  updater. The target must support current data; backups and exact-commit CI remain
-  required. A failed repair preserves live data, captures a forensic snapshot where
-  possible and leaves the new release selected but stopped. Incompatible automatic
-  and manual rollback are refused. Compatible ordinary upgrades retain their existing
-  rollback behavior, including failure handling when `systemctl start` fails.
-- Store ownership checked before SQLite opens. Standard `/var/lib/outpost` state and
-  installer-marked custom databases require the selected packaged interpreter and
-  package. Development uses separate state; historical binaries lack this guard.
-- Clearing the old systemd failure limit before startup, updated operating guidance,
-  and the repair guide included in future offline kits.
+- `/var/lib/outpost-qualification/136-20260908/after-reboot-summary.json`
+- `/var/lib/outpost-qualification/136-20260908/before-reboot-summary.json`
+- `/var/lib/outpost-qualification/136-20260908/collector-error.json`, if present.
 
-See `docs/BOOT-RECOVERY.md`. No migration, wire-format or identity change is introduced
-by this repair; it safely deploys the already-existing forward migrations.
+If collection is still running, inspect the qualification unit and let its bounded
+observation finish. A missing or failed result is not successful reboot evidence.
+After reviewing a passing result and actual service state, record sanitized evidence,
+close #136, and check it off in tracker #130. Disable and remove only this temporary
+qualification unit; retain the private observations and backups. Update this resume
+point and the private state file with the actual outcome.
 
-## Recovery copies and local evidence
+## Verified before reboot
 
-A private, integrity-checked schema-172 snapshot and configuration copies are retained
-under `/var/lib/outpost/backups/issue-136-2026-09-08/`. They have not been copied off-device.
-Do not publish their contents or identifiers.
+The enabled service runs its selected packaged interpreter, web and health return 200,
+radio and core tasks are healthy, and required native Hailo AI is ready. Database
+integrity and foreign-key checks pass at schema 185. A fresh readiness check reports
+`boot_schema: pass` with the running and boot package at the same location. The checkout
+was refused access to the installed database before opening a writer.
 
-A separate private copy migrated from 172 to 185 successfully with the real Database
-opening path, FULL on its actual writer, clean integrity and zero foreign-key errors.
-All preexisting incident, incident-update, mail, federation-mail and outbound-work IDs
-were retained. The live database was unchanged. The sanitized result and private
-rehearsal location are in `.data/reboot-136-2026-09-08/migration-rehearsal.json`.
+All original incident, incident-update, mail, federation-mail, outbound-work and relay
+envelope IDs were retained. The initial outbox had 1,534 terminal records and no active
+pending work; normal operation added sent work. This does not establish a nonempty
+pending-queue physical outage campaign. Other field readiness remains degraded: offline
+maps failed their check and several physical/local-access/peer/restore observations
+remain unknown. Those do not become qualified by the #136 boot-schema repair.
 
-Initial installer/ownership checks passed 32 cases. The broader store, transaction,
-backup, boot-readiness, ownership and offline-kit run passed 129 tests. Store ownership
-reached 100% line coverage. Strict mypy passed 155 source files; the debt ratchet
-remains 262. Required pre-push checks passed. Consult the state file and final logs
-for exact-commit CI. Final focused reruns passed nine recovery cases and eight
-ownership cases. Package smoke verified all 38 runtime/radio pins and exercised
-ownership, FULL commits, reopen and obsolete-release rejection in the installed
-wheel's actual interpreter. These local results do not establish a real reboot.
+Two local deployment issues were resolved before the successful update. A logging
+wrapper's restrictive umask initially prevented the service account from executing the
+staged package; no migration ran on that attempt. Package read/execute permissions and
+the updater child umask were corrected. The next attempt started a healthy service but
+the installer's unauthenticated metrics probe received 401 under the inherited default.
+Its code-only rollback retained the migrated data and the same verified source revision.
+The local config now explicitly uses the documented `web.metrics_access: loopback`:
+local metrics return 200 and non-loopback requests return 403. The final normal updater
+passed both health and metrics checks. Private logs preserve all attempts.
 
-## Next deployment steps
+## USB recovery copies
 
-1. Confirm and validate the independent recovery copy, and verify green CI for the
-   new #136 repair commit. The previous `9c3324a` deployment pin lacks forward-repair
-   support and cannot repair this incompatible predecessor through the old updater.
-2. Use the normal updater with `OUTPOST_RECOVER_INCOMPATIBLE_BOOT=1` and the existing
-   native Hailo wheel at
-   `/var/lib/outpost/installers/hailort-5.3.0-cp313-cp313-linux_aarch64.whl`.
-   The current Hailo device was present; model and native inputs must pass the normal
-   installer checks. Preserve configuration and authoritative data.
-3. Verify actual packaged service health, web access, radio state, schema, retained
-   data/durable work and fresh boot-schema readiness. Record exact commit and service
-   process evidence privately, with sanitized issue evidence.
-4. Record the pre-reboot boot ID and recovery checkpoint, then complete the authorized
-   controlled reboot and compare post-boot evidence without starting a checkout server.
-   Keep #136 open until the physical reboot criterion is satisfied.
+The owner supplied USB storage. Both encrypted archives were synced, read back from the
+USB, decrypted and checked against their source archive and per-file SHA-256 hashes.
+Each database passed integrity and foreign-key checks. Existing USB files were preserved;
+the filesystem was safely unmounted after the final verification.
+
+- Original schema 172: `Outpost-Recovery/20260908T152005Z/pre-upgrade-schema-172.tar.gpg`.
+  SHA-256 `dfd57b936bc6d6505235059b260a05150ad0ef497e6e72e5c20fde9baf7f881f`.
+- Post-repair schema 185, current configuration and CI evidence:
+  `Outpost-Recovery/20260908T161006Z/post-repair-schema-185.tar.gpg`.
+  SHA-256 `367eb2d4c095ad11d17b05f01d19ebf1321ddfa398e26e3266fd912d2424e12f`.
+
+These are encrypted database/configuration recovery archives, not native `.opr` bundles
+or disk images. They share a strong recovery key retained separately from the USB. The
+owner handoff file is identified in the private state file; the owner must retain the
+key outside the Pi for loss-of-machine recovery. That custody step and whole-appliance
+replacement qualification have not been claimed complete.
+
+Private local snapshots are retained under
+`/var/lib/outpost/backups/issue-136-2026-09-08/`. Preserve newer acknowledged live data;
+never restore an older snapshot over it. See `docs/BOOT-RECOVERY.md` for the explicit
+forward-repair workflow and development-store ownership rule.
 
 ## Completed durability checkpoint: #137
 
