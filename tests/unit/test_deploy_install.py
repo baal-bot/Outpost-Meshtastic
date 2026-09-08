@@ -42,6 +42,7 @@ def _installer_harness(tmp_path: Path, *, transport: str = "trusted_http") -> di
     _database(database, 1, "before")
     config = yaml.safe_load((root / "config/config.example.yaml").read_text())
     config["store"]["path"] = str(database)
+    config["store"]["tiles_path"] = str(state / "tiles")
     config["modules"]["env"]["enabled"] = False
     config["web"]["transport"].update(
         {
@@ -243,8 +244,13 @@ def test_installer_executes_staging_snapshot_atomic_activation_and_service(tmp_p
     harness = _installer_harness(tmp_path)
     first = _run_install(harness, "initial")
     _assert_successful_install(harness, first, "initial")
+    tiles = cast(Path, harness["state"]) / "tiles"
+    assert tiles.is_dir() and tiles.stat().st_mode & 0o777 == 0o750
+    existing = tiles / "coverage.keep"
+    existing.write_bytes(b"existing offline coverage")
     second = _run_install(harness, "upgrade")
     _assert_successful_install(harness, second, "upgrade")
+    assert existing.read_bytes() == b"existing offline coverage"
 
     prefix = cast(Path, harness["prefix"])
     assert (prefix / "previous").resolve() == prefix / "releases/initial"

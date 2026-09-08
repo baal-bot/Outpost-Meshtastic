@@ -73,6 +73,7 @@ VISUAL_PAGES = (
     ("physical-transfer", "/bundles.html"),
     ("recovery", "/recovery.html"),
     ("access", "/access.html"),
+    ("maps", "/maps.html"),
     ("backups", "/backups.html"),
     ("ai", "/ai.html"),
     ("incident-report", "/incident-report.html?id=7"),
@@ -556,6 +557,18 @@ def route_visual_content_api(page: object) -> None:
             ),
         )
 
+    fulfill(
+        "**/api/v1/maps",
+        {
+            "job": {"state": "idle"},
+            "busy": False,
+            "installed": None,
+            "installed_error": None,
+            "free_bytes": 2 * 1024**3,
+            "maximum_download_bytes": 1024**3,
+            "suggestion": {"available": False, "detail": "No recent GPS fix. Enter coordinates."},
+        },
+    )
     fulfill(
         "**/api/v1/federation/bundles",
         {
@@ -1603,6 +1616,10 @@ def test_operator_page_visual_baseline_and_browser_health(
             wait_for_navigation(page)
         if page_name == "access":
             wait_for_access_visual_content(page)
+        elif page_name == "maps":
+            page.locator("#map-installed").filter(
+                has_text="No verified vector map installed"
+            ).wait_for()
         elif page_name == "federation":
             page.locator('html[data-federation-ready="true"]').wait_for(state="attached")
         page.wait_for_timeout(100)
