@@ -39,6 +39,15 @@ PUBLIC_FILES = (
     "docs/INSTALLATION.md",
     "docs/ONBOARDING.md",
     "docs/WEB-TRANSPORT.md",
+    "docs/RELEASES.md",
+    "docs/RETENTION.md",
+    "docs/AI.md",
+    "docs/FEDERATION.md",
+    "docs/FEDERATION-ACCEPTANCE-BACKLOG.md",
+    "docs/FEDERATION-RELAY-PROTOCOL.md",
+    "docs/FEDERATION-TOPOLOGY.md",
+    "docs/INCIDENT-RECONCILIATION.md",
+    "docs/benchmarks/HAILO-H10-QWEN-2026-08-27.md",
 )
 
 
@@ -222,8 +231,13 @@ def build(source: Path, wheels: Path, evidence: Path, output: Path) -> str:
     for name in PUBLIC_FILES:
         payload["reference/" + name] = regular(source / name)
     payload["offline_kit.py"] = regular(Path(__file__))
-    payload["OFFLINE-REPLACEMENT.md"] = regular(
+    payload["reference/docs/OFFLINE-REPLACEMENT.md"] = regular(
         Path(__file__).parents[1] / "docs/OFFLINE-REPLACEMENT.md"
+    )
+    payload["OFFLINE-REPLACEMENT.md"] = (
+        b"# Offline replacement instructions\n\n"
+        b"Read [the offline replacement guide](reference/docs/OFFLINE-REPLACEMENT.md).\n"
+        b"Its linked local references are included in this kit.\n"
     )
     payload["ci-evidence.json"] = json.dumps(ci, sort_keys=True).encode() + b"\n"
     payload["runtime-hashed.txt"] = "".join(

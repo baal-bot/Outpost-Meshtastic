@@ -95,6 +95,10 @@ nonregular inputs and invalid inventory paths fail verification. The kit limit
 is 512 files/2 GiB, with 512 MiB per file; large OS/map/model assets belong in the
 separate equipment inventory. Record their hashes separately.
 
+Open the kit's `OFFLINE-REPLACEMENT.md` entry page to reach the complete guide in
+`reference/docs/`. The guide's local linked references retain their directory
+layout and are included for use without the source checkout or Internet access.
+
 ## Install without package indexes or a cache
 
 On the prepared replacement host, copy the kit and retain the trusted verifier
