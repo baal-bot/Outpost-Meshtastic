@@ -1001,6 +1001,10 @@ kind = "operations"
 path = "docs/RADIO-POWER.md"
 description = "External-power telemetry, battery thresholds, missing/stale evidence and schema-186 compatibility without a whole-station energy claim."
 [[capabilities.evidence]]
+kind = "field"
+path = "docs/RADIO-POWER-QUALIFICATION-2026-09-08.md"
+description = "Local Pi on source 0dd0598/schema 186 reports external radio power with passing fresh readiness, matching served dashboard assets, healthy web/radio/native AI and all protected pre-update records retained; station energy and other field gates remain separate."
+[[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_outage_readiness.py::test_healthy_local_checks_do_not_certify_unknown_outage_prerequisites"
 description = "Actual service/store assessment preserves unknown outage prerequisites despite healthy narrow checks, with no radio, alert or destructive exercise."

@@ -57,3 +57,7 @@ readiness, including external/missing/critical transitions and expiry.
 retention without reclassifying old NULL samples. The outage-readiness cases retain
 future/stale and whole-station boundaries. Chromium tests exercise external, missing
 and low-battery labels on 320px and 1280px layouts in all three themes.
+
+[The September 8 local Pi observation](RADIO-POWER-QUALIFICATION-2026-09-08.md)
+records the verified schema-186 deployment, actual external-power readiness pass,
+served dashboard assets and retained records. Whole-station power remains separate.

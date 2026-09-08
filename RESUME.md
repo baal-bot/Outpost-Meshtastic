@@ -1,6 +1,6 @@
 # Session resume point — 2026-09-08 (America/New_York)
 
-## Current task: #171 external radio power
+## Completed: #171 external radio power
 
 The user reported that the local dashboard incorrectly warns about missing battery
 readings from the radio powered by the Pi's USB supply. The fix preserves Meshtastic's
@@ -9,13 +9,33 @@ Radio page and situation briefing. Missing/invalid telemetry remains unknown,
 stale/future samples retain their boundaries, and station-power qualification remains
 separate. Migration 186 preserves old NULL samples as unknown.
 
-Read `.data/radio-external-power-2026-09-08/STATE.json` for current tests, exact-commit
-CI and deployment status. Source preparation does not update the packaged service;
-at this checkpoint the installed release is still the schema-185 #136 release below.
-Complete green exact-commit CI, retain a current private backup, run the normal
-verified updater and inspect actual web/radio/AI/schema/record retention and a fresh
-external-power readiness result. Record sanitized evidence and close #171 after the
-local update passes. The second machine remains with its owner.
+The selected, running release is **`20260908T175620Z-0dd05985194a`**, source
+`0dd05985194af45d4621dce24d62376ed639c9b2`, database schema **186**. Exact-commit CI
+`34254372769` passed all four jobs: 2,286 full-suite tests per job and 1,214
+production-mode tests per Python version. All 254 local cases passed. The normal
+updater completed successfully with the native HailoRT wheel.
+
+At 17:57:54 UTC, fresh readiness reported `radio_power: pass`, external power true
+and no battery percentage. Web, radio, required native AI, schema integrity and
+same-package boot readiness passed. All protected pre-update IDs survived, including
+1,570 outbound-work and 1,929 power-history records. Old unknown power samples kept
+their false flag; a new external-power record was present. Served Radio assets match
+the installed package and source. The overall readiness banner remains degraded for
+offline maps and the other outstanding observations.
+
+Read `.data/radio-external-power-2026-09-08/STATE.json` and
+[the dated radio-power report](docs/RADIO-POWER-QUALIFICATION-2026-09-08.md) for
+evidence. Fresh pre-update schema-185 and post-update schema-186 encrypted recovery
+archives were verified on USB, with existing files preserved; the USB was safely
+unmounted. Owner recovery-key custody outside the Pi remains outstanding. The second
+machine remains with its owner. Later documentation commits are separate from the
+installed release's CI identity.
+
+A read-only #139 investigation found the configured service tile path missing and
+an existing checkout pack containing all 737 declared, decodable tiles. Intended
+coverage remains unconfirmed; nothing was installed or downloaded. Private evidence
+is under `/var/lib/outpost-qualification/139-20260908/`. Preserve the actual WAN-down
+browser gate and confirm the operating area before making map changes.
 
 ## Completed: #136 controlled reboot acceptance
 
@@ -24,7 +44,8 @@ automatic boot witness and independent follow-up. Sanitized evidence is recorded
 on GitHub, #136 is closed as completed, and its entry is checked in tracker #130.
 The second node is a separate machine and the user updates it.
 
-The selected, running packaged release is `20260908T160830Z-045130381360`, source
+At the #136 qualification, the selected packaged release was
+`20260908T160830Z-045130381360`, source
 `045130381360e23aa89e093b8afb0c87613cef6d`, database schema **185**. Exact-commit CI
 `34242955400` completed successfully in all four jobs: 2,261 full-suite tests per job,
 and 1,209 production-mode tests per Python version. Normal `deploy/update.sh`
