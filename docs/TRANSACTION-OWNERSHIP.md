@@ -65,6 +65,13 @@ bounded non-I/O callbacks, cancellation ambiguity and quiesced recovery requirem
 | [`ItemFailures`](../src/outpost/fed/item_failures.py) | Owns the bounded metadata-only source journal transaction, checks the current producer head, and guards clearing against stale admissions. | Encoding, journal commit and governed radio admission are separate. Receiver failures belong to the reconciliation checkpoint, never a content receipt. See [oversized-item limits](FEDERATION-ITEM-FAILURES.md). |
 | [`OutpostApp`](../src/outpost/app.py) / [`web.api`](../src/outpost/web/api.py) / [`MeshOperationsCenter`](../src/outpost/operations_center.py) | Construct services, translate authenticated commands/API intent, coordinate callbacks, and record additional response state. Human federation review now passes the expected version to its service-owned transaction/audit. | Other SQL and audit still cross these layers. Handheld preview and confirmation checks are additional guards, not a substitute for the transactional service check. |
 
+`FederationAdoptionService` borrows the application's existing peer/database owner.
+Preview/commit recheck current session/role/modules, retired predecessor/pin,
+successor pairing/key and one-to-one namespace. Association and redacted audit
+share one writer, with no upsert, nested writer, worker, private-data/key/counter
+transfer or RF. Only legacy BBS uses these aliases; incidents and alerts do not.
+See the [node-loss contract](NODE-LOSS-AND-MOBILITY.md).
+
 This map identifies ownership, not proof that every method in a listed class is race-free.
 Direct SQL writers, migrations, import paths, automatic board handling and maintenance must be
 included whenever a domain invariant changes.

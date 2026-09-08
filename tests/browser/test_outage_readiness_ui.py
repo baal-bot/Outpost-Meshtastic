@@ -66,6 +66,8 @@ async def evidence_page(app, width=1280, *, run=True):
     if run:
         await app.self_check.run("test")
     async with AsyncExitStack() as stack:
+        # Routed browser requests must finish before their ASGI client closes.
+        client = await operator_client(app, stack)
         runtime = await stack.enter_async_context(async_playwright())
         browser = await runtime.chromium.launch()
         stack.push_async_callback(browser.close)
@@ -73,7 +75,6 @@ async def evidence_page(app, width=1280, *, run=True):
             viewport={"width": width, "height": 1000}, service_workers="block"
         )
         stack.push_async_callback(context.close)
-        client = await operator_client(app, stack)
         await context.add_cookies(
             [
                 {

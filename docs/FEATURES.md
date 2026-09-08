@@ -281,6 +281,10 @@ Evidence:
 - Automated: [tests/integration/test_encrypted_recovery.py::test_disk_full_interruption_and_publication_are_fresh_only](../tests/integration/test_encrypted_recovery.py) — Wrong targets, insufficient space and interruption at each publication boundary never overwrite the source or preexisting nodes.
 - Automated: [tests/browser/test_recovery_browser.py::test_actual_restored_browser_login_verification_and_logout_are_offline](../tests/browser/test_recovery_browser.py) — Real Chromium verifies restored operator login/password change, protected recovery evidence and logout offline at 320/1280 pixels.
 - Operations: [docs/ENCRYPTED-RECOVERY.md](ENCRYPTED-RECOVERY.md) — Encrypted copy, offline key custody, second-operator restoration, compatibility/asset limits, interruption handling and identity-fencing procedure.
+- Automated: [tests/integration/test_node_loss_drill.py::test_lost_origin_survival_matrix_and_opt_in_resident_reenrolment](../tests/integration/test_node_loss_drill.py) — Synthetic source loss accounts for surviving public replicas, older encrypted private history, unavoidable uncopied loss and fresh guest enrolment without implicit authority or private-data transfer.
+- Automated: [tests/integration/test_node_loss.py::test_review_commit_is_atomic_one_to_one_and_preserves_identity_counters](../tests/integration/test_node_loss.py) — Reviewed BBS namespace association preserves keys/counters, cannot silently reassign identity and never revives rejected old-node trust.
+- Automated: [tests/browser/test_node_loss_browser.py::test_real_browser_requires_review_and_does_not_retry_stale_adoption](../tests/browser/test_node_loss_browser.py) — Real offline operator UI exercises cancel, stale-key conflict, no automatic retry and fresh explicit consent at 320/1280 pixels.
+- Operations: [docs/NODE-LOSS-AND-MOBILITY.md](NODE-LOSS-AND-MOBILITY.md) — Per-data survival/retention, explicitly unqualified recovery objectives, distinct replacement identity, fenced-clone limits and voluntary resident consent/provenance/revocation/conflict rules.
 - Automated: [tests/unit/test_deploy_install.py::test_installer_harness_rejects_safety_mutants](../tests/unit/test_deploy_install.py) — Executed installer mutations prove rollback and activation safety assertions can fail.
 - Operations: [docs/RELEASES.md](RELEASES.md) — Release evidence, verified update, rollback, compromise, and revocation procedures.
 - Operations: [docs/benchmarks/SQLITE-COMMIT-POLICY-2026-09-05.md](benchmarks/SQLITE-COMMIT-POLICY-2026-09-05.md) — Preliminary six-trial, four-concurrent-operation writer comparison on the Pi's temporary SD-card stores; ordinary reopen only, no power cut or changed live policy.
@@ -288,7 +292,7 @@ Evidence:
 Known limitations:
 
 - Encrypted recovery is synthetic-store/browser-tested, not a physical off-device or fresh-Pi drill. The memory-only format is limited to 256 MiB SQLite images and a compatible installed runtime; external maps, models, OS/network/device assets need the separate recovery kit.
-- Restored identities remain fenced: no radio/provider/background queues start, copied sessions are discarded, and actual named-operator access is verified locally. Return-to-service, former-node exclusion and stale identity/revocation reconciliation belong to #146; backup custody is not proof of exclusive identity.
+- Restored identities remain fenced: no radio/provider/background queues start and copied sessions are discarded. The node-loss contract requires a fresh serving identity and current local consent, not clone activation or automatic private replication. Backup custody cannot prove exclusive identity or global revocation during a partition.
 - Temporary NORMAL/FULL writer latency measurements do not prove power-loss survival, flush compliance, energy cost or sustained service latency. The live and repository default remain NORMAL; #137/#44 are open.
 
 ### Retention and privacy controls

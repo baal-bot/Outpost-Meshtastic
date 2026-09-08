@@ -68,6 +68,7 @@ from outpost.fed import (
     item_failures,
     wire_int,
 )
+from outpost.fed.adoption import FederationAdoptionService
 from outpost.fed.bundles import FederationBundleService
 from outpost.fed.dispatcher import FederationDispatcher
 from outpost.fed.incident_delivery import IncidentDelivery
@@ -310,6 +311,10 @@ class OutpostApp:
         self.federation_bundles = FederationBundleService(
             self.database, self.clock, self.federation, self.federation_sync
         )
+        self.federation_adoption = FederationAdoptionService(
+            self.federation,
+            lambda: self.config.modules.fed.enabled and self.config.modules.bbs.enabled,
+        )
         self.federation_relay.register_handler("incident", self._dispatch_relay_incident)
         self.federation_relay.register_handler("request", self._dispatch_relay_request)
         self.federation_relay.register_handler("receipt", self._dispatch_relay_receipt)
@@ -456,6 +461,7 @@ class OutpostApp:
             ai_test=self.test_ai,
             federation_relay=self.federation_relay,
             federation_bundles=self.federation_bundles,
+            federation_adoption=self.federation_adoption,
             federation_topology=self.federation_topology,
             radio_configuration_status=self.radio_configuration_status,
             radio_configuration_preflight=self.preflight_radio_configuration,

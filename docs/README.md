@@ -15,6 +15,8 @@ detailed intended product design.
 8. [Dashboard and API](DASHBOARD.md)
 9. [Local AI](AI.md)
 10. [Mesh traffic replay and operator drills](REPLAY.md)
+11. [Encrypted off-device recovery](ENCRYPTED-RECOVERY.md)
+12. [Node loss, replacement identity and resident mobility](NODE-LOSS-AND-MOBILITY.md)
 
 ## Members and responders
 

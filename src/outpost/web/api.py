@@ -37,6 +37,7 @@ from outpost.fed import (
     FederationRelayService,
     FederationTopologyService,
 )
+from outpost.fed.adoption import FederationAdoptionService
 from outpost.fed.bundles import FederationBundleService
 from outpost.fed.incident_delivery import IncidentDelivery
 from outpost.fed.item_failures import CURSOR as ENCODING_FAILURE_CURSOR
@@ -59,6 +60,7 @@ from outpost.watch import AlertService, CheckinService, IncidentReportService, I
 from outpost.web.auth import MfaChallenge, WebAuthService
 from outpost.web.member_triage import NEEDS_REVIEW_SQL, MemberTriageError, MemberTriageService
 from outpost.web.operator_inbox import OperatorInboxService
+from outpost.web.routes.adoption import register_adoption_routes
 from outpost.web.routes.bundles import register_bundle_routes
 from outpost.web.routes.federation_review import register_federation_review_routes
 from outpost.web.routes.readiness import register_readiness_routes
@@ -465,11 +467,6 @@ class FederationApproveBody(BaseModel):
     confirmation_code: str = Field(pattern=r"^[0-9]{6}$")
 
 
-class FederationSuccessorBody(BaseModel):
-    old_mesh_id: str = Field(pattern=r"^![0-9a-fA-F]{8}$")
-    old_node_name: str | None = Field(default=None, max_length=80)
-
-
 class FederationMqttBody(BaseModel):
     enabled: bool
     address: str = Field(max_length=253)
@@ -742,6 +739,7 @@ def create_web_app(
     ai_test: Callable[[str], Awaitable[dict[str, object]]] | None = None,
     federation_relay: FederationRelayService | None = None,
     federation_bundles: FederationBundleService | None = None,
+    federation_adoption: FederationAdoptionService | None = None,
     federation_topology: FederationTopologyService | None = None,
     radio_configuration_status: Callable[[], Awaitable[dict[str, Any]]] | None = None,
     radio_configuration_configure: (
@@ -1571,6 +1569,9 @@ def create_web_app(
     if federation_bundles is not None:
         register_bundle_routes(app, federation_bundles)
 
+    if federation_adoption is not None:
+        register_adoption_routes(app, federation_adoption)
+
     if restore_coordinator is not None:
 
         @app.get("/api/v1/recovery/restores/{job_id}", response_model=None)
@@ -1861,74 +1862,6 @@ def create_web_app(
                     )
                     items.append(item)
                 return {"items": sorted(items, key=lambda item: item["mesh_id"])}
-
-            @app.post("/api/v1/federation/peers/{mesh_id}/adopt-origin", response_model=None)
-            async def federation_adopt_origin(
-                mesh_id: str, body: FederationSuccessorBody
-            ) -> dict[str, Any] | Response:
-                try:
-                    peer = await federation.by_mesh_id(mesh_id)
-                except ValueError as error:
-                    return JSONResponse(
-                        {"error": {"code": "peer_not_found", "message": str(error)}},
-                        status_code=404,
-                    )
-                if peer.state != "active":
-                    return JSONResponse(
-                        {
-                            "error": {
-                                "code": "peer_not_active",
-                                "message": ("Pair the successor before adopting history."),
-                            }
-                        },
-                        status_code=409,
-                    )
-                if body.old_mesh_id.lower() == mesh_id.lower():
-                    return JSONResponse(
-                        {
-                            "error": {
-                                "code": "same_identity",
-                                "message": ("The predecessor and successor must differ."),
-                            }
-                        },
-                        status_code=409,
-                    )
-                content = await database.read(
-                    "SELECT (SELECT COUNT(*) FROM thread WHERE uid LIKE ?)+"
-                    "(SELECT COUNT(*) FROM post WHERE uid LIKE ?) count",
-                    (body.old_mesh_id + ":%", body.old_mesh_id + ":%"),
-                )
-                if not content or int(content[0]["count"]) == 0:
-                    return JSONResponse(
-                        {
-                            "error": {
-                                "code": "origin_not_found",
-                                "message": ("No retained content uses that predecessor identity."),
-                            }
-                        },
-                        status_code=404,
-                    )
-                await database.write(
-                    "INSERT INTO fed_peer_successor(old_mesh_id,successor_peer_id,"
-                    "old_node_name,adopted_at,adopted_by) VALUES(?,?,?,unixepoch(),"
-                    "?) ON CONFLICT(old_mesh_id) DO UPDATE SET "
-                    "successor_peer_id=excluded.successor_peer_id,old_node_name=excluded.old_node_name,"
-                    "adopted_at=excluded.adopted_at,adopted_by=excluded.adopted_by",
-                    (body.old_mesh_id.lower(), peer.id, body.old_node_name, current_actor()),
-                )
-                await write_audit(
-                    database,
-                    actor_kind="web",
-                    actor_ref=current_actor_ref(),
-                    action="federation.origin_adopt",
-                    target=f"fed_peer:{peer.id}",
-                    detail=body.old_mesh_id.lower(),
-                )
-                return {
-                    "ok": True,
-                    "old_mesh_id": body.old_mesh_id.lower(),
-                    "successor_mesh_id": mesh_id,
-                }
 
         @app.get("/api/v1/federation/peers/{mesh_id}/pairing-code", response_model=None)
         async def federation_pairing_code(mesh_id: str) -> dict[str, str] | Response:

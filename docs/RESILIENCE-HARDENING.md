@@ -12,9 +12,14 @@ Fresh application and browser tests prove actual operator access and retained
 identity/private-data/revision evidence. A durable default-deny fence prevents any
 radio, provider, retention or delivery workers from starting. Wrong-key, tamper,
 incompatibility, no-space and interruption cases leave existing nodes untouched.
-Return-to-service and old-node exclusion remain #146; physical recovery/flush
-qualification, external appliance assets and key custody are not certified by
-these synthetic tests. The original specifications and live node remain unchanged.
+The [node-loss contract](NODE-LOSS-AND-MOBILITY.md) now specifies fresh serving identity,
+fenced archive review, explicit predecessor retirement and consent/retention rules.
+An actual synthetic loss drill accounts for surviving public replicas, older private
+checkpoints and unavoidable uncopied loss. Existing BBS association now requires a
+fresh transactional operator review and cannot alias incidents or alerts. This is
+not hot-standby activation, automatic private replication or global revocation.
+Physical recovery/flush qualification, external appliance assets and key custody
+are not certified by these tests. Original specifications and live node are unchanged.
 
 ## Signed physical transfer — #143
 

@@ -124,7 +124,7 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | AI assistant | `ai_interaction` | Redact member link, question, and answer after `ai_interaction_content_days`; retain only de-identified quality fields until `ai_interaction_metrics_days`. An operator can permanently delete all AI history for a specific member sooner from the AI page. |
 | AI assistant | `ai_refusal_rule` | Preserve operator-managed safety policy until explicit deletion. |
 | Federation | `fed_peer`, `fed_peer_successor` | Preserve trust, pairing, and identity-adoption evidence until operator action. |
-| Federation | `fed_peer_tombstone` | Preserve explicit forget evidence so a removed peer cannot silently reappear. |
+| Federation | `fed_peer_tombstone` | Preserve explicit forget evidence. Discovery can recreate a pending peer, never automatically restore its former trust. |
 | Federation | `fed_cursor`, `fed_service_circuit` | Preserve bounded state per peer/stream/service. |
 | Federation | `fed_topology_policy`, `fed_topology_peer` | Cascade current topology preferences/state with their peer. |
 | Federation | `fed_seen` | Retain replay/deduplication history for `federation_history_days`. |

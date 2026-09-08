@@ -267,9 +267,10 @@ class FederationTopologyService:
                 continue
             audit = await self.database.read(
                 "SELECT actor_kind,actor_ref,action,created_at FROM audit_log "
-                "WHERE action='federation.origin_adopt' AND detail=? "
+                "WHERE action='federation.origin_adopt' AND (detail=? OR "
+                "CASE WHEN json_valid(detail) THEN json_extract(detail,'$.predecessor') END=?) "
                 "ORDER BY created_at DESC,id DESC LIMIT 10",
-                (row["old_mesh_id"],),
+                (row["old_mesh_id"], row["old_mesh_id"]),
             )
             items.append(
                 {

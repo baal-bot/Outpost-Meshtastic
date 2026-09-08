@@ -569,7 +569,7 @@ maturity = "automated_tested"
 introduced_commit = "df0ee14"
 limitations = [
   "Encrypted recovery is synthetic-store/browser-tested, not a physical off-device or fresh-Pi drill. The memory-only format is limited to 256 MiB SQLite images and a compatible installed runtime; external maps, models, OS/network/device assets need the separate recovery kit.",
-  "Restored identities remain fenced: no radio/provider/background queues start, copied sessions are discarded, and actual named-operator access is verified locally. Return-to-service, former-node exclusion and stale identity/revocation reconciliation belong to #146; backup custody is not proof of exclusive identity.",
+  "Restored identities remain fenced: no radio/provider/background queues start and copied sessions are discarded. The node-loss contract requires a fresh serving identity and current local consent, not clone activation or automatic private replication. Backup custody cannot prove exclusive identity or global revocation during a partition.",
   "Temporary NORMAL/FULL writer latency measurements do not prove power-loss survival, flush compliance, energy cost or sustained service latency. The live and repository default remain NORMAL; #137/#44 are open.",
 ]
 roadmap = []
@@ -597,6 +597,22 @@ description = "Real Chromium verifies restored operator login/password change, p
 kind = "operations"
 path = "docs/ENCRYPTED-RECOVERY.md"
 description = "Encrypted copy, offline key custody, second-operator restoration, compatibility/asset limits, interruption handling and identity-fencing procedure."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_node_loss_drill.py::test_lost_origin_survival_matrix_and_opt_in_resident_reenrolment"
+description = "Synthetic source loss accounts for surviving public replicas, older encrypted private history, unavoidable uncopied loss and fresh guest enrolment without implicit authority or private-data transfer."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_node_loss.py::test_review_commit_is_atomic_one_to_one_and_preserves_identity_counters"
+description = "Reviewed BBS namespace association preserves keys/counters, cannot silently reassign identity and never revives rejected old-node trust."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_node_loss_browser.py::test_real_browser_requires_review_and_does_not_retry_stale_adoption"
+description = "Real offline operator UI exercises cancel, stale-key conflict, no automatic retry and fresh explicit consent at 320/1280 pixels."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/NODE-LOSS-AND-MOBILITY.md"
+description = "Per-data survival/retention, explicitly unqualified recovery objectives, distinct replacement identity, fenced-clone limits and voluntary resident consent/provenance/revocation/conflict rules."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/unit/test_deploy_install.py::test_installer_harness_rejects_safety_mutants"

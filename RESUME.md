@@ -1,68 +1,93 @@
-# Session resume point — 2026-08-30
+# Session resume point — 2026-09-07
 
-## Repository state
+## Repository and active work
 
-- Repository: `baal-bot/Outpost-Meshtastic`
-- Branch: `main`
-- Last completed feature commit: `6397fbc2904a679f0fd7e97ca06062e5a763e173`
-- Commit title: `feat: add recurring welfare drills (#124)`
-- `main` and `origin/main` matched and the worktree was clean before this handoff.
-- GitHub CI run `33342427525` passed all four Python 3.12/3.13 and locked-runtime jobs.
-- Issue #124 is closed with its implementation and verification record.
+- Repository: `baal-bot/Outpost-Meshtastic`.
+- Branch: `main`; local HEAD and GitHub `main` both at
+  `bf01c2a17266b08c65bd9fc8a93ee57d06a492aa` when this session resumed.
+- Last pushed commit: `Add encrypted off-device recovery with fenced offline verification (#145)`.
+- The reboot preserved the implementation for
+  [#146](https://github.com/baal-bot/Outpost-Meshtastic/issues/146). It is now reviewed
+  and locally verified, and is committed together with this handoff. Use `git log`
+  and GitHub to check publication and CI state before continuing.
+- This handoff replaces the August 30 queue and live-service instructions, which are stale.
+  This session used isolated test stores and simulated radios. Current live service,
+  database, radio and boot health have not been inspected or qualified.
 
-## Live state before reboot
+## Recovered #146 implementation
 
-- The development server was running directly from this checkout as the `outpost` user.
-- Health returned HTTP 200 with `{"status":"ok","version":"0.1.0"}`.
-- `/var/lib/outpost/outpost.db` migrated successfully through schema version 172.
-- The attached Meshtastic radio reported healthy.
-- Migration 0172 created the responder-group and recurring-welfare tables.
-- No responder groups or recurring schedules were created in live data during implementation.
-- The manual development process will not survive a reboot. Check whether another service owns port 8080 before starting it again.
+- `docs/NODE-LOSS-AND-MOBILITY.md` defines per-data survival, recovery objectives,
+  fresh replacement identities, restored-copy fencing, and voluntary resident
+  consent/provenance/revocation/conflict/retention rules.
+- `fed/adoption.py` and `web/routes/adoption.py` replace the old one-step BBS
+  adoption endpoint with an explicit preview and current-session confirmation.
+  Current authority, predecessor retirement, successor pairing, context expiry,
+  one-to-one association and audit are checked in the existing writer transaction.
+- BBS namespace aliases no longer affect distinct incident or alert identities;
+  ambiguous legacy aliases and chains fail closed.
+- The Federation page supports reviewed association for rejected or forgotten
+  predecessors, cancellation and changed-key conflicts without automatic retries.
+  Keyboard focus returns after cancellation, errors and a successful association.
+  The topology audit view accepts both legacy text and structured adoption events.
+- New production-wired integration/browser cases cover synthetic source loss,
+  stale encrypted checkpoints, unavoidable uncopied losses, fresh guest enrolment,
+  stale/revoked authority, replay counters, audit rollback and competing approvals.
+- Coverage floors, wheel contents, capability evidence and operational docs are updated.
+- No automatic private replication, clone activation, portable account or welfare
+  transfer feature is approved or implemented by this contract.
 
-## What #124 added
+## CI recovered from GitHub
 
-- Named responder groups with general, medical, fire, search and rescue, logistics,
-  communications, and public-safety types.
-- Weekly, biweekly, and monthly welfare drills in configured local time.
-- Frozen drill rosters, explicit `DRILL` markings, automatic response windows, and retained run history.
-- Exact recipient/message/airtime preview with hard recipient and airtime ceilings.
-- Stale previews and later roster/airtime growth stop a send pending fresh operator review.
-- Drills yield to real watch events and digest quiet hours.
-- Members can use `DRILLS ON|OFF` without changing eligibility for real welfare checks.
-- Participation reporting includes per-net response rate, never responded, and not heard since the latest net.
-- Real `HELPME` reports remain urgent even when received during a drill.
+- [Run 34162591706](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34162591706)
+  passed all four jobs on `d138e43`. This includes the #143 and #151 corrections.
+  Their issue bodies still describe that run as pending; both issues remain open.
+- [Run 34163313982](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34163313982)
+  on `bf01c2a` passed Python 3.13 and both locked-runtime jobs. The Python 3.12
+  coverage suite had **2,172 passed, one skipped, one failed**.
+- The failure was teardown in
+  `test_missing_report_warns_until_an_explicit_real_readiness_run`: its HTTP client
+  closed before Chromium, while a routed request still needed the client.
+  `tests/browser/test_outage_readiness_ui.py` now registers the client before the
+  browser resources so teardown closes Chromium first. No assertion was removed.
+- The next push contains #146 and the readiness cleanup correction. Full GitHub
+  CI for that revision must pass before claiming complete verification.
 
-## Verification completed
+## Local verification
 
-- Ruff formatting and lint, strict source mypy, the mypy ratchet, capability and command catalogues,
-  markup safety, shell syntax, Python compilation, and diff checks passed.
-- Focused safety, check-in, situation, maintenance, governor, mesh-command, and browser tests passed.
-- The complete responsive Chromium matrix passed.
-- Critical coverage passed: global 80.8%, safety 88.0%, safety commands 97.5%, and all production floors.
-- Production-wiring coverage and the packaged-wheel smoke installation passed.
-- The live schema, protected API boundary, Watch assets, radio health, and process health were checked after restart.
+- The initially recovered #146 suite passed **35 tests** before follow-up fixes.
+- Ruff, strict source mypy, capability/requirement/command catalogues and static
+  markup checks passed.
+- The isolated wheel smoke installation passed with all **38** runtime/radio pins.
+- The final recovery/federation/readiness regression run passed **129 tests**.
+  Both new adoption modules have **100% line coverage** in that focused run.
+- Federation visual/browser checks passed **21 cases** with existing baselines
+  and thresholds. The final keyboard regression passed **two browser cases**
+  after correcting focus return for the disabled review trigger.
+- Isolated dialog checks covered keyboard entry, Escape and focus return at
+  320 pixels in Dark, Daylight and Night Ops, plus desktop. Screenshots use
+  synthetic records only. These are not physical usability/second-operator evidence.
+- Evidence is under ignored `.data/reboot-2026-09-07/`: original failed CI log,
+  snapshots of the active GitHub issue bodies, JUnit/coverage results and screenshots.
+  Root `coverage.json` and `production-coverage.json` predate this work; do not
+  report them as current full-suite evidence.
 
-## First steps after reboot
+## Continue from here
 
-1. Confirm the checkout is still on `main` at or beyond `6397fbc`, the worktree is clean, and fetch/pull with fast-forward only if needed.
-2. Check for an existing Outpost process or system service on port 8080 before launching a development process.
-3. If no instance is running, start the source checkout with:
+1. Inspect `git status` and this handoff, preserving all recovered changes.
+2. Check publication and full CI for the #146 commit and its readiness-test
+   cleanup correction. No local check was failing when this handoff was committed.
+3. Run full CI on the resulting revision before claiming full verification or
+   closing #146/#145. Reconcile #143/#151 against their already-passing descendant
+   CI evidence when updating the existing GitHub issue bodies.
+4. The next recovery preparation issue is
+   [#147](https://github.com/baal-bot/Outpost-Meshtastic/issues/147): offline
+   replacement kit and persistent local operator access. Its fresh-target,
+   disconnected-client and second-operator acceptance needs actual field evidence.
+5. [#130](https://github.com/baal-bot/Outpost-Meshtastic/issues/130) is the current
+   resilience tracker. #135/#136/#137/#139/#141/#142/#148/#150/#155–#159 and #44
+   retain their stated operational, hardware or evaluation gates. Software tests
+   do not close physical power-loss, reboot, RTC, maps, RF, usability or soak gates.
 
-   ```sh
-   sudo -n -u outpost env OUTPOST_CONFIG=/etc/outpost/config.yaml \
-     PYTHONPATH=/home/brendtpe/Documents/coding_projects/mesh-outpost/src \
-     /home/brendtpe/Documents/coding_projects/mesh-outpost/.venv/bin/python -m outpost
-   ```
-
-4. Verify `http://127.0.0.1:8080/api/v1/health` returns HTTP 200 and confirm the radio is up before testing mesh behavior.
-5. Open the Watch page and visually confirm the welfare schedule, responder groups, and participation-history panels.
-
-## Remaining GitHub queue
-
-- #44 is the P1 red-team remediation tracker. All software work is complete; it intentionally remains open for
-  two physical field gates: destructive power-cut/recovery evidence and a physical two-node MQTT-only plus
-  automatic LoRa/MQTT fallback campaign. Do not close it based on simulation.
-- #61 is the only other open issue and is a P3 future native iOS/Android companion architecture.
-- The next session should choose between executing/documenting a #44 hardware campaign or beginning #61 product
-  architecture; there is no remaining open software-defect ticket in the current queue.
+Do not use the old August 30 handoff to restart the live service or claim the
+live schema/radio is healthy. This session has not performed a deployment,
+live migration, service/radio restart, WAN cut or held-node activation.

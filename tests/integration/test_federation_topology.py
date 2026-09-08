@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from outpost.audit import write_audit
 from outpost.clock import VirtualClock
 from outpost.fed import FederationPeerService, FederationTopologyService
 from outpost.store import Database
@@ -80,7 +81,10 @@ async def test_location_is_coarse_opt_in_authenticated_and_revocable(tmp_path) -
 
 
 @pytest.mark.asyncio
-async def test_topology_health_states_paths_backlog_successor_and_forgotten(tmp_path) -> None:
+@pytest.mark.parametrize("adoption_detail", ["legacy", "reviewed"])
+async def test_topology_health_states_paths_backlog_successor_and_forgotten(
+    tmp_path, adoption_detail
+) -> None:
     database, clock, peers, topology = await topology_node(tmp_path, "health", A)
     await add_peer(database, peers, B)
     await add_peer(database, peers, C, "pending")
@@ -106,6 +110,23 @@ async def test_topology_health_states_paths_backlog_successor_and_forgotten(tmp_
         (now, B),
     )
 
+    await write_audit(
+        database,
+        actor_kind="web",
+        actor_ref="operator",
+        action="federation.origin_adopt",
+        target=f"fed_peer:{(await peers.by_mesh_id(B)).id}",
+        detail="!eeeeeeee"
+        if adoption_detail == "legacy"
+        else {
+            "predecessor": "!eeeeeeee",
+            "successor": B,
+            "scope": "legacy_public_bbs_namespace_only",
+            "namespace_confirmed": True,
+        },
+        created_at=now,
+    )
+
     current = {item["mesh_id"]: item for item in (await topology.overview())["items"]}
     assert current[B]["identity_kind"] == "successor"
     assert current[B]["last_successful_path"] == "mqtt"
@@ -114,6 +135,14 @@ async def test_topology_health_states_paths_backlog_successor_and_forgotten(tmp_
     assert current[C]["state"] == "discovered"
     assert current[D]["state"] == "forgotten"
     assert current["!eeeeeeee"]["state"] == "adopted"
+    assert current["!eeeeeeee"]["audit"] == [
+        {
+            "actor_kind": "web",
+            "actor_ref": "operator",
+            "action": "federation.origin_adopt",
+            "created_at": now,
+        }
+    ]
     assert all(item["location"] is None for item in current.values())
 
     clock.advance(peers.peer_stale_seconds + 1)

@@ -55,6 +55,8 @@ required = {
     "outpost/store/migrations/0184_federation_bundles.sql",
     "outpost/fed/bundle_format.py",
     "outpost/fed/bundles.py",
+    "outpost/fed/adoption.py",
+    "outpost/web/routes/adoption.py",
     "outpost/web/routes/bundles.py",
     "outpost/web/routes/federation_review.py",
     "outpost/web/static/Figtree-Variable.ttf",

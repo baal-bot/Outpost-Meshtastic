@@ -133,9 +133,15 @@ Federated content is retained when a peer disconnects, is unpaired, or is forgot
 must not erase community records. Threads from an identity that is no longer in the peer directory
 are labelled as former-peer content and remain readable.
 
-Replacing a radio creates a new cryptographic peer identity. After pairing that identity normally,
-an operator may use **Content identity → Adopt history** on the Federation page to declare it the
-successor to a former content origin. This action is explicit and audited; matching Outpost names
-never trigger an automatic merge. Original mesh IDs remain on stored records for provenance, while
-the successor relationship supplies current attribution and prevents re-exported historical items
-from being imported as duplicates. Trust and replay counters are never inherited.
+Replacement is a distinct, newly paired station, not a hot standby. The supported
+[node-loss and mobility contract](NODE-LOSS-AND-MOBILITY.md) preserves provenance, fences
+restored checkpoints and requires fresh local consent for private/member/welfare continuity.
+
+**Content identity → Adopt history** is only a legacy public BBS namespace association, never
+an incident, alert, trust-key, private-data or account transfer. Do not use it for a fresh empty
+replacement with reused numeric suffixes. First verify actual continuation of the same record
+namespace, reject/remove the predecessor peer and origin signing pin, and mutually pair the
+successor. The real UI previews both IDs/counts/scope and requires a fresh explicit confirmation.
+Current authority, key context and one-to-one association are rechecked in the shared writer;
+association and audit commit together. Stale/competing reviews, replacement mappings and chains
+fail closed with no automatic retry. Original record provenance and replay counters stay intact.

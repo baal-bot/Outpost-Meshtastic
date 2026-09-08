@@ -29,6 +29,11 @@ files = [
   "src/outpost/store/recovery_snapshot.py",
 ]
 
+[production_groups.identity_adoption]
+minimum = 90
+per_file_minimum = 90
+files = ["src/outpost/fed/adoption.py", "src/outpost/web/routes/adoption.py"]
+
 [groups.safety]
 minimum = 80
 files = [

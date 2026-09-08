@@ -124,10 +124,11 @@ are blocked. The workbench shows counts and public identity evidence, not privat
 message bodies or secret keys. OS access to the restored directory necessarily
 permits access to its private database; protect the host accordingly.
 
-No reactivation/fence-removal command is provided by #145. #146 owns the reviewed
-former-node exclusion, peer/key and revision reconciliation, queue disposition,
-privacy/revocation reconciliation, local radio verification and return-to-service
-decision. A stale snapshot cannot know later password changes, revocations,
+No reactivation/fence-removal command is provided. The
+[node-loss decision](NODE-LOSS-AND-MOBILITY.md) specifies a fresh serving station with
+distinct identity and current local consent; the historical clone stays fenced.
+Former-node retirement, public provenance and private revocation/retention decisions
+remain explicit. A stale snapshot cannot know later password changes, revocations,
 consumed MFA codes, delivered work or newer remote revisions. Do not copy its raw
 database over an active station, manually clear the fence, or assume possession
 of the old private key establishes exclusive authority.

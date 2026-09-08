@@ -127,7 +127,16 @@ class FederationSyncService:
             "ON p.id=s.successor_peer_id WHERE p.mesh_id=?",
             (mesh_id,),
         )
-        return f"{rows[0]['old_mesh_id']}:{suffix}" if rows else uid
+        # Old releases allowed several predecessors or chains. Never choose an
+        # arbitrary record namespace from an ambiguous legacy association.
+        if len(rows) != 1:
+            return uid
+        chained = await store.read(
+            "SELECT 1 FROM fed_peer_successor s LEFT JOIN fed_peer p "
+            "ON p.id=s.successor_peer_id WHERE s.old_mesh_id=? OR p.mesh_id=? LIMIT 1",
+            (mesh_id, rows[0]["old_mesh_id"]),
+        )
+        return uid if chained else f"{rows[0]['old_mesh_id']}:{suffix}"
 
     async def approved_thread(self, slug: str, uid: str) -> bool:
         rows = await self.database.read(
@@ -279,7 +288,11 @@ class FederationSyncService:
             if table_version is None:
                 continue
             table, version_column = table_version
-            canonical_uid = await self.canonical_remote_uid(uid)
+            # History adoption is a legacy BBS namespace association, not an
+            # authority transfer for incidents or alerts with matching suffixes.
+            canonical_uid = (
+                await self.canonical_remote_uid(uid) if stream.startswith("board:") else uid
+            )
             if stream == "incidents":
                 stored_uid = self._stored_origin_uid(uid)
                 rows = await self.database.read(

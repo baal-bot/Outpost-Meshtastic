@@ -283,7 +283,7 @@ async function refreshStoreForward() {
 async function loadOriginHistory() {
   const policy = document.querySelector(".path-grid").closest(".panel");
   const panel = document.createElement("section"); panel.className = "ui-card panel content-panel origin-panel";
-  panel.innerHTML = `<div class="heading"><div><p class="eyebrow">CONTENT IDENTITY</p><h2>Former Outpost history</h2></div><button id="refresh-origins" class="small-button">Refresh</button></div><p class="mqtt-note">Retained content is never deleted when trust ends. Assign a paired successor only after verifying that its operator controls the former Outpost.</p><div id="origin-history"><p class="ui-empty empty">Loading retained origins…</p></div>`;
+  panel.innerHTML = `<div class="heading"><div><p class="eyebrow">CONTENT IDENTITY</p><h2>Former Outpost history</h2></div><button id="refresh-origins" class="small-button">Refresh</button></div><p class="mqtt-note">Ending trust does not delete retained BBS history. Association is only for independently verified continuity of the same BBS record namespace, never a fresh empty replacement. Reject the predecessor peer and origin signing pin first. Incidents, alerts, keys and private records are not transferred.</p><div id="origin-history"><p class="ui-empty empty">Loading retained origins…</p></div>`;
   policy.parentElement.insertBefore(panel, policy);
   $("refresh-origins").addEventListener("click", refreshOriginHistory);
   await refreshOriginHistory();
@@ -294,8 +294,42 @@ async function refreshOriginHistory() {
   if (!originResponse.ok || !peerResponse.ok) {target.innerHTML=`<p class="ui-empty empty">Origin history unavailable · HTTP ${!originResponse.ok?originResponse.status:peerResponse.status}.</p>`;return;}
   const origins = (await originResponse.json()).items;
   const peers = (await peerResponse.json()).items;
-  target.innerHTML = origins.map(origin => `<article class="sync-row origin-row"><div><strong>${safe(origin.node_name || origin.mesh_id)}</strong><code>${safe(origin.mesh_id)} · ${safe(origin.status)}</code></div><div><b>${origin.thread_count}</b><span>Threads</span></div><div><b>${origin.post_count}</b><span>Posts</span></div>${origin.successor_mesh_id?`<p>Successor: ${safe(origin.successor_name || origin.successor_mesh_id)}<br><code>${safe(origin.successor_mesh_id)}</code></p>`:origin.status==="former"&&peers.length?`<div class="origin-adopt"><select data-origin-peer="${safe(origin.mesh_id)}">${peers.map(peer=>`<option value="${safe(peer.mesh_id)}">${safe(peer.node_name||peer.mesh_id)}</option>`).join("")}</select><button data-adopt-origin="${safe(origin.mesh_id)}">Adopt history</button></div>`:`<p>${origin.status==="former"?"Former peer · retained read-only":"Current peer identity"}</p>`}</article>`).join("") || `<p class="ui-empty empty">No retained remote board history.</p>`;
-  document.querySelectorAll("[data-adopt-origin]").forEach(button=>button.addEventListener("click",async()=>{const oldId=button.dataset.adoptOrigin;const select=document.querySelector(`[data-origin-peer="${oldId}"]`);if(!await window.OutpostUI.confirm({title:"Adopt retained Outpost history?",message:`Assign retained content from ${oldId} to ${select.options[select.selectedIndex].text}. Trust and pairing keys are not transferred.`,confirmLabel:"Adopt history"}))return;const response=await api(`/api/v1/federation/peers/${encodeURIComponent(select.value)}/adopt-origin`,{method:"POST",body:JSON.stringify({old_mesh_id:oldId})});if(!response.ok){await window.OutpostUI.alert({title:"History not adopted",message:(await response.json()).error.message});return;}await refreshOriginHistory();}));
+  target.innerHTML = origins.map(origin => {
+    const retired = ["former", "rejected"].includes(origin.status);
+    let association = `<p>${retired ? "Former peer · retained read-only" : "Current peer identity"}</p>`;
+    if (origin.successor_mesh_id) {
+      association = `<p>Successor: ${safe(origin.successor_name || origin.successor_mesh_id)}<br><code>${safe(origin.successor_mesh_id)}</code></p>`;
+    } else if (retired && peers.length) {
+      association = `<div class="origin-adopt"><select aria-label="Successor for ${safe(origin.mesh_id)}" data-origin-peer="${safe(origin.mesh_id)}">${peers.map(peer => `<option value="${safe(peer.mesh_id)}">${safe(peer.node_name || peer.mesh_id)}</option>`).join("")}</select><button data-adopt-origin="${safe(origin.mesh_id)}">Adopt history</button></div>`;
+    }
+    return `<article class="sync-row origin-row"><div><strong>${safe(origin.node_name || origin.mesh_id)}</strong><code>${safe(origin.mesh_id)} · ${safe(origin.status)}</code></div><div><b>${origin.thread_count}</b><span>Threads</span></div><div><b>${origin.post_count}</b><span>Posts</span></div>${association}</article>`;
+  }).join("") || `<p class="ui-empty empty">No retained remote board history.</p>`;
+  document.querySelectorAll("[data-adopt-origin]").forEach(button => button.addEventListener("click", async () => {
+    const oldId = button.dataset.adoptOrigin;
+    const select = document.querySelector(`[data-origin-peer="${oldId}"]`);
+    const successor = select.value;
+    const endpoint = `/api/v1/federation/peers/${encodeURIComponent(successor)}/adopt-origin`;
+    button.disabled = true;
+    select.disabled = true;
+    try {
+      const preview = await api(`${endpoint}/preview`, {method:"POST", body:JSON.stringify({old_mesh_id:oldId})});
+      const review = await preview.json();
+      if (!preview.ok) throw new Error(review.error?.message || `Review unavailable · HTTP ${preview.status}`);
+      if (!await window.OutpostUI.confirm({title:"Confirm BBS namespace continuity?", message:`${oldId} → ${successor}. ${review.threads} public threads, ${review.posts} public posts. ${review.warning}`, confirmLabel:"Confirm same BBS namespace", danger:true})) return;
+      const response = await api(endpoint, {method:"POST", body:JSON.stringify({old_mesh_id:oldId, review_token:review.review_token, confirm_namespace:true})});
+      if (!response.ok) { const failure = await response.json(); throw new Error(failure.error?.message || `Commit unavailable · HTTP ${response.status}`); }
+      await refreshOriginHistory();
+    } catch (error) {
+      await window.OutpostUI.alert({title:"Association not confirmed", message:`${error.message || "Connection failed"}. No automatic retry. Refresh history before starting a new review.`});
+    } finally {
+      button.disabled = false;
+      select.disabled = false;
+      // The dialog opened while its trigger was disabled, so restore focus
+      // after re-enabling it (or use Refresh if the committed row replaced it).
+      const focusTarget = button.isConnected ? button : $("refresh-origins");
+      focusTarget?.focus({preventScroll:true});
+    }
+  }));
 }
 async function refresh() {
   const filter = $("peer-filter").value;
