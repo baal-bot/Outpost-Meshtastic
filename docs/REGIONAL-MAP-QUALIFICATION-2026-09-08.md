@@ -36,8 +36,8 @@ tile path. It contains the Protomaps September 8 world overview through zoom 6:
 | Tiles | 5,461 |
 | Installed size | 49,823,744 bytes (49.8 MB / 47.5 MiB) |
 | Basemap source version | 4.15.2 |
-| Regional detail | None selected on this station yet |
-| Map readiness | `unknown`, reason `overview_only` |
+| Regional detail at the initial qualification | None selected yet |
+| Map readiness at the initial qualification | `unknown`, reason `overview_only` |
 
 The imported file's SHA-256 is
 `3cc69f8eecff346c99a9c762d19a570027052690778e634dc3beb81b708e33da`.
@@ -52,18 +52,19 @@ markup and stylesheet order. The rendered map filled its viewport, contained geo
 features and labels, and produced no browser errors or external requests. The captured
 image was visually inspected. This verifies browser isolation, not a physical WAN outage.
 
-## Remaining field acceptance
+## Later station selection and remaining field acceptance
 
-Refresh existing dashboard tabs, then open **Access → Set up offline regional maps & world
-overview** (`/maps.html`). Choose the actual operating area using a recent GPS suggestion
-or manual coordinates, review its size, and download the regional pack. The world overview
-alone does not establish local street-level coverage. A public Nairobi sample used for
-development was kept separate from the station selection.
+The owner subsequently selected the station region. The
+[#141 update qualification](OFFLINE-TIME-QUALIFICATION-2026-09-08.md) verified that the
+65,884,160-byte regional pack (6,176 tiles) and world overview survived the update.
+The inventory reports `selected_region_verified`; served tiles and map assets match.
+The prior operator map observation is stale after that service restart and needs
+operator review. This does not change the local pack verification result.
 
-Issue #139 remains open for the actual station region and a fresh-browser exercise with
-the physical WAN unavailable. No new reboot, physical WAN interruption or second-node
-change was performed. Existing raster files and the previously unmounted recovery USB
-were preserved.
+Issue #139 remains open for a fresh-browser exercise with the physical WAN unavailable.
+No physical WAN interruption or second-node change was performed. Existing raster
+files and the previously unmounted recovery USB were preserved. A public Nairobi
+sample used for development was kept separate from the station selection.
 
 Private evidence is retained in `.data/regional-maps-2026-09-08/STATE.json` and
 `/var/lib/outpost-qualification/139-20260908/regional-update/`. Keep raw configuration,

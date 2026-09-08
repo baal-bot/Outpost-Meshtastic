@@ -1,33 +1,47 @@
 # Session resume point — 2026-09-08 (America/New_York)
 
-## In progress: #141 offline time confidence
+## Installed: #141 clock safeguards; physical acceptance remains open
 
-The owner authorized #141. Runtime changes add read-only OS time evidence, bounded
-process holdover, latched wall-step detection, guarded custody/retention/recovery,
-elapsed queue accounting, and visible time holds. Local replies/alerts continue
-within retained budgets during in-process uncertainty; uncertain cold-start radio
-recovery needs a usable OS source. See [OFFLINE-TIME.md](docs/OFFLINE-TIME.md).
+The owner authorized #141. The selected, running release is
+**`20260908T235451Z-5a7de3241e4c`**, source
+`5a7de3241e4cfaa7cb4829ae6fbb01fe714455ef`, database schema **186**.
+Exact-source CI `34288628754` passed all four jobs: 2,371 full-suite tests per job
+and 1,263 production-mode tests per Python version. The normal updater completed
+at 23:55:58 UTC with the native HailoRT wheel.
 
-Local checks: 45 new clock/browser cases passed (all three themes, phone/desktop),
-329 initial regressions passed, and 64 final custody/browser cases passed. New
-`timekeeping.py` production coverage is 94%; a new 90% floor is enforced. Format,
-lint, mypy, strict-debt ratchet, catalogues, requirements, static markup and package
-smoke passed. All 181 final queue/worker/maintenance/diagnostics cases passed.
-The 300s visible + 300s hidden idle measurement is running; evidence is tracked in private `.data/clock-141-2026-09-08/STATE.json`.
+The implementation adds read-only OS time evidence, bounded process holdover,
+latched wall-step detection, guarded custody/retention/recovery, elapsed queue
+accounting, and visible time holds. Local replies and alerts continue within their
+budgets during in-process uncertainty; uncertain cold-start radio recovery needs
+a usable OS source. See [OFFLINE-TIME.md](docs/OFFLINE-TIME.md) and the
+[dated qualification report](docs/OFFLINE-TIME-QUALIFICATION-2026-09-08.md).
 
-The packaged unit also needs the narrow `adjtimex`/`clock_adjtime` allowlist and
-explicit `CAP_SYS_TIME` exclusion. The real isolated systemd probe passed with the
-new sandbox and no clock writes; deploy the unit with the package. All 25 installer
-cases and 99 clock/readiness follow-up cases passed, including the reproduced and
-fixed false wall-step warning from normal clock slew.
+At 23:56:03 UTC, web, radio, core tasks, required native AI, schema integrity and
+same-package boot readiness passed. All protected record IDs survived, including
+1,609 outbound-work and 2,001 power-history records. The running service reports
+usable synchronized UTC, excludes `CAP_SYS_TIME`, and retains `NoNewPrivileges`.
+USB external power passes without a battery percentage. Served Federation assets
+match the installed package/source. The regional pack, overview, tile and map assets
+verify; an earlier operator map observation is stale after the restart and needs
+operator review. No replacement attestation was recorded.
 
-No new release is installed yet. The live regional-map release below is still
-selected. The owner has since selected regional detail; live map readiness passes.
-Pi inspection reports synchronized UTC, RTC boot use, charging voltage zero and
-RTC battery-input voltage 0V. This is not a battery-presence or retention verdict.
-The owner's RTC-battery confirmation is pending. No clock, charging, network, power,
-recovery USB or second-node change has been made. #141 must remain open for physical
-RTC retention and the intended offline source/cold-start exercise.
+Local checks include 329 initial regressions, 64 final custody/browser cases, 181
+queue/worker/maintenance/diagnostics cases, 99 clock/readiness cases and 25 installer
+cases. The new clock/browser coverage includes all three themes at phone and desktop
+widths; `timekeeping.py` has 94% production coverage against a new 90% floor.
+The 300s visible + 300s hidden dashboard probe passed every budget. These overlapping
+suites are reported separately. Package smoke, formatting, lint, types, catalogues,
+requirements and markup also passed. The isolated real service-sandbox probe passed
+before deployment; no clock writes were used.
+
+RTC boot use, a zero charging voltage and a 0V battery-input reading were observed.
+These do not establish battery presence or retention. Owner confirmation of the
+separate RTC backup battery is pending. #141 remains open for physical RTC retention
+and the intended offline source/cold-start exercise. No clock, charging, network,
+power, recovery USB or second-node change was made. The host did not reboot.
+Private evidence: `.data/clock-141-2026-09-08/STATE.json` and
+`/var/lib/outpost-qualification/141-20260908/clock-update/`. Later documentation
+commits are separate from the installed release's CI identity.
 
 ## Installed: #139 regional maps with world overview; field acceptance remains open
 
@@ -38,23 +52,25 @@ local-radio GPS suggestions/manual fallback, bounded PMTiles ranges, verified im
 SQLite vector packs, bundled local MapLibre assets, and `outpost-maps` USB import/export.
 The installer now points to regional setup after the radio starts instead of seeding USGS.
 
-The selected, running release is **`20260908T215537Z-df4c206dc5f6`**, source
+At the map qualification, the release was **`20260908T215537Z-df4c206dc5f6`**, source
 `df4c206dc5f6ef6ee3bf550305a850ecaf1752e4`, database schema **186**. Exact-source CI
 `34278060752` passed all four jobs. The normal local updater completed successfully
 with the native HailoRT wheel. Web, radio, required native AI, database integrity,
 same-package boot readiness and protected-record retention passed. USB external power
 still passes readiness without a battery percentage.
 
-A verified world overview (z0–6, 5,461 tiles, **49,823,744 bytes**) is installed at the
-configured service tile path. Live tiles and map assets match the installed package;
-a fresh browser rendered the overview and labels with outside requests blocked.
+The initial qualification installed a verified world overview (z0–6, 5,461 tiles,
+**49,823,744 bytes**) at the configured service tile path. Live tiles and map assets
+matched the package; a fresh browser rendered the overview and labels with outside requests blocked.
 The public manifest excludes precise setup coordinates. A separate public Nairobi
 sample (2 km, z12 + overview) measured 50.8 MB and passed export/import verification.
 
-Refresh the dashboard and open **Access → Set up offline regional maps & world overview**
-(`/maps.html`) to select the actual station region using fresh GPS or manual coordinates.
-Map readiness correctly reports `unknown / overview_only` until regional detail is selected.
-Keep #139 open for station-region selection and the actual physical WAN-disconnected test.
+The owner subsequently selected the actual station region. The #141 update above
+preserves its verified regional pack and world overview (65,884,160 bytes, 6,176 tiles)
+and supersedes the earlier map runtime. The local inventory reports
+`selected_region_verified`; the dashboard's earlier operator observation became stale
+at the service restart. Keep #139 open for the actual physical WAN-disconnected test
+and review the operator observation after performing the relevant acceptance.
 Read [the qualification report](docs/REGIONAL-MAP-QUALIFICATION-2026-09-08.md) and private
 `.data/regional-maps-2026-09-08/STATE.json`. Documentation commits after the installed
 source are separate from its release identity.
@@ -72,8 +88,8 @@ The #171 qualification used release **`20260908T175620Z-0dd05985194a`**, source
 `0dd05985194af45d4621dce24d62376ed639c9b2`, database schema **186**. Exact-commit CI
 `34254372769` passed all four jobs: 2,286 full-suite tests per job and 1,214
 production-mode tests per Python version. All 254 local cases passed. The normal
-updater completed successfully with the native HailoRT wheel. The regional-map release
-above now supersedes that installed version and preserves the external-power fix.
+updater completed successfully with the native HailoRT wheel. The subsequent map and
+clock releases preserve the external-power fix.
 
 At 17:57:54 UTC, fresh readiness reported `radio_power: pass`, external power true
 and no battery percentage. Web, radio, required native AI, schema integrity and
