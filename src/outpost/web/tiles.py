@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import math
 import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 from outpost.maps.packs import FORMAT, active_manifest, read_json
+from outpost.maps.regions import tile_xy
 
 TilePackState = Literal["ready", "missing", "unreadable"]
 _MEDIA_TYPES = {"jpg": "image/jpeg", "png": "image/png"}
@@ -113,3 +115,48 @@ def find_tile(
             continue
         return candidate, _MEDIA_TYPES[requested]
     return None
+
+
+def public_tile_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Expose tile-grid coverage, never the exact GPS/setup center or private plan."""
+    if manifest.get("format") != FORMAT:
+        return manifest
+    result = {
+        key: manifest[key]
+        for key in (
+            "format",
+            "version",
+            "pack_id",
+            "overview_max_zoom",
+            "tile_compression",
+            "attribution",
+            "license",
+            "source_version",
+            "source_date",
+        )
+        if key in manifest
+    }
+    result["source"] = "Protomaps"
+    result["region"] = None
+    region = manifest.get("region")
+    if region:
+        zoom = int(region["max_zoom"])
+        width = 1 << zoom
+
+        def latitude(edge: int) -> float:
+            return math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * edge / width))))
+
+        bounds = []
+        for west, south, east, north in region["bounds"]:
+            left, bottom = tile_xy(south, west, zoom)
+            right, top = tile_xy(north, east, zoom)
+            bounds.append(
+                [
+                    left / width * 360 - 180,
+                    latitude(bottom + 1),
+                    (right + 1) / width * 360 - 180,
+                    latitude(top),
+                ]
+            )
+        result["region"] = {"bounds": bounds, "max_zoom": zoom}
+    return result

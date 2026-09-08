@@ -144,6 +144,12 @@ def test_install_serves_verified_tiles_and_preserves_selection_on_bad_import(ser
     app = create_web_app(lambda: {}, tile_path=service.root, map_setup=service)
     client = TestClient(app)
     assert client.get("/tiles/manifest.json").json()["format"] == "outpost-vector-v1"
+    public = client.get("/tiles/manifest.json").json()
+    assert set(public["region"]) == {"bounds", "max_zoom"}
+    assert public["region"]["bounds"] != manifest["region"]["bounds"]
+    assert not {"file", "sha256", "id", "source_etag"} & public.keys()
+    private = client.get("/api/v1/maps").json()["installed"]
+    assert private["region"]["longitude"] == 179.99
     tile = client.get(f"/tiles/vector/{manifest['pack_id']}/overview/0/0/0.pbf")
     assert tile.status_code == 200 and tile.content == mvt()
     assert client.get("/api/v1/maps").json()["installed"]["pack_id"] == manifest["pack_id"]

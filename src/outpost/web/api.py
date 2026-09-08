@@ -71,7 +71,7 @@ from outpost.web.routes.maps import register_map_routes
 from outpost.web.routes.readiness import register_readiness_routes
 from outpost.web.routes.responsibility import register_responsibility_routes
 from outpost.web.settings import RuntimeSettings
-from outpost.web.tiles import absolute_tile_root, find_tile, inspect_tile_pack
+from outpost.web.tiles import absolute_tile_root, find_tile, inspect_tile_pack, public_tile_manifest
 from outpost.web.transport import WebTransportMiddleware, transport_status
 
 PUBLIC_API_PATHS = frozenset(
@@ -1153,7 +1153,7 @@ def create_web_app(
             )
         assert status.manifest is not None
         return JSONResponse(
-            {**status.manifest, "status": "ready"},
+            {**public_tile_manifest(status.manifest), "status": "ready"},
             headers={"Cache-Control": "no-store"},
         )
 

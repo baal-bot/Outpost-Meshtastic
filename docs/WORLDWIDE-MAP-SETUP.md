@@ -20,7 +20,8 @@ running; it no longer seeds USGS raster tiles automatically.
 3. Select **Check coverage & size** while connected to the internet. Review the estimate
    and available storage, then **Download maps**. The provider can infer the approximate
    region from requested ranges. Coordinates stay in the local setup and pack metadata;
-   avoid publishing those files as diagnostic evidence.
+   avoid publishing those files as diagnostic evidence. The public vector manifest exposes
+   tile-grid coverage rather than the precise GPS center or private setup plan.
 4. Wait for verification. Every expected tile, checksum, compressed payload and vector
    structure is checked before an atomic manifest selects the completed pack. Failed or
    interrupted work leaves the existing selection intact. Pause/resume uses saved staging
