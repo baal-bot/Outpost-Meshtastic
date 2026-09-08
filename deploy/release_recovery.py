@@ -113,8 +113,11 @@ def write_metadata(
     pre_upgrade_schema: int,
     previous_schema_cap: int,
     upgrade_schema_cap: int,
+    forward_recovery: bool = False,
 ) -> dict[str, Any]:
-    if pre_upgrade_schema > previous_schema_cap:
+    if pre_upgrade_schema > upgrade_schema_cap:
+        raise RecoveryError("pre-upgrade database is newer than the proposed release")
+    if pre_upgrade_schema > previous_schema_cap and not forward_recovery:
         raise RecoveryError("pre-upgrade database is newer than the previous release")
     metadata: dict[str, Any] = {
         "format": 1,
@@ -126,6 +129,7 @@ def write_metadata(
         "pre_upgrade_schema": pre_upgrade_schema,
         "previous_schema_cap": previous_schema_cap,
         "upgrade_schema_cap": upgrade_schema_cap,
+        "forward_recovery": forward_recovery and pre_upgrade_schema > previous_schema_cap,
     }
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,6 +137,17 @@ def write_metadata(
     temporary.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
     os.replace(temporary, output_path)
     return metadata
+
+
+def write_store_owner(database: str | Path, current: str | Path) -> None:
+    path = Path(database).resolve()
+    selection = Path(current).absolute()
+    marker = path.with_name(path.name + ".deployment.json")
+    record = {"format": 1, "database": str(path), "current": str(selection)}
+    temporary = marker.with_name(f".{marker.name}.new")
+    temporary.write_text(json.dumps(record, sort_keys=True) + "\n")
+    temporary.chmod(0o644)
+    os.replace(temporary, marker)
 
 
 def plan_rollback(
@@ -153,6 +168,11 @@ def plan_rollback(
         raise RecoveryError("rollback metadata does not match the current release")
     if metadata.get("previous_release") != target:
         raise RecoveryError("rollback metadata does not match the selected previous release")
+    if metadata.get("forward_recovery") is True:
+        raise RecoveryError(
+            "forward recovery has no compatible previous release; retain current data "
+            "and install a verified compatible release"
+        )
     database = Path(str(metadata.get("database", "")))
     live = inspect_database(database)
     target_cap = int(metadata["previous_schema_cap"])
@@ -202,6 +222,10 @@ def _parser() -> argparse.ArgumentParser:
     record.add_argument("--pre-upgrade-schema", required=True, type=int)
     record.add_argument("--previous-schema-cap", required=True, type=int)
     record.add_argument("--upgrade-schema-cap", required=True, type=int)
+    record.add_argument("--forward-recovery", action="store_true")
+    owner = commands.add_parser("own-store")
+    owner.add_argument("--database", required=True)
+    owner.add_argument("--current", required=True)
     plan = commands.add_parser("plan")
     plan.add_argument("--metadata", required=True)
     plan.add_argument("--current-release", required=True)
@@ -233,7 +257,11 @@ def main() -> None:
                 pre_upgrade_schema=args.pre_upgrade_schema,
                 previous_schema_cap=args.previous_schema_cap,
                 upgrade_schema_cap=args.upgrade_schema_cap,
+                forward_recovery=args.forward_recovery,
             )
+        elif args.command == "own-store":
+            write_store_owner(args.database, args.current)
+            result = {"ownership_recorded": True}
         else:
             result = plan_rollback(
                 args.metadata,

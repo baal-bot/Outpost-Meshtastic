@@ -109,6 +109,11 @@ The rollback command verifies its compatibility plan before downtime and restore
 pre-upgrade database when the older code cannot read the live schema. See [Installation](INSTALLATION.md#roll-back)
 for the full procedure.
 
+When the live database was already newer than the previous release before the
+upgrade, use [explicit forward recovery](BOOT-RECOVERY.md). That path preserves
+current data, refuses rollback to the incompatible predecessor, and leaves the
+new release stopped for repair if startup fails.
+
 Each upgrade creates `pre-upgrade-<release>.db`; each manual rollback creates a
 `pre-manual-rollback-*.db` safety copy. These appear by kind on the Backups page and count toward its
 reported bytes. Successful upgrades and daily maintenance keep the newest configured number of

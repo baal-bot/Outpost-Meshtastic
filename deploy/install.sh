@@ -23,6 +23,8 @@ HAILO_VLM_MODEL_SOURCE=${OUTPOST_HAILO_VLM_MODEL:-}
 MDNS_ENABLED=${OUTPOST_MDNS:-1}
 HAILO_RELEASE_GRACE_SECONDS=${OUTPOST_HAILO_RELEASE_GRACE_SECONDS:-5}
 ALLOW_UNVERIFIED_CI=${OUTPOST_ALLOW_UNVERIFIED_CI:-0}
+RECOVER_INCOMPATIBLE_BOOT=${OUTPOST_RECOVER_INCOMPATIBLE_BOOT:-0}
+FORWARD_RECOVERY=0
 CI_VERIFIED_REVISION=${OUTPOST_CI_VERIFIED_REVISION:-}
 CI_EVIDENCE=${OUTPOST_CI_EVIDENCE:-}
 WEB_TRANSPORT_MODE=trusted_http
@@ -58,6 +60,10 @@ case "$MDNS_ENABLED" in 0|1) ;; *) fail "OUTPOST_MDNS must be 0 or 1" ;; esac
 case "$ALLOW_UNVERIFIED_CI" in
   0|1) ;;
   *) fail "OUTPOST_ALLOW_UNVERIFIED_CI must be 0 or 1" ;;
+esac
+case "$RECOVER_INCOMPATIBLE_BOOT" in
+  0|1) ;;
+  *) fail "OUTPOST_RECOVER_INCOMPATIBLE_BOOT must be 0 or 1" ;;
 esac
 case "$HAILO_RELEASE_GRACE_SECONDS" in
   ''|*[!0-9]*) fail "OUTPOST_HAILO_RELEASE_GRACE_SECONDS must be an integer from 0 to 30" ;;
@@ -298,6 +304,8 @@ if [ -f "$DATABASE_PATH" ]; then
   chown outpost:outpost "$BACKUP_PATH"
   chmod 0640 "$BACKUP_PATH"
   echo "Created verified pre-upgrade backup: $BACKUP_PATH"
+  [ "$PRE_UPGRADE_SCHEMA" -le "$UPGRADE_SCHEMA_CAP" ] || \
+    fail "database schema $PRE_UPGRADE_SCHEMA exceeds proposed release capacity $UPGRADE_SCHEMA_CAP; live data and boot selection were left untouched"
 fi
 
 if [ -n "$OLD_TARGET" ] && [ -n "$BACKUP_PATH" ]; then
@@ -308,15 +316,25 @@ migrations = Path(outpost.store.__file__).parent / "migrations"
 print(max(int(path.name[:4]) for path in migrations.glob("[0-9][0-9][0-9][0-9]_*.sql")))
 PY
   )
+  recovery_option=
+  if [ "$PRE_UPGRADE_SCHEMA" -gt "$PREVIOUS_SCHEMA_CAP" ]; then
+    [ "$RECOVER_INCOMPATIBLE_BOOT" = 1 ] || \
+      fail "database schema $PRE_UPGRADE_SCHEMA exceeds previous release capacity $PREVIOUS_SCHEMA_CAP; validate an independent recovery copy, then use OUTPOST_RECOVER_INCOMPATIBLE_BOOT=1 with deploy/update.sh for forward recovery"
+    FORWARD_RECOVERY=1
+    recovery_option=--forward-recovery
+    echo "Forward recovery: previous release cannot read current data. A failed start will preserve data and leave the new release selected but stopped; no downgrade or snapshot restore is available."
+  fi
   python3 "$SCRIPT_DIR/release_recovery.py" record \
     --output "$RELEASE_DIR/rollback.json" \
     --upgrade-release "$RELEASE_DIR" --previous-release "$OLD_TARGET" \
     --database "$DATABASE_PATH" --backup "$BACKUP_PATH" \
     --pre-upgrade-schema "$PRE_UPGRADE_SCHEMA" \
     --previous-schema-cap "$PREVIOUS_SCHEMA_CAP" \
-    --upgrade-schema-cap "$UPGRADE_SCHEMA_CAP" >/dev/null
+    --upgrade-schema-cap "$UPGRADE_SCHEMA_CAP" $recovery_option >/dev/null
   chmod 0644 "$RELEASE_DIR/rollback.json"
 fi
+python3 "$SCRIPT_DIR/release_recovery.py" own-store \
+  --database "$DATABASE_PATH" --current "$CURRENT_LINK" >/dev/null
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK.next"
 mv -Tf "$CURRENT_LINK.next" "$CURRENT_LINK"
 install -m 0644 "$SCRIPT_DIR/outpost.service" "$SYSTEMD_DIR/outpost.service"
@@ -343,22 +361,36 @@ if [ -n "$OLD_TARGET" ]; then
   systemctl stop "$SERVICE_NAME"
   wait_for_hailo_release
 fi
-systemctl start "$SERVICE_NAME"
-
 healthy=0
-if outpost_wait_for_health; then
-  healthy=1
+systemctl reset-failed "$SERVICE_NAME"
+if systemctl start "$SERVICE_NAME"; then
+  if outpost_wait_for_health; then
+    healthy=1
+  else
+    health_status=$?
+  fi
 else
-  health_status=$?
+  health_status=1
 fi
 if [ "$healthy" -eq 1 ] && ! metrics_probe | grep -q '^# HELP outpost_'; then
   echo "Exact /metrics deployment smoke check failed." >&2
   healthy=0
 fi
 if [ "$healthy" -ne 1 ]; then
-  echo "New release failed health verification; rolling back." >&2
-  systemctl stop "$SERVICE_NAME" || true
+  echo "New release failed health verification." >&2
+  systemctl stop "$SERVICE_NAME" || \
+    fail "failed release could not be stopped; service state is unconfirmed, live data and new boot selection preserved, no rollback attempted"
   wait_for_hailo_release
+  if [ "$FORWARD_RECOVERY" = 1 ]; then
+    failed_path="$DATABASE_PATH.failed-$RELEASE_ID"
+    python3 "$SCRIPT_DIR/release_recovery.py" snapshot \
+      --source "$DATABASE_PATH" --destination "$failed_path" >/dev/null || \
+      fail "forward recovery failed and forensic snapshot was unavailable; live database remains untouched and the new release is selected but stopped"
+    chown outpost:outpost "$failed_path"
+    chmod 0640 "$failed_path"
+    fail "forward recovery failed; live database preserved, new release selected but stopped. Forensic snapshot: $failed_path. Repair forward with a compatible verified release; do not restore an older database."
+  fi
+  echo "Rolling back the failed release." >&2
   rollback_action=code-only
   rollback_snapshot_at=
   if [ -n "$OLD_TARGET" ] && [ -f "$RELEASE_DIR/rollback.json" ]; then

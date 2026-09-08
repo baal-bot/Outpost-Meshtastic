@@ -37,6 +37,7 @@ PUBLIC_FILES = (
     "docs/ENCRYPTED-RECOVERY.md",
     "docs/NODE-LOSS-AND-MOBILITY.md",
     "docs/INSTALLATION.md",
+    "docs/BOOT-RECOVERY.md",
     "docs/ONBOARDING.md",
     "docs/WEB-TRANSPORT.md",
     "docs/RELEASES.md",

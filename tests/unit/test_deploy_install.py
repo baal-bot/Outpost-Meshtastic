@@ -117,6 +117,11 @@ exec "$REAL_PYTHON" "$@"
         """#!/bin/sh
 printf 'systemctl %s\n' "$*" >> "$HARNESS_LOG"
 case " $* " in
+  *" stop "*)
+    if [ "${HARNESS_HEALTH:-success}" = stop-fail ] && [ -e "$HARNESS_MUTATION_STATE" ]; then
+      exit 1
+    fi
+    ;;
   *" start "*|*" restart "*)
     if [ "${HARNESS_MUTATION:-none}" != none ] && [ ! -e "$HARNESS_MUTATION_STATE" ]; then
       : > "$HARNESS_MUTATION_STATE"
@@ -129,6 +134,7 @@ connection.execute("UPDATE sample SET value=?", ("during-failed-release",))
 connection.commit()
 connection.close()'
     fi
+    [ "${HARNESS_HEALTH:-success}" = start-fail ] && exit 1
     ;;
 esac
 exit 0
@@ -140,7 +146,7 @@ exit 0
 printf 'curl %s\n' "$*" >> "$HARNESS_LOG"
 for argument in "$@"; do probe_url=$argument; done
 case "${HARNESS_HEALTH:-success}" in
-  fail) exit 7 ;;
+  fail|stop-fail) exit 7 ;;
   probe-error) exit 3 ;;
   tls)
     case "$*|$probe_url" in
@@ -179,6 +185,7 @@ def _run_install(
     health: str = "success",
     mutation: str = "none",
     schema_cap: int = 1,
+    forward_recovery: bool = False,
     script: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     root = cast(Path, harness["root"])
@@ -195,6 +202,7 @@ def _run_install(
         "OUTPOST_MDNS": "0",
         "OUTPOST_NONINTERACTIVE": "1",
         "OUTPOST_ALLOW_UNVERIFIED_CI": "1",
+        "OUTPOST_RECOVER_INCOMPATIBLE_BOOT": "1" if forward_recovery else "0",
         "OUTPOST_HAILO_RELEASE_GRACE_SECONDS": "0",
         "OUTPOST_HEALTH_ATTEMPTS": "2",
         "OUTPOST_HEALTH_DELAY_SECONDS": "0",
@@ -305,6 +313,110 @@ def test_failed_schema_upgrade_restores_snapshot_and_preserves_forensic_copy(
         )
     assert "writes after that point were discarded" in failed.stderr
     assert f"Failed-release forensic copy: {forensic}" in failed.stderr
+
+
+def _strand_boot_release(harness: dict[str, Any]) -> None:
+    _assert_successful_install(harness, _run_install(harness, "old"), "old")
+    with closing(sqlite3.connect(harness["database"])) as connection:
+        connection.execute("INSERT INTO schema_version VALUES(2,2)")
+        connection.execute("UPDATE sample SET value='acknowledged-after-development-migration'")
+        connection.commit()
+
+
+@pytest.mark.parametrize("schema_cap", [1, 2])
+def test_incompatible_boot_repair_requires_explicit_forward_recovery(
+    tmp_path: Path, schema_cap: int
+) -> None:
+    harness = _installer_harness(tmp_path)
+    _strand_boot_release(harness)
+    before = cast(Path, harness["log"]).read_text()
+    result = _run_install(harness, "unapproved", schema_cap=schema_cap)
+    assert result.returncode != 0
+    assert (harness["prefix"] / "current").resolve() == harness["prefix"] / "releases/old"
+    assert "systemctl stop outpost.service" not in harness["log"].read_text()[len(before) :]
+    assert inspect_database(harness["database"]).schema_version == 2
+
+
+def test_forward_recovery_rejects_a_target_older_than_live_data(tmp_path: Path) -> None:
+    harness = _installer_harness(tmp_path)
+    _strand_boot_release(harness)
+    result = _run_install(harness, "too-old", forward_recovery=True)
+    assert result.returncode != 0
+    assert "exceeds proposed release capacity" in result.stderr
+    assert (harness["prefix"] / "current").resolve() == harness["prefix"] / "releases/old"
+    assert inspect_database(harness["database"]).schema_version == 2
+
+
+def test_forward_recovery_preserves_newer_acknowledged_data_and_blocks_old_rollback(
+    tmp_path: Path,
+) -> None:
+    harness = _installer_harness(tmp_path)
+    _strand_boot_release(harness)
+    result = _run_install(harness, "repair", schema_cap=2, forward_recovery=True)
+    _assert_successful_install(harness, result, "repair")
+    with closing(sqlite3.connect(harness["database"])) as connection:
+        assert connection.execute("SELECT value FROM sample").fetchone()[0] == (
+            "acknowledged-after-development-migration"
+        )
+    assert Path(str(harness["database"]) + ".deployment.json").is_file()
+    before = harness["log"].read_text()
+    rollback = _run_rollback(harness, "success")
+    assert rollback.returncode != 0
+    assert "forward recovery has no compatible previous release" in rollback.stderr
+    assert "systemctl stop" not in harness["log"].read_text()[len(before) :]
+    assert inspect_database(harness["database"]).schema_version == 2
+
+
+@pytest.mark.parametrize("health", ["fail", "start-fail"])
+def test_failed_forward_recovery_keeps_live_data_and_new_selection_stopped(
+    tmp_path: Path, health: str
+) -> None:
+    harness = _installer_harness(tmp_path)
+    _strand_boot_release(harness)
+    result = _run_install(
+        harness,
+        "repair-failed",
+        schema_cap=2,
+        forward_recovery=True,
+        health=health,
+        mutation="code",
+    )
+    assert result.returncode != 0
+    assert "live database preserved, new release selected but stopped" in result.stderr
+    assert (harness["prefix"] / "current").resolve() == (
+        harness["prefix"] / "releases/repair-failed"
+    )
+    assert inspect_database(harness["database"]).schema_version == 2
+    for path in (harness["database"], Path(str(harness["database"]) + ".failed-repair-failed")):
+        with closing(sqlite3.connect(path)) as connection:
+            assert connection.execute("SELECT value FROM sample").fetchone()[0] == (
+                "during-failed-release"
+            )
+    assert harness["log"].read_text().splitlines()[-1] == "systemctl stop outpost.service"
+
+
+def test_forward_recovery_stop_failure_preserves_data_and_reports_unknown_state(
+    tmp_path: Path,
+) -> None:
+    harness = _installer_harness(tmp_path)
+    _strand_boot_release(harness)
+    result = _run_install(
+        harness,
+        "stop-failed",
+        schema_cap=2,
+        forward_recovery=True,
+        health="stop-fail",
+        mutation="code",
+    )
+    assert result.returncode != 0
+    assert "service state is unconfirmed" in result.stderr
+    assert "no rollback attempted" in result.stderr
+    assert (harness["prefix"] / "current").resolve() == harness["prefix"] / "releases/stop-failed"
+    assert inspect_database(harness["database"]).schema_version == 2
+    with closing(sqlite3.connect(harness["database"])) as connection:
+        assert connection.execute("SELECT value FROM sample").fetchone()[0] == (
+            "during-failed-release"
+        )
 
 
 def _run_rollback(harness: dict[str, Any], health: str) -> subprocess.CompletedProcess[str]:

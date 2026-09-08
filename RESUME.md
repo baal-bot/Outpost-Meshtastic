@@ -1,98 +1,100 @@
 # Session resume point — 2026-09-08 (America/New_York)
 
-## Current scope
+## Current task: #136
 
-- Repository: `baal-bot/Outpost-Meshtastic`; branch `main`.
-- The user approved closing #137 on its verified software evidence and requires
-  battery backup for both deployment machines. Physical qualification remains #44;
-  storage/energy, battery runtime and shutdown behavior remain #148. These hardware
-  checks are unperformed and do not block #137's software closure.
-- The second node is a separate machine and **the user will update it**. Do not
-  infer remote access or deployment.
-- No live database, service, radio, WAN or physical power test was changed here.
-  Development and benchmarks use new disposable stores with simulated radio.
-- Verified software revision: `9c3324a14486bc1933766b9c57bf8c523495b43f`.
-  Read `.data/durability-2026-09-08/STATE.json` for its CI and offline-kit evidence.
-  `.data/close-137-2026-09-08/STATE.json`, when present, records the later documentation
-  commit and GitHub closure. Keep these revisions and their evidence distinct.
+The user authorized continuing with installed-service alignment and unattended reboot
+recovery on this machine. The second node is a separate machine; the user updates it.
+No local or remote service restart, deployment, radio test or reboot has occurred in
+this task yet. GitHub CLI was installed as an updater prerequisite.
 
-## #137 change and evidence
+Read `.data/reboot-136-2026-09-08/STATE.json` for the final repair commit, CI state,
+checks and deployment checkpoint recorded after this commit. Preserve the distinction
+between a prepared repair and a verified live deployment.
 
-The application now configures WAL/FULL connections and checks the actual writer
-before migrations and before serving callers. Startup rejects a weakened writer
-and closes its connection. No weaker production configuration is added. Schema,
-wire format and identity remain unchanged. The current DATA-002 clause and
-operating contract describe this decision; the original requirement snapshot is
-preserved and whole-requirement physical acceptance stays pending.
+The independent-backup prerequisite is pending: the user was asked where a validated
+off-device copy exists, or which external destination should receive one. No external
+filesystem was mounted at inspection. Do not treat the verified local snapshot as an
+off-device copy. Continue independent preparation while awaiting that information.
 
-Five new production-wired test cases cover fresh migrations, an upgrade from
-schema 184, reopen, restore and rejection/cleanup of weakened writer settings.
-Broader transaction, mail, outbox, signed custody and recovery regression results
-are under `.data/durability-2026-09-08/` and in final CI.
+## Observed failure and prepared repair
 
-The maintained `tools/benchmark_commit_policy.py` creates only new temporary
-stores and measures real incident/mail/outbox/signed-custody service calls. Six
-512-operation trials at concurrency eight retained all 3,072 returned IDs after
-ordinary reopen; every reopened writer used FULL and radio sends stayed zero.
-FULL elapsed 2.763–3.030 seconds/trial versus NORMAL 1.629–1.835. The exact source
-hashes, per-category timings and limits are in
-`docs/benchmarks/SQLITE-COMMIT-POLICY-2026-09-08.md` and its JSON record. These are
-existing-host workspace-SD measurements, not energy or physical-loss qualification.
+Read-only inspection found `outpost.service` enabled and failed, selecting release
+`20260829T012425Z-ff11ed8dd99b`, whose migration capacity is 153. The live database is
+schema 172 and passed `quick_check`. The source supports schema 185. No checkout
+Outpost process was running at inspection.
 
-All 229 targeted store/transaction/custody/backup/recovery/kit regressions passed;
-the database module reached 93.8% line coverage in that run. Package smoke verified
-all 38 runtime/radio pins. Lint, strict typing and the unchanged 262-error debt
-ratchet passed locally.
+The repair adds:
 
-The first full CI run found a stale expected lint-tool list in the deployment
-tests after the benchmark was added to CI/pre-push. The follow-up updates that
-expectation to include the benchmark and offline-kit tool; application code is
-unchanged. At `9c3324a`, [CI run 34228844518](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34228844518)
-passed all four jobs: 2,246 tests per full-suite run and 1,201 production-wiring
-tests per Python version, with coverage, package and dependency checks passing.
+- Explicit `OUTPOST_RECOVER_INCOMPATIBLE_BOOT=1` support in the normal verified
+  updater. The target must support current data; backups and exact-commit CI remain
+  required. A failed repair preserves live data, captures a forensic snapshot where
+  possible and leaves the new release selected but stopped. Incompatible automatic
+  and manual rollback are refused. Compatible ordinary upgrades retain their existing
+  rollback behavior, including failure handling when `systemctl start` fails.
+- Store ownership checked before SQLite opens. Standard `/var/lib/outpost` state and
+  installer-marked custom databases require the selected packaged interpreter and
+  package. Development uses separate state; historical binaries lack this guard.
+- Clearing the old systemd failure limit before startup, updated operating guidance,
+  and the repair guide included in future offline kits.
 
-A new 39-package FULL-policy kit from that exact green revision is retained at
-`.data/durability-2026-09-08/kit`. A separate copy installed into an inactive runtime
-with the source checkout, wheelhouse and package cache hidden, and networking
-unavailable to its process. Synthetic encrypted restore, named-operator login,
-identity continuity and the persistent recovery fence passed. The installed writer
-reported FULL before and after restart; simulated radio sends stayed zero.
-Its manifest SHA-256 is
+See `docs/BOOT-RECOVERY.md`. No migration, wire-format or identity change is introduced
+by this repair; it safely deploys the already-existing forward migrations.
+
+## Recovery copies and local evidence
+
+A private, integrity-checked schema-172 snapshot and configuration copies are retained
+under `/var/lib/outpost/backups/issue-136-2026-09-08/`. They have not been copied off-device.
+Do not publish their contents or identifiers.
+
+A separate private copy migrated from 172 to 185 successfully with the real Database
+opening path, FULL on its actual writer, clean integrity and zero foreign-key errors.
+All preexisting incident, incident-update, mail, federation-mail and outbound-work IDs
+were retained. The live database was unchanged. The sanitized result and private
+rehearsal location are in `.data/reboot-136-2026-09-08/migration-rehearsal.json`.
+
+Initial installer/ownership checks passed 32 cases. The broader store, transaction,
+backup, boot-readiness, ownership and offline-kit run passed 129 tests. Store ownership
+reached 100% line coverage. Strict mypy passed 155 source files; the debt ratchet
+remains 262. Required pre-push checks passed. Consult the state file and final logs
+for exact-commit CI. Final focused reruns passed nine recovery cases and eight
+ownership cases. Package smoke verified all 38 runtime/radio pins and exercised
+ownership, FULL commits, reopen and obsolete-release rejection in the installed
+wheel's actual interpreter. These local results do not establish a real reboot.
+
+## Next deployment steps
+
+1. Confirm and validate the independent recovery copy, and verify green CI for the
+   new #136 repair commit. The previous `9c3324a` deployment pin lacks forward-repair
+   support and cannot repair this incompatible predecessor through the old updater.
+2. Use the normal updater with `OUTPOST_RECOVER_INCOMPATIBLE_BOOT=1` and the existing
+   native Hailo wheel at
+   `/var/lib/outpost/installers/hailort-5.3.0-cp313-cp313-linux_aarch64.whl`.
+   The current Hailo device was present; model and native inputs must pass the normal
+   installer checks. Preserve configuration and authoritative data.
+3. Verify actual packaged service health, web access, radio state, schema, retained
+   data/durable work and fresh boot-schema readiness. Record exact commit and service
+   process evidence privately, with sanitized issue evidence.
+4. Record the pre-reboot boot ID and recovery checkpoint, then complete the authorized
+   controlled reboot and compare post-boot evidence without starting a checkout server.
+   Keep #136 open until the physical reboot criterion is satisfied.
+
+## Completed durability checkpoint: #137
+
+#137 is closed on verified software revision
+`9c3324a14486bc1933766b9c57bf8c523495b43f`. CI run `34228844518` passed all four jobs:
+2,246 tests per full-suite run and 1,201 production-wiring tests per Python version.
+The checked WAL/FULL policy remains enabled. The owner requires battery backup for
+both machines; #44 owns physical power-loss qualification and #148 owns storage/energy,
+battery runtime and shutdown qualification. Those unperformed hardware checks remain open.
+
+The scope clarification was pushed in `73d098cf249d2206b44e8deb58538b42f8eb46ce`.
+See `.data/close-137-2026-09-08/STATE.json` and
+`.data/durability-2026-09-08/STATE.json` for their separate evidence.
+The retained 39-package kit at `.data/durability-2026-09-08/kit` remains an unchanged
+`9c3324a` artifact; its manifest SHA-256 is
 `7380bda194764c6bfcee5bcf83c33c1fe480f8319425f6ca83f5f6b80b64b1c3`.
-This dated kit retains its original documents and is not rebuilt for the later
-scope clarification. Its verification does not establish physical replacement,
-battery runtime or power-loss acceptance.
+Its inactive installation and synthetic fenced restore do not qualify a physical
+replacement or reboot. Do not reuse old coverage files as current evidence.
 
-## Next actions and second-node update
-
-1. Finish recording the authorized #137 software closure, if the closure state
-   file or GitHub issue still shows it pending. Keep #44 and #148 open with their
-   hardware checks unchecked; full DATA-002 acceptance also remains pending.
-2. The next repository/deployment task is #136: align the installed service with
-   the verified software and complete its startup/reboot acceptance. The last
-   read-only observation found this host's enabled service failed and selecting
-   the August 29 release `ff11ed8dd99b` (schema capacity 153; checkout capacity 185).
-   The live database schema was not queried and this observation does not establish
-   the failure's cause. No deployment, service restart or reboot occurred here.
-3. On their separate second machine, the user should retain a validated off-device
-   backup, use a clean checkout, fetch and select verified revision
-   `9c3324a14486bc1933766b9c57bf8c523495b43f`, then run
-   `./deploy/update.sh 9c3324a14486bc1933766b9c57bf8c523495b43f` as the normal checkout
-   owner. The updater requires GitHub CLI for CI verification and invokes sudo for
-   installation. `git pull` alone does not update the installed service.
-4. The user must verify installed service health, radio/peer state and a fresh
-   readiness result. Those remote checks have not happened here. A later
-   documentation commit does not change the verified application's deployment pin.
-
-## Previous completed checkpoint
-
-The previous main revision `6fb1909` passed all four CI jobs; the three September 7
-commits passed 12 jobs total. #143, #146 and #151 are closed. #145 and #147 remain
-open for actual fresh-appliance, permanent-client/reboot and second-operator gates.
-The 39-package copied-kit install and synthetic fenced restore succeeded with
-networking unavailable to their process and original source/wheelhouse/cache hidden.
-See `.data/reboot-2026-09-07/STATE.json` for that dated evidence and retained kit.
-
-#130 remains the resilience tracker. The physical/time/capacity/power/SDR/field/soak
-and evaluation tasks keep their own acceptance requirements. Root coverage JSON
-files from older sessions must not be cited as current evidence.
+#130 remains the resilience tracker. #143, #146 and #151 are closed; #145 and #147
+retain their physical replacement, permanent-client/reboot and second-operator gates.

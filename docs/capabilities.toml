@@ -943,7 +943,7 @@ description = "Opt-in hardware release-gate assertion for the full guarded corpu
 [[capabilities]]
 id = "installation_operations"
 area = "Installation and diagnostics"
-present = "Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, health-gated Hailo handoff, and hardened service tooling."
+present = "Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, explicit forward recovery from incompatible boot releases, installed-store ownership guards, health-gated Hailo handoff, and hardened service tooling."
 maturity = "automated_tested"
 introduced_commit = "d614d85"
 limitations = ["A recorded fresh-Pi mDNS/hotspot onboarding drill and extended unattended wallboard soak remain field gates.", "Boot-schema evidence compares static package capacity with the inspected database; it does not prove configuration, import integrity, migration success, or unattended reboot/radio recovery. Custom or unavailable selections remain unknown.", "Outage assessment cannot certify missing regional maps, clock holdover, off-device restoration, station energy, replacement-client access, radio-only peer paths or SAME reception. Operator observations remain unverified, finite and context-bound; no qualification exercise runs automatically."]
@@ -951,7 +951,7 @@ roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-09-05"
+date = "2026-09-08"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/unit/test_deploy_install.py::test_installer_harness_rejects_safety_mutants"
@@ -972,6 +972,18 @@ description = "Healthy HTTP cannot mask an incompatible selected boot package; c
 kind = "automated"
 path = "tests/integration/test_boot_readiness.py::test_unknown_or_failed_boot_selection_never_reports_all_ready"
 description = "Unknown, disabled, custom, inactive and failed service selections degrade readiness without exporting raw unit values."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/unit/test_deploy_install.py::test_forward_recovery_preserves_newer_acknowledged_data_and_blocks_old_rollback"
+description = "Explicit forward repair retains newer data and refuses incompatible manual rollback before downtime."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_store_ownership.py::test_checkout_cannot_migrate_a_marked_installed_store"
+description = "The real database opening path rejects checkout ownership, including a database symlink, before SQLite opens or migrates acknowledged data."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/BOOT-RECOVERY.md"
+description = "Backup prerequisites, verified forward repair, failure preservation, development isolation and controlled reboot evidence."
 [[capabilities.evidence]]
 kind = "operations"
 path = "docs/SAFETY-READINESS.md"

@@ -193,8 +193,10 @@ The diagnostics CLI collects independent static evidence when the live backend i
 Collection has bounded subprocess output/deadlines and directory inventories, runs off the radio
 event loop, and never executes alternate Python or changes a database/service. Exported evidence
 omits raw unit commands, environment values and filesystem paths. No migration or radio policy
-changes are involved. Installed release alignment, development database ownership, actual reboot
-recovery (#136), and the remaining outage-readiness dimensions (#149) stay open.
+changes are involved. The subsequent [forward-recovery and store-ownership work](BOOT-RECOVERY.md)
+provides #136's repair workflow and rejects development code before opening installed
+databases. Actual installed release alignment and reboot recovery (#136), and the
+remaining outage-readiness dimensions (#149), require their separate evidence.
 
 ## Visible oversized-item failures — #162 / #135 prerequisite
 

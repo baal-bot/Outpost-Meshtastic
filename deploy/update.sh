@@ -6,6 +6,7 @@ PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
 TARGET=${1:-origin/main}
 RELEASE_REPOSITORY=${OUTPOST_RELEASE_REPOSITORY:-baal-bot/Outpost-Meshtastic}
 ALLOW_UNVERIFIED_CI=${OUTPOST_ALLOW_UNVERIFIED_CI:-0}
+RECOVER_INCOMPATIBLE_BOOT=${OUTPOST_RECOVER_INCOMPATIBLE_BOOT:-0}
 GH=${OUTPOST_GH:-}
 HAILORT_WHEEL=${OUTPOST_HAILORT_WHEEL:-}
 HAILO_VLM_MODEL_SOURCE=${OUTPOST_HAILO_VLM_MODEL:-}
@@ -30,6 +31,10 @@ fi
 case "$ALLOW_UNVERIFIED_CI" in
   0|1) ;;
   *) echo "OUTPOST_ALLOW_UNVERIFIED_CI must be 0 or 1" >&2; exit 1 ;;
+esac
+case "$RECOVER_INCOMPATIBLE_BOOT" in
+  0|1) ;;
+  *) echo "OUTPOST_RECOVER_INCOMPATIBLE_BOOT must be 0 or 1" >&2; exit 1 ;;
 esac
 git -C "$PROJECT_DIR" diff --quiet && git -C "$PROJECT_DIR" diff --cached --quiet || { echo "Refusing to update a checkout with uncommitted changes." >&2; exit 1; }
 old=$(git -C "$PROJECT_DIR" rev-parse HEAD)
@@ -96,6 +101,7 @@ else
 fi
 git -C "$PROJECT_DIR" checkout --detach "$target"
 if sudo env OUTPOST_ALLOW_UNVERIFIED_CI="$ALLOW_UNVERIFIED_CI" \
+  OUTPOST_RECOVER_INCOMPATIBLE_BOOT="$RECOVER_INCOMPATIBLE_BOOT" \
   OUTPOST_CI_VERIFIED_REVISION="$target" OUTPOST_CI_EVIDENCE="$ci_evidence" \
   OUTPOST_HAILORT_WHEEL="$HAILORT_WHEEL" OUTPOST_HAILO_VLM_MODEL="$HAILO_VLM_MODEL_SOURCE" \
   "$SCRIPT_DIR/install.sh"; then

@@ -51,6 +51,18 @@ release cannot read the live schema. Code-only failures leave live data untouche
 restore first captures a verified failed-release forensic snapshot and reports the discarded time
 window. `git pull` alone never updates the running installation.
 
+The standard state directory and installer-marked custom databases are reserved for
+the selected packaged interpreter. A source checkout is rejected before SQLite
+opens or migrates those stores. Use a separate development configuration with
+`store.path` outside `/var/lib/outpost`, and an isolated radio/test profile. Do not
+remove a `.deployment.json` ownership record to run development code on live data.
+Older binaries do not contain this guard; retain the deployment workflow when
+working with historical checkouts.
+
+If development has already advanced the database beyond the boot release, follow
+[repairing an incompatible boot release](BOOT-RECOVERY.md). This requires a verified
+compatible target and an independent recovery copy; an older database is not a repair.
+
 After service startup, resume the complete field checklist with `sudo outpost-onboarding status`.
 It covers credentials, identity/location, live radio and region/channel verification, maps and
 providers, off-device backup, optional federation, and a separate wallboard account. The installer

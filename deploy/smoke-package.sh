@@ -34,6 +34,7 @@ required = {
     "outpost/recovery_format.py",
     "outpost/recovery_fence.py",
     "outpost/store/recovery_snapshot.py",
+    "outpost/store/ownership.py",
     "outpost/store/migrations/0185_recovery_fence.sql",
     "outpost/web/static/recovery.html",
     "outpost/web/static/recovery.js",
@@ -88,6 +89,57 @@ if missing:
 for command in ("outpost-diagnostics", "outpost-onboarding", "outpost-replay", "outpost-setup-token", "outpost-recovery"):
     if command not in entry_points:
         raise SystemExit(f"wheel is missing console command: {command}")
+PY
+
+ln -s "$SMOKE_DIR/venv" "$SMOKE_DIR/current"
+python3 "$SCRIPT_DIR/release_recovery.py" own-store \
+  --database "$SMOKE_DIR/owned.db" --current "$SMOKE_DIR/current" >/dev/null
+PYTHONPATH= "$SMOKE_DIR/venv/bin/python" - "$SMOKE_DIR" <<'PY'
+import asyncio
+import sys
+from pathlib import Path
+
+import outpost
+from outpost.store import Database
+from outpost.store.database import StoreError
+
+root = Path(sys.argv[1])
+assert Path(outpost.__file__).is_relative_to(root / "venv")
+
+async def verify_owner():
+    database = Database(root / "owned.db")
+    await database.open()
+    try:
+        await database.write("CREATE TABLE package_probe(id TEXT PRIMARY KEY)")
+        await database.write("INSERT INTO package_probe VALUES('retained')")
+        async with database.transaction() as transaction:
+            assert (await transaction.read("PRAGMA synchronous"))[0][0] == 2
+    finally:
+        await database.close()
+    reopened = Database(root / "owned.db")
+    await reopened.open()
+    try:
+        assert (await reopened.read("SELECT id FROM package_probe"))[0][0] == "retained"
+    finally:
+        await reopened.close()
+    before = (root / "owned.db").read_bytes()
+    (root / "current").unlink()
+    (root / "other-release").mkdir()
+    (root / "current").symlink_to(root / "other-release")
+    rejected = Database(root / "owned.db")
+    try:
+        try:
+            await rejected.open()
+        except StoreError:
+            pass
+        else:
+            raise AssertionError("An unselected packaged release opened the installed store")
+        assert (root / "owned.db").read_bytes() == before
+    finally:
+        await rejected.close()
+
+asyncio.run(verify_owner())
+print("Packaged store ownership, FULL commits, reopen and obsolete-release rejection passed.")
 PY
 
 echo "Package smoke test passed: $WHEEL"

@@ -12,6 +12,8 @@ from typing import Any, TypeVar, cast
 
 from prometheus_client import Counter, Gauge
 
+from outpost.store.ownership import require_store_owner
+
 T = TypeVar("T")
 MIN_SQLITE = (3, 43, 0)
 DB_READ_POOL_SIZE = 2
@@ -121,6 +123,10 @@ class Database:
     def _open_sync(self) -> None:
         if sqlite3.sqlite_version_info < MIN_SQLITE:
             raise StoreError("REQ-DATA-002b requires SQLite >= 3.43")
+        try:
+            require_store_owner(self.path)
+        except RuntimeError as error:
+            raise StoreError(str(error)) from None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fresh = not self.path.exists()
         connection = sqlite3.connect(self.path, check_same_thread=False)
