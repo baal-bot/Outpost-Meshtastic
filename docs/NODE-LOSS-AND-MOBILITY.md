@@ -39,7 +39,7 @@ These are operator planning targets for the community, not measured guarantees:
 
 | Failure | Recovery-point objective (maximum intended loss) | Recovery-time objective and gate |
 | --- | --- | --- |
-| Power interruption, intact readable store | Last committed transaction under the [WAL/FULL contract](COMMIT-DURABILITY.md) on flush-honoring storage; actual acknowledged-ID retention remains physically unqualified | Local service within 5 minutes of stable power, only after health/time/radio checks; physical #136/#44/#148 remains open |
+| Power interruption, intact readable store | Last committed transaction under the [WAL/FULL contract](COMMIT-DURABILITY.md) on flush-honoring storage; acknowledged-ID retention under abrupt power loss remains physically unqualified | Local service within 5 minutes of stable power, only after health/time/radio checks; power-loss and energy qualification remain #44/#148. The local Pi's [controlled reboot](BOOT-RECOVERY-QUALIFICATION-2026-09-08.md) passed #136 separately |
 | Failed storage or lost appliance with an independent encrypted copy | No more than 24 hours of private/configuration history: make and verify an actual independent copy at least daily and after critical identity/configuration changes | Isolated operator archive review within 30 minutes with compatible prepositioned runtime, custody and a trained operator; field timing remains #147 |
 | Fresh serving replacement | New writes from commissioning onward; no inherited source authority | Basic local communication and new incident intake within 60 minutes of a prepared kit reaching a safe powered site; physical #147/#148 prerequisites, not a software guarantee |
 | Origin unavailable but a second peer retained public records | Last actually received/reviewed record, not “all records”; target a reviewed checkpoint at least every 15 minutes during active incidents where channel capacity permits | Continue the surviving node's independent local services; source updates remain unknown until verified reconciliation |
@@ -177,5 +177,7 @@ Real Chromium tests cover cancel, stale-key conflict and explicit fresh consent 
 
 These checks do not certify a real appliance power cut, SD controller durability,
 field coverage, resident usability, physical recovery-kit completeness or the
-target recovery times. Those existing gates remain #44/#135/#136/#147/#148/#155/#157;
+target recovery times. Those existing gates remain #44/#135/#147/#148/#155/#157;
 closing this architecture/software contract does not close those physical gates.
+The separate [September 8 controlled reboot record](BOOT-RECOVERY-QUALIFICATION-2026-09-08.md)
+qualifies #136's local installed-service recovery only.

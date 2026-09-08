@@ -195,8 +195,11 @@ event loop, and never executes alternate Python or changes a database/service. E
 omits raw unit commands, environment values and filesystem paths. No migration or radio policy
 changes are involved. The subsequent [forward-recovery and store-ownership work](BOOT-RECOVERY.md)
 provides #136's repair workflow and rejects development code before opening installed
-databases. Actual installed release alignment and reboot recovery (#136), and the
-remaining outage-readiness dimensions (#149), require their separate evidence.
+databases. The local Pi's installed release alignment and controlled reboot recovery
+passed #136 on September 8, 2026, with [separate physical observations](BOOT-RECOVERY-QUALIFICATION-2026-09-08.md)
+of automatic packaged startup, web/radio/AI recovery, schema integrity and retained
+records, including five pending work items. The remaining outage-readiness dimensions
+retain their separate evidence requirements.
 
 ## Visible oversized-item failures — #162 / #135 prerequisite
 

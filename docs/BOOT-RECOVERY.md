@@ -64,6 +64,8 @@ and the same package location. Other unmet field checks retain their own status.
 A controlled reboot must then start the enabled packaged service without a terminal
 session. Compare boot IDs and capture the same observations after reboot, including
 any expired or delivered durable work. A service restart, simulated test or static
-schema pass does not satisfy that physical reboot criterion. #136 remains open until
-the actual deployment and reboot evidence has been recorded; physical power-loss
-qualification stays with #44.
+schema pass does not satisfy that physical reboot criterion. The local Pi passed
+#136's actual deployment and controlled reboot acceptance on September 8, 2026;
+the [dated qualification record](BOOT-RECOVERY-QUALIFICATION-2026-09-08.md) identifies
+the release, schema, automatic boot witness and retained records. Physical power-loss
+qualification stays with #44; repeat deployment-specific checks after later changes.

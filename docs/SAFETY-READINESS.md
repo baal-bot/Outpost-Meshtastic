@@ -156,5 +156,7 @@ configuration/database path, migration success, package integrity/import behavio
 network access, power autonomy, or successful unattended reboot. Results are point-in-time evidence;
 rerun after a deployment or unit change. Arrange a verified deployment and validated recovery backup
 to resolve incompatibility. Do not bypass the downgrade guard, restore older data over acknowledged
-records, or reboot merely to clear a warning. Development database ownership and actual reboot
-qualification remain tracked in #136. #149's assessment does not close that physical gate.
+records, or reboot merely to clear a warning. Development database ownership and the local Pi's
+actual controlled reboot acceptance were completed under #136; see the separate
+[September 8 qualification record](BOOT-RECOVERY-QUALIFICATION-2026-09-08.md). #149's static
+assessment alone does not establish that result or qualify a later deployment.

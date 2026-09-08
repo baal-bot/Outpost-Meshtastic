@@ -233,8 +233,8 @@ issues = [154, 156]
 
 [goals.G1]
 state = "open"
-rationale = "Phase 1-3 software evidence exists; a fresh, uncached WAN-down deployment still needs installed boot, regional map, local access and offline recovery qualification. Hardware exercises are held by the operator."
-related = ["docs/PHASE3-ACCEPTANCE.md", "docs/FEATURES.md"]
+rationale = "Phase 1-3 software evidence exists and the repaired local Pi passed controlled reboot acceptance on 2026-09-08. A fresh, uncached WAN-down deployment still needs regional map, offline time, local access and offline recovery qualification. Remaining hardware exercises are held by the operator."
+related = ["docs/PHASE3-ACCEPTANCE.md", "docs/FEATURES.md", "docs/BOOT-RECOVERY-QUALIFICATION-2026-09-08.md"]
 issues = [136, 139, 141, 145, 147, 157]
 
 [goals.G2]
@@ -257,8 +257,8 @@ issues = [156]
 
 [goals.G5]
 state = "open"
-rationale = "No current-release 30-day no-intervention qualification with radio, power and provider recovery has been established. The installed service mismatch and physical loss tests remain open and held."
-related = ["docs/FEATURES.md", "docs/RESILIENCE-HARDENING.md"]
+rationale = "No current-release 30-day no-intervention qualification with radio, power and provider recovery has been established. The local installed service mismatch was repaired and one controlled reboot passed on 2026-09-08; physical power-loss and extended unattended qualification remain open and held."
+related = ["docs/FEATURES.md", "docs/RESILIENCE-HARDENING.md", "docs/BOOT-RECOVERY-QUALIFICATION-2026-09-08.md"]
 issues = [136, 137, 145, 148, 158, 44]
 
 [goals.G6]

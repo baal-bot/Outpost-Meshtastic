@@ -985,6 +985,10 @@ kind = "operations"
 path = "docs/BOOT-RECOVERY.md"
 description = "Backup prerequisites, verified forward repair, failure preservation, development isolation and controlled reboot evidence."
 [[capabilities.evidence]]
+kind = "field"
+path = "docs/BOOT-RECOVERY-QUALIFICATION-2026-09-08.md"
+description = "One local Pi on source 0451303/schema 185 recovered automatically after a controlled reboot with healthy web/radio/required Hailo AI and all pre-reboot records retained, including five pending work items; power-loss and broader field gates remain separate."
+[[capabilities.evidence]]
 kind = "operations"
 path = "docs/SAFETY-READINESS.md"
 description = "All-check evidence states, finite operator observations, cache/sample freshness, collection budgets and non-destructive remediation; physical qualification remains separate."
