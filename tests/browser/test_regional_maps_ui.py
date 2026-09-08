@@ -91,6 +91,17 @@ def test_vector_maps_render_offline_in_all_themes(browser, maps_url, theme, widt
     assert not errors and not external
     assert any("/tiles/vector/" in url for url in assets)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    # The shared controller uses 256-pixel camera units; MVT uses 512. The displayed
+    # vector zoom and detail warning must match the source's actual tile zoom.
+    page.evaluate("""() => document.querySelector('#map-preview').outpostMapController
+      .setView({lat:-1.2864,lon:36.8172,zoom:13})""")
+    page.wait_for_function("""() => document.querySelector('.outpost-map-coordinates')
+      .textContent.endsWith('z12')""")
+    assert "Offline regional map" in page.locator(".outpost-map-basemap-state").inner_text()
+    page.evaluate("""() => document.querySelector('#map-preview').outpostMapController
+      .setView({zoom:14})""")
+    page.wait_for_function("""() => document.querySelector('.outpost-map-basemap-state')
+      .textContent.includes('detail ends at z12')""")
     page.locator("#map-preview").focus()
     before = page.evaluate(
         "() => document.querySelector('#map-preview').outpostMapController.getView().lon"
@@ -149,29 +160,28 @@ def test_operational_maps_use_local_vector_pack_and_keep_markers(browser, maps_u
         page.wait_for_function(
             "s => Boolean(document.querySelector(s)?.outpostMapController?.vector)", arg=selector
         )
-        page.evaluate(
-            """s => {
-          const map = document.querySelector(s).outpostMapController;
-          map.setView({lat:-1.2864,lon:36.8172,zoom:11});
-          map.setMarkers([{id:'map-test',lat:-1.2864,lon:36.8172,label:'Test marker'}]);
-          map.renderNow();
-        }""",
-            selector,
-        )
         page.locator(selector).scroll_into_view_if_needed()
         page.wait_for_timeout(500)
-        assert page.locator(selector + " canvas").count() == 1
-        assert page.locator(selector + " [data-marker-id='map-test']").is_visible()
-        assert (
-            page.locator(selector + " .outpost-vector-map").evaluate(
-                "el => getComputedStyle(el).position"
-            )
-            == "absolute"
+        # Sample the synthetic marker in the same frame it is installed. Normal
+        # domain refreshes legitimately replace it with their empty fixture lists.
+        rendered = page.evaluate(
+            """s => {
+              const root = document.querySelector(s);
+              const map = root.outpostMapController;
+              map.setView({lat:-1.2864,lon:36.8172,zoom:11});
+              map.setMarkers([{id:'map-test',lat:-1.2864,lon:36.8172,label:'Test marker'}]);
+              map.renderNow();
+              const marker = root.querySelector('[data-marker-id="map-test"]');
+              return {canvas:root.querySelectorAll('canvas').length,
+                markerWidth:marker.getBoundingClientRect().width,
+                position:getComputedStyle(root.querySelector('.outpost-vector-map')).position,
+                status:root.querySelector('.outpost-map-basemap-state').textContent};
+            }""",
+            selector,
         )
-        assert (
-            "Offline regional map"
-            in page.locator(selector + " .outpost-map-basemap-state").inner_text()
-        )
+        assert rendered["canvas"] == 1 and rendered["markerWidth"] > 0
+        assert rendered["position"] == "absolute"
+        assert "Offline regional map" in rendered["status"]
         assert not external
     finally:
         page.close()

@@ -572,7 +572,7 @@
       this._renderMarkers(viewport);
       if (this.coordinates) {
         this.coordinates.textContent =
-          `${this.view.lat.toFixed(5)}, ${this.view.lon.toFixed(5)} · z${this.view.zoom}`;
+          `${this.view.lat.toFixed(5)}, ${this.view.lon.toFixed(5)} · z${this.vector ? this.view.zoom - 1 : this.view.zoom}`;
       }
       this.options.onViewChange?.(this.getView());
       const duration = performance.now() - startedAt;

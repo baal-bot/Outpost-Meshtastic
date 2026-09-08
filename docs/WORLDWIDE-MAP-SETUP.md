@@ -5,7 +5,7 @@ Outpost installs a small world overview (zooms 0–6) plus optional regional det
 orientation across the Web Mercator globe, not street detail everywhere; areas above
 85.0511° north or south are outside that projection.
 
-Open **Access → Set up offline regional maps & world overview**, or `/maps.html`.
+Refresh dashboard tabs opened before upgrading, then open **Access → Set up offline regional maps & world overview**, or `/maps.html`.
 The first-run `maps_providers` checklist points to the same page. The installer creates
 the configured tile directory for the service and defers selection until the radio is
 running; it no longer seeds USGS raster tiles automatically.
