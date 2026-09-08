@@ -104,12 +104,19 @@ class Database:
 
     @staticmethod
     def _configure(connection: sqlite3.Connection) -> None:
-        connection.execute("PRAGMA synchronous=NORMAL")
+        # WAL commits must request their durability barrier before callers can
+        # acknowledge authoritative data. Storage must still honor SQLite's sync.
+        connection.execute("PRAGMA synchronous=FULL")
         connection.execute("PRAGMA busy_timeout=5000")
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA temp_store=MEMORY")
         connection.execute("PRAGMA cache_size=-16000")
         connection.execute("PRAGMA mmap_size=67108864")
+
+    @staticmethod
+    def _verify_writer_durability(connection: sqlite3.Connection) -> None:
+        if connection.execute("PRAGMA main.synchronous").fetchone()[0] != 2:
+            raise StoreError("REQ-DATA-002b: writer must use synchronous=FULL")
 
     def _open_sync(self) -> None:
         if sqlite3.sqlite_version_info < MIN_SQLITE:
@@ -118,19 +125,25 @@ class Database:
         fresh = not self.path.exists()
         connection = sqlite3.connect(self.path, check_same_thread=False)
         connection.row_factory = sqlite3.Row
-        if fresh:
-            connection.execute("PRAGMA auto_vacuum=INCREMENTAL")
-            connection.execute("PRAGMA journal_mode=WAL")
-        self._configure(connection)
-        journal = connection.execute("PRAGMA journal_mode").fetchone()[0]
-        auto_vacuum = connection.execute("PRAGMA auto_vacuum").fetchone()[0]
-        if str(journal).lower() != "wal" or auto_vacuum != 2:
+        try:
+            if fresh:
+                connection.execute("PRAGMA auto_vacuum=INCREMENTAL")
+                connection.execute("PRAGMA journal_mode=WAL")
+            self._configure(connection)
+            journal = connection.execute("PRAGMA journal_mode").fetchone()[0]
+            auto_vacuum = connection.execute("PRAGMA auto_vacuum").fetchone()[0]
+            if str(journal).lower() != "wal" or auto_vacuum != 2:
+                raise StoreError(
+                    "REQ-DATA-002a: database must use journal_mode=wal and auto_vacuum=incremental"
+                )
+            self._verify_writer_durability(connection)
+            self._writer = connection
+            self._migrate_sync()
+            self._verify_writer_durability(connection)
+        except BaseException:
+            self._writer = None
             connection.close()
-            raise StoreError(
-                "REQ-DATA-002a: database must use journal_mode=wal and auto_vacuum=incremental"
-            )
-        self._writer = connection
-        self._migrate_sync()
+            raise
 
     def _migrate_sync(self) -> None:
         assert self._writer is not None

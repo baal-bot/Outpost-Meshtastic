@@ -40,7 +40,7 @@ records that conversational approval; it is not an independently authored GitHub
 | Event-driven incidents | The 60-second community/map outcome remains open (#135, #157). Catch-up manifests, remote quarantine receipt and operator acceptance are different stages. |
 | Encrypted backups | Database snapshots and external-storage encryption advice are not integrated encrypted backups or fresh-node restoration (FED-015a, SEC-042; #145/#146). |
 | Physical sync | Signed, filtered bundle exchange remains missing (FED-041, #143). Full backups and replay fixtures are not substitutes. |
-| Durability/boot | WAL/NORMAL remains current original policy, not a power-cut persistence guarantee (DATA-002, #137/#44). Installed-service alignment is #136; the development process is not boot evidence. |
+| Durability/boot | #137 changes current connections to checked WAL/FULL; the original WAL/NORMAL wording remains in the historical snapshot. Complete power-loss, storage and energy acceptance stays pending under #137/#44. Installed-service alignment is #136; the development process is not boot evidence. |
 | Migration numbering | Shared monotonic history differs from original reserved module bands (DATA-009). Replacement approval is pending; do not renumber applied migrations. |
 | Application cryptography | The original blanket prohibition conflicts with encrypted federation mail/relay (SEC-028). This was not among the approved choices; reconcile the exception explicitly. |
 

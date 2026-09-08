@@ -51,11 +51,11 @@ gate so formatting drift cannot hide the later checks:
 ```
 
 ```sh
-.venv/bin/ruff format --check src tests tools/build_release_metadata.py tools/check_capabilities.py \
+.venv/bin/ruff format --check src tests tools/build_release_metadata.py tools/benchmark_commit_policy.py tools/check_capabilities.py \
   tools/check_commands.py tools/check_ci_evidence.py tools/check_dependency_lock.py \
   tools/check_mypy_ratchet.py tools/check_requirements.py tools/pytest_evidence_plugin.py tools/verify_release.py \
   deploy/configure.py deploy/render_avahi.py deploy/offline_kit.py
-.venv/bin/ruff check src tests tools/build_release_metadata.py tools/check_capabilities.py \
+.venv/bin/ruff check src tests tools/build_release_metadata.py tools/benchmark_commit_policy.py tools/check_capabilities.py \
   tools/check_commands.py tools/check_ci_evidence.py tools/check_dependency_lock.py \
   tools/check_mypy_ratchet.py tools/check_requirements.py tools/pytest_evidence_plugin.py tools/verify_release.py \
   deploy/configure.py deploy/render_avahi.py deploy/offline_kit.py

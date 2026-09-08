@@ -26,13 +26,20 @@ PRAGMA auto_vacuum  = INCREMENTAL; -- MUST precede the first CREATE TABLE
 **(b) Per-connection pragmas — applied on every connection opened:**
 
 ```sql
-PRAGMA synchronous  = NORMAL;      -- durable enough with WAL; far kinder to SD cards
+PRAGMA synchronous  = FULL;        -- request a WAL durability barrier for every commit
 PRAGMA busy_timeout = 5000;
 PRAGMA foreign_keys = ON;
 PRAGMA temp_store   = MEMORY;
 PRAGMA cache_size   = -16000;      -- 16000 KiB ≈ 15.6 MiB
 PRAGMA mmap_size    = 67108864;    -- 64 MB
 ```
+
+The authoritative writer MUST verify `synchronous=FULL` before applying migrations
+and again before serving requests. No weaker production mode is supported. Successful
+authoritative writes require the commit to finish before success is returned or
+new outbound work is published. Storage and the operating system must honor flushes;
+this setting alone is not physical power-loss qualification. See
+[the acknowledged-record contract](../../COMMIT-DURABILITY.md) and #137/#44.
 
 **REQ-DATA-002a** — Startup **MUST** verify `PRAGMA journal_mode` returns `wal` and
 `PRAGMA auto_vacuum` returns `2` (incremental), and **MUST** log an actionable error naming

@@ -1,88 +1,70 @@
-# Session resume point — 2026-09-07 (America/New_York)
+# Session resume point — 2026-09-08 (America/New_York)
 
-## Current work and live-state boundary
+## Current scope
 
 - Repository: `baal-bot/Outpost-Meshtastic`; branch `main`.
-- #146 was committed and pushed as `a3c557e5f2809ccd1dc76d748b628b9aaf9d4d2b`.
-- Its full CI is [run 34172816172](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34172816172).
-  It was running when this checkpoint was written; check its actual final state.
-- This commit adds the #147 offline runtime preparation tooling and permanent
-  local access/second-operator guide. Check the latest commit's full CI separately.
-- Read ignored `.data/reboot-2026-09-07/STATE.json`, when present, for the latest
-  CI results and issue state recorded after this committed checkpoint.
-- Work here uses isolated stores, synthetic fixtures and inactive runtime
-  directories. No live database, service, radio, WAN or held appliance was changed.
-  The August 30 live-service restart instructions are obsolete.
+- The user authorized #137's durability work. The second node is a separate
+  machine and **the user will update it**. Do not infer remote access or deployment.
+- No live database, service, radio, WAN or physical power test was changed here.
+  Development and benchmarks use new disposable stores with simulated radio.
+- Read `.data/durability-2026-09-08/STATE.json`, when present, for final commit/CI
+  evidence recorded after this committed checkpoint. Also inspect current GitHub
+  #137 and the actual latest CI result before calling this work fully verified.
 
-## #146 implementation and local verification
+## #137 change and evidence
 
-The node-loss contract defines per-data survival, recovery objectives, distinct
-fresh replacement identity, fenced archive review and voluntary local resident
-consent/provenance/revocation/conflict/retention. BBS adoption requires a current
-named operator's preview and explicit confirmation in the existing writer;
-association and audit commit together. It cannot transfer keys/private records
-or alias incident/alert identities. Ambiguous legacy mappings fail closed.
+The application now configures WAL/FULL connections and checks the actual writer
+before migrations and before serving callers. Startup rejects a weakened writer
+and closes its connection. No weaker production configuration is added. Schema,
+wire format and identity remain unchanged. The current DATA-002 clause and
+operating contract describe this decision; the original requirement snapshot is
+preserved and whole-requirement physical acceptance stays pending.
 
-The recovered work passed 129 recovery/federation/readiness regressions, 21
-federation visual/browser checks and the final two keyboard/consent browser cases.
-Both adoption modules reached 100% line coverage in the focused run. Package
-smoke installation verified all 38 runtime/radio pins. Ruff, strict mypy/ratchet,
-capability/requirement/command catalogues and markup gates passed.
+Five new production-wired test cases cover fresh migrations, an upgrade from
+schema 184, reopen, restore and rejection/cleanup of weakened writer settings.
+Broader transaction, mail, outbox, signed custody and recovery regression results
+are under `.data/durability-2026-09-08/` and in final CI.
 
-The previous `bf01c2a` CI failure was readiness-browser teardown: its HTTP client
-closed before pending Chromium routes. The #146 commit corrects that ownership
-order without removing assertions. [Run 34163313982](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34163313982)
-is historical failed evidence, not a successful run.
+The maintained `tools/benchmark_commit_policy.py` creates only new temporary
+stores and measures real incident/mail/outbox/signed-custody service calls. Six
+512-operation trials at concurrency eight retained all 3,072 returned IDs after
+ordinary reopen; every reopened writer used FULL and radio sends stayed zero.
+FULL elapsed 2.763–3.030 seconds/trial versus NORMAL 1.629–1.835. The exact source
+hashes, per-category timings and limits are in
+`docs/benchmarks/SQLITE-COMMIT-POLICY-2026-09-08.md` and its JSON record. These are
+existing-host workspace-SD measurements, not energy or physical-loss qualification.
 
-## #147 preparation tooling
+All 229 targeted store/transaction/custody/backup/recovery/kit regressions passed;
+the database module reached 93.8% line coverage in that run. Package smoke verified
+all 38 runtime/radio pins. Lint, strict typing and the unchanged 262-error debt
+ratchet passed locally. Inspect the actual full CI outcome; this file was written
+before the commit's run.
 
-- `deploy/offline_kit.py build` requires a clean application checkout, matching
-  successful saved CI evidence and exactly the application plus all locked wheels.
-  Application wheel files must match the source bytes; host and schema fingerprint
-  are recorded along with a bounded hash inventory, public references and licenses.
-- `verify` requires an independently recorded manifest digest. `install` creates
-  only a new inactive venv, uses local hash-pinned binaries without indexes/caches,
-  checks package consistency and removes its own failed staging directory.
-- `docs/OFFLINE-REPLACEMENT.md` inventories boot media, power/LAN, drivers, maps,
-  firmware/client apps, optional vendor/models, licensing and separate private
-  recovery custody. It gives permanent numeric-LAN/mDNS access and a second-operator
-  expiry/reboot/recovery record. The online installer is not claimed offline-safe.
-- Local unit regression: 534 tests passed before the final input-size guard case;
-  all 32 final kit-specific cases passed afterward. Ruff and strict typing of the
-  standalone tool passed. Full CI on this commit remains required.
-- Real preparation: the `a3c557e` application wheel matches all 315 tracked package
-  files; all 38 locked dependencies are downloaded into the ignored wheelhouse.
-  An actual kit build/install using saved green CI awaits that run's success.
-- Test fixtures use a small synthetic application/dependency wheel pair. Do not
-  describe their successful fresh-venv installation as a physical Outpost recovery.
+## Next actions and second-node update
 
-## GitHub issue state at checkpoint
+1. Finish/check full CI for the #137 commit and resolve any actual failures.
+2. Update the existing #137 body with exact commit/run/results. Keep #137 open for
+   energy/storage qualification and #44's physical acknowledged-ID power-cut gate.
+3. Give the user the exact green revision. On their second machine, they should
+   first retain a validated off-device backup, use a clean checkout, fetch and
+   select that revision, then run `./deploy/update.sh <exact-commit>` as the normal
+   checkout owner. The updater requires GitHub CLI for CI verification and invokes
+   sudo for installation. `git pull` alone does not update the installed service.
+4. Have the user verify installed service health, radio/peer state and a fresh
+   readiness result. Do not claim that those remote checks have already happened.
+5. The previous verified offline kit uses a3c557e/NORMAL. Retain it as a previous
+   generation; a FULL-policy kit must be rebuilt from the new green source and
+   independently verified. New offline kits include the durability references.
 
-- #143 (signed physical transfer) and #151 (incident responsibility) are closed.
-  Their bodies now record the four successful jobs on `d138e43` in
-  [run 34162591706](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34162591706).
-  GitHub automatically checked both tasks in #130. No new issue/comment was created.
-- #146 awaits its new full CI before final closure of the architecture/software task.
-- #145 remains open for actual compatible offline-appliance/operator restoration;
-  software verification does not satisfy that physical acceptance criterion.
-- #147 remains open for actual fresh-target/permanent-client/reboot/second-operator
-  evidence even after preparation tooling passes CI.
-- #130 remains the resilience tracker. #135/#136/#137/#139/#141/#142/#148/#150/
-  #155–#159 and #44 retain their stated operational, hardware or evaluation gates.
+## Previous completed checkpoint
 
-## Resume actions
+The previous main revision `6fb1909` passed all four CI jobs; the three September 7
+commits passed 12 jobs total. #143, #146 and #151 are closed. #145 and #147 remain
+open for actual fresh-appliance, permanent-client/reboot and second-operator gates.
+The 39-package copied-kit install and synthetic fenced restore succeeded with
+networking unavailable to their process and original source/wheelhouse/cache hidden.
+See `.data/reboot-2026-09-07/STATE.json` for that dated evidence and retained kit.
 
-1. Check `git status`, `git log` and the ignored `STATE.json`; preserve any later changes.
-2. Inspect final CI for #146 and this #147 preparation commit. Fix failures on their
-   actual evidence before closing tasks or claiming full verification.
-3. Once exact source CI passes, build/verify the real prepared kit and test its
-   inactive install inside a process-only network namespace. This host supports
-   `unshare --user --map-root-user --net`; it does not disconnect the live host.
-4. Reconcile the existing #146/#145/#147 issue bodies with actual results and limits.
-   Actual service activation, physical RF, WAN disconnection and second-person
-   testing need their separately scoped field exercises; do not infer completion.
-
-Ignored artifacts are under `.data/reboot-2026-09-07/`, including test XML/coverage,
-CI logs, previous issue bodies, screenshots, a detached `kit-source` worktree and
-public dependency wheels. Root coverage JSON files predate this work and must not
-be cited as current full-suite evidence.
+#130 remains the resilience tracker. The physical/time/capacity/power/SDR/field/soak
+and evaluation tasks keep their own acceptance requirements. Root coverage JSON
+files from older sessions must not be cited as current evidence.

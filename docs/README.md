@@ -18,6 +18,7 @@ detailed intended product design.
 11. [Encrypted off-device recovery](ENCRYPTED-RECOVERY.md)
 12. [Node loss, replacement identity and resident mobility](NODE-LOSS-AND-MOBILITY.md)
 13. [Offline replacement kit and permanent local access](OFFLINE-REPLACEMENT.md)
+14. [Acknowledged-record durability](COMMIT-DURABILITY.md)
 
 ## Members and responders
 

@@ -1,0 +1,260 @@
+{
+  "source_revision": "6fb190971c8625f4d0a482d9ca79a1d9a23a0f6a",
+  "database_source_sha256": "4da4ae11716b825df5c2def88b73a24dcd6af3f2520801daed2b63ac9f269e96",
+  "benchmark_source_sha256": "dc3af60a13fcb0335b96b8b86879a9d09ddc6d0e3983457b822053ea930c4f95",
+  "platform": "aarch64",
+  "kernel": "6.18.39+rpt-rpi-2712",
+  "python": "3.13.5",
+  "sqlite": "3.46.1",
+  "scope": "synthetic mixed domain calls on new temporary stores; no router/RF/power cut",
+  "energy_wh": null,
+  "power_loss_qualified": false,
+  "trials": [
+    {
+      "trial": 1,
+      "mode": "NORMAL",
+      "default_writer": 2,
+      "reopened_writer": 2,
+      "operations": 512,
+      "concurrency": 8,
+      "wall_seconds": 1.6291067130005104,
+      "acknowledged_identifiers_verified_after_reopen": true,
+      "counts": {
+        "incident": 128,
+        "mail": 128,
+        "outbox": 128,
+        "signed_custody": 128
+      },
+      "radio_sends": 0,
+      "database_bytes": 1572864,
+      "wal_bytes": 4185952,
+      "latency_ms": {
+        "incident": {
+          "p50": 8.270071000879398,
+          "p95": 206.6163970011985,
+          "max": 223.93653499602806
+        },
+        "mail": {
+          "p50": 8.324302500113845,
+          "p95": 206.6830999974627,
+          "max": 223.0696699989494
+        },
+        "outbox": {
+          "p50": 8.429153502220288,
+          "p95": 206.81111799785867,
+          "max": 222.73380200203974
+        },
+        "signed_custody": {
+          "p50": 8.289987999887671,
+          "p95": 206.6031930007739,
+          "max": 222.1665649994975
+        }
+      }
+    },
+    {
+      "trial": 2,
+      "mode": "FULL",
+      "default_writer": 2,
+      "reopened_writer": 2,
+      "operations": 512,
+      "concurrency": 8,
+      "wall_seconds": 2.95207260800089,
+      "acknowledged_identifiers_verified_after_reopen": true,
+      "counts": {
+        "incident": 128,
+        "mail": 128,
+        "outbox": 128,
+        "signed_custody": 128
+      },
+      "radio_sends": 0,
+      "database_bytes": 1572864,
+      "wal_bytes": 4185952,
+      "latency_ms": {
+        "incident": {
+          "p50": 40.833203496731585,
+          "p95": 91.43754199612886,
+          "max": 108.85075300029712
+        },
+        "mail": {
+          "p50": 42.04085300079896,
+          "p95": 91.59816999454051,
+          "max": 103.67049200431211
+        },
+        "outbox": {
+          "p50": 41.551910999260144,
+          "p95": 86.87611099594506,
+          "max": 97.78701500181342
+        },
+        "signed_custody": {
+          "p50": 41.9034644983185,
+          "p95": 89.9071450039628,
+          "max": 114.07745600445196
+        }
+      }
+    },
+    {
+      "trial": 3,
+      "mode": "FULL",
+      "default_writer": 2,
+      "reopened_writer": 2,
+      "operations": 512,
+      "concurrency": 8,
+      "wall_seconds": 3.030400476003706,
+      "acknowledged_identifiers_verified_after_reopen": true,
+      "counts": {
+        "incident": 128,
+        "mail": 128,
+        "outbox": 128,
+        "signed_custody": 128
+      },
+      "radio_sends": 0,
+      "database_bytes": 1572864,
+      "wal_bytes": 4185952,
+      "latency_ms": {
+        "incident": {
+          "p50": 43.24867800096399,
+          "p95": 92.28531499684323,
+          "max": 118.40616799599957
+        },
+        "mail": {
+          "p50": 42.7219220000552,
+          "p95": 91.22510000452166,
+          "max": 119.00992300070357
+        },
+        "outbox": {
+          "p50": 42.77711649774574,
+          "p95": 88.75315399927786,
+          "max": 114.30508700141218
+        },
+        "signed_custody": {
+          "p50": 42.93868850072613,
+          "p95": 88.93707900278969,
+          "max": 128.41624599968782
+        }
+      }
+    },
+    {
+      "trial": 4,
+      "mode": "NORMAL",
+      "default_writer": 2,
+      "reopened_writer": 2,
+      "operations": 512,
+      "concurrency": 8,
+      "wall_seconds": 1.8351385339992703,
+      "acknowledged_identifiers_verified_after_reopen": true,
+      "counts": {
+        "incident": 128,
+        "mail": 128,
+        "outbox": 128,
+        "signed_custody": 128
+      },
+      "radio_sends": 0,
+      "database_bytes": 1572864,
+      "wal_bytes": 4185952,
+      "latency_ms": {
+        "incident": {
+          "p50": 8.013795501028653,
+          "p95": 216.53948099992704,
+          "max": 340.96005199535284
+        },
+        "mail": {
+          "p50": 7.960434497363167,
+          "p95": 217.238791003183,
+          "max": 341.06823700130917
+        },
+        "outbox": {
+          "p50": 7.687325498409336,
+          "p95": 217.04003299964825,
+          "max": 341.2970490026055
+        },
+        "signed_custody": {
+          "p50": 7.93559250087128,
+          "p95": 216.7504240060225,
+          "max": 340.3181680041598
+        }
+      }
+    },
+    {
+      "trial": 5,
+      "mode": "NORMAL",
+      "default_writer": 2,
+      "reopened_writer": 2,
+      "operations": 512,
+      "concurrency": 8,
+      "wall_seconds": 1.706205301998125,
+      "acknowledged_identifiers_verified_after_reopen": true,
+      "counts": {
+        "incident": 128,
+        "mail": 128,
+        "outbox": 128,
+        "signed_custody": 128
+      },
+      "radio_sends": 0,
+      "database_bytes": 1572864,
+      "wal_bytes": 4185952,
+      "latency_ms": {
+        "incident": {
+          "p50": 8.41929250236717,
+          "p95": 221.8711120003718,
+          "max": 225.88250899570994
+        },
+        "mail": {
+          "p50": 8.452431495243218,
+          "p95": 222.04042499652132,
+          "max": 225.66512200137367
+        },
+        "outbox": {
+          "p50": 8.509449500706978,
+          "p95": 222.00525899825152,
+          "max": 225.5337349997717
+        },
+        "signed_custody": {
+          "p50": 8.343867997609777,
+          "p95": 221.96975899714744,
+          "max": 225.45980900031282
+        }
+      }
+    },
+    {
+      "trial": 6,
+      "mode": "FULL",
+      "default_writer": 2,
+      "reopened_writer": 2,
+      "operations": 512,
+      "concurrency": 8,
+      "wall_seconds": 2.7630558439996094,
+      "acknowledged_identifiers_verified_after_reopen": true,
+      "counts": {
+        "incident": 128,
+        "mail": 128,
+        "outbox": 128,
+        "signed_custody": 128
+      },
+      "radio_sends": 0,
+      "database_bytes": 1572864,
+      "wal_bytes": 4185952,
+      "latency_ms": {
+        "incident": {
+          "p50": 37.4481265025679,
+          "p95": 90.05699899717001,
+          "max": 113.24361400329508
+        },
+        "mail": {
+          "p50": 37.36375700100325,
+          "p95": 90.93864200258395,
+          "max": 114.09464499593014
+        },
+        "outbox": {
+          "p50": 37.45446050015744,
+          "p95": 86.99165000143694,
+          "max": 114.52186499809613
+        },
+        "signed_custody": {
+          "p50": 37.2084900009213,
+          "p95": 89.05696999863721,
+          "max": 119.85910499788588
+        }
+      }
+    }
+  ]
+}

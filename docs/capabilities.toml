@@ -564,23 +564,35 @@ description = "Local-first/offline-only behavior, retry and persistence boundari
 [[capabilities]]
 id = "backup_recovery"
 area = "Backup, restore, upgrade, and rollback"
-present = "Online verified backups, rotation, quiesced web restore, passphrase-encrypted off-device bundles with configuration and selected secrets, fresh-directory offline restoration into a durable identity-fenced operator workbench, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback."
+present = "Checked WAL/FULL application commits, online verified backups, rotation, quiesced web restore, passphrase-encrypted off-device bundles with configuration and selected secrets, fresh-directory offline restoration into a durable identity-fenced operator workbench, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback."
 maturity = "automated_tested"
 introduced_commit = "df0ee14"
 limitations = [
   "Encrypted recovery is synthetic-store/browser-tested, not a physical off-device or fresh-Pi drill. The memory-only format is limited to 256 MiB SQLite images and a compatible installed runtime; external maps, models, OS/network/device assets need the separate recovery kit.",
   "Restored identities remain fenced: no radio/provider/background queues start and copied sessions are discarded. The node-loss contract requires a fresh serving identity and current local consent, not clone activation or automatic private replication. Backup custody cannot prove exclusive identity or global revocation during a partition.",
-  "Temporary NORMAL/FULL writer latency measurements do not prove power-loss survival, flush compliance, energy cost or sustained service latency. The live and repository default remain NORMAL; #137/#44 are open.",
+  "Application connections now use checked WAL/FULL. Temporary mixed-workload measurements and ordinary reopen do not prove physical power-loss survival, flush compliance, energy cost or sustained service latency; #137/#44 remain open and installed nodes require an update.",
 ]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-09-07"
+date = "2026-09-08"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_backups.py::test_failed_restore_automatically_recovers_safety_snapshot"
 description = "A failed restore automatically returns to the verified safety snapshot."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_commit_durability.py::test_full_writer_policy_survives_fresh_migrations_and_reopen"
+description = "The actual serialized writer uses FULL after fresh migrations and ordinary reopen; another connection's PRAGMA is not used as writer evidence."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_commit_durability.py::test_weaker_writer_policy_fails_closed_and_releases_connection"
+description = "Weakened writer configuration before or after migrations fails startup and releases its connection."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/COMMIT-DURABILITY.md"
+description = "Acknowledged-record commit contract, reproducible disposable-store benchmarks and separate physical storage/power acceptance."
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/integration/test_encrypted_recovery.py::test_memory_snapshot_and_complete_fenced_restore"

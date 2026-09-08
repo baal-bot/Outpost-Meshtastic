@@ -48,6 +48,9 @@ PUBLIC_FILES = (
     "docs/FEDERATION-TOPOLOGY.md",
     "docs/INCIDENT-RECONCILIATION.md",
     "docs/benchmarks/HAILO-H10-QWEN-2026-08-27.md",
+    "docs/COMMIT-DURABILITY.md",
+    "docs/benchmarks/SQLITE-COMMIT-POLICY-2026-09-08.md",
+    "docs/benchmarks/sqlite-commit-policy-2026-09-08.json",
 )
 
 

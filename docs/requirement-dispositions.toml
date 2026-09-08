@@ -104,7 +104,8 @@ rationale = "Dashboard idle probe measures incremental workload, not the complet
 issues = [142, 148, 158]
 
 [requirements.REQ-DATA-002]
-rationale = "The code retains the original WAL/NORMAL policy. That policy is not an acknowledged-data power-loss guarantee; FULL benchmarking and whole-appliance loss/recovery acceptance remain open."
+rationale = "#137 replaces the current WAL/NORMAL connection policy with checked WAL/FULL, including migrations and reopen. The original snapshot remains preserved. Software tests and temporary mixed-workload measurements do not establish whole-appliance power-loss survival, storage flush compliance or energy cost; full acceptance remains pending."
+owner_decision = "Proceed with #137's stronger commit policy and software verification; retain the physical #44 acceptance gate and no weaker production option."
 issues = [137, 44, 148]
 
 [requirements.REQ-DATA-009]
