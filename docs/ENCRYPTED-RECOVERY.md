@@ -42,7 +42,9 @@ Radio-device PKI/channel PSKs that were never exported to the host cannot be
 recovered from a host backup. Maps, models, Python/OS packages, systemd/network/AP
 configuration, external proxy TLS, device firmware, disk encryption and physical
 power equipment are not a host-image archive. Keep compatible offline install
-media and these separately managed assets with the recovery kit. The original
+media and these separately managed assets with the recovery kit.
+See the [offline replacement guide](OFFLINE-REPLACEMENT.md) for the verified runtime
+wheelhouse, external-asset inventory and permanent local access procedure. The original
 configuration is retained as `effective-config.json`; the review configuration
 remaps the database/support paths and isolates tiles/releases in the new target,
 with loopback-only HTTP. It never silently reuses the original host's paths.

@@ -615,6 +615,14 @@ path = "docs/NODE-LOSS-AND-MOBILITY.md"
 description = "Per-data survival/retention, explicitly unqualified recovery objectives, distinct replacement identity, fenced-clone limits and voluntary resident consent/provenance/revocation/conflict rules."
 [[capabilities.evidence]]
 kind = "automated"
+path = "tests/unit/test_offline_kit.py::test_actual_offline_install_uses_only_verified_copy_and_never_activates"
+description = "Synthetic wheel fixture installs into a fresh inactive venv from an independently copied hash-verified kit after removing source/wheelhouse access; checks exact package inventory and ignores ambient index/cache/target configuration. Actual appliance and second-operator qualification remain open."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/OFFLINE-REPLACEMENT.md"
+description = "Runtime kit preparation/verification, explicit boot/vendor/client/map/licensing inventory, permanent powered operator LAN and second-operator offline recovery/expiry/reboot record."
+[[capabilities.evidence]]
+kind = "automated"
 path = "tests/unit/test_deploy_install.py::test_installer_harness_rejects_safety_mutants"
 description = "Executed installer mutations prove rollback and activation safety assertions can fail."
 [[capabilities.evidence]]

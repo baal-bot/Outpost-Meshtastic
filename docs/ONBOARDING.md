@@ -73,6 +73,10 @@ This is a local bootstrap path, not a general guest network or an internet-shari
 run it on a Wi-Fi interface needed for the node's backhaul. Stop it as soon as permanent LAN access
 and operator credentials work.
 
+Prepare a powered permanent operator LAN, offline address recovery and client
+access that survive hotspot expiry. The [offline replacement guide](OFFLINE-REPLACEMENT.md)
+includes the equipment inventory, verified runtime kit and second-operator test.
+
 ## Read-only wallboard
 
 In **Access**, create a separate account with the **Read-only / wallboard** role and sign the kiosk

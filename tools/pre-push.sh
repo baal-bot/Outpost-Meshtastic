@@ -20,7 +20,7 @@ cd "$PROJECT_DIR"
   tools/check_ci_evidence.py tools/check_dependency_lock.py tools/check_requirements.py \
   tools/check_mypy_ratchet.py tools/check_static_markup.py \
   tools/pytest_evidence_plugin.py tools/verify_release.py deploy/configure.py \
-  deploy/render_avahi.py
+  deploy/render_avahi.py deploy/offline_kit.py
 echo "Outpost pre-push formatting gate passed."
 "$PYTHON" tools/check_mypy_ratchet.py
 "$PYTHON" tools/check_commands.py --check
