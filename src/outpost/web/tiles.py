@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
 import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+
+from outpost.maps.packs import FORMAT, active_manifest, read_json
 
 TilePackState = Literal["ready", "missing", "unreadable"]
 _MEDIA_TYPES = {"jpg": "image/jpeg", "png": "image/png"}
@@ -59,8 +60,11 @@ def inspect_tile_pack(value: str | Path) -> TilePackStatus:
         return TilePackStatus(root, "unreadable", "manifest.json is not a regular file")
 
     try:
-        manifest_value = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        manifest_value = read_json(manifest_path)
+        if manifest_value.get("format") == FORMAT:
+            manifest = active_manifest(root)
+            return TilePackStatus(root, "ready", "Verified vector map pack installed", manifest)
+    except (OSError, ValueError, RecursionError) as error:
         return TilePackStatus(root, "unreadable", f"manifest is invalid: {type(error).__name__}")
     if not isinstance(manifest_value, dict):
         return TilePackStatus(root, "unreadable", "manifest root is not an object")

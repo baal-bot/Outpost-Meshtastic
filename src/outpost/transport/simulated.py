@@ -116,6 +116,9 @@ class SimulatedRadioLink:
     async def local_telemetry(self) -> LocalTelemetry:
         return self.telemetry
 
+    def local_position(self) -> dict[str, Any]:
+        return {}
+
     async def configuration_status(self) -> dict[str, Any]:
         return {
             "available": True,

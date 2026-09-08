@@ -140,10 +140,10 @@ CHECK_DEFINITIONS = (
     CheckDefinition(
         "offline_maps",
         "operations",
-        "Regional offline map coverage is qualified",
+        "Selected regional offline map is verified",
         "An available tile or manifest does not establish useful maps throughout the service area.",
-        "Provision and independently verify a licensed regional pack, bounds and zoom coverage. "
-        "This check does not download maps or certify a sampled tile.",
+        "Use /maps.html for a verified region and world overview, or import a prepared pack. "
+        "Check the selected area and perform a separate WAN-disconnected field exercise.",
     ),
     CheckDefinition(
         "time_confidence",
@@ -703,9 +703,10 @@ class SelfCheckService:
 
     async def _outage_checks(self, now: int) -> list[CheckResult]:
         def local() -> tuple[dict[str, object], dict[str, object]]:
-            return map_inventory(self.config.store.tiles_path), storage_inventory(
-                self.config.store.path
-            )
+            location = self.config.node.location
+            return map_inventory(
+                self.config.store.tiles_path, (location.lat, location.lon) if location else None
+            ), storage_inventory(self.config.store.path)
 
         probe = asyncio.create_task(asyncio.to_thread(local))
         cancelled = False
@@ -732,8 +733,14 @@ class SelfCheckService:
         return [
             self._result(
                 "offline_maps",
-                False,
-                "Offline map metadata is missing or invalid."
+                maps["state"] == "pass",
+                "Selected region and overview verified at installation; WAN field test separate."
+                if maps["state"] == "pass"
+                else "World overview installed; select a region for local detail."
+                if maps.get("reason") == "overview_only"
+                else "Selected map does not cover the configured station location."
+                if maps.get("reason") == "configured_location_outside_region"
+                else "Offline map metadata is missing or invalid."
                 if maps["state"] == "fail"
                 else "Manifest present; regional coverage, zooms and integrity are unverified.",
                 maps,

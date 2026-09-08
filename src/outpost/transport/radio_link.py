@@ -102,6 +102,25 @@ class MeshtasticRadioLink:
         size = len(bytes(value or b""))
         return {0: "open", 1: "default", 16: "AES-128", 32: "AES-256"}.get(size, f"{size}-byte key")
 
+    def local_position(self) -> dict[str, Any]:
+        """Read only the connected local node cache, without any serial/RF request."""
+        if self._interface is None or self._state is not LinkState.UP:
+            return {}
+        nodes = getattr(self._interface, "nodes", {}) or {}
+        position = dict((nodes.get(self._local_id) or {}).get("position") or {})
+        for name in ("latitude", "longitude"):
+            if name not in position and type(position.get(name + "I")) in {int, float}:
+                position[name] = position[name + "I"] / 10_000_000
+        source = position.get("locationSource")
+        if type(source) is int:
+            source = {1: "LOC_MANUAL", 2: "LOC_INTERNAL", 3: "LOC_EXTERNAL"}.get(source)
+        return {
+            "latitude": position.get("latitude"),
+            "longitude": position.get("longitude"),
+            "source": source,
+            "timestamp": position.get("timestamp"),
+        }
+
     async def configuration_status(self) -> dict[str, Any]:
         if self._interface is None or self._state is not LinkState.UP:
             if self._configuration_snapshot is None:

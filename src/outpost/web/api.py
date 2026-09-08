@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 import re
+import sqlite3
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -42,6 +44,8 @@ from outpost.fed.bundles import FederationBundleService
 from outpost.fed.incident_delivery import IncidentDelivery
 from outpost.fed.item_failures import CURSOR as ENCODING_FAILURE_CURSOR
 from outpost.fed.item_failures import LIMIT as ENCODING_FAILURE_LIMIT
+from outpost.maps.packs import vector_tile
+from outpost.maps.setup import MapSetupService
 from outpost.member_data import MemberDataService, retention_statement
 from outpost.operator_context import (
     current_actor,
@@ -63,6 +67,7 @@ from outpost.web.operator_inbox import OperatorInboxService
 from outpost.web.routes.adoption import register_adoption_routes
 from outpost.web.routes.bundles import register_bundle_routes
 from outpost.web.routes.federation_review import register_federation_review_routes
+from outpost.web.routes.maps import register_map_routes
 from outpost.web.routes.readiness import register_readiness_routes
 from outpost.web.routes.responsibility import register_responsibility_routes
 from outpost.web.settings import RuntimeSettings
@@ -85,6 +90,7 @@ PUBLIC_API_PREFIXES = ("/api/v1/recovery/restores/",)
 PUBLIC_NON_API_ROUTE_PATHS = frozenset(
     {
         "/tiles/manifest.json",
+        "/tiles/vector/{pack_id}/{kind}/{zoom}/{x}/{y}.pbf",
         "/tiles/{zoom}/{x}/{y}.{extension}",
         "/favicon.ico",
         "/connecttest.txt",
@@ -755,6 +761,8 @@ def create_web_app(
     web_config: WebConfig | None = None,
     self_check: SelfCheckService | None = None,
     tile_path: str | Path = DEFAULT_TILES_PATH,
+    map_setup: MapSetupService | None = None,
+    map_position: Callable[[], dict[str, Any]] | None = None,
     incident_reports: IncidentReportService | None = None,
     member_data: MemberDataService | None = None,
     incident_delivery: IncidentDelivery | None = None,
@@ -892,7 +900,7 @@ def create_web_app(
             response.headers["Strict-Transport-Security"] = (
                 f"max-age={effective_web_config.transport.hsts_seconds}"
             )
-        if request.url.path.endswith((".html", ".js", ".css")) or request.url.path == "/":
+        if request.url.path.endswith((".html", ".js", ".mjs", ".css")) or request.url.path == "/":
             response.headers["Cache-Control"] = "no-cache"
         if request.url.path.startswith("/api/v1/auth/") or request.url.path in {
             "/api/v1/wallboard/summary",
@@ -1111,6 +1119,21 @@ def create_web_app(
         return apply_security_headers(request, await call_next(request))
 
     tile_root = absolute_tile_root(tile_path)
+    register_map_routes(app, map_setup, map_position)
+
+    @app.get("/tiles/vector/{pack_id}/{kind}/{zoom}/{x}/{y}.pbf", response_model=None)
+    async def vector_map_tile(pack_id: str, kind: str, zoom: int, x: int, y: int) -> Response:
+        try:
+            tile = await asyncio.to_thread(vector_tile, tile_root, kind, zoom, x, y, pack_id)
+        except (OSError, ValueError, sqlite3.Error):
+            return Response(status_code=503, headers={"Cache-Control": "no-store"})
+        if tile is None:
+            return Response(status_code=204, headers={"Cache-Control": "no-store"})
+        data, compression = tile
+        headers = {"Cache-Control": "public, max-age=86400"}
+        if compression == 2 and data:
+            headers["Content-Encoding"] = "gzip"
+        return Response(data, media_type="application/vnd.mapbox-vector-tile", headers=headers)
 
     @app.get("/tiles/manifest.json", response_model=None)
     async def tile_manifest() -> Response:

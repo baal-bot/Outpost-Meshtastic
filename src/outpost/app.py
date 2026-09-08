@@ -13,6 +13,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal
 
 import cbor2
@@ -81,6 +82,8 @@ from outpost.fed.reconciliation import Reconciliation
 from outpost.fed.review import FederationReviewService
 from outpost.fed.revisions import CAPABILITY as RECONCILIATION_CAPABILITY
 from outpost.fed.revisions import MODE as RECONCILIATION_MODE
+from outpost.maps.regions import MapError, position_suggestion
+from outpost.maps.setup import MapSetupService
 from outpost.member_data import MemberDataService
 from outpost.operations_center import MeshOperationsCenter
 from outpost.operator_context import current_actor
@@ -423,6 +426,7 @@ class OutpostApp:
             self.router.intents,
         )
         self.radio_power.on_condition_change = lambda _condition: self.self_check.run("radio-power")
+        self.map_setup = MapSetupService(Path(self.config.store.tiles_path))
         self.web = create_web_app(
             self.status,
             self.database,
@@ -469,6 +473,8 @@ class OutpostApp:
             situation=self.situation,
             web_config=self.config.web,
             tile_path=self.config.store.tiles_path,
+            map_setup=self.map_setup,
+            map_position=self.map_position,
             incident_reports=self.incident_reports,
             member_data=self.member_data,
             incident_delivery=self.incident_delivery,
@@ -686,6 +692,7 @@ class OutpostApp:
     async def _restore_database(self, name: str) -> dict[str, object]:
         self._shutting_down = True
         await self.supervisor.stop()
+        await asyncio.to_thread(self.map_setup.close)
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
@@ -2816,6 +2823,16 @@ class OutpostApp:
         result["operation"] = self.radio_configuration.operation()
         return result
 
+    def map_position(self) -> dict[str, Any]:
+        location = self.config.node.location
+        configured = (location.lat, location.lon) if location else None
+        try:
+            return position_suggestion(
+                self.radio.local_position(), int(self.clock.now().timestamp()), configured
+            )
+        except MapError as error:
+            return {"available": False, "detail": str(error)}
+
     async def radio_configuration_status(self) -> dict[str, Any]:
         return self._radio_configuration_context(await self.radio.configuration_status())
 
@@ -2880,6 +2897,7 @@ class OutpostApp:
     async def shutdown(self) -> None:
         self._shutting_down = True
         await self.supervisor.stop()
+        await asyncio.to_thread(self.map_setup.close)
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)

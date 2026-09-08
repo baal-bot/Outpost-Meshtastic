@@ -336,3 +336,5 @@ html[data-theme="night"] .outpost-map-tile {
   .outpost-map { height: 360px; }
   .outpost-map-detail { top: 8px; right: 8px; }
 }
+
+.outpost-vector-map { position: absolute; inset: 0; pointer-events: none; }

@@ -267,17 +267,15 @@ print(load_config().store.tiles_path)
 PY
 )
 
-if [ ! -f "$TILE_PATH/manifest.json" ] && \
-  "$RELEASE_DIR/bin/python" -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])) or {}; raise SystemExit(0 if d.get("node",{}).get("location") else 1)' "$CONFIG_DIR/config.yaml"; then
-  echo "Installing bounded offline map pack for node.location"
-  if "$RELEASE_DIR/bin/python" "$PROJECT_DIR/tools/build_tile_pack.py" \
-    --config "$CONFIG_DIR/config.yaml"; then
-    chown -R outpost:outpost "$TILE_PATH"
-  else
-    echo "Offline map download failed; installation will continue with online maps." >&2
-  fi
+# Regional setup uses the running radio cache after first sign-in. Do not seed
+# US-only raster tiles or infer a GPS fix before the radio service has started.
+if [ ! -d "$TILE_PATH" ]; then
+  install -d -m 0750 -o outpost -g outpost "$TILE_PATH"
+fi
+if [ -f "$TILE_PATH/manifest.json" ]; then
+  echo "Existing offline map preserved. Regional setup is available at /maps.html."
 else
-  echo "Existing offline map preserved, or map setup deferred until node.location is configured."
+  echo "Open /maps.html after sign-in for a world overview and GPS-assisted regional maps."
 fi
 
 BACKUP_PATH=

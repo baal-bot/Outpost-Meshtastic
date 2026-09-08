@@ -82,7 +82,8 @@ STEPS = (
     SetupStep(
         "maps_providers",
         "Maps and information providers",
-        "Set location and a real provider contact, seed the bounded offline map, and review "
+        "Open /maps.html for GPS-assisted regional maps and a world overview, or import a pack "
+        "with outpost-maps. Set a real provider contact and review "
         "weather, CAP, earthquake, SAME, and AI module choices.",
         "Environment labels provider freshness and maps remain usable after WAN loss.",
         SetupNeeds(True, False, False, False),

@@ -1,8 +1,9 @@
 # Field-appliance onboarding
 
-The planned [worldwide map setup](WORLDWIDE-MAP-SETUP.md) uses the connected radio's
-validated position to suggest regional maps, with manual selection and offline import
-fallbacks. It is not implemented by the current coordinate prompts or checklist.
+Open `/maps.html` (also linked from Access) to install a small world overview and a
+region suggested from a recent connected-radio GPS fix. Manual coordinates, overview-only
+setup and USB import work when GPS or internet is unavailable. See the
+[regional map guide](WORLDWIDE-MAP-SETUP.md). Full-planet downloads are not offered.
 
 Outpost keeps a resumable first-run checklist at `/var/lib/outpost/onboarding.json`. The file
 contains only step state and timestamps, never passwords, radio keys, locations, or operator notes.

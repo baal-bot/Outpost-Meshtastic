@@ -7,12 +7,15 @@ import os
 import stat
 from pathlib import Path
 
+from outpost.maps.packs import FORMAT, active_manifest
+from outpost.maps.regions import contains
+
 MAX_MANIFEST_BYTES = 65_536
 MIN_FREE_BYTES = 1_073_741_824
 MIN_FREE_PERCENT = 5
 
 
-def map_inventory(root: str) -> dict[str, object]:
+def map_inventory(root: str, location: tuple[float, float] | None = None) -> dict[str, object]:
     """Read bounded metadata, not an unbounded tile walk or geographic proof."""
     try:
         descriptor = os.open(
@@ -32,6 +35,26 @@ def map_inventory(root: str) -> dict[str, object]:
         return {"state": "fail", "reason": "manifest_missing"}
     except (OSError, ValueError, UnicodeError, RecursionError):
         return {"state": "fail", "reason": "manifest_unreadable"}
+    if manifest.get("format") == FORMAT:
+        try:
+            selected = active_manifest(Path(root))
+            regional = bool(selected and selected.get("region"))
+            if regional and selected and location and not contains(selected["region"], *location):
+                return {
+                    "state": "fail",
+                    "reason": "configured_location_outside_region",
+                    "coverage_verified": False,
+                    "world_overview": True,
+                }
+            return {
+                "state": "pass" if regional else "unknown",
+                "reason": "selected_region_verified" if regional else "overview_only",
+                "coverage_verified": regional,
+                "world_overview": True,
+                "wan_disconnection_tested": False,
+            }
+        except (OSError, ValueError):
+            return {"state": "fail", "reason": "installed_pack_changed"}
     count = manifest.get("tile_count")
     declared = count if type(count) is int and 0 <= count <= 10_000_000 else None
     return {

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script src="/theme-boot.js"></script>
+  <title>Map setup · Outpost</title>
+  <link rel="stylesheet" href="/base.css?v=1">
+  <link rel="stylesheet" href="/layout.css?v=1">
+  <link rel="stylesheet" href="/maps.css">
+  <link rel="stylesheet" href="/vendor/maps/maplibre-gl.css">
+  <link rel="stylesheet" href="/map-controller.css?v=6">
+  <link rel="stylesheet" href="/components.css?v=2">
+</head>
+<body>
+  <aside class="rail"><a class="brand" href="/"><b>O</b><span>OUTPOST</span></a><nav><a href="/">⌂ <span>Overview</span></a></nav></aside>
+  <div class="shell">
+    <header><div><p class="eyebrow">OFFLINE MAPS</p><h1>World overview & regional detail</h1></div><a class="back-link" href="/access.html">← Settings</a></header>
+    <main class="maps-main">
+      <section class="ui-card maps-card" aria-labelledby="map-area-title">
+        <h2 id="map-area-title">Choose your area</h2>
+        <p>A small world overview keeps the globe available. Add local detail around your station for use without internet.</p>
+        <p id="map-position">Checking the connected radio for a recent GPS fix…</p>
+        <button id="map-use-reported" type="button" hidden>Use reported coordinates manually</button>
+        <form id="map-plan-form">
+          <label class="map-overview"><input id="overview-only" type="checkbox"> World overview only</label>
+          <fieldset id="map-region-fields"><legend>Regional coverage</legend>
+            <div class="maps-fields">
+              <label>Latitude<input id="map-latitude" type="number" min="-85.05112878" max="85.05112878" step="any" required></label>
+              <label>Longitude<input id="map-longitude" type="number" min="-180" max="180" step="any" required></label>
+              <label>Radius (km)<input id="map-radius" type="number" min="1" max="100" value="20" step="1" required></label>
+              <label>Detail<select id="map-zoom"><option value="12">Area · z12</option><option value="14" selected>Local roads · z14</option><option value="15">Neighborhood · z15</option></select></label>
+            </div>
+          </fieldset>
+          <label>Download limit<select id="map-budget"><option value="128">128 MiB</option><option value="512" selected>512 MiB</option><option value="1024">1 GiB</option></select></label>
+          <p>Checking size needs internet and shares the approximate selected area with the map provider. A full planet download is never requested.</p>
+          <button id="map-plan" type="submit">Check coverage & size</button>
+        </form>
+      </section>
+      <section class="ui-card maps-card" aria-labelledby="map-install-title">
+        <h2 id="map-install-title">Download & install</h2>
+        <p id="map-job" role="status" aria-live="polite">Loading map setup…</p>
+        <p id="map-estimate"></p>
+        <progress id="map-progress" max="1" value="0" hidden aria-label="Tiles prepared"></progress>
+        <div class="maps-actions"><button id="map-download" type="button" hidden>Download maps</button><button id="map-pause" type="button" hidden>Pause</button></div>
+        <p id="map-installed"></p>
+        <p>Downloads can resume after interruption. Installation verifies every tile before selecting the new pack. Existing maps remain available if setup fails.</p>
+        <details><summary>Install from USB without internet</summary><p>On a connected computer, use <code>outpost-maps prepare</code> and <code>outpost-maps export</code>. On this station, run <code>outpost-maps import</code> with the exported file. Use the station’s configured tile path. See the offline map guide for complete commands.</p></details>
+      </section>
+      <section class="ui-card maps-card maps-preview" aria-labelledby="map-preview-title">
+        <h2 id="map-preview-title">Installed map preview</h2>
+        <p>Drag, scroll, or use arrow keys and + / −. This preview uses offline maps only.</p>
+        <div id="map-preview" aria-label="Installed offline map" class="outpost-map">
+          <div class="outpost-map-tiles"></div><div class="outpost-map-markers"></div><span class="outpost-map-coordinates"></span>
+          <div class="outpost-map-controls"><button type="button" data-map-action="zoom-in" aria-label="Zoom in">+</button><button type="button" data-map-action="zoom-out" aria-label="Zoom out">−</button></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/map-controller.js?v=6"></script>
+  <script type="module" src="/maps.js"></script>
+</body>
+</html>

@@ -128,7 +128,7 @@
       this.manifestEpoch = 0;
       this.tileReloadToken = "";
       if (!controllers.size && basemapModeSaved) basemapMode = readMode(basemapMode);
-      this.basemapMode = basemapMode;
+      this.basemapMode = options.offlineOnly ? "offline-only" : basemapMode;
       this.modeSaved = basemapModeSaved;
       this.metrics = {
         frames: 0,
@@ -187,6 +187,7 @@
       label.title = "Use only local tiles at this Outpost address in this browser. Other dashboard feeds are unaffected.";
       this.offlineControl = document.createElement("input");
       this.offlineControl.type = "checkbox";
+      this.offlineControl.disabled = Boolean(this.options.offlineOnly);
       this.offlineControl.checked = this.basemapMode === "offline-only";
       label.append(this.offlineControl, document.createTextNode("Offline only"));
       this.retryControl = document.createElement("button");
@@ -216,12 +217,21 @@
       const tilePack = await loadManifest(refresh);
       if (this.destroyed || epoch !== this.manifestEpoch) return;
       this.tilePack = tilePack;
+      if (tilePack.manifest?.format === "outpost-vector-v1") {
+        try {
+          const {createVectorMap} = await import("/vector-map.js");
+          if (this.destroyed || epoch !== this.manifestEpoch) return;
+          this.vector = createVectorMap(this, tilePack.manifest);
+        } catch (_) {
+          this.vectorFailed = true;
+        }
+      }
       this.retryControl.disabled = false;
       this.requestRender();
     }
 
     setBasemapMode(mode) {
-      if (this.destroyed || !["local-first", "offline-only"].includes(mode)) return;
+      if (this.destroyed || this.options.offlineOnly || !["local-first", "offline-only"].includes(mode)) return;
       basemapMode = mode;
       basemapModeSaved = true;
       try { localStorage.setItem(MODE_KEY, mode); } catch (_) { basemapModeSaved = false; }
@@ -232,11 +242,12 @@
 
     _applyBasemapMode() {
       this.modeSaved = basemapModeSaved;
-      this.offlineControl.checked = basemapMode === "offline-only";
-      if (this.basemapMode !== basemapMode) {
+      const effectiveMode = this.options.offlineOnly ? "offline-only" : basemapMode;
+      this.offlineControl.checked = effectiveMode === "offline-only";
+      if (this.basemapMode !== effectiveMode) {
         // Retire callbacks synchronously, before another image event can start a fallback.
-        this.basemapMode = basemapMode;
-        this._clearTiles();
+        this.basemapMode = effectiveMode;
+        if (!this.vector) this._clearTiles();
       }
       this.requestRender();
     }
@@ -552,7 +563,12 @@
         left: center.x - width / 2,
         top: center.y - height / 2,
       };
-      this._renderTiles(viewport);
+      if (this.vector) this.vector.render(viewport);
+      else if (this.tilePack.manifest?.format === "outpost-vector-v1") {
+        this.basemapState.textContent = this.vectorFailed ?
+          "Offline map renderer unavailable · retry or use a browser with WebGL support" : "Loading offline map…";
+        this.basemapState.hidden = false;
+      } else this._renderTiles(viewport);
       this._renderMarkers(viewport);
       if (this.coordinates) {
         this.coordinates.textContent =
@@ -676,6 +692,9 @@
     }
 
     _clearTiles() {
+      this.vector?.destroy();
+      this.vector = null;
+      this.vectorFailed = false;
       for (const [key, image] of this.tileElements) this._removeTile(key, image);
     }
 

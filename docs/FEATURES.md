@@ -37,13 +37,13 @@ revision on which CI runs this manifest check.
 | Welfare events and check-ins | Events, recurring opt-in drills with reviewed airtime ceilings, named responder groups, readiness history, roster states, delivery-accountable HELP/OK handling, honest no-responder guidance, derived unaccounted members, and CSV export. | Simulated | unreleased @ `HEAD` (2026-08-29); introduced `04e74ca` |
 | Environmental information | Weather observations/forecasts, source-preserving CAP alert expiry with a visible missing-expiry fallback, astronomy, earthquakes, caching, provenance, maps, and waypoints. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `72763e5` |
 | NOAA SAME / RTL-SDR | Supervised receive-only rtl_fm/samedec pipeline, county and review gates, CAP dedupe, health, and bounded restart. | Hardware-gated | unreleased @ `HEAD` (2026-08-26); introduced `764516a` |
-| Dashboard and operator access | Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, shared local-first maps with a browser offline-only mode and visible partial-coverage failures, and a federation topology view. | Automated-tested | unreleased @ `HEAD` (2026-09-08); introduced `5295868` |
+| Dashboard and operator access | Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, GPS-assisted bounded regional vector maps with a world overview, manual/USB import fallback, local renderer assets, and legacy raster maps with an offline-only mode and visible partial-coverage failures, and a federation topology view. | Automated-tested | unreleased @ `HEAD` (2026-09-08); introduced `5295868` |
 | Backup, restore, upgrade, and rollback | Checked WAL/FULL application commits, online verified backups, rotation, quiesced web restore, passphrase-encrypted off-device bundles with configuration and selected secrets, fresh-directory offline restoration into a durable identity-fenced operator workbench, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback. | Automated-tested | unreleased @ `HEAD` (2026-09-08); introduced `df0ee14` |
 | Retention and privacy controls | Bounded retention, foreign-key-safe incident deletion, isolated maintenance failures, atomic rotated snapshots, member-visible data counts, PKI-bound exact-position deletion, operator-reviewed pseudonymization, message limits, and a configuration-generated public policy. | Automated-tested | unreleased @ `HEAD` (2026-08-30); introduced `4d8af9c` |
 | Outpost federation | Pairing, authenticated framing, policy, producer-revision board/incident/alert reconciliation and separately negotiated plain incident notes with durable pending-page receipts and bounded indexed discovery; automatic incident/note delivery with independent fresh/backlog lanes, finite persistent retries, guarded coalesced storage receipts and operator delivery controls; version-bound human import/rejection with atomic audit, signed policy-filtered physical-transfer pages with radio-off commissioned identity and current-key/operator review, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, transactional destination dispatch, and privacy-gated topology health. | Two-node field-tested | unreleased @ `HEAD` (2026-09-07); introduced `8f7219e` |
 | Meshtastic MQTT federation path | Optional radio-firmware MQTT discovery, targeted bootstrap, transport observation, and resilient pairing approvals. | Two-node field-tested | unreleased @ `HEAD` (2026-08-26); introduced `f75f8af` |
 | Local AI assistant | ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, native HailoRT Qwen3-VL provider, bounded device reacquisition, and explicit readiness state. | Hardware-gated | unreleased @ `HEAD` (2026-08-27); introduced `6b3d01a` |
-| Installation and diagnostics | Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, explicit forward recovery from incompatible boot releases, installed-store ownership guards, health-gated Hailo handoff, and hardened service tooling. | Automated-tested | unreleased @ `HEAD` (2026-09-08); introduced `d614d85` |
+| Installation and diagnostics | Resumable field checklist, GPS-assisted regional map setup and bounded overview downloads with verified USB import/export, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, explicit forward recovery from incompatible boot releases, installed-store ownership guards, health-gated Hailo handoff, and hardened service tooling. | Automated-tested | unreleased @ `HEAD` (2026-09-08); introduced `d614d85` |
 
 ## Evidence and limitations
 
@@ -264,15 +264,18 @@ Evidence:
 - Automated: [tests/browser/test_mobile_navigation.py::test_shared_map_local_first_without_wan_and_persistent_offline_mode](../tests/browser/test_mobile_navigation.py) — Fresh browser and held-WAN maps across three themes and phone/desktop sizes, with persistent offline-only mode and keyboard/selection preservation.
 - Automated: [tests/browser/test_mobile_navigation.py::test_shared_map_partial_tiles_remain_visible_and_retry_is_explicit](../tests/browser/test_mobile_navigation.py) — Corrupt local tiles remain visible as coverage holes despite other successful tiles or Internet fallback; unchanged coverage does not automatically retry.
 - Operations: [docs/OFFLINE-MAPS.md](OFFLINE-MAPS.md) — Local-first/offline-only behavior, retry and persistence boundaries, and remaining full-pack and field qualification.
+- Automated: [tests/unit/test_regional_maps.py::test_install_serves_verified_tiles_and_preserves_selection_on_bad_import](../tests/unit/test_regional_maps.py) — International bounded map planning, PMTiles range safety, verification, import and resume.
+- Automated: [tests/browser/test_regional_maps_ui.py::test_vector_maps_render_offline_in_all_themes](../tests/browser/test_regional_maps_ui.py) — Local vector rendering and glyphs across nine viewport/theme combinations with WAN blocked.
+- Automated: [tests/integration/test_map_setup_access.py::test_map_setup_requires_operator_session_and_csrf](../tests/integration/test_map_setup_access.py) — Setup retains normal operator-session, role and CSRF boundaries.
 
 Known limitations:
 
 - Trusted HTTP deliberately lacks transport encryption; Internet-facing operation still requires operator-managed TLS, firewalling, and network-abuse controls.
-- Map availability describes visible tiles only. Whole-pack coverage/integrity, service-path provisioning, and physical WAN-down qualification remain #139; offline-only mode affects basemap requests at one browser origin, not other dashboard feeds.
+- Vector setup verifies selected coverage and tile integrity before atomic installation. Physical WAN-down and station service-path qualification remain #139; legacy raster availability describes visible tiles only. Offline-only mode affects basemaps at one browser origin, not other feeds.
 
 Related roadmap:
 
-- Worldwide overview and GPS-assisted regional offline maps with manual/import fallback; design recorded in docs/WORLDWIDE-MAP-SETUP.md, implementation and field qualification remain #139.
+- Complete station service-path and physical WAN-down field qualification for regional maps (#139).
 
 ### Backup, restore, upgrade, and rollback
 
@@ -449,7 +452,7 @@ Known limitations:
 
 Related roadmap:
 
-- Worldwide overview and GPS-assisted regional offline maps with manual/import fallback; design recorded in docs/WORLDWIDE-MAP-SETUP.md, implementation and field qualification remain #139.
+- Complete station service-path and physical WAN-down field qualification for regional maps (#139).
 
 ## Global boundaries
 

@@ -43,6 +43,7 @@ dev = [
 [project.scripts]
 outpost = "outpost.__main__:main"
 outpost-diagnostics = "outpost.diagnostics:main"
+outpost-maps = "outpost.maps.cli:main"
 outpost-onboarding = "outpost.onboarding:main"
 outpost-replay = "outpost.replay_cli:main"
 outpost-recovery = "outpost.recovery:main"

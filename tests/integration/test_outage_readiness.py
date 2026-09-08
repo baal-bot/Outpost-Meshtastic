@@ -472,3 +472,22 @@ async def test_post_commit_cancellation_invalidates_the_old_in_memory_report(
     assert (
         checks(await appliance.self_check.run("recovery"))["station_power"]["state"] == "attested"
     )
+
+
+async def test_outpost_map_setup_uses_configured_store_and_location(appliance, monkeypatch):
+    from outpost.config import Location
+    from tests.support.maps import source_factory
+    from tests.unit.test_regional_maps import install
+
+    factory = source_factory()
+    monkeypatch.setattr(appliance.map_setup, "_source", factory)
+    monkeypatch.setattr("outpost.maps.setup.RangeSource", factory)
+    appliance.config.node.location = Location(lat=-1.2864, lon=36.8172)
+    suggestion = appliance.map_position()
+    assert suggestion["source"] == "configured" and suggestion["latitude"] == -1.2864
+    await asyncio.to_thread(install, appliance.map_setup)
+    report = await appliance.self_check.run("regional-map-test")
+    result = checks(report)["offline_maps"]
+    assert result["state"] == "unknown"
+    assert result["evidence"]["reason"] == "overview_only"
+    appliance.map_setup.close()

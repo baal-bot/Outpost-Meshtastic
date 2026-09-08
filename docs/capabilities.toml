@@ -519,11 +519,11 @@ description = "Process supervision and parser failure boundaries."
 [[capabilities]]
 id = "dashboard_access"
 area = "Dashboard and operator access"
-present = "Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, shared local-first maps with a browser offline-only mode and visible partial-coverage failures, and a federation topology view."
+present = "Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, GPS-assisted bounded regional vector maps with a world overview, manual/USB import fallback, local renderer assets, and legacy raster maps with an offline-only mode and visible partial-coverage failures, and a federation topology view."
 maturity = "automated_tested"
 introduced_commit = "5295868"
-limitations = ["Trusted HTTP deliberately lacks transport encryption; Internet-facing operation still requires operator-managed TLS, firewalling, and network-abuse controls.", "Map availability describes visible tiles only. Whole-pack coverage/integrity, service-path provisioning, and physical WAN-down qualification remain #139; offline-only mode affects basemap requests at one browser origin, not other dashboard feeds."]
-roadmap = ["Worldwide overview and GPS-assisted regional offline maps with manual/import fallback; design recorded in docs/WORLDWIDE-MAP-SETUP.md, implementation and field qualification remain #139."]
+limitations = ["Trusted HTTP deliberately lacks transport encryption; Internet-facing operation still requires operator-managed TLS, firewalling, and network-abuse controls.", "Vector setup verifies selected coverage and tile integrity before atomic installation. Physical WAN-down and station service-path qualification remain #139; legacy raster availability describes visible tiles only. Offline-only mode affects basemaps at one browser origin, not other feeds."]
+roadmap = ["Complete station service-path and physical WAN-down field qualification for regional maps (#139)."]
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
@@ -560,6 +560,19 @@ description = "Corrupt local tiles remain visible as coverage holes despite othe
 kind = "operations"
 path = "docs/OFFLINE-MAPS.md"
 description = "Local-first/offline-only behavior, retry and persistence boundaries, and remaining full-pack and field qualification."
+
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/unit/test_regional_maps.py::test_install_serves_verified_tiles_and_preserves_selection_on_bad_import"
+description = "International bounded map planning, PMTiles range safety, verification, import and resume."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_regional_maps_ui.py::test_vector_maps_render_offline_in_all_themes"
+description = "Local vector rendering and glyphs across nine viewport/theme combinations with WAN blocked."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_map_setup_access.py::test_map_setup_requires_operator_session_and_csrf"
+description = "Setup retains normal operator-session, role and CSRF boundaries."
 
 [[capabilities]]
 id = "backup_recovery"
@@ -943,11 +956,11 @@ description = "Opt-in hardware release-gate assertion for the full guarded corpu
 [[capabilities]]
 id = "installation_operations"
 area = "Installation and diagnostics"
-present = "Resumable field checklist, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, explicit forward recovery from incompatible boot releases, installed-store ownership guards, health-gated Hailo handoff, and hardened service tooling."
+present = "Resumable field checklist, GPS-assisted regional map setup and bounded overview downloads with verified USB import/export, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, explicit forward recovery from incompatible boot releases, installed-store ownership guards, health-gated Hailo handoff, and hardened service tooling."
 maturity = "automated_tested"
 introduced_commit = "d614d85"
 limitations = ["A recorded fresh-Pi mDNS/hotspot onboarding drill and extended unattended wallboard soak remain field gates.", "Boot-schema evidence compares static package capacity with the inspected database; it does not prove configuration, import integrity, migration success, or unattended reboot/radio recovery. Custom or unavailable selections remain unknown.", "Outage assessment cannot certify missing regional maps, clock holdover, off-device restoration, station energy, replacement-client access, radio-only peer paths or SAME reception. Operator observations remain unverified, finite and context-bound; no qualification exercise runs automatically."]
-roadmap = ["Worldwide overview and GPS-assisted regional offline maps with manual/import fallback; design recorded in docs/WORLDWIDE-MAP-SETUP.md, implementation and field qualification remain #139."]
+roadmap = ["Complete station service-path and physical WAN-down field qualification for regional maps (#139)."]
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"

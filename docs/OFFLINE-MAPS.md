@@ -1,4 +1,10 @@
-# Local-first map behavior
+# Offline regional maps and legacy raster behavior
+
+Use the [worldwide regional setup guide](WORLDWIDE-MAP-SETUP.md) for GPS-assisted setup,
+world overview, bounded downloads and USB import. Installed vector packs render entirely
+from local assets. Outside the selected region, they retain the world overview.
+
+## Legacy raster packs
 
 The shared Watch, Environment, Members, and Federation maps consult the Outpost's
 `/tiles/manifest.json` before requesting basemap images. A usable local tile is requested
@@ -36,10 +42,8 @@ superseded manifest inspections, and destroyed maps cannot start late fallback r
 
 ## Remaining qualification — #139
 
-The [worldwide setup design](WORLDWIDE-MAP-SETUP.md) proposes a small global overview,
-GPS-assisted regional downloads with manual fallback, and an optional full-planet
-pack. That provisioning workflow and vector rendering remain implementation work;
-the behavior described above is the currently implemented raster-map behavior.
+Regional vector provisioning and rendering are now implemented. The notes below describe
+the narrower guarantees of legacy raster packs and the remaining physical qualification.
 
 This browser change (#164) does not provision or certify a map pack. The existing service
 inspector only finds a tile with a recognizable raster header. Its `ready` result and legacy

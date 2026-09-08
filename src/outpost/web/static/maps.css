@@ -1,0 +1,16 @@
+.maps-main { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.maps-card { padding: 24px; min-width: 0; }
+.maps-card p { overflow-wrap: anywhere; line-height: 1.6; }
+.maps-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.maps-card label { display: grid; gap: 8px; margin-block: 12px; }
+.maps-card input, .maps-card select { width: 100%; min-width: 0; }
+.maps-card .map-overview { display: flex; align-items: center; gap: 10px; }
+.map-overview input { width: auto; }
+.maps-card fieldset { border: 1px solid var(--ui-border); border-radius: 8px; min-width: 0; }
+.maps-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.maps-preview { grid-column: 1 / -1; }
+.maps-card progress { width: 100%; accent-color: var(--ui-accent); }
+@media (max-width: 800px) { .maps-main, .maps-fields { grid-template-columns: 1fr; } .maps-card { padding: 16px; } }
+.maps-main > .readiness-banner,
+.maps-main > .web-transport-banner { grid-column: 1 / -1; }
+.maps-fields input { min-height: 44px; height: 44px; }

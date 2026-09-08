@@ -1,21 +1,19 @@
 # Session resume point — 2026-09-08 (America/New_York)
 
-## Next work: #139 worldwide map setup
+## In progress: #139 regional maps with world overview
 
-The owner clarified that maps must serve installations worldwide. They suggested
-either whole-world coverage or reading the radio's GPS during setup to download the
-appropriate region. [The researched design](docs/WORLDWIDE-MAP-SETUP.md) recommends
-a small worldwide overview, GPS-assisted detailed regional packs with manual/USB
-fallbacks, and an optional full-planet pack. Protomaps PMTiles is the preferred
-candidate; source/distribution and the vector-rendering path need a bounded prototype.
+The owner selected regional detail plus a small world overview and explicitly excluded
+full-planet downloads. The implementation and operating guide are in
+[WORLDWIDE-MAP-SETUP.md](docs/WORLDWIDE-MAP-SETUP.md): authenticated `/maps.html`, recent
+local-radio GPS suggestions/manual fallback, bounded PMTiles ranges, verified immutable
+SQLite vector packs, bundled local MapLibre assets, and `outpost-maps` USB import/export.
+The installer now points to regional setup after the radio starts instead of seeding USGS.
 
-This turn records the design and implementation scope. No map download, service
-change, or field qualification has occurred. Begin with trustworthy local-radio
-position observations and global region planning, then a small international offline
-rendering prototype. Current radio snapshots lack position age/source, and the
-existing installer defaults to USGS raster tiles before starting the radio service.
-Keep all #139 field acceptance criteria open. The running release remains the
-verified #171 release below; documentation commits do not change that identity.
+A public Nairobi sample (2 km, z12 + world z0–6) downloaded and verified at 50.8 MB installed.
+Private working evidence is in `.data/regional-maps-2026-09-08/`. Nine responsive/theme
+browser cases pass with external requests blocked. Exact-source CI and normal local
+release installation remain pending; do not treat this source note as installed evidence.
+The running release remains #171 below. Keep #139's physical WAN field acceptance open.
 
 ## Completed: #171 external radio power
 

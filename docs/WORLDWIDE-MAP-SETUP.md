@@ -1,123 +1,117 @@
-# Worldwide offline map setup
+# Worldwide regional map setup
 
-Design for [#139](https://github.com/baal-bot/Outpost-Meshtastic/issues/139), researched
-September 8, 2026. The owner wants installations worldwide to obtain useful maps
-without choosing a region in source code. This document describes proposed behavior;
-the GPS-assisted download and vector-map support are not implemented yet.
+Outpost installs a small world overview (zooms 0–6) plus optional regional detail
+(zooms 7–15). **There is no full-planet download option.** World overview means
+orientation across the Web Mercator globe, not street detail everywhere; areas above
+85.0511° north or south are outside that projection.
 
-## Recommended coverage
+Open **Access → Set up offline regional maps & world overview**, or `/maps.html`.
+The first-run `maps_providers` checklist points to the same page. The installer creates
+the configured tile directory for the service and defers selection until the radio is
+running; it no longer seeds USGS raster tiles automatically.
 
-Use a small worldwide overview with detailed regional packs selected during setup.
-Offer a full-planet pack as an optional large-storage installation.
+1. Use the suggested installation location, or enter latitude and longitude. A configured
+   location takes precedence. Otherwise, only a connected local radio's GPS position with
+   an actual fix timestamp no more than 15 minutes old is suggested. Radio clock time,
+   connection time, peer positions and fixed/unknown-age positions are not fresh GPS fixes.
+   Valid last-reported coordinates can be selected manually with an explicit button.
+2. Choose radius (default 20 km), detail (default z14), and download limit (default 512 MiB).
+   Without a usable position, select **World overview only** and add a region later.
+3. Select **Check coverage & size** while connected to the internet. Review the estimate
+   and available storage, then **Download maps**. The provider can infer the approximate
+   region from requested ranges. Coordinates stay in the local setup and pack metadata;
+   avoid publishing those files as diagnostic evidence.
+4. Wait for verification. Every expected tile, checksum, compressed payload and vector
+   structure is checked before an atomic manifest selects the completed pack. Failed or
+   interrupted work leaves the existing selection intact. Pause/resume uses saved staging
+   data; restart does not silently resume a network download. An expired source build or
+   corrupt staging requires a new plan.
+5. Use the offline preview, then check the operational maps. Outside downloaded coverage,
+   the world overview remains visible; zooming past the pack's detail level is labelled.
+   Open tabs can continue using their previous immutable pack until they recheck the manifest.
 
-| Coverage | Purpose | Size reference |
-| --- | --- | --- |
-| Worldwide overview | Countries, major places and orientation before regional setup | Protomaps documents about 60 MB for zooms 0–6 |
-| Regional detail | Streets and local context around the installation; additional regions can be retained | Estimate from the selected region, detail and source archive before downloading |
-| Full planet | Detailed coverage for operators who choose the storage and download cost | Protomaps documents roughly 120 GB for zooms 0–15 |
+The planner caps work at 60,000 tiles, rejects an installed estimate over 1 GiB, and allows
+64 MiB–1 GiB transfer limits per download attempt. Each HTTP request is at most 4 MiB and
+must return an exact `206` range with a stable strong ETag. A server returning the entire
+archive is rejected before its body is read. Metadata planning has its own 32 MiB limit.
+Retries and resumed attempts are bounded; completed tiles are reused. Size is an estimate,
+not a fixed worldwide price: density, latitude, radius, zoom and source version affect it.
+The real September 8 sample (world overview plus a 2 km Nairobi region through z12) used
+about 45 MB of tile transfer and 50.8 MB of installed storage.
 
-These are upstream examples, not measurements of an Outpost release or promises of
-equal map detail in every country. Fonts, styles, application files, temporary download
-space and an older retained pack require additional storage.
-[Overview example](https://docs.protomaps.com/guide/getting-started),
-[planet downloads and regional extraction](https://docs.protomaps.com/basemaps/downloads).
+Storage checks reserve at least 1 GiB or 5% of the filesystem, plus staging space. Old
+verified packs and interrupted staging files are retained rather than automatically deleted.
+Review disk usage before repeated installations; only remove obsolete packs after open
+clients no longer need them. Configure an absolute `store.tiles_path`; setup, serving and
+readiness all use that path, including packaged installations.
 
-## Setup flow
+## Prepare elsewhere and import from USB
 
-1. After the radio connects, suggest an area using the connected local radio's valid,
-   recent position. Show whether the source is onboard GPS, external GPS, or a manual
-   fixed location, with age when known. Do not select another mesh member's position.
-2. Let the operator confirm or move the center and choose the area and detail. Start
-   with the existing downloader's 20 km radius as a proposal, and show download size,
-   installed size and available space. Region size remains adjustable.
-3. If GPS is absent, stale, invalid or of unknown age, offer manual coordinates or a
-   map selection. Preserve an explicitly configured installation location as the
-   default. Do not silently replace it, change radio position settings, or broadcast
-   a newly selected map center.
-4. Download the accepted region, with progress, bounded retries and cancellation.
-   Validate it before atomically selecting it. An interrupted operation leaves the
-   previous verified pack available; resumable work must retain the exact source
-   identity and validate retained chunks.
-5. Offer importing a verified pack from USB or preparing it on another computer when
-   the installation has no Internet. Keep the world overview and ordinary lists usable
-   if regional setup is deferred.
-6. Later, allow additional regions, replacement or explicit refresh. Movement or GPS
-   jitter must not silently start repeated downloads or remove existing regions.
+The same installed Outpost package provides `outpost-maps`. Use a directory writable by
+the current user on the connected computer. Example coordinates below are a public sample,
+not the station's location:
 
-Downloading follows the setup selection; normal offline operation uses the Pi's
-stored maps. The regional download provider can infer the requested area. Keep exact
-setup coordinates out of public logs and telemetry; no external geocoder is required
-for manual coordinates or selection on the local overview.
+```sh
+outpost-maps --tiles-path "$PWD/offline-maps" prepare \
+  --latitude -1.2864 --longitude 36.8172 --radius-km 20 --max-zoom 14
+# Inspect the estimate and saved plan ID, then download it:
+outpost-maps --tiles-path "$PWD/offline-maps" resume PLAN_ID
+outpost-maps --tiles-path "$PWD/offline-maps" export /media/USB/region.sqlite
+```
 
-## Source and rendering approach
+Omit latitude/longitude for overview only. `prepare --download` explicitly plans and downloads
+in one command. `status` shows the saved job and selected pack. An interrupted download can
+be resumed with its plan ID while the source build remains available.
 
-The preferred candidate is an OpenStreetMap-derived vector basemap in PMTiles format.
-The [PMTiles extractor](https://docs.protomaps.com/pmtiles/cli) supports selecting a
-region from a remote archive without first downloading the entire planet. Its
-structural verifier is only one validation layer; application coverage and decoding
-checks are still required.
+On the offline station, use the service account and configured tile path:
 
-Use a versioned download catalogue with source date, format/style versions, published
-integrity information, attribution and size information. Determine a permitted,
-maintainable distribution endpoint during the implementation prototype; do not ship
-an unversioned or expiring daily URL as the permanent default. Protomaps documents
-regional downloads but discourages hotlinking to its build files. Preserve a local
-archive/mirror option and retain the source/licensing notices with exported packs.
+```sh
+sudo -u outpost outpost-maps --tiles-path /var/lib/outpost/.data/tiles \
+  import /media/USB/region.sqlite
+```
 
-The standard OpenStreetMap tile server explicitly prohibits offline prefetching and
-bulk downloads. It cannot supply this setup feature.
-[OSMF tile policy](https://operations.osmfoundation.org/policies/tiles/).
+Ensure that account can read the USB file and invoke the installed release's executable
+(use its absolute path if `outpost-maps` is not on PATH). Import verifies and copies the pack
+before selection. Export refuses to overwrite an existing destination. CLI and dashboard
+operations share a process lock. The dashboard API does not accept arbitrary filesystem
+paths or arbitrary download URLs.
 
-Outpost currently renders raster images through its shared map controller. PMTiles
-can contain several tile types; the proposed Protomaps basemap contains vectors, so
-changing the download URL alone would not make it render. Prototype a locally bundled
-MapLibre/PMTiles basemap behind the shared controller, preserving markers, selections,
-keyboard controls, themes and explicit offline behavior. Retain existing raster packs
-as a compatibility path. Serve every style, font, sprite and script from the appliance,
-including labels for supported international scripts; no runtime CDN dependency.
-[Offline rendering assets](https://docs.protomaps.com/basemaps/maplibre).
+## Source, runtime and offline contract
 
-## Existing integration points and gaps
+[Protomaps daily downloads](https://docs.protomaps.com/basemaps/downloads) permit regional
+extraction from their OpenStreetMap-derived basemap. Outpost probes at most seven recent
+published build dates, pins the selected ETag, and reads the [PMTiles v3 source format](https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md)
+with bounded HTTP ranges. If the host is unavailable, import a prepared pack or retry later.
+Builds are ephemeral; installed packs do not need continued access to the provider.
+Outpost never bulk-downloads the standard OpenStreetMap tile service, whose
+[tile policy prohibits offline prefetch](https://operations.osmfoundation.org/policies/tiles/).
 
-- `deploy/configure.py` currently asks for coordinates. `deploy/install.sh` downloads
-  a bounded pack only when `node.location` exists and a manifest is absent. That
-  download occurs before the new application service starts.
-- `tools/build_tile_pack.py` defaults to USGS Topo raster tiles. It is not the worldwide
-  source-selection or vector-extraction workflow described here.
-- `MeshtasticRadioLink` reads local coordinates, but `RadioSnapshot` does not preserve
-  position age or source. Setup should use the service's existing connection and a
-  bounded local-position observation instead of opening a competing serial connection
-  or treating connection time as GPS-fix time. The upstream position message separates
-  position-solution timestamp from the clock-setting time field.
-  [Meshtastic position schema](https://github.com/meshtastic/protobufs/blob/master/meshtastic/mesh.proto).
-- The setup download therefore belongs after radio connection, as a resumable maps
-  step. An explicitly supplied location or imported pack can support unattended setup.
-  Noninteractive setup must have explicit region and download-budget inputs.
-- `store.tiles_path` must remain the single configured installed root. The service,
-  installer, update, copy and recovery procedures must agree on it. Pack selection
-  needs an additive versioned manifest; legacy raster manifests remain distinguishable.
-- Current map inspection finds a recognizable image and does not certify the whole
-  region. Publish a bounded verification result after the complete install scan;
-  dashboard readiness must not walk a planet archive on each refresh.
+Installed packs use Outpost's `outpost-vector-v1` SQLite archive: metadata and checksummed
+ZXY vector tiles, separated into overview and regional sources. This is an Outpost export
+format, not a generic PMTiles/MBTiles import. The local API serves versioned vector tiles.
+Legacy PNG/JPEG packs and their existing raster behavior remain supported.
 
-## Acceptance and implementation order
+MapLibre GL JS 6.8.0, its module worker, stylesheet and Noto glyph assets are vendored under
+`src/outpost/web/static/vendor/maps`. `manifest.json` records upstream versions, source
+commit and file hashes; tests verify the complete inventory. BSD and OFL license files are
+included. The local style draws geography, roads, boundaries and place labels without
+external styles, sprites, glyph services or telemetry. Labels prefer English names and fall
+back to source names; this is not a promise of complete language/script localization.
+Attribution remains visible for OpenStreetMap contributors and Protomaps. A browser with
+WebGL support is required for vector basemaps; coordinates, markers and lists remain usable
+if rendering is unavailable.
 
-First implement and test location selection and bounded worldwide region planning,
-then prototype one small international vector pack with all rendering assets offline.
-Use that result to pin the provider, versions, size estimates and Pi/browser budgets.
-Integrate durable download/import, atomic installation and setup UI only after that
-path is verified. Then package the overview and optional full-planet workflow.
+## Verification and remaining field work
 
-Tests must cover no GPS, stale/future fixes, unknown source/age, manual overrides,
-Southern Hemisphere and International Date Line regions, equator/prime-meridian
-coordinates, sparse and dense areas, missing glyphs, interrupted downloads, disk
-limits, corrupt/partial packs and upgrades preserving older packs. The current Web
-Mercator map projection excludes the polar caps beyond approximately 85.05 degrees;
-report that limitation explicitly instead of silently claiming coverage there.
+Automated coverage includes the Date Line, international regions, stale/absent GPS,
+whole-response rejection, changed sources, download interruption/resume, import failure,
+corrupt tiles, account/CSRF boundaries, immutable old-pack access, and nine responsive/theme
+browser combinations with outside network requests blocked and an empty browser cache.
 
-Readiness must distinguish overview-only, verified regional detail, partial/corrupt
-data, and current location outside installed coverage. An overview cannot pass a
-regional-detail requirement. Keep missing maps optional to incident/list operation.
-Before closing #139, verify fresh-browser rendering with the physical WAN unavailable,
-all required local assets present, and the install/update/copy workflow exercised on
-the configured service path. No such qualification is established by this design.
+Readiness distinguishes missing/changed packs, overview only and a verified selected region.
+It reports failure when a configured installation location lies outside the selected region.
+Its bounded check compares the installed file's size/mtime with the verification receipt;
+it does not scan the entire archive on each refresh. Each served tile also checks its hash.
+A verified selected region does not prove it covers a different deployment location, nor
+prove a physical WAN-disconnected field exercise. Review the chosen region if the station
+moves. Issue #139 retains the actual station/service-path and physical field acceptance.
