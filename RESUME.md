@@ -1,6 +1,6 @@
 # Session resume point — 2026-09-08 (America/New_York)
 
-## In progress: #139 regional maps with world overview
+## Installed: #139 regional maps with world overview; field acceptance remains open
 
 The owner selected regional detail plus a small world overview and explicitly excluded
 full-planet downloads. The implementation and operating guide are in
@@ -9,11 +9,26 @@ local-radio GPS suggestions/manual fallback, bounded PMTiles ranges, verified im
 SQLite vector packs, bundled local MapLibre assets, and `outpost-maps` USB import/export.
 The installer now points to regional setup after the radio starts instead of seeding USGS.
 
-A public Nairobi sample (2 km, z12 + world z0–6) downloaded and verified at 50.8 MB installed.
-Private working evidence is in `.data/regional-maps-2026-09-08/`. Nine responsive/theme
-browser cases pass with external requests blocked. Exact-source CI and normal local
-release installation remain pending; do not treat this source note as installed evidence.
-The running release remains #171 below. Keep #139's physical WAN field acceptance open.
+The selected, running release is **`20260908T215537Z-df4c206dc5f6`**, source
+`df4c206dc5f6ef6ee3bf550305a850ecaf1752e4`, database schema **186**. Exact-source CI
+`34278060752` passed all four jobs. The normal local updater completed successfully
+with the native HailoRT wheel. Web, radio, required native AI, database integrity,
+same-package boot readiness and protected-record retention passed. USB external power
+still passes readiness without a battery percentage.
+
+A verified world overview (z0–6, 5,461 tiles, **49,823,744 bytes**) is installed at the
+configured service tile path. Live tiles and map assets match the installed package;
+a fresh browser rendered the overview and labels with outside requests blocked.
+The public manifest excludes precise setup coordinates. A separate public Nairobi
+sample (2 km, z12 + overview) measured 50.8 MB and passed export/import verification.
+
+Refresh the dashboard and open **Access → Set up offline regional maps & world overview**
+(`/maps.html`) to select the actual station region using fresh GPS or manual coordinates.
+Map readiness correctly reports `unknown / overview_only` until regional detail is selected.
+Keep #139 open for station-region selection and the actual physical WAN-disconnected test.
+Read [the qualification report](docs/REGIONAL-MAP-QUALIFICATION-2026-09-08.md) and private
+`.data/regional-maps-2026-09-08/STATE.json`. Documentation commits after the installed
+source are separate from its release identity.
 
 ## Completed: #171 external radio power
 
@@ -24,19 +39,20 @@ Radio page and situation briefing. Missing/invalid telemetry remains unknown,
 stale/future samples retain their boundaries, and station-power qualification remains
 separate. Migration 186 preserves old NULL samples as unknown.
 
-The selected, running release is **`20260908T175620Z-0dd05985194a`**, source
+The #171 qualification used release **`20260908T175620Z-0dd05985194a`**, source
 `0dd05985194af45d4621dce24d62376ed639c9b2`, database schema **186**. Exact-commit CI
 `34254372769` passed all four jobs: 2,286 full-suite tests per job and 1,214
 production-mode tests per Python version. All 254 local cases passed. The normal
-updater completed successfully with the native HailoRT wheel.
+updater completed successfully with the native HailoRT wheel. The regional-map release
+above now supersedes that installed version and preserves the external-power fix.
 
 At 17:57:54 UTC, fresh readiness reported `radio_power: pass`, external power true
 and no battery percentage. Web, radio, required native AI, schema integrity and
 same-package boot readiness passed. All protected pre-update IDs survived, including
 1,570 outbound-work and 1,929 power-history records. Old unknown power samples kept
 their false flag; a new external-power record was present. Served Radio assets match
-the installed package and source. The overall readiness banner remains degraded for
-offline maps and the other outstanding observations.
+the installed package and source. At that qualification, the overall readiness banner
+was degraded for offline maps and the other outstanding observations.
 
 Read `.data/radio-external-power-2026-09-08/STATE.json` and
 [the dated radio-power report](docs/RADIO-POWER-QUALIFICATION-2026-09-08.md) for
@@ -46,11 +62,11 @@ unmounted. Owner recovery-key custody outside the Pi remains outstanding. The se
 machine remains with its owner. Later documentation commits are separate from the
 installed release's CI identity.
 
-A read-only #139 investigation found the configured service tile path missing and
+The initial read-only #139 investigation found the configured service tile path missing and
 an existing checkout pack containing all 737 declared, decodable tiles. Intended
-coverage remains unconfirmed; nothing was installed or downloaded. Private evidence
-is under `/var/lib/outpost-qualification/139-20260908/`. Preserve the actual WAN-down
-browser gate and confirm the operating area before making map changes.
+coverage was unconfirmed at that point. Subsequent regional-map implementation and
+world-overview installation are recorded above. Private evidence remains under
+`/var/lib/outpost-qualification/139-20260908/`; preserve the actual WAN-down browser gate.
 
 ## Completed: #136 controlled reboot acceptance
 
