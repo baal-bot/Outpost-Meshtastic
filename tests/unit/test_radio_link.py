@@ -20,6 +20,39 @@ def test_named_and_numeric_portnums_are_normalised() -> None:
     assert link._portnum(None) == 0
 
 
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (101, 101),
+        (255, 101),
+        (0xFFFFFFFF, 101),
+        (100, 100),
+        (0, 0),
+        (None, None),
+        (True, None),
+        ("101", None),
+        (-1, None),
+        (-0.1, None),
+        (100.5, None),
+        (float("inf"), None),
+        (float("nan"), None),
+        (0x100000000, None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_local_power_telemetry_preserves_external_supply(raw, expected) -> None:
+    link = MeshtasticRadioLink(RadioConfig(), VirtualClock())
+    link._local_id = "!00000001"
+    link._interface = SimpleNamespace(
+        nodes={link._local_id: {"deviceMetrics": {"batteryLevel": raw}}}
+    )
+    assert (await link.local_telemetry()).battery_level == expected
+
+    # A serial connection alone is not a report of its power source.
+    link._interface.nodes[link._local_id]["deviceMetrics"].clear()
+    assert (await link.local_telemetry()).battery_level is None
+
+
 @pytest.mark.asyncio
 async def test_callback_hands_message_to_event_loop_without_thread_clock_access() -> None:
     clock = VirtualClock()

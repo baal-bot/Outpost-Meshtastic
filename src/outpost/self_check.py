@@ -118,7 +118,7 @@ CHECK_DEFINITIONS = (
     CheckDefinition(
         "radio_power",
         "operations",
-        "Connected-radio power is above its warning threshold",
+        "Connected radio has external power or sufficient battery",
         "The connected mesh radio may stop before operators expect it to.",
         "Restore charging or external power and verify the trend on the Radio page.",
     ),
@@ -550,22 +550,25 @@ class SelfCheckService:
     async def _radio_power(self, now: int | None = None) -> CheckResult:
         now = int(self.clock.now().timestamp()) if now is None else now
         rows = await self.database.read(
-            "SELECT captured_at,battery_level FROM radio_power_sample "
+            "SELECT captured_at,battery_level,external_power FROM radio_power_sample "
             "ORDER BY captured_at DESC,id DESC LIMIT 1"
         )
         level = normalize_battery_level(rows[0]["battery_level"]) if rows else None
-        condition = power_condition(level, self.config.radio.power)
+        external_power = bool(rows[0]["external_power"]) if rows else False
+        condition = power_condition(level, self.config.radio.power, external_power=external_power)
         age = now - int(rows[0]["captured_at"]) if rows else None
         max_age = 2 * self.config.radio.power.sample_interval_s + 60
-        state: EvidenceState = "pass" if condition == "normal" else "fail"
-        if age is None or age < 0 or level is None:
+        state: EvidenceState = "pass" if condition in {"normal", "external"} else "fail"
+        if age is None or age < 0 or (level is None and not external_power):
             state = "unknown"
         elif age > max_age:
             state = "stale"
         if not rows:
             detail = "No connected-radio power sample has been recorded yet."
+        elif external_power:
+            detail = "The connected radio reports external power; no battery reading is needed."
         elif level is None:
-            detail = "The connected radio reports no battery (external power or unsupported)."
+            detail = "The connected radio has not reported battery or external-power status."
         elif condition == "critical":
             detail = f"Radio battery is critical at {level}%."
         elif condition == "warning":
@@ -578,6 +581,7 @@ class SelfCheckService:
             detail,
             {
                 "battery_level": level,
+                "external_power": external_power,
                 "condition": condition if rows else "no_data",
                 "captured_at": int(rows[0]["captured_at"]) if rows else None,
                 "warning_percent": self.config.radio.power.warning_percent,

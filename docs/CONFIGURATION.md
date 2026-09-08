@@ -39,9 +39,12 @@ Select `serial`, `tcp`, or `ble` and configure the matching subsection. Serial i
 fixed node. `federation_portnum` is a private Meshtastic application port from 256–511. Only
 explicitly trusted bridge node IDs belong in `bridge_node_ids`.
 
-`radio.power` turns the connected node's battery report into an operator condition. Warning and
+`radio.power` turns the connected node's power report into an operator condition. Warning and
 critical percentages must be ordered, `sample_interval_s` and `trend_hours` bound the retained
-trend, and a missing report is labelled external/unsupported power rather than treated as 0%.
+trend. Reported external power is labelled **External power** and passes the fresh radio-power
+readiness check without a battery percentage. Missing telemetry remains unknown, and a reported
+0% remains a critical battery reading. Neither an external-power report nor a USB connection proves
+the Pi's backup-power capacity; see [radio power](RADIO-POWER.md).
 `shed_discretionary` defaults to false. When explicitly enabled, battery at or below
 `shed_below_percent` pauses only AI, bulletins, and digests until power recovers; replies, alerts,
 and the critical-alert emergency reserve remain available.

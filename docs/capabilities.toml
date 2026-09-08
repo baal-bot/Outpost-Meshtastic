@@ -994,6 +994,14 @@ path = "docs/SAFETY-READINESS.md"
 description = "All-check evidence states, finite operator observations, cache/sample freshness, collection budgets and non-destructive remediation; physical qualification remains separate."
 [[capabilities.evidence]]
 kind = "automated"
+path = "tests/integration/test_radio_power.py::test_external_power_survives_adapter_governor_storage_and_readiness"
+description = "Reported external radio power survives the adapter, governor and stored history and passes its fresh readiness check without a battery percentage; missing/low readings, expiry and whole-station power remain distinct."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/RADIO-POWER.md"
+description = "External-power telemetry, battery thresholds, missing/stale evidence and schema-186 compatibility without a whole-station energy claim."
+[[capabilities.evidence]]
+kind = "automated"
 path = "tests/integration/test_outage_readiness.py::test_healthy_local_checks_do_not_certify_unknown_outage_prerequisites"
 description = "Actual service/store assessment preserves unknown outage prerequisites despite healthy narrow checks, with no radio, alert or destructive exercise."
 [[capabilities.evidence]]

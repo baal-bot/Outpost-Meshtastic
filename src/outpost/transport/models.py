@@ -63,6 +63,8 @@ class SendResult:
 
 @dataclass(frozen=True)
 class LocalTelemetry:
+    """Local device metrics; battery_level 101 denotes reported external power."""
+
     channel_utilisation: float = 0.0
     air_util_tx: float = 0.0
     battery_level: int | None = None

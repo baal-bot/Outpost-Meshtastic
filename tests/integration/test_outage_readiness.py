@@ -222,6 +222,19 @@ async def test_radio_battery_freshness_is_separate_from_station_power(appliance,
     assert report["station_power"]["state"] == "unknown"
 
 
+@pytest.mark.parametrize("age,state", [(0, "pass"), (1000, "stale"), (-1, "unknown")])
+async def test_external_radio_power_keeps_freshness_and_station_boundaries(appliance, age, state):
+    await appliance.database.write(
+        "UPDATE radio_power_sample SET captured_at=?,battery_level=NULL,external_power=1",
+        (int(appliance.clock.now().timestamp()) - age,),
+    )
+    report = checks(await appliance.self_check.run("test"))
+    assert report["radio_power"]["state"] == state
+    assert report["radio_power"]["passed"] is (state == "pass")
+    assert report["radio_power"]["evidence"]["external_power"] is True
+    assert report["station_power"]["state"] == "unknown"
+
+
 @pytest.mark.parametrize("name", sorted(ATTESTABLE))
 async def test_operator_observation_is_audited_but_never_measured_certification(appliance, name):
     report = await observe(appliance, name)

@@ -20,7 +20,7 @@ and operator-attested evidence; none of the latter three means all-ready.
 | check: `escalation_audiences` | Safety | Every configured caution, urgent, and critical escalation stage resolves to a destination. |
 | check: `maintenance_freshness` | Operations | Retention maintenance has a valid completion record no more than 48 hours old. |
 | check: `backup_rotation` | Operations | The snapshot inventory does not exceed `store.backup.keep`. |
-| check: `radio_power` | Operations | A fresh connected-radio battery sample is above its warning threshold. No battery/no sample/future timestamps are unknown, not a zero-battery alarm or station-power proof. |
+| check: `radio_power` | Operations | A fresh connected-radio sample reports external power or a battery above its warning threshold. Missing/invalid reports and future timestamps remain unknown; old samples are stale. External radio power does not prove station backup power. |
 | check: `alert_delivery_history` | Safety | No alert escalation stage recorded zero admitted deliveries during the previous seven days. |
 | check: `intent_map` | Configuration | The configured tolerant-intent file exists, loads, and contains no rejected entries or regexes. |
 | check: `configured_keys_effective` | Configuration | Explicitly configured keys are not among settings known to have no runtime consumer. |
@@ -65,6 +65,14 @@ states without rerunning probes or rewriting the saved report. The original
 `outpost_self_check_evidence_state{check,state}` gauge is one-hot and follows the
 returned classifications. Rerun to refresh stale measurements. Existing startup,
 post-maintenance, power-change and on-demand triggers remain; no new timer is added.
+
+Meshtastic reports external power with a battery field above 100. Outpost retains
+that indication separately from battery percentage and shows **External power** on
+the Radio page and in readiness. A fresh external-power sample passes `radio_power`
+without a battery reading. A connected USB/serial port alone cannot substitute for
+that report; absent or invalid telemetry stays unknown. The separate `station_power`
+check still requires whole-station energy evidence. See [radio power](RADIO-POWER.md)
+for persistence, compatibility and validation details.
 
 This is an assessment, not an implementation of the missing RTC, encrypted backup,
 regional-map or physical qualification work. Unknowns remain visible until those

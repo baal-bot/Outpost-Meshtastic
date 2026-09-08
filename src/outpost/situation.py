@@ -1185,7 +1185,10 @@ class SituationBriefingService:
         delta = trend.get("delta_percent")
         elapsed = trend.get("elapsed_hours")
         power_title = f"Radio power {display_level}%" if reported else "Radio power not reported"
-        if reported and isinstance(delta, (int, float)) and isinstance(elapsed, (int, float)):
+        if condition == "external":
+            power_title = "Radio on external power"
+            power_detail = "The radio reports an external power supply"
+        elif reported and isinstance(delta, (int, float)) and isinstance(elapsed, (int, float)):
             power_detail = f"{direction} {abs(int(delta))} point(s) over {float(elapsed):.1f}h"
         elif reported:
             power_detail = "Trend will appear after another sampled reading"

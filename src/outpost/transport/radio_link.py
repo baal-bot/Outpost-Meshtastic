@@ -12,7 +12,7 @@ from typing import Any
 from outpost.channel_profile import OUTPOST_CHANNEL_PROFILE, matching_profile_channel
 from outpost.clock import Clock
 from outpost.config import RadioConfig
-from outpost.radio_power import normalize_battery_level
+from outpost.radio_power import normalize_power_level
 
 from .metrics import INBOUND_DROPPED, INBOUND_QUEUE_DEPTH
 from .models import InboundMessage, LinkState, LocalTelemetry, RadioSnapshot, SendResult
@@ -807,5 +807,5 @@ class MeshtasticRadioLink:
         return LocalTelemetry(
             channel_utilisation=float(metrics.get("channelUtilization", 0.0)),
             air_util_tx=float(metrics.get("airUtilTx", 0.0)),
-            battery_level=normalize_battery_level(metrics.get("batteryLevel")),
+            battery_level=normalize_power_level(metrics.get("batteryLevel")),
         )

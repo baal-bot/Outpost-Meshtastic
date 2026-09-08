@@ -1,5 +1,22 @@
 # Session resume point — 2026-09-08 (America/New_York)
 
+## Current task: #171 external radio power
+
+The user reported that the local dashboard incorrectly warns about missing battery
+readings from the radio powered by the Pi's USB supply. The fix preserves Meshtastic's
+external-power indication through the adapter, governor, stored samples, readiness,
+Radio page and situation briefing. Missing/invalid telemetry remains unknown,
+stale/future samples retain their boundaries, and station-power qualification remains
+separate. Migration 186 preserves old NULL samples as unknown.
+
+Read `.data/radio-external-power-2026-09-08/STATE.json` for current tests, exact-commit
+CI and deployment status. Source preparation does not update the packaged service;
+at this checkpoint the installed release is still the schema-185 #136 release below.
+Complete green exact-commit CI, retain a current private backup, run the normal
+verified updater and inspect actual web/radio/AI/schema/record retention and a fresh
+external-power readiness result. Record sanitized evidence and close #171 after the
+local update passes. The second machine remains with its owner.
+
 ## Completed: #136 controlled reboot acceptance
 
 The user returned after the authorized controlled reboot. The local Pi passed its

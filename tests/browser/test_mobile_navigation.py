@@ -3543,6 +3543,58 @@ def test_disabled_module_pages_are_explained_and_inert(
         page.close()
 
 
+@pytest.mark.parametrize("width", (320, 1280))
+@pytest.mark.parametrize("theme", THEMES)
+def test_radio_power_distinguishes_external_missing_and_low_battery(
+    browser: object, dashboard_url: str, width: int, theme: str
+) -> None:
+    page = prepare_page(browser, width, dashboard_url, theme=theme)
+    route_shared_operator_api(page)
+    route_visual_content_api(page)
+    power = {
+        "reported": False,
+        "battery_level": None,
+        "external_power": True,
+        "condition": "external",
+        "trend": {"direction": "unavailable", "sample_count": 1},
+        "thresholds": {"warning_percent": 30, "critical_percent": 15},
+        "shedding": {"enabled": False, "active": False},
+        "samples": [],
+    }
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.route(
+        "**/api/v1/mesh/power",
+        lambda route: route.fulfill(json=power),
+    )
+    try:
+        for condition, level, title, detail in (
+            ("external", None, "External power", "no battery reading needed"),
+            ("not_reported", None, "Not reported", "have not been reported"),
+            ("critical", 5, "5%", "critical ≤15%"),
+            ("external", None, "External power", "no battery reading needed"),
+        ):
+            power.update(
+                condition=condition,
+                battery_level=level,
+                reported=level is not None,
+                external_power=condition == "external",
+            )
+            page.goto(dashboard_url + "/radio.html", wait_until="domcontentloaded")
+            page.wait_for_function(
+                "title => document.querySelector('#radio-power-level')?.textContent === title",
+                arg=title,
+            )
+            assert detail in page.locator("#radio-power-detail").text_content()
+            card = page.locator("#radio-power-card")
+            assert f"power-{condition}" in card.get_attribute("class")
+            assert page.locator("#radio-power-trace").is_hidden()
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        assert errors == []
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize("width", (390, 1280))
 def test_radio_queue_filter_hides_expired_history_by_default(
     browser: object, dashboard_url: str, width: int

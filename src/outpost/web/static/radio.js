@@ -500,16 +500,21 @@ async function refresh() {
   $("radio-preset").textContent =
     `${status.radio_config.region} · ${status.radio_config.preset}`;
   const powerCard = $("radio-power-card");
-  powerCard.classList.remove("power-normal", "power-warning", "power-critical", "power-not_reported");
+  powerCard.classList.remove("power-normal", "power-external", "power-warning", "power-critical", "power-not_reported");
   powerCard.classList.add(`power-${power.condition || "not_reported"}`);
-  $("radio-power-level").textContent = power.reported
+  const externalPower = power.condition === "external";
+  $("radio-power-level").textContent = externalPower
+    ? "External power"
+    : power.reported
     ? `${Number(power.battery_level).toFixed(0)}%`
-    : "No battery";
+    : "Not reported";
   const trend = power.trend || {};
   const thresholds = power.thresholds || {};
   const shedding = power.shedding || {};
-  let powerDetail = "No battery reported · external power or unsupported telemetry";
-  if (power.reported) {
+  let powerDetail = "Battery and external-power status have not been reported";
+  if (externalPower) {
+    powerDetail = "Radio reports an external power supply · no battery reading needed";
+  } else if (power.reported) {
     const trendText = trend.delta_percent == null || trend.elapsed_hours == null
       ? "trend pending"
       : `${trend.direction} ${Math.abs(Number(trend.delta_percent)).toFixed(0)} points / ${Number(trend.elapsed_hours).toFixed(1)}h`;

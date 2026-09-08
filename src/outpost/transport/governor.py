@@ -913,7 +913,7 @@ class AirtimeGovernor:
         )
         if self.power_observer is not None:
             try:
-                await self.power_observer(self.battery_level)
+                await self.power_observer(telemetry.battery_level)
             except Exception:
                 # Power history must never become a new failure boundary for alert egress.
                 RADIO_POWER_OBSERVATION_FAILURES.inc()
