@@ -455,11 +455,12 @@ def test_release_update_verifies_artifacts_before_checkout_and_install() -> None
     pre_push = (Path(__file__).parents[2] / "tools" / "pre-push.sh").read_text()
     workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "ci.yml").read_text()
     expected_scope = (
-        "src tests tools/build_release_metadata.py tools/check_capabilities.py "
+        "src tests tools/build_release_metadata.py tools/benchmark_commit_policy.py "
+        "tools/check_capabilities.py "
         "tools/check_commands.py tools/check_ci_evidence.py tools/check_dependency_lock.py "
         "tools/check_requirements.py "
         "tools/check_mypy_ratchet.py tools/check_static_markup.py tools/pytest_evidence_plugin.py "
-        "tools/verify_release.py deploy/configure.py deploy/render_avahi.py"
+        "tools/verify_release.py deploy/configure.py deploy/render_avahi.py deploy/offline_kit.py"
     )
     assert expected_scope in " ".join(pre_push.replace("\\\n", "").split())
     assert '"$PYTHON" -m tools.check_requirements --check' in pre_push

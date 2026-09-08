@@ -40,6 +40,11 @@ all 38 runtime/radio pins. Lint, strict typing and the unchanged 262-error debt
 ratchet passed locally. Inspect the actual full CI outcome; this file was written
 before the commit's run.
 
+The first full CI run found a stale expected lint-tool list in the deployment
+tests after the benchmark was added to CI/pre-push. The follow-up updates that
+expectation to include the benchmark and offline-kit tool; application code is
+unchanged. Use the follow-up commit's CI result from STATE.json for deployment.
+
 ## Next actions and second-node update
 
 1. Finish/check full CI for the #137 commit and resolve any actual failures.
