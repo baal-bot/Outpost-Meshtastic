@@ -47,8 +47,8 @@ history together. Expiry rechecks eligibility after obtaining the writer. The #1
 change alone does not change schema, radio commands, federation wire format, or airtime policy.
 
 The #131 evidence does not close short-reference reuse (#138), missing-location correction (#140),
-federation clock/latency (#134/#135), or SQLite power-loss durability (#137). No physical outage
-or real-radio timing qualification is implied by transaction/cancellation tests.
+federation clock/latency (#134/#135), or physical SQLite power-loss qualification (#44).
+No physical outage or real-radio timing qualification is implied by transaction/cancellation tests.
 
 The separate #138 implementation and migration 174 add permanent local reference bindings,
 retire ambiguous reused legacy numbers, and include report title/origin in reaction replies.

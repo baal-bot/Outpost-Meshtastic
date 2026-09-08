@@ -224,12 +224,16 @@ an older unversioned backend. Automatic board policy stays separate. This is a d
 human API/command safety tightening, not an on-air or SQLite schema change; #153 and its
 event-publication prerequisite #135 remain open.
 
-## Preliminary commit-policy latency — #137 remains open
+## Preliminary commit-policy latency — September 5 evidence
 
 [The temporary-store comparison](benchmarks/SQLITE-COMMIT-POLICY-2026-09-05.md) records NORMAL
 versus FULL latency for concurrent incident/mail/outbox/quarantine-receipt operations on this
 Pi's workspace SD-card filesystem. It changes no live setting and proves neither power-loss
-survival nor energy/service-level acceptance. Default-policy selection and #44 remain open.
+survival nor energy/service-level acceptance. Default-policy selection was pending at
+the time of that measurement. The subsequent [checked WAL/FULL contract](COMMIT-DURABILITY.md)
+records #137's verified software policy and battery-backed deployment requirement.
+Hardware power-loss qualification remains #44, and storage/energy, battery runtime
+and shutdown behavior remain #148.
 
 ## Indexed producer page work — #144
 
@@ -279,8 +283,8 @@ newer store. This code change does not update or restart the installed appliance
 isolation, failure and actual task cancellation at both write boundaries, reopening,
 and recovery from the real pre-fix schema. Existing local, operator, and federated
 mail tests remain compatibility checks. These tests do not prove survival of sudden
-power removal; commit durability and physical power-cut qualification remain #137
-and #44 respectively.
+power removal. The subsequent [checked WAL/FULL contract](COMMIT-DURABILITY.md)
+completes #137's software policy; physical power-cut qualification remains #44.
 
 ## Airtime eligibility — #133
 

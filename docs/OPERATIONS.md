@@ -98,8 +98,10 @@ before sharing; redaction does not make ordinary radio or community activity non
 
 The application writer uses checked WAL/FULL commits. Review the
 [acknowledged-record durability contract](COMMIT-DURABILITY.md) for the success
-boundary, measured cost and remaining storage/power qualification. FULL does not
-replace independent encrypted backups or #44's physical loss campaign.
+boundary and measured cost. Battery backup is required for both deployment machines.
+The #137 software policy is complete; battery coverage, runtime and shutdown behavior
+remain #148, and physical power-loss qualification remains #44. Retain independent
+encrypted backups alongside the battery-backed power system.
 
 The dashboard can create, validate, download, and restore backups. Rotation protects disk space;
 local copies do not protect against device loss. Periodically store a validated backup in encrypted

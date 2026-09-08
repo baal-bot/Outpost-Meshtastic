@@ -62,4 +62,7 @@ this uninstrumented run identify the cause of those stalls.
 The data supports proceeding with the explicit FULL policy and broader regression
 testing. It does not establish sustained/aged/full-media performance, a worst-case
 bound, RF G6 timing, energy cost or acknowledged-data survival after physical loss.
-Those measurements and the #44 retained-ID campaign remain open.
+Target-storage and energy measurements remain under #148; the #44 retained-ID campaign
+also remains open.
+The subsequent software verification and owner-approved closure of #137 are recorded
+in the [commit contract](../COMMIT-DURABILITY.md); this dated measurement is unchanged.

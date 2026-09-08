@@ -114,7 +114,8 @@ can follow a successful commit; refresh instead of retrying automatically. Web s
 responses disable submission until a fresh review. A repeated committed token conflicts.
 Recovery from an *older restored backup* can lose newer responsibility decisions: this workflow
 cannot certify unseen history after rollback. Reconcile with the response lead before reassigning.
-Database power-loss durability remains separately unqualified (#137).
+Physical database power-loss survival remains separately unqualified (#44). The software
+policy is the [checked WAL/FULL contract](COMMIT-DURABILITY.md) (#137).
 
 ## Privacy, records and verification
 

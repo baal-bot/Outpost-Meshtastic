@@ -39,7 +39,7 @@ and again before serving requests. No weaker production mode is supported. Succe
 authoritative writes require the commit to finish before success is returned or
 new outbound work is published. Storage and the operating system must honor flushes;
 this setting alone is not physical power-loss qualification. See
-[the acknowledged-record contract](../../COMMIT-DURABILITY.md) and #137/#44.
+[the acknowledged-record contract](../../COMMIT-DURABILITY.md): #137 owns software policy; #44/#148 own hardware qualification.
 
 **REQ-DATA-002a** — Startup **MUST** verify `PRAGMA journal_mode` returns `wal` and
 `PRAGMA auto_vacuum` returns `2` (incremental), and **MUST** log an actionable error naming

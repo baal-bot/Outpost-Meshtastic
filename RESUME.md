@@ -3,13 +3,18 @@
 ## Current scope
 
 - Repository: `baal-bot/Outpost-Meshtastic`; branch `main`.
-- The user authorized #137's durability work. The second node is a separate
-  machine and **the user will update it**. Do not infer remote access or deployment.
+- The user approved closing #137 on its verified software evidence and requires
+  battery backup for both deployment machines. Physical qualification remains #44;
+  storage/energy, battery runtime and shutdown behavior remain #148. These hardware
+  checks are unperformed and do not block #137's software closure.
+- The second node is a separate machine and **the user will update it**. Do not
+  infer remote access or deployment.
 - No live database, service, radio, WAN or physical power test was changed here.
   Development and benchmarks use new disposable stores with simulated radio.
-- Read `.data/durability-2026-09-08/STATE.json`, when present, for final commit/CI
-  evidence recorded after this committed checkpoint. Also inspect current GitHub
-  #137 and the actual latest CI result before calling this work fully verified.
+- Verified software revision: `9c3324a14486bc1933766b9c57bf8c523495b43f`.
+  Read `.data/durability-2026-09-08/STATE.json` for its CI and offline-kit evidence.
+  `.data/close-137-2026-09-08/STATE.json`, when present, records the later documentation
+  commit and GitHub closure. Keep these revisions and their evidence distinct.
 
 ## #137 change and evidence
 
@@ -37,29 +42,47 @@ existing-host workspace-SD measurements, not energy or physical-loss qualificati
 All 229 targeted store/transaction/custody/backup/recovery/kit regressions passed;
 the database module reached 93.8% line coverage in that run. Package smoke verified
 all 38 runtime/radio pins. Lint, strict typing and the unchanged 262-error debt
-ratchet passed locally. Inspect the actual full CI outcome; this file was written
-before the commit's run.
+ratchet passed locally.
 
 The first full CI run found a stale expected lint-tool list in the deployment
 tests after the benchmark was added to CI/pre-push. The follow-up updates that
 expectation to include the benchmark and offline-kit tool; application code is
-unchanged. Use the follow-up commit's CI result from STATE.json for deployment.
+unchanged. At `9c3324a`, [CI run 34228844518](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34228844518)
+passed all four jobs: 2,246 tests per full-suite run and 1,201 production-wiring
+tests per Python version, with coverage, package and dependency checks passing.
+
+A new 39-package FULL-policy kit from that exact green revision is retained at
+`.data/durability-2026-09-08/kit`. A separate copy installed into an inactive runtime
+with the source checkout, wheelhouse and package cache hidden, and networking
+unavailable to its process. Synthetic encrypted restore, named-operator login,
+identity continuity and the persistent recovery fence passed. The installed writer
+reported FULL before and after restart; simulated radio sends stayed zero.
+Its manifest SHA-256 is
+`7380bda194764c6bfcee5bcf83c33c1fe480f8319425f6ca83f5f6b80b64b1c3`.
+This dated kit retains its original documents and is not rebuilt for the later
+scope clarification. Its verification does not establish physical replacement,
+battery runtime or power-loss acceptance.
 
 ## Next actions and second-node update
 
-1. Finish/check full CI for the #137 commit and resolve any actual failures.
-2. Update the existing #137 body with exact commit/run/results. Keep #137 open for
-   energy/storage qualification and #44's physical acknowledged-ID power-cut gate.
-3. Give the user the exact green revision. On their second machine, they should
-   first retain a validated off-device backup, use a clean checkout, fetch and
-   select that revision, then run `./deploy/update.sh <exact-commit>` as the normal
-   checkout owner. The updater requires GitHub CLI for CI verification and invokes
-   sudo for installation. `git pull` alone does not update the installed service.
-4. Have the user verify installed service health, radio/peer state and a fresh
-   readiness result. Do not claim that those remote checks have already happened.
-5. The previous verified offline kit uses a3c557e/NORMAL. Retain it as a previous
-   generation; a FULL-policy kit must be rebuilt from the new green source and
-   independently verified. New offline kits include the durability references.
+1. Finish recording the authorized #137 software closure, if the closure state
+   file or GitHub issue still shows it pending. Keep #44 and #148 open with their
+   hardware checks unchecked; full DATA-002 acceptance also remains pending.
+2. The next repository/deployment task is #136: align the installed service with
+   the verified software and complete its startup/reboot acceptance. The last
+   read-only observation found this host's enabled service failed and selecting
+   the August 29 release `ff11ed8dd99b` (schema capacity 153; checkout capacity 185).
+   The live database schema was not queried and this observation does not establish
+   the failure's cause. No deployment, service restart or reboot occurred here.
+3. On their separate second machine, the user should retain a validated off-device
+   backup, use a clean checkout, fetch and select verified revision
+   `9c3324a14486bc1933766b9c57bf8c523495b43f`, then run
+   `./deploy/update.sh 9c3324a14486bc1933766b9c57bf8c523495b43f` as the normal checkout
+   owner. The updater requires GitHub CLI for CI verification and invokes sudo for
+   installation. `git pull` alone does not update the installed service.
+4. The user must verify installed service health, radio/peer state and a fresh
+   readiness result. Those remote checks have not happened here. A later
+   documentation commit does not change the verified application's deployment pin.
 
 ## Previous completed checkpoint
 

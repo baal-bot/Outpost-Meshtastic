@@ -8,7 +8,7 @@ assignments, announce an identity, or import pending federation records.
 
 This implements the passphrase option in the original REQ-SEC-042. It is not a
 claim of physical-media, power-loss, fresh-Pi, or peer-replacement qualification.
-Those gates remain separate (#137, #146, #147). A restored key is continuity
+Those gates remain separate (#44, #146, #147). A restored key is continuity
 evidence, not proof that another copy of that identity has stopped transmitting.
 
 ## What is captured

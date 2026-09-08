@@ -201,7 +201,7 @@ Known limitations:
 
 - The six-participant real-radio tabletop and receipt-latency gate remain open.
 - Reporter location edits require a verified PKI DM or operator assistance. Suppression does not erase prior public history; moving outside a peer's area does not withdraw its older copy. Reference safety follows the database lineage; lost history or old-backup restores require identity precautions.
-- Clock-independent producer reconciliation and bounded automatic incident delivery are software-tested on modern links; complete physical G6 (#135) and acknowledged-data power-loss durability (#137) remain unqualified.
+- Clock-independent producer reconciliation and bounded automatic incident delivery are software-tested on modern links; complete physical G6 (#135) and acknowledged-data power-loss survival (#44) remain unqualified. The checked WAL/FULL software policy is complete (#137).
 - Incident/note changes have an atomic coalesced source journal drained through independent per-peer cursors; source recording and staging alone are not remote delivery (#165/#135).
 - Responsibility is local to a coordinating Outpost, not globally exclusive during a partition. Offers require explicit retrieval and acceptance, not an alert ACK; no automatic paging or physical responder-availability claim is made (#151).
 
@@ -298,7 +298,7 @@ Known limitations:
 
 - Encrypted recovery is synthetic-store/browser-tested, not a physical off-device or fresh-Pi drill. The memory-only format is limited to 256 MiB SQLite images and a compatible installed runtime; external maps, models, OS/network/device assets need the separate recovery kit.
 - Restored identities remain fenced: no radio/provider/background queues start and copied sessions are discarded. The node-loss contract requires a fresh serving identity and current local consent, not clone activation or automatic private replication. Backup custody cannot prove exclusive identity or global revocation during a partition.
-- Application connections now use checked WAL/FULL. Temporary mixed-workload measurements and ordinary reopen do not prove physical power-loss survival, flush compliance, energy cost or sustained service latency; #137/#44 remain open and installed nodes require an update.
+- The checked WAL/FULL software policy is complete (#137), with battery backup required for both deployment machines. Physical power-loss survival and flush qualification remain #44; storage/energy, battery runtime and shutdown behavior remain #148. Temporary-store measurements do not establish those hardware outcomes or sustained service latency; installed nodes still require an update.
 
 ### Retention and privacy controls
 

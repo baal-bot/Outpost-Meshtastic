@@ -21,8 +21,9 @@ uncommitted mutation or make a dependent allocation inside the transaction.
 The return value is a row ID, **not an affected-row count**; conditional updates need an explicit
 transactional result check. Cancellation rolls back writer work where possible, but cancellation
 after a commit cannot prove that nothing was saved. Callers must not promise exactly-once effects
-from timeout handling alone. WAL/NORMAL and process recovery tests are not physical power-loss
-durability qualification (#137/#44).
+from timeout handling alone. Commit settings and process recovery tests do not establish
+physical power-loss qualification (#44/#148). The software policy is the
+[checked WAL/FULL contract](COMMIT-DURABILITY.md) (#137).
 
 A domain operation should either own its transaction or receive a `Transaction` from its caller.
 Do not nest an owned transaction under the same non-reentrant writer lock. Network I/O, radio

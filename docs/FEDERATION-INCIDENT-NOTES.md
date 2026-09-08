@@ -101,5 +101,6 @@ identity, RTC confidence and physical power-loss qualification remain separate.
 No installed appliance or live database is migrated by this work. Before an approved
 deployment, take and verify a full backup, preserve revision lineage/sequence state,
 and deploy the matching binary. Older binaries refuse schema 177. Migration work
-and storage scale with retained history; SQLite WAL/NORMAL settings are unchanged
-and software rollback/reopen tests do not prove sudden-power-loss survival.
+and storage scale with retained history. The subsequent
+[checked WAL/FULL contract](COMMIT-DURABILITY.md) completes the software policy (#137);
+software rollback/reopen tests do not establish physical power-loss qualification (#44).

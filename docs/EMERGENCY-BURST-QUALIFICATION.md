@@ -117,7 +117,7 @@ qualifies rollback/recovery, not physical flash exhaustion or sudden power remov
 
 Remaining capacity work belongs to #142 (seven-day population/airtime/storage model),
 #144 (large-history paging cost), and #158 (long-duration soak). The multi-node field
-exercise #157, power-loss qualification #137/#44, and human responder load/triage
+exercise #157, power-loss qualification #44, and human responder load/triage
 remain separate gates. Do not extrapolate 15 ms application latency into an RF SLA or
 72 review records into a claim that a volunteer team can handle that load.
 

@@ -494,7 +494,7 @@ when no peer nodes are known.
 | SQLite `SQLITE_BUSY` | Serialised writer plus `busy_timeout=5000`; on persistent failure, degrade to read-only mode and alert the operator |
 | Disk full | Detected by a health check at 90%; retention pruning runs early; write-path returns a terse error; alerts still transmit |
 | WAN down | All internet-backed data sources serve cached values, age-stamped; SAME path (if present) continues to work; no user-visible failure other than staleness labels |
-| Power loss | WAL + `synchronous=FULL` requests commit durability from flush-honoring storage; physical survival remains #137/#44. On restart, check integrity and retained acknowledged IDs; recover unexpired durable work in safety order. |
+| Power loss | Checked WAL/FULL software policy is complete (#137). Battery backup is required for both deployment machines; power-system qualification remains #148 and physical acknowledged-ID survival remains #44. On restart, check integrity and retained acknowledged IDs; recover unexpired durable work in safety order. |
 | Clock skew (no RTC on a Pi) | On boot, if system time is implausible (< build date), mark timestamps `unsynced` and prefer monotonic ordering; NTP when WAN available; an RTC module is recommended in the install docs |
 
 **REQ-ARCH-021** — The outbound queue **MUST** be bounded (default 500 items) with per-class

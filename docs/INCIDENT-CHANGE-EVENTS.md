@@ -42,7 +42,8 @@ Maintenance preserves the journal, and full SQLite backups preserve it with the 
 lineage, revision index and sequence. There is at most one pending row per incident/note head,
 not one per edit or per peer. This is not an absolute lifetime storage cap: retained identities
 and tombstones can grow. No pending work is silently dropped to meet a row limit. Storage
-policy and physical commit durability remain #148/#137.
+policy remains #148 and physical commit durability remains #44. The checked WAL/FULL
+software policy is complete (#137).
 
 ## Bounded inspection and the next dispatcher
 

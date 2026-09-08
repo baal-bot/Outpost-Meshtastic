@@ -71,12 +71,35 @@ ceiling, SD-card endurance, energy consumption or worst-case response time. If a
 deployment cannot sustain the chosen workload, reduce discretionary work or improve
 storage/power; do not silently downgrade the writer to NORMAL.
 
-## Remaining physical acceptance
+## Battery-backed deployment and software acceptance
 
-#137 remains open for target-storage/energy measurements and #44's controlled
-power-loss campaign. Record source/configuration, medium/controller/power details,
-the exact acknowledged incident/mail/outbound/custody IDs before interruption,
-retained IDs and recovery outcomes afterward, and every loss or intervention.
-An `integrity_check` pass or ordinary process restart cannot replace this evidence.
-Testing uses backed-up designated hardware and a separately planned interruption;
-these instructions do not initiate one.
+The owner's September 8, 2026 deployment decision requires battery backup for both
+machines. This is an infrastructure requirement; its installation, runtime and
+shutdown behavior have not been established by the software tests. The checked
+WAL/FULL policy remains enabled, including for operating-system crashes.
+
+#137's software work is complete at
+[`9c3324a`](https://github.com/baal-bot/Outpost-Meshtastic/commit/9c3324a14486bc1933766b9c57bf8c523495b43f).
+[All four CI jobs](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34228844518)
+passed: 2,246 tests per full-suite run and 1,201 production-wiring tests per Python
+version. The existing-host benchmark retained all 3,072 returned IDs after ordinary
+reopen. An independently verified 39-package offline kit installed and restored a
+synthetic fenced workbench; its actual writer used FULL before and after restart.
+
+The owner approved closing #137 on this software evidence, with the remaining
+hardware work assigned to its existing issues:
+
+- [#148](https://github.com/baal-bot/Outpost-Meshtastic/issues/148) owns target-storage
+  and energy qualification, battery coverage and runtime, telemetry, and low-energy
+  operating/shutdown behavior. Its #137 software prerequisite is satisfied.
+- [#44](https://github.com/baal-bot/Outpost-Meshtastic/issues/44) owns the controlled
+  power-loss and retained-acknowledged-ID campaign. It remains unperformed and open.
+
+Those hardware tasks do not block #137's software closure. Whole-appliance and
+full requirement acceptance remain pending; closing #137 records no successful
+power cut, battery test or hardware flush qualification. For the #44 campaign,
+record source/configuration, medium/controller/power details, the exact acknowledged
+incident/mail/outbound/custody IDs before interruption, retained IDs and recovery
+outcomes afterward, and every loss or intervention. An `integrity_check` pass or
+ordinary process restart cannot replace that evidence. Testing uses backed-up
+designated hardware and a separately planned interruption.

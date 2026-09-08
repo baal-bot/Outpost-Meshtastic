@@ -46,7 +46,8 @@ transactions and single-operation `Database.write` retain the writer lock until 
 even across repeated cancellation. When commit has begun, it may succeed: publication completes
 before cancellation is propagated. A cancelled call is therefore not proof that nothing was
 saved. Cancellation latency includes waiting for the writer; no hard shutdown deadline or
-physical power-loss guarantee is established. WAL/NORMAL policy remains unchanged (#137).
+physical power-loss guarantee is established. Writer durability follows the
+[checked WAL/FULL contract](COMMIT-DURABILITY.md) (#137); physical qualification remains #44.
 
 ## Publication failure is not rollback
 
