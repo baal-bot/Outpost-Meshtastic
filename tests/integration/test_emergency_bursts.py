@@ -436,9 +436,13 @@ async def test_changed_safety_notes_receive_distinct_acks_but_repeats_do_not(bur
     assert len({item.dedupe_token for item in app.governor.queued_items()}) == 8
 
 
-@pytest.mark.parametrize("cancel", [False, True])
+@pytest.mark.parametrize(
+    ("cancel", "cancellation_delay"),
+    [(False, 0), (True, 0), (True, 0.15)],
+    ids=["timeout", "cancel", "delayed-cancel"],
+)
 async def test_interrupted_safety_handler_does_not_suppress_unrecorded_retry(
-    burst_app, monkeypatch, cancel
+    burst_app, monkeypatch, cancel, cancellation_delay
 ):
     app = await burst_app(responders=0)
     entered = asyncio.Event()
@@ -449,11 +453,14 @@ async def test_interrupted_safety_handler_does_not_suppress_unrecorded_retry(
         await asyncio.Event().wait()
 
     monkeypatch.setattr(app.incidents, "create", paused_before_mutation)
-    app.config.router.member_lock_timeout_s = 0.1
+    # Explicit cancellation must not race the short deadline exercised by the
+    # other case when a loaded CI runner delays resuming this test task.
+    app.config.router.member_lock_timeout_s = 5 if cancel else 0.1
     request = inbound(app, 1, "REPORT! road sample retry")
     task = asyncio.create_task(deliver(app, request))
     await asyncio.wait_for(entered.wait(), 5)
     if cancel:
+        await asyncio.sleep(cancellation_delay)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task

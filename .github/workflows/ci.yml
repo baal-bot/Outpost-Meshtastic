@@ -64,8 +64,9 @@ jobs:
 
   locked-runtime:
     runs-on: ubuntu-24.04
-    # Leave headroom above #143's measured 22-minute suite for recovery and packaging.
-    timeout-minutes: 40
+    # #139's slower Python 3.12 runner reached the 40-minute limit at 86%.
+    # Keep the full suite, audit and package checks with enough time to finish.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
