@@ -37,7 +37,7 @@ revision on which CI runs this manifest check.
 | Welfare events and check-ins | Events, recurring opt-in drills with reviewed airtime ceilings, named responder groups, readiness history, roster states, delivery-accountable HELP/OK handling, honest no-responder guidance, derived unaccounted members, and CSV export. | Simulated | unreleased @ `HEAD` (2026-08-29); introduced `04e74ca` |
 | Environmental information | Weather observations/forecasts, source-preserving CAP alert expiry with a visible missing-expiry fallback, astronomy, earthquakes, caching, provenance, maps, and waypoints. | Automated-tested | unreleased @ `HEAD` (2026-08-29); introduced `72763e5` |
 | NOAA SAME / RTL-SDR | Supervised receive-only rtl_fm/samedec pipeline, county and review gates, CAP dedupe, health, and bounded restart. | Hardware-gated | unreleased @ `HEAD` (2026-08-26); introduced `764516a` |
-| Dashboard and operator access | Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, shared local-first maps with a browser offline-only mode and visible partial-coverage failures, and a federation topology view. | Automated-tested | unreleased @ `HEAD` (2026-09-06); introduced `5295868` |
+| Dashboard and operator access | Responsive module-aware pages/API, explicit per-source failure states, named roles, responder-readiness warnings, web-account/operator-radio links, automatic mesh Operator inventory, a default-deny redacted wallboard contract, TOTP/recovery, sessions, step-up protection, optional direct/proxy HTTPS, trusted offline HTTP, strict proxy-header trust, accessibility, shared local-first maps with a browser offline-only mode and visible partial-coverage failures, and a federation topology view. | Automated-tested | unreleased @ `HEAD` (2026-09-08); introduced `5295868` |
 | Backup, restore, upgrade, and rollback | Checked WAL/FULL application commits, online verified backups, rotation, quiesced web restore, passphrase-encrypted off-device bundles with configuration and selected secrets, fresh-directory offline restoration into a durable identity-fenced operator workbench, CI-gated signed releases, verified pre-activation updates, health-gated activation, and schema-aware rollback. | Automated-tested | unreleased @ `HEAD` (2026-09-08); introduced `df0ee14` |
 | Retention and privacy controls | Bounded retention, foreign-key-safe incident deletion, isolated maintenance failures, atomic rotated snapshots, member-visible data counts, PKI-bound exact-position deletion, operator-reviewed pseudonymization, message limits, and a configuration-generated public policy. | Automated-tested | unreleased @ `HEAD` (2026-08-30); introduced `4d8af9c` |
 | Outpost federation | Pairing, authenticated framing, policy, producer-revision board/incident/alert reconciliation and separately negotiated plain incident notes with durable pending-page receipts and bounded indexed discovery; automatic incident/note delivery with independent fresh/backlog lanes, finite persistent retries, guarded coalesced storage receipts and operator delivery controls; version-bound human import/rejection with atomic audit, signed policy-filtered physical-transfer pages with radio-off commissioned identity and current-key/operator review, peer services, encrypted mail relay, poison-resistant signed multi-hop custody with recoverable key rotation, transactional destination dispatch, and privacy-gated topology health. | Two-node field-tested | unreleased @ `HEAD` (2026-09-07); introduced `8f7219e` |
@@ -270,6 +270,10 @@ Known limitations:
 - Trusted HTTP deliberately lacks transport encryption; Internet-facing operation still requires operator-managed TLS, firewalling, and network-abuse controls.
 - Map availability describes visible tiles only. Whole-pack coverage/integrity, service-path provisioning, and physical WAN-down qualification remain #139; offline-only mode affects basemap requests at one browser origin, not other dashboard feeds.
 
+Related roadmap:
+
+- Worldwide overview and GPS-assisted regional offline maps with manual/import fallback; design recorded in docs/WORLDWIDE-MAP-SETUP.md, implementation and field qualification remain #139.
+
 ### Backup, restore, upgrade, and rollback
 
 Maturity: **Automated-tested**.
@@ -442,6 +446,10 @@ Known limitations:
 - A recorded fresh-Pi mDNS/hotspot onboarding drill and extended unattended wallboard soak remain field gates.
 - Boot-schema evidence compares static package capacity with the inspected database; it does not prove configuration, import integrity, migration success, or unattended reboot/radio recovery. Custom or unavailable selections remain unknown.
 - Outage assessment cannot certify missing regional maps, clock holdover, off-device restoration, station energy, replacement-client access, radio-only peer paths or SAME reception. Operator observations remain unverified, finite and context-bound; no qualification exercise runs automatically.
+
+Related roadmap:
+
+- Worldwide overview and GPS-assisted regional offline maps with manual/import fallback; design recorded in docs/WORLDWIDE-MAP-SETUP.md, implementation and field qualification remain #139.
 
 ## Global boundaries
 

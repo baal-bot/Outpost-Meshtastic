@@ -1,5 +1,22 @@
 # Session resume point — 2026-09-08 (America/New_York)
 
+## Next work: #139 worldwide map setup
+
+The owner clarified that maps must serve installations worldwide. They suggested
+either whole-world coverage or reading the radio's GPS during setup to download the
+appropriate region. [The researched design](docs/WORLDWIDE-MAP-SETUP.md) recommends
+a small worldwide overview, GPS-assisted detailed regional packs with manual/USB
+fallbacks, and an optional full-planet pack. Protomaps PMTiles is the preferred
+candidate; source/distribution and the vector-rendering path need a bounded prototype.
+
+This turn records the design and implementation scope. No map download, service
+change, or field qualification has occurred. Begin with trustworthy local-radio
+position observations and global region planning, then a small international offline
+rendering prototype. Current radio snapshots lack position age/source, and the
+existing installer defaults to USGS raster tiles before starting the radio service.
+Keep all #139 field acceptance criteria open. The running release remains the
+verified #171 release below; documentation commits do not change that identity.
+
 ## Completed: #171 external radio power
 
 The user reported that the local dashboard incorrectly warns about missing battery

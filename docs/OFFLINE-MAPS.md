@@ -36,6 +36,11 @@ superseded manifest inspections, and destroyed maps cannot start late fallback r
 
 ## Remaining qualification — #139
 
+The [worldwide setup design](WORLDWIDE-MAP-SETUP.md) proposes a small global overview,
+GPS-assisted regional downloads with manual fallback, and an optional full-planet
+pack. That provisioning workflow and vector rendering remain implementation work;
+the behavior described above is the currently implemented raster-map behavior.
+
 This browser change (#164) does not provision or certify a map pack. The existing service
 inspector only finds a tile with a recognizable raster header. Its `ready` result and legacy
 manifest bounds/zoom/count fields do **not** certify complete coverage, decode validity, checksums,

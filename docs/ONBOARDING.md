@@ -1,5 +1,9 @@
 # Field-appliance onboarding
 
+The planned [worldwide map setup](WORLDWIDE-MAP-SETUP.md) uses the connected radio's
+validated position to suggest regional maps, with manual selection and offline import
+fallbacks. It is not implemented by the current coordinate prompts or checklist.
+
 Outpost keeps a resumable first-run checklist at `/var/lib/outpost/onboarding.json`. The file
 contains only step state and timestamps, never passwords, radio keys, locations, or operator notes.
 The interactive installer records identity setup; completed dashboard credentials are detected from

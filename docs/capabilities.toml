@@ -523,11 +523,11 @@ present = "Responsive module-aware pages/API, explicit per-source failure states
 maturity = "automated_tested"
 introduced_commit = "5295868"
 limitations = ["Trusted HTTP deliberately lacks transport encryption; Internet-facing operation still requires operator-managed TLS, firewalling, and network-abuse controls.", "Map availability describes visible tiles only. Whole-pack coverage/integrity, service-path provisioning, and physical WAN-down qualification remain #139; offline-only mode affects basemap requests at one browser origin, not other dashboard feeds."]
-roadmap = []
+roadmap = ["Worldwide overview and GPS-assisted regional offline maps with manual/import fallback; design recorded in docs/WORLDWIDE-MAP-SETUP.md, implementation and field qualification remain #139."]
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-09-06"
+date = "2026-09-08"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/browser/test_mobile_navigation.py::test_shared_dialogs_manage_focus_escape_validation_and_live_regions"
@@ -947,7 +947,7 @@ present = "Resumable field checklist, mDNS and expiring isolated hotspot access,
 maturity = "automated_tested"
 introduced_commit = "d614d85"
 limitations = ["A recorded fresh-Pi mDNS/hotspot onboarding drill and extended unattended wallboard soak remain field gates.", "Boot-schema evidence compares static package capacity with the inspected database; it does not prove configuration, import integrity, migration success, or unattended reboot/radio recovery. Custom or unavailable selections remain unknown.", "Outage assessment cannot certify missing regional maps, clock holdover, off-device restoration, station energy, replacement-client access, radio-only peer paths or SAME reception. Operator observations remain unverified, finite and context-bound; no qualification exercise runs automatically."]
-roadmap = []
+roadmap = ["Worldwide overview and GPS-assisted regional offline maps with manual/import fallback; design recorded in docs/WORLDWIDE-MAP-SETUP.md, implementation and field qualification remain #139."]
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
