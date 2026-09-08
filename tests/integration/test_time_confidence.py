@@ -289,6 +289,16 @@ async def test_readiness_and_retention_explain_time_uncertainty(appliance, monke
     assert "time_confidence" in (await appliance.maintenance.health())["failures"]
 
 
+async def test_normal_clock_slew_is_not_a_readiness_step(appliance, monkeypatch):
+    clock = appliance.clock
+    monitor(monkeypatch, clock)
+    for _ in range(12):
+        clock.advance(1000)
+        clock.epoch += timedelta(seconds=0.5)
+        assert time_status(clock).timestamp_safe
+        assert not appliance.self_check._clock_changed()
+
+
 @pytest.mark.parametrize("hours", [-6, 6])
 async def test_incident_worker_preserves_intents_and_reports_time_block(nodes, monkeypatch, hours):
     source, sp, target, _ = await pair(nodes)

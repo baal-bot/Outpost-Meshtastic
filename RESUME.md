@@ -15,6 +15,12 @@ lint, mypy, strict-debt ratchet, catalogues, requirements, static markup and pac
 smoke passed. All 181 final queue/worker/maintenance/diagnostics cases passed.
 The 300s visible + 300s hidden idle measurement is running; evidence is tracked in private `.data/clock-141-2026-09-08/STATE.json`.
 
+The packaged unit also needs the narrow `adjtimex`/`clock_adjtime` allowlist and
+explicit `CAP_SYS_TIME` exclusion. The real isolated systemd probe passed with the
+new sandbox and no clock writes; deploy the unit with the package. All 25 installer
+cases and 99 clock/readiness follow-up cases passed, including the reproduced and
+fixed false wall-step warning from normal clock slew.
+
 No new release is installed yet. The live regional-map release below is still
 selected. The owner has since selected regional detail; live map readiness passes.
 Pi inspection reports synchronized UTC, RTC boot use, charging voltage zero and

@@ -12,6 +12,12 @@ unprivileged query; it cannot adjust time. Outpost never sets the OS clock, enab
 battery charging, connects to a time server, or takes time from a remote radio.
 The administrator remains responsible for choosing the OS time source.
 
+The packaged systemd unit admits `adjtimex` and `clock_adjtime` queries while
+explicitly excluding `CAP_SYS_TIME` from its capability bounding set and retaining
+`NoNewPrivileges=yes`. Deploy the unit together with the package; an older syscall
+allowlist blocks the query. Custom units need the same read access and must not
+grant clock-setting capability.
+
 | Evidence | Behavior |
 | --- | --- |
 | OS reports synchronization, no clock fault, maximum error at most 30 seconds | Timestamp-sensitive operations may proceed. RTC retention remains unqualified. |

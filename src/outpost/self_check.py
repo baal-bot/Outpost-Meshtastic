@@ -365,11 +365,16 @@ class SelfCheckService:
         return self.snapshot()
 
     def _clock_changed(self) -> bool:
-        if time_status(self.clock).state == "stepped":
+        status = time_status(self.clock)
+        if status.state == "stepped":
             return True
         if self._initial_mono is None:
             self._initial_wall = self.clock.now().timestamp()
             self._initial_mono = self.clock.monotonic()
+            return False
+        if status.source == "linux_kernel":
+            # The monitor distinguishes discontinuities from normal OS slew.
+            # Comparing lifetime wall/monotonic drift would eventually invent a step.
             return False
         elapsed = self.clock.monotonic() - self._initial_mono
         return abs(self.clock.now().timestamp() - self._initial_wall - elapsed) > 5
