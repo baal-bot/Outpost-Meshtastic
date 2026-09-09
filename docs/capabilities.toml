@@ -941,7 +941,7 @@ description = "A federation HELLO received through the radio path creates a pend
 [[capabilities]]
 id = "local_ai"
 area = "Local AI assistant"
-present = "ASK runtime with permission-scoped retrieval, deterministic safety filters, evidence validation/fallback, review console, native HailoRT Qwen3-VL provider, bounded device reacquisition, and explicit readiness state."
+present = "ASK runtime with permission-scoped and revision-checked retrieval, conservative cited-record grounding, deterministic fallback, reserved non-AI worker capacity, frozen synthetic comparative evaluation and blinded review export, review console, native HailoRT Qwen3-VL provider, bounded device reacquisition, and explicit readiness state."
 maturity = "hardware_gated"
 introduced_commit = "6b3d01a"
 limitations = [
@@ -965,6 +965,18 @@ description = "Provider failure opens the AI circuit breaker and later recovers 
 kind = "hardware"
 path = "tests/eval/test_live_provider.py::test_live_provider_meets_release_gate"
 description = "Opt-in hardware release-gate assertion for the full guarded corpus."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_ai_holdout.py::test_frozen_holdout_through_real_database_and_service"
+description = "Frozen synthetic cases exercise real retrieval, permissions and guard behavior in both guarded and deterministic modes; scripted controls do not claim model quality."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_ai_holdout.py::test_core_commands_and_same_sender_urgent_intake_survive_ai_load"
+description = "Real inbound workers/router preserve board, mail and urgent intake with AI disabled, blocked and failed."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/AI-EVALUATION-2026-09-09.md"
+description = "Software completion, holdout/legacy scoring separation, blinding, measurement limits and later comparison scope."
 
 [[capabilities]]
 id = "installation_operations"

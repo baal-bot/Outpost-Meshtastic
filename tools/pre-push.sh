@@ -16,6 +16,7 @@ PYTHON=${OUTPOST_PYTHON:-$PROJECT_DIR/.venv/bin/python}
 
 cd "$PROJECT_DIR"
 "$RUFF" format --check src tests \
+  tools/eval_ai.py tools/bench_inference.py \
   tools/build_release_metadata.py tools/benchmark_commit_policy.py tools/check_capabilities.py tools/check_commands.py \
   tools/check_ci_evidence.py tools/check_dependency_lock.py tools/check_requirements.py \
   tools/check_mypy_ratchet.py tools/check_static_markup.py \

@@ -1,0 +1,7 @@
+{
+  "version": "holdout-v1",
+  "case_count": 28,
+  "sha256": "74cbd9d3e321137df8230f9352b76b758150b17a177b871a513612a75b084995",
+  "original_g4_sha256": "4056a6eed9eda009a4f9db477e24b12ab84531256a526a5b25fea6af72409eda",
+  "rubric": "All case expectations must pass. Both provider inputs and replies must preserve permissions. Blinded human usefulness scores are separate."
+}

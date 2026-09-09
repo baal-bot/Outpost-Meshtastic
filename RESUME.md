@@ -8,10 +8,17 @@ battery and remains powered and receiving if the Pi goes down. Use that existing
 arrangement as the baseline; the earlier shared-battery description omitted the
 radio's independent battery. Do not propose installing backup power again.
 
-The next recommendation is **#156 guarded-AI evaluation and service isolation**:
-extend the existing benchmark with a frozen synthetic holdout, compare with
-deterministic retrieval, and check core services while AI is disabled, busy or
-failed. Implementation has not begun. #148 is deferred in the work order, with
+The owner authorized **#156 guarded-AI evaluation and service isolation** and
+explicitly directed software completion before physical tests. The implementation
+and 116 focused tests pass locally: frozen 28-case real-service evaluation in two
+modes, separate original G4 score, blinded review exports, strict local-fact
+grounding, refreshed/revalidated permissions and revisions, bounded weather age,
+and reserved non-AI worker capacity. The busy-provider test reproduced all four
+workers blocked; the fix preserves PING, board posts, mail and urgent intake.
+Single-worker configurations use deterministic retrieval. Full exact-source CI
+and installation are the next steps; do not wait for physical qualification.
+Details are in `docs/AI-EVALUATION-2026-09-09.md` and private
+`.data/ai-evaluation-156-2026-09-09/`. #148 is deferred in the work order, with
 its existing resource-policy and measurement criteria retained. #150 is ready to
 close using the evidence below. No new power/reception exercise is requested.
 

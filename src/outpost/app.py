@@ -235,6 +235,7 @@ class OutpostApp:
                 self.database,
                 now=lambda: int(self.clock.now().timestamp()),
                 node_status=self.status,
+                weather_max_age_hours=self.config.env.max_age_hours,
             ),
             self.ai_store,
             now=lambda: int(self.clock.now().timestamp()),

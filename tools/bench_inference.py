@@ -254,6 +254,7 @@ async def guarded_eval_sample(
         str(raw["content"]),
         evidence_refs=tuple(chunk.ref for chunk in chunks),
         grounded=True,
+        evidence_chunks=chunks,
     )
     content = filtered.text if filtered.accepted else extractive_fallback(chunks)
     return {

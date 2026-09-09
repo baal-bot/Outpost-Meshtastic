@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -134,6 +135,12 @@ def _age(created_at: int, now: int) -> str:
     return f"{seconds // 86_400}d"
 
 
+def _revision(row: Any) -> str:
+    # FTS rank and the rendered age may change without a record changing.
+    values = {key: row[key] for key in row.keys() if key != "rank"}
+    return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
+
+
 class RetrievalEngine:
     def __init__(
         self,
@@ -141,10 +148,12 @@ class RetrievalEngine:
         *,
         now: Callable[[], int],
         node_status: Callable[[], dict[str, Any]] | None = None,
+        weather_max_age_hours: int = 6,
     ) -> None:
         self.database = database
         self.now = now
         self.node_status = node_status
+        self.weather_max_age_seconds = weather_max_age_hours * 3600
 
     async def retrieve(self, question: str, member: Member, registry: Any) -> RetrievalResult:
         classes = classify(question)
@@ -222,6 +231,7 @@ class RetrievalEngine:
                         * _decay(int(row["updated_at"]), now, 180)
                         / (1 + abs(float(row["rank"])))
                     ),
+                    revision=_revision(row),
                 )
             )
         return chunks
@@ -230,10 +240,17 @@ class RetrievalEngine:
         query = _query(question)
         if not query:
             return []
+        # A queued request's Member is a snapshot. Revocations must apply to
+        # both local and imported posts before evidence reaches a provider.
+        current = await self.database.read("SELECT trust FROM member WHERE id=?", (member.id,))
+        trust = min(
+            TrustLevel.parse(member.trust),
+            TrustLevel.parse(str(current[0]["trust"])) if current else TrustLevel.GUEST,
+        )
         rows = await self.database.read(
             """
             SELECT p.thread_id,p.seq,p.author_label,p.body,p.created_at,b.slug,
-                   b.min_read_trust,bm25(post_fts) rank
+                   b.min_read_trust,p.origin_node,bm25(post_fts) rank
             FROM post_fts f JOIN post p ON p.id=f.rowid
             JOIN thread t ON t.id=p.thread_id JOIN board b ON b.id=t.board_id
             WHERE post_fts MATCH ? AND p.hidden=0 AND t.hidden=0 AND b.archived=0
@@ -244,14 +261,16 @@ class RetrievalEngine:
         now = self.now()
         chunks: list[EvidenceChunk] = []
         for row in rows:
-            if TrustLevel.parse(member.trust) < TrustLevel.parse(str(row["min_read_trust"])):
+            if trust < TrustLevel.parse(str(row["min_read_trust"])):
                 continue
             chunks.append(
                 EvidenceChunk(
                     f"board:{row['slug']}#{row['thread_id']}",
                     "board",
-                    f"{_age(int(row['created_at']), now)} @{row['author_label']} {row['body']}",
+                    f"{_age(int(row['created_at']), now)} @{row['author_label']} "
+                    f"origin {row['origin_node']}: {row['body']}",
                     12 * _decay(int(row["created_at"]), now, 14) / (1 + abs(float(row["rank"]))),
+                    revision=_revision(row),
                 )
             )
         return chunks[:8]
@@ -263,13 +282,16 @@ class RetrievalEngine:
             if reference
             else (
                 "status IN ('open','monitoring') OR "
-                "(status IN ('resolved','expired') AND updated_at>=unixepoch()-172800)"
+                "(status IN ('resolved','expired') AND updated_at>=?)"
             )
         )
-        params: tuple[Any, ...] = (int(reference.group(1)),) if reference else ()
+        params: tuple[Any, ...] = (
+            (int(reference.group(1)),) if reference else (self.now() - 172800,)
+        )
         rows = await self.database.read(
             f"""
-            SELECT local_ref,title,body,severity,status,location_text,updated_at
+            SELECT local_ref,title,body,severity,status,location_text,updated_at,
+                   origin_node,unverified,flagged_for_review
             FROM incident WHERE {where} ORDER BY updated_at DESC LIMIT 8
             """,  # noqa: S608 - where is a closed internal choice
             params,
@@ -282,6 +304,10 @@ class RetrievalEngine:
                 " · ".join(
                     str(value)
                     for value in (
+                        "unverified report"
+                        if row["unverified"] or row["flagged_for_review"]
+                        else "report",
+                        f"origin {row['origin_node']}",
                         row["severity"],
                         row["status"],
                         row["title"],
@@ -292,6 +318,7 @@ class RetrievalEngine:
                     if value
                 ),
                 16 * _decay(int(row["updated_at"]), now, 2),
+                revision=_revision(row),
             )
             for row in rows
         ]
@@ -301,9 +328,11 @@ class RetrievalEngine:
         rows = await self.database.read(
             """
             SELECT cache_key,provider,payload,fetched_at FROM env_cache
-            WHERE cache_key LIKE 'weather:%' OR cache_key LIKE 'forecast:%'
+            WHERE (cache_key LIKE 'weather:%' OR cache_key LIKE 'forecast:%')
+              AND fetched_at<=? AND fetched_at>=?
             ORDER BY fetched_at DESC LIMIT 2
-            """
+            """,
+            (now, now - self.weather_max_age_seconds),
         )
         chunks: list[EvidenceChunk] = []
         for row in rows:
@@ -332,6 +361,7 @@ class RetrievalEngine:
                     "weather",
                     f"{_age(int(row['fetched_at']), now)} {text}",
                     18 * _decay(int(row["fetched_at"]), now, 0.25),
+                    revision=_revision(row),
                 )
             )
         alerts = await self.database.read(
@@ -351,6 +381,7 @@ class RetrievalEngine:
                     f"until {row['expires_at']}"
                 ),
                 25,
+                revision=_revision(row),
             )
             for row in alerts
         )
@@ -376,6 +407,7 @@ class RetrievalEngine:
                     f"last heard {_age(int(row['last_seen']), now)}"
                 ),
                 10,
+                revision=_revision(row),
             )
             for row in selected[:5]
         ]

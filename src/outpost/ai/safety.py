@@ -154,6 +154,7 @@ def postfilter(
     *,
     evidence_refs: Sequence[str],
     grounded: bool,
+    evidence_chunks: Sequence[EvidenceChunk] | None = None,
 ) -> FilteredOutput:
     text = " ".join(answer.split()).strip()
     if not text:
@@ -176,6 +177,20 @@ def postfilter(
         return FilteredOutput(False, None, "ungrounded_citation")
     if len(text.encode()) > 200:
         return FilteredOutput(False, None, "too_long")
+    if grounded and evidence_chunks is not None:
+        # A genuine reference does not validate an invented claim. Accept only
+        # the complete cited record or the same bounded excerpt produced by the
+        # deterministic fallback. Preserve qualifiers, attribution and age.
+        supported = {
+            " ".join(candidate.split()).casefold()
+            for chunk in evidence_chunks
+            for candidate in (
+                f"[AI] {chunk.text.strip()} src: {chunk.ref}",
+                extractive_fallback((chunk,)),
+            )
+        }
+        if text.casefold() not in supported:
+            return FilteredOutput(False, None, "unsupported_claim")
     return FilteredOutput(True, text)
 
 

@@ -14,6 +14,13 @@ request to move on from power qualification, the next software recommendation is
 **#156 guarded-AI evaluation and service-isolation checks**. #148 is deferred in
 the work order; its remaining resource-policy and measurement criteria are not
 silently marked complete.
+
+The owner authorized #156 and explicitly prioritized completing software before
+physical qualification. Software implementation and automated validation proceed
+independently of the field sessions below. #156 now has a frozen real-service
+holdout, deterministic comparison, blinding exports and fixes for grounding,
+revision/access changes and AI worker starvation; local focused tests pass. See
+[the software evidence](AI-EVALUATION-2026-09-09.md) for CI and release status.
 See the [SDR qualification record](SDR-RECEPTION-QUALIFICATION-2026-09-09.md).
 #139's physical offline-map check is another small remaining task. Prepare the
 longer exercises while doing these smaller tasks, then freeze

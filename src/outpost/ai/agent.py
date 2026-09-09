@@ -129,6 +129,14 @@ class AIService:
     def provider_ready(self) -> bool:
         return self._provider_health.state is ProviderState.HEALTHY
 
+    @property
+    def generation_capacity(self) -> int:
+        """Leave an inbound worker available for non-AI commands."""
+        return min(
+            self.config.ai.max_concurrency + self.config.ai.queue_depth,
+            max(0, self.config.router.inbound_workers - 1),
+        )
+
     async def check_health(self) -> ProviderHealth:
         try:
             health = await asyncio.wait_for(
@@ -181,7 +189,7 @@ class AIService:
             "capabilities": capabilities.model_dump(mode="json"),
             "queue": {
                 "active_and_waiting": self._pending,
-                "capacity": self.config.ai.max_concurrency + self.config.ai.queue_depth,
+                "capacity": self.generation_capacity,
             },
             "generation": {
                 "working": self.generation_working,
@@ -231,7 +239,7 @@ class AIService:
         if not self.provider_ready or self.circuit_open:
             return None, "unavailable"
         async with self._count_lock:
-            capacity = self.config.ai.max_concurrency + self.config.ai.queue_depth
+            capacity = self.generation_capacity
             if self._pending >= capacity:
                 return None, "queue_full"
             self._pending += 1
@@ -283,7 +291,18 @@ class AIService:
         AI_REQUESTS.labels("situation", "web", "answered").inc()
         return content, "answered"
 
-    async def answer(self, question: str, member: Member, channel: int, registry: Any) -> AIAnswer:
+    async def answer(
+        self,
+        question: str,
+        member: Member,
+        channel: int,
+        registry: Any,
+        *,
+        deterministic_only: bool = False,
+    ) -> AIAnswer:
+        # With a single inbound worker, retain useful deterministic answers
+        # without tying up the only worker on optional model generation.
+        deterministic_only = deterministic_only or self.generation_capacity == 0
         question = " ".join(question.split()).strip()
         if not question:
             answer = AIAnswer("[AI] ASK needs a question.", "invalid", "general")
@@ -333,13 +352,15 @@ class AIService:
             await self._log(answer, question, member, channel, ())
             self._record_request(answer, channel)
             return answer
-        if self.circuit_open:
+        if self.circuit_open and not deterministic_only:
             answer = self._offline(primary, "circuit_open")
             await self._log(answer, question, member, channel, ())
             self._record_request(answer, channel)
             return answer
         async with self._count_lock:
-            capacity = self.config.ai.max_concurrency + self.config.ai.queue_depth
+            capacity = (
+                max(1, self.generation_capacity) if deterministic_only else self.generation_capacity
+            )
             if self._pending >= capacity:
                 answer = AIAnswer(
                     "[AI] Busy. Retry in a min.",
@@ -353,7 +374,18 @@ class AIService:
             self._pending += 1
         try:
             async with self._semaphore:
-                return await self._infer(question, member, channel, primary, result)
+                # A request may wait behind inference while records or access
+                # change. Refresh evidence after admission to the worker.
+                result = await self.retrieval.retrieve(question, member, registry)
+                return await self._infer(
+                    question,
+                    member,
+                    channel,
+                    primary,
+                    result,
+                    deterministic_only=deterministic_only,
+                    registry=registry,
+                )
         finally:
             async with self._count_lock:
                 self._pending -= 1
@@ -365,7 +397,19 @@ class AIService:
         channel: int,
         primary: str,
         retrieval: Any,
+        *,
+        deterministic_only: bool = False,
+        registry: Any = None,
     ) -> AIAnswer:
+        if not retrieval.chunks and not retrieval.allow_ungrounded:
+            answer = AIAnswer(
+                "[AI] No local info on that. Try BOARDS or ask the operator.",
+                "no_evidence",
+                primary,
+            )
+            await self._log(answer, question, member, channel, ())
+            self._record_request(answer, channel)
+            return answer
         grounded = bool(retrieval.chunks)
         capabilities = self._capabilities or await self.provider.capabilities()
         system = (
@@ -425,6 +469,24 @@ class AIService:
             self._record_request(answer, channel)
             return answer
         prompt = f"{pack.text}\n\nQUESTION\n{plan.question}" if pack.text else plan.question
+        if deterministic_only:
+            answer = AIAnswer(
+                extractive_fallback(pack.chunks),
+                "deterministic_retrieval",
+                primary,
+                grounded=bool(pack.chunks),
+            )
+            await self._log(
+                answer,
+                question,
+                member,
+                channel,
+                tuple(c.ref for c in pack.chunks),
+                rejected_evidence_refs=rejected_refs,
+                evidence_rejection_reason=evidence_rejection_reason,
+            )
+            self._record_request(answer, channel)
+            return answer
         try:
             response = await asyncio.wait_for(
                 self.provider.chat(
@@ -462,6 +524,19 @@ class AIService:
             self._record_request(answer, channel)
             return answer
         self._record_generation_success()
+        current = await self.retrieval.retrieve(question, member, registry)
+        current_chunks = {(chunk.ref, chunk.revision or chunk.text) for chunk in current.chunks}
+        if grounded and any(
+            (chunk.ref, chunk.revision or chunk.text) not in current_chunks for chunk in pack.chunks
+        ):
+            answer = AIAnswer(
+                "[AI] Local information or access changed while answering. Please retry.",
+                "evidence_changed",
+                primary,
+            )
+            await self._log(answer, question, member, channel, ())
+            self._record_request(answer, channel)
+            return answer
         if response.ttft_ms is not None:
             AI_TTFT.labels(self.provider.name, self.provider.model).observe(response.ttft_ms / 1000)
         AI_TOTAL.labels(self.provider.name, self.provider.model).observe(response.total_ms / 1000)
@@ -473,6 +548,7 @@ class AIService:
             response.content,
             evidence_refs=tuple(chunk.ref for chunk in pack.chunks),
             grounded=grounded,
+            evidence_chunks=pack.chunks,
         )
         if filtered.accepted:
             text, outcome = filtered.text or "", "answered"

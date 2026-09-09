@@ -124,6 +124,47 @@ errors, qualifying the model behind Outpost's deterministic guards and evidence-
 
 ## Operational boundaries
 
+### Software evaluation and current grounding
+
+The #156 software evaluation exercises the real `AIService`, database retrieval,
+permissions, evidence packing, filters and interaction log. A frozen 28-case
+synthetic corpus runs against both the guarded service and a deterministic
+retrieval baseline. It includes local/imported board permissions, hidden records,
+changed reports, stale/future weather, unsupported claims, injected content and
+provider failure. The original 60-case G4 harness remains a separate result; it
+does not exercise database retrieval. Run the software controls without hardware:
+
+```sh
+.venv/bin/python -m tools.eval_ai --output .data/ai-evaluation-156
+```
+
+The report identifies its scripted provider, corpus/source digests, per-case
+failures, model calls, latency, process CPU, RSS snapshots, reply bytes and modeled
+LONG_FAST airtime. Energy is explicitly unavailable. `blinded-review.json` omits
+provider/mode labels and the grading result; keep `review-key.json` separate during
+independent usefulness scoring. No human scores are fabricated. The manifest
+prevents silently changing cases after a run; additional holdout work needs a new
+version. Scripted adversarial controls are regression evidence, not model-quality
+measurements. `--configured-provider --config PATH` selects a real provider for a
+later comparison using the same disposable synthetic store, with no radio or
+production database. The configured provider must be available for that session.
+
+For local facts, a valid citation alone is insufficient. Generated answers must
+preserve the complete cited record or its deterministic bounded excerpt, including
+age, attribution and qualifiers; other wording uses the cited extractive fallback.
+This deliberately limits paraphrasing of operational information. Utility tasks
+such as translation keep their separate ungrounded path. Evidence is refreshed
+after queueing and its source revision/access is checked again after generation;
+changed information produces a retry response. Weather retrieval uses the same
+configured maximum cache age as the weather service and rejects future fetch times.
+
+AI admission leaves one inbound worker available for non-AI commands. A
+single-worker configuration uses deterministic retrieval instead of model
+generation. Production-path regressions saturate AI requests and still store a
+board post, mail and an urgent report while serving PING, with AI disabled, blocked
+or failed. Physical/energy qualification and later model comparisons do not block
+completion of this software work. See [the software evidence](AI-EVALUATION-2026-09-09.md).
+
 - AI is off in the example configuration and always off on channel 0 by default.
 - AI never receives mail, exact member positions, or operator notes.
 - Permission-filtered retrieval is selected by application code; model-controlled tools are not

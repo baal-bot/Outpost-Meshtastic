@@ -53,6 +53,7 @@ class EvidenceChunk:
     source: str
     text: str
     score: float
+    revision: str | None = None
 
 
 @dataclass(frozen=True)
