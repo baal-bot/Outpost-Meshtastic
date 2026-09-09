@@ -8,12 +8,15 @@ only before this process has ever trusted native or peer UTC, after two fresh
 stable native synchronization probes 30–60 seconds apart. Later steps remain
 latched. Existing governed recovery preserves expiry, replay checks and airtime.
 
-Local clock/queue/governor verification passed 207 cases and operator/browser
+Local clock/queue/governor verification passed 208 cases and operator/browser
 verification passed eight cases. Read
 [the qualification record](docs/STARTUP-TIME-QUALIFICATION-2026-09-09.md) and
 [the 16-issue closeout plan](docs/ISSUE-CLOSEOUT-PLAN-2026-09-09.md).
 The broader compatibility run passed 695 unit/readiness/maintenance/worker/outbox
-cases. Exact-source CI and the normal verified updater remain in progress; the
+cases before the final cached-report refresh follow-up. That follow-up refreshes
+the old startup-hold report through the existing navigation poll without renewing
+observations; 73 readiness/API/browser cases passed. Exact-source CI and the normal
+verified updater remain in progress; the
 installed release below has not yet been replaced. Private state
 and prepared installation/preservation checks are in
 `.data/startup-time-2026-09-09/STATE.json`. No GitHub issue was closed, no operator

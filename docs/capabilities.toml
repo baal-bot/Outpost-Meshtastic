@@ -1043,6 +1043,11 @@ description = "Delayed native startup synchronization with forward/backward six-
 
 [[capabilities.evidence]]
 kind = "automated"
+path = "tests/browser/test_time_confidence_ui.py::test_operator_sees_startup_recovery_without_rtc_certification"
+description = "The authenticated browser's normal navigation poll refreshes a cached startup hold after clock recovery without a manual readiness run, renewed observations or RTC certification, at phone and desktop widths."
+
+[[capabilities.evidence]]
+kind = "automated"
 path = "tests/browser/test_time_confidence_ui.py::test_operator_sees_time_hold_and_create_never_claims_queued"
 description = "Actual authenticated Federation page reports time holds and rejects creation without claiming queued or delivered; mobile/desktop across all themes."
 

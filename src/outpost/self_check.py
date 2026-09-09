@@ -339,6 +339,23 @@ class SelfCheckService:
 
     async def latest(self) -> dict[str, Any]:
         if self._cached.get("generated_at") is not None:
+            prior_time = next(
+                (
+                    check
+                    for check in self._cached.get("checks", [])
+                    if check["name"] == "time_confidence"
+                ),
+                None,
+            )
+            if (
+                prior_time is not None
+                and prior_time["evidence"].get("startup_recovered") is not True
+                and time_status(self.clock).startup_recovered
+            ):
+                # The ordinary navigation poll must retire a cached startup hold
+                # even when today's maintenance already ran. This refreshes
+                # measurements once; it does not renew operator observations.
+                return await self.run("startup-time-recovered")
             return self.snapshot()
         rows = await self.database.read(
             "SELECT value FROM runtime_setting WHERE key='readiness.self_check'"

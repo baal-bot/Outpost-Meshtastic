@@ -13,6 +13,8 @@ from tests.integration.test_federation_relay import A, B, allow_relay, relay_nod
 from tests.integration.test_federation_revisions import nodes as nodes
 from tests.integration.test_governor_timing import packet
 from tests.integration.test_governor_timing import queue as queue
+from tests.integration.test_outage_readiness import appliance as appliance
+from tests.integration.test_outage_readiness import observe
 from tests.integration.test_peer_time import exchange, pair
 from tests.integration.test_time_confidence import monitor
 from tests.support.application import production_governor
@@ -259,3 +261,37 @@ async def test_startup_recovery_preserves_signed_expiry_and_replay_checks(
     finally:
         await ad.close()
         await bd.close()
+
+
+async def test_startup_recovery_refreshes_cached_readiness_without_renewing_observations(
+    appliance, monkeypatch
+):
+    await observe(appliance, "station_power")
+    observation_sql = (
+        "SELECT value FROM runtime_setting WHERE key='readiness.observation.station_power'"
+    )
+    original = (await appliance.database.read(observation_sql))[0][0]
+    source = monitor(monkeypatch, appliance.clock, synchronized=False)
+    appliance.clock.epoch += timedelta(seconds=259.806)
+    source[0] = TimeSource(True, 0.01)
+    await appliance.self_check.run("startup")
+    assert (await appliance.self_check.latest())["trigger"] == "startup"
+    appliance.clock.advance(30)
+    report = await appliance.self_check.latest()
+    assert report["trigger"] == "startup-time-recovered"
+    clock_check = next(c for c in report["checks"] if c["name"] == "time_confidence")
+    assert clock_check["evidence"]["timestamp_safe"] and clock_check["state"] == "unknown"
+    assert (await appliance.database.read(observation_sql))[0][0] == original
+    assert (
+        len(
+            await appliance.database.read(
+                "SELECT * FROM audit_log WHERE action='readiness.observation'"
+            )
+        )
+        == 1
+    )
+    saved_sql = "SELECT value FROM runtime_setting WHERE key='readiness.self_check'"
+    saved = (await appliance.database.read(saved_sql))[0][0]
+    appliance.clock.advance(5)
+    await appliance.self_check.latest()
+    assert (await appliance.database.read(saved_sql))[0][0] == saved

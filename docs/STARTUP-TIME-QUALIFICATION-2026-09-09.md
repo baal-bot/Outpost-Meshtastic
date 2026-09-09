@@ -31,24 +31,28 @@ startup recovery without certifying RTC retention.
 
 ## Local evidence
 
-On Linux ARM64 / Python 3.13, **207 clock, peer, queue and governor cases passed**.
+On Linux ARM64 / Python 3.13, **208 clock, peer, queue and governor cases passed**.
 The new startup cases cover the observed 259.806-second correction, both six-hour
 directions, delayed/absent/faulty sources, bounded fresh confirmation, repeat
 jumps, elapsed regression, initial system-clock wiring, queue preservation and
 expiry, prior airtime, durable probe accounting and unknown-history silence,
-signed expiry/replay, and closing the startup exception after peer trust.
+signed expiry/replay, closing the startup exception after peer trust, and refreshing
+cached readiness without renewing observations.
 Focused production-path coverage for `timekeeping.py` is **94.8%**.
 
 **Eight authenticated API/Chromium cases passed**, including the existing time
 hold across three themes at phone/desktop widths and new startup recovery shown
-by the real navigation refresh scheduler at 320 and 1280 pixels. The status changes
+by the real navigation refresh scheduler at 320 and 1280 pixels. No manual readiness
+run or backend refresh is injected after the clock recovers. The status changes
 to recovered UTC while hardware time qualification remains unknown; no operator
 observation is created. Formatting, lint, typing/debt, capability, requirement,
 command and static-markup checks passed.
 
 A broader compatibility group passed **695 unit, readiness, maintenance,
-incident-worker and durable-outbox cases**. This overlaps the focused governor
-group; the counts are reported separately rather than added together.
+incident-worker and durable-outbox cases** before the final cached-report refresh
+follow-up. The final follow-up passed **73 readiness/API/browser cases**, including
+the eight browser cases above. These groups overlap; their counts are reported
+separately rather than added together.
 
 Source and evidence:
 [clock monitor](../src/outpost/timekeeping.py),

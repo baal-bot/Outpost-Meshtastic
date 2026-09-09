@@ -51,13 +51,14 @@ async def test_operator_sees_startup_recovery_without_rtc_certification(
         clock_check = page.locator('.readiness-check[data-check="time_confidence"]')
         await expect(clock_check).to_contain_text("Recovery is automatic")
         appliance.clock.advance(30)
-        report = await appliance.self_check.run("test")
+        await page.clock.run_for(31_000)
+        await expect(clock_check).to_contain_text("automatic startup clock recovery")
+        report = appliance.self_check.snapshot()
+        assert report["trigger"] == "startup-time-recovered"
         evidence = next(check for check in report["checks"] if check["name"] == "time_confidence")
         assert evidence["evidence"]["timestamp_safe"]
         assert evidence["evidence"]["startup_recovered"]
         assert evidence["state"] == "unknown"
-        await page.clock.run_for(31_000)
-        await expect(clock_check).to_contain_text("automatic startup clock recovery")
         await expect(clock_check).to_contain_text("RTC retention is unqualified")
         assert not await appliance.database.read(
             "SELECT * FROM audit_log WHERE action='readiness.observation'"

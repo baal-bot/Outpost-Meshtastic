@@ -44,6 +44,10 @@ Native or accepted peer confidence permanently closes this startup exception for
 the process. Steps during normal operation still require controlled recovery. The
 diagnostic `startup_recovered` field records automatic startup recovery for the
 current process; it does not prove hardware time accuracy or an actual reboot test.
+The next ordinary dashboard navigation poll refreshes a cached pre-recovery
+readiness report once, even if daily maintenance has already run. This removes the
+old startup-hold message without renewing operator observations or claiming RTC
+qualification.
 
 Local replies and alerts continue during **in-process** uncertainty if the governor
 started with usable time and has recovered its airtime history. Their deadlines,
