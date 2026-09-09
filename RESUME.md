@@ -2,6 +2,21 @@
 
 ## Installed: #141 clock safeguards; physical acceptance remains open
 
+The owner clarified that the Pi, SDR and LoRa radio share an external backup
+battery with days of runtime and solar charging backup, and expects the powered
+Pi to retain accurate time. Prioritize continuous operation through a days-long
+WAN outage. Dedicated RTC battery presence remains unspecified and concerns the
+complete-power-loss fallback; it does not block this primary scenario.
+The installed six-hour/30-second estimated holdover policy is conservative and
+can pause timestamp-sensitive functions before the station battery is depleted.
+Qualify actual drift and multi-day availability before claiming that requirement
+is met. This clarification did not change the installed runtime or run a field test.
+The owner also proposed pulling time from peer Outposts when needed. The next #141
+extension is an authenticated, fresh peer-time exchange with source age/uncertainty,
+delay bounds, loop prevention and a bounded recovery path through time-uncertain
+egress. Existing pairing/HMAC/counters provide a foundation, but peer time is not
+implemented. See the planned fallback in [OFFLINE-TIME.md](docs/OFFLINE-TIME.md).
+
 The owner authorized #141. The selected, running release is
 **`20260908T235451Z-5a7de3241e4c`**, source
 `5a7de3241e4cfaa7cb4829ae6fbb01fe714455ef`, database schema **186**.
@@ -35,9 +50,9 @@ requirements and markup also passed. The isolated real service-sandbox probe pas
 before deployment; no clock writes were used.
 
 RTC boot use, a zero charging voltage and a 0V battery-input reading were observed.
-These do not establish battery presence or retention. Owner confirmation of the
-separate RTC backup battery is pending. #141 remains open for physical RTC retention
-and the intended offline source/cold-start exercise. No clock, charging, network,
+These do not establish separate RTC battery presence or retention. That question
+belongs to the complete-power-loss fallback. #141 remains open for multi-day powered
+clock accuracy/availability and the separate RTC/cold-start exercise. No clock, charging, network,
 power, recovery USB or second-node change was made. The host did not reboot.
 Private evidence: `.data/clock-141-2026-09-08/STATE.json` and
 `/var/lib/outpost-qualification/141-20260908/clock-update/`. Later documentation

@@ -98,7 +98,83 @@ WAN-disconnected acceptance on the intended station. A peer radio's timestamp, a
 timezone setting, or a local NTP server merely advertising its own unsynchronized
 clock is insufficient evidence. No local source has been physically qualified here.
 
-## Physical acceptance and recovery
+## Continuous operation on station backup power
+
+The local owner reports that the Pi, SDR and LoRa radio share an external backup
+battery with days of runtime and solar charging backup. Use continued operation
+through a WAN outage as the primary acceptance scenario for this installation.
+The Pi's clock keeps running while the station supply keeps the Pi powered. The
+dedicated RTC battery concerns retention when main power is completely removed;
+its presence is not a prerequisite for this continuously powered scenario.
+
+The installed software still limits estimated holdover to six hours from the last
+good OS observation and 30 seconds estimated error, using 500 ppm drift. These are
+conservative policy bounds, not measurements of this Pi's clock accuracy. They can
+hold timestamp-sensitive functions while the battery still has days of energy.
+Increasing the duration alone would still encounter the error bound. Multi-day
+powered operation therefore needs clock-accuracy and availability qualification;
+the installed safeguards do not establish that acceptance.
+
+For the next planned field exercise, retain station power and local access, record
+a synchronized baseline, then arrange WAN/time-source isolation with the operator.
+Compare UTC against an independent reference over the intended days-long interval,
+including beyond the current holdover boundary. Record elapsed time, boot/process
+continuity, actual UTC error, reported confidence and the behavior of retained work.
+Recovery must preserve signed validity limits, airtime accounting and revision
+ordering. Use those measurements to qualify a longer confidence policy or a verified
+offline OS time source. Owner-reported battery runtime guides the exercise; measured
+whole-station energy and solar performance remain under #148.
+
+This clarification changes the next acceptance scenario. No WAN isolation, power
+interruption, clock adjustment or runtime-policy change was performed for it.
+
+## Planned trusted-peer time fallback
+
+The owner proposed obtaining time from federated Outposts when needed. This is a
+planned #141 extension; the installed release has no peer time synchronization.
+A paired, explicitly trusted time provider with a usable reference could help an
+Outpost that has lost its own time source. That reference may be NTP, GNSS or
+qualified powered holdover. Ordinary message creation times are unsuitable as
+fresh clock samples because radio queues and custody can delay delivery.
+
+The extension should use a small authenticated live request/response carrying an
+unpredictable challenge, UTC sample, source identity, reference age and uncertainty.
+Use the existing peer credential and durable replay-counter boundaries, plus a
+monotonic request deadline. Include queue/radio delay in the uncertainty estimate;
+reject excessively delayed replies and corroborate independent sources when
+available. Authentication establishes the peer identity; source-quality policy
+establishes whether its time is useful. Conflicting evidence stays explicit.
+
+Preserve the original reference age and uncertainty through any future propagation.
+A and B must not reset each other's holdover by exchanging the same aging reference.
+An initial implementation can restrict providers to independent qualified sources
+and decline re-export of peer-derived time. A group of peers can agree while sharing
+an inaccurate reference; agreement alone cannot establish UTC accuracy.
+
+Two integration constraints need explicit implementation and tests:
+
+- The current governor blocks federation during time uncertainty, and the normal
+  send path evaluates peer liveness using wall time. A bounded time-recovery path
+  must work before UTC is trusted, with authentication, monotonic deadlines and
+  conservative airtime accounting. It must not unlock arbitrary federation traffic.
+- Validating a peer sample must connect to the actual clock used for UTC checks.
+  Merely changing a confidence flag while leaving an incorrect clock in use is
+  insufficient. Keep clock-setting authority separate from the Outpost process;
+  the installed service's capability restrictions remain in force.
+
+Acceptance should cover late/replayed replies, revoked peers, conflicting sources,
+reference loops, six-hour offsets, multi-day source loss, restarts, radio budgets,
+unsupported older peers and recovery without false delivery or renewed signed
+lifetimes. The continuously powered Pi remains the normal clock; peer requests
+provide bounded checks/corrections when needed, not continuous radio chatter.
+
+Design references: NTP's offset/delay model in
+[RFC 5905, section 8](https://www.rfc-editor.org/rfc/rfc5905.html#section-8), and
+fresh authenticated responses and delay limits in
+[RFC 8915, sections 5.3 and 8.6](https://www.rfc-editor.org/rfc/rfc8915.html#section-5.3).
+These inform the design; a custom LoRa exchange would not itself be NTP or NTS.
+
+## Complete power loss: RTC acceptance and recovery
 
 Prepare a local console/operator, verified recovery copy and independent time
 reference. Record battery hardware, source configuration, intended offline duration

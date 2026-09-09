@@ -78,12 +78,32 @@ The five-minute visible and five-minute hidden dashboard probe passed every
 The browser reported no page errors. This probe used an isolated temporary database
 and did not interrupt the production radio.
 
-## Remaining physical acceptance
+## Owner's power configuration and next acceptance
+
+After deployment, the owner clarified that the Pi, SDR and LoRa radio share one
+external backup supply with days of runtime and solar charging backup. The owner
+expects the Pi's clock to stay accurate while powered. This establishes the intended
+operating scenario: prioritize multi-day clock accuracy and continued service with
+WAN time sources unavailable and station power maintained.
+
+The installed six-hour holdover and 30-second estimated-error bounds are conservative
+software policy. They do not measure this Pi's actual drift and can pause functions
+before the station battery runs out. Multi-day availability is still an open #141
+acceptance item. The updated [procedure](OFFLINE-TIME.md#continuous-operation-on-station-backup-power)
+records the powered exercise; the runtime and its existing CI identity are unchanged.
+Measured whole-station autonomy and charging behavior remain under #148.
+The owner subsequently proposed a federated time fallback. Its authentication,
+freshness, delay, provenance and recovery requirements are recorded in the operating
+guide as a planned extension. No peer-time synchronization was installed by this
+qualification, and the existing six-hour holdover bound remains in effect.
+
+## Remaining complete-power-loss acceptance
 
 Read-only inspection found an exposed RTC used at boot and a synchronized OS clock.
 The RTC battery input measured 0V and charging voltage was zero. Neither a device
 entry nor a voltage snapshot establishes battery presence or retention. Owner
-confirmation of the separate RTC backup battery is pending.
+confirmation of the separate RTC backup battery remains unspecified. It concerns
+the complete-power-loss fallback rather than the primary continuously powered test.
 
 No physical power interruption, WAN/NTP isolation, clock change, RTC charging
 change, recovery-USB operation or second-node operation was performed. A controlled
