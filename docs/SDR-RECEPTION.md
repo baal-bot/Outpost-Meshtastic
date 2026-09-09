@@ -37,6 +37,13 @@ successful independent receiver updates.
 
 ## Prepare a dated station and antenna record
 
+For the existing installation, the owner's confirmed connected antenna and
+receiver-correlated weekly-test/alert records already establish SAME reception;
+see [the September 9 closeout assessment](SDR-RECEPTION-QUALIFICATION-2026-09-09.md).
+Reuse those observations. The procedure below supports new or changed setups and
+reception troubleshooting; it does not require a separate listening exercise to
+re-prove a path already delivering valid alert headers.
+
 Record the release/schema, decoder version, receiver model/serial, antenna and
 feedline, placement, tuned frequency, gain/PPM/sample settings, configured SAME
 areas, station identity and programming office. Keep device identifiers and exact
@@ -90,12 +97,15 @@ a temporary isolated database and has no transmitter or alert dispatcher.
 Use actual prepared settings in place of the placeholders. Preserve the tool's
 console output, including its timestamped decode summary, in the session evidence
 before the temporary database is removed. Record a separate
-physical USB-disconnect/reconnect and process-interruption exercise, including
-repeated failures, bounded backoff, recovery and process cleanup. Compare original
+physical USB-disconnect/reconnect and process-interruption exercise when recovery
+evidence is missing or the hardware path has changed. Credit existing physical
+USB recovery and repeated process regressions when assessing the issue criteria.
+An exercise should cover repeated failures, bounded backoff, recovery and process
+cleanup. Compare original
 and resulting event/alert/outbound identifiers to detect duplicate actionable
 warnings or unintended sends. Restore the normal service and verify it owns the
-SDR and receives audio again. Synthetic process interruption regressions are
-preparation for this hardware witness, not a replacement for it.
+SDR and receives audio again. Keep the provenance of physical USB checks and
+synthetic process-interruption regressions distinct in the evidence record.
 
 SAME depends on an operating, receivable broadcast transmitter and the installed
 antenna path. It carries alert headers and does not generate a local offline

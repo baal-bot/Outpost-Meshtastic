@@ -1,5 +1,20 @@
 # Session resume point — 2026-09-09 (America/New_York)
 
+## Current direction: software work and corrected power inventory
+
+The owner asked for the next software issue and reiterated that the Pi runs from
+a solar battery capable of powering it for many days. The LoRa radio has its own
+battery and remains powered and receiving if the Pi goes down. Use that existing
+arrangement as the baseline; the earlier shared-battery description omitted the
+radio's independent battery. Do not propose installing backup power again.
+
+The next recommendation is **#156 guarded-AI evaluation and service isolation**:
+extend the existing benchmark with a frozen synthetic holdout, compare with
+deterministic retrieval, and check core services while AI is disabled, busy or
+failed. Implementation has not begun. #148 is deferred in the work order, with
+its existing resource-policy and measurement criteria retained. #150 is ready to
+close using the evidence below. No new power/reception exercise is requested.
+
 ## Installed: #150 SDR reception evidence
 
 The user authorized the next software task from the closeout plan. The selected,
@@ -34,12 +49,24 @@ were unchanged. Maps remained PASS and absent from unresolved checks.
 
 Read [the qualification record](docs/SDR-RECEPTION-QUALIFICATION-2026-09-09.md),
 [the station procedure](docs/SDR-RECEPTION.md) and
-[the closeout plan](docs/ISSUE-CLOSEOUT-PLAN-2026-09-09.md). #150 remains hardware-gated
-for the legitimate broadcast/intelligibility/antenna witness and physical repeated
-interruption campaign. No GitHub issue was closed, no operator statement was
-recorded and no physical USB cut or host reboot was performed. Next software is
-**#148 whole-station energy/storage/thermal policy**; #139 remains the quickest
-likely field closure. Other field/equipment prerequisites are in the plan.
+[the closeout plan](docs/ISSUE-CLOSEOUT-PLAN-2026-09-09.md). The owner then confirmed
+the existing antenna and reception. Read-only review at 19:34 UTC recovered two
+relevant log-only weekly tests (September 2 and 9, 15:00:42 UTC), neither linked to
+an actionable alert; the September 9 receiver journal corroborates its test. A
+33rd SAME event arrived at 18:50:09 UTC after the update, also journal-corroborated.
+The initial current-process **never** snapshot must not be treated as lifetime
+reception history. August 26 already records physical USB-driver-loss recovery.
+#150 is ready to close: existing connected-antenna reception and real decoded
+tests satisfy reception, and the August hardware recovery plus passing repeated
+process-failure/deduplication regressions cover the recovery criterion. The owner
+correctly rejected requests to re-document or re-prove the working antenna path.
+No additional station record, listening session or reception test is required.
+The qualification record now maps all four criteria to the existing evidence;
+publishing that evidence and closing GitHub remain administrative steps.
+No GitHub issue was closed, no operator statement was recorded and no physical USB
+cut or host reboot was performed during this update. Next software is
+**#156 guarded-AI evaluation and service isolation**; #139 is another small
+remaining field task. Other field/equipment prerequisites are in the plan.
 
 Private evidence and updater checks are in `.data/sdr-reception-2026-09-09/` and
 `/var/lib/outpost-qualification/150-20260909/sdr-reception-update/`.
@@ -81,9 +108,10 @@ Private evidence is in `.data/startup-time-2026-09-09/STATE.json` and
 `/var/lib/outpost-qualification/141-20260909/startup-time-update/`.
 Later documentation commits do not change the installed release's CI identity.
 
-The live GitHub inventory still has 16 open issues. Next software is #150 SDR
-reception status, then #148 resource policy; the quickest likely field closure is
-#139 maps. Share #145/#147 recovery/access setup and #135/#157 multi-station work,
+The live GitHub inventory still has 16 open issues. #150's subsequent installation
+and recovered field evidence are recorded above. The next software recommendation
+is now #156; #148 is deferred in the work order and #139 maps remains a small field
+task. Share #145/#147 recovery/access setup and #135/#157 multi-station work,
 then run the seven-day #142 and thirty-day #158 gates on a qualified fixed candidate.
 The plan details every issue, prerequisite and closing witness. Third-station,
 separate restore-target and second-operator availability remain unconfirmed; no
@@ -206,9 +234,10 @@ commits after the installed source do not require another runtime update.
 
 ## Prior installation: #141 native clock safeguards
 
-The owner clarified that the Pi, SDR and LoRa radio share an external backup
-battery with days of runtime and solar charging backup, and expects the powered
-Pi to retain accurate time. Prioritize continuous operation through a days-long
+The owner confirmed a solar backup battery with days of runtime and expects the
+powered Pi to retain accurate time. The later correction above records the LoRa
+radio's own battery, which was omitted from the earlier shared-supply description.
+Prioritize continuous operation through a days-long
 WAN outage. Dedicated RTC battery presence remains unspecified and concerns the
 complete-power-loss fallback; it does not block this primary scenario.
 The installed six-hour/30-second estimated holdover policy is conservative and

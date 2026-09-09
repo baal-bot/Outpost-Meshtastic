@@ -72,13 +72,54 @@ same verified **65,884,160 bytes / 6,176 tiles**. Overall readiness remains degr
 for outstanding physical qualification checks. The host did not reboot, peer-time
 permissions remain disabled and clock-setting capability remains excluded.
 
-## Remaining field gates
+## Existing field evidence recovered during closeout review
 
-The synthetic subprocess exercise is not a physical USB-disconnection test. No
-legitimate antenna-received broadcast test, station speech/intelligibility check
-or physical interruption campaign was performed in this session. Those #150
-criteria remain open and the capability remains **hardware-gated**. No GitHub issue
-state or live operator observation was changed.
+The owner confirmed that the antenna is installed and weather reception has been
+running since initial setup. A read-only database and service-journal review at
+**19:34 UTC on September 9** recovered evidence overlooked in the initial update
+summary:
+
+- The durable log contains **33 SAME events**, including relevant Required Weekly
+  Tests on **September 2 and September 9 at 15:00:42 UTC** (11:00:42 a.m. EDT).
+  Both are classified as tests, remain `log_only` / `logged`, and have no linked
+  actionable alert. The September 9 receiver journal independently corroborates
+  that day's test decode.
+- A further SVA header arrived at **18:50:09 UTC**, after this release was
+  installed. Its receiver-journal entry matches the durable record; it was
+  withheld because its areas do not match the configured counties.
+- [The August 26 hardware record](PHASE4-ACCEPTANCE.md) already documents forced
+  USB-driver loss, watchdog detection, bounded retry and automatic recovery after
+  rebind. The new repeated child-process regressions add duplicate-warning and
+  drill-handling coverage.
+
+The legitimate broadcast-test requirement therefore has installed-hardware
+evidence alongside the recorded regression fixture. The initial **never** state
+was a snapshot of the new process, not a statement that the station had never
+decoded a broadcast. Historical evidence must be credited without presenting it
+as a fresh measurement of the current antenna configuration.
+
+## Closeout assessment
+
+**#150 is ready to close using the existing evidence.** The owner confirms the
+antenna is connected and the station receives alerts; the receiver journal and
+durable decoded messages corroborate this. Requiring a new antenna record or
+separate speech-listening session would add a gate to an already demonstrated
+SAME reception path. The process/audio indicators alone were never the only
+available evidence.
+
+| Issue acceptance criterion | Closing evidence |
+| --- | --- |
+| Legitimate test decode plus recorded regression fixture | September 9 receiver-journal and durable RWT record, September 2 retained RWT, and the checksum-pinned public NPT recording decoded by the installed decoder. |
+| Weak/absent signal and never-verified decoding do not qualify reception | Installed independent reception indicators and passing receiver/API/browser regressions for absent, weak, stale and invalidated evidence. |
+| Repeated USB/process interruptions recover without duplicate actionable warnings or unintended transmissions | August 26 physical USB-driver-loss/rebind recovery plus `test_repeated_process_loss_recovers_without_duplicate_actionable_warnings`, run for both child processes. Each case recovers after three failures, retains one drill and one pending warning, creates no alert/outbound work before approval, refuses drill approval and preserves one alert after warning approval and repeat ingestion. |
+| Document broadcast dependence and separate offline forecast generation | [SDR reception procedure](SDR-RECEPTION.md), including station/test scheduling, indicators and the limits of SAME. |
+
+This credits the physical USB check and automated repeated-process checks for
+what each observed; it does not claim a new physical interruption campaign.
+No additional reception work is required from the owner. Publishing the closing
+evidence and closing the GitHub issue remain administrative steps. No GitHub issue
+state or live readiness observation was changed during this review. The separate
+long-duration and WAN-outage acceptance tasks keep their own requirements.
 
 Private evidence is retained under `.data/sdr-reception-2026-09-09/`; installed
 preservation evidence is under

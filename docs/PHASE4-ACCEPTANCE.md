@@ -1,11 +1,14 @@
 # Phase 4 — Environment acceptance evidence
 
-Status: **automated reliability and SDR pipeline checks passed; station/test-decode field gates pending**
+Status: **automated reliability, SDR recovery and live SAME decode evidence recorded; extended field gates pending**
 
 RTL-SDR process/audio/recovery checks were recorded on 2026-08-26 with a Nooelec
-NESDR SMArt v5 on a Raspberry Pi. That evidence does not qualify intelligible
-station reception or a legitimate over-antenna SAME test decode. Follow
-[the station qualification procedure](SDR-RECEPTION.md) for #150.
+NESDR SMArt v5 on a Raspberry Pi. The installed station also retained relevant
+weekly SAME tests on September 2 and September 9 at 15:00:42 UTC, both log-only
+with no linked actionable alert. The September 9 receiver journal corroborates
+that day's broadcast test and another header after the software update. See
+[the recovered field evidence and completed #150 assessment](SDR-RECEPTION-QUALIFICATION-2026-09-09.md)
+and [the station qualification procedure](SDR-RECEPTION.md) for #150.
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
@@ -54,5 +57,6 @@ Additional exit gates:
 
 ## Remaining work before the complete Phase 4 exit gate
 
-1. Accumulate the 30-day NWS field observation and one full WAN-down field day.
-2. Observe at least one real local SAME warning/test over the antenna and retain its field evidence.
+Accumulate the 30-day NWS field observation and one full WAN-down field day.
+#150's reception/status/recovery scope is ready to close using the existing
+connected-antenna broadcasts, hardware recovery and software regression evidence.
