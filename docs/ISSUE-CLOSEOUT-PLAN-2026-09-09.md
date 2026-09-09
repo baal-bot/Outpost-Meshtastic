@@ -8,8 +8,8 @@ completed field exercise provide different evidence.
 
 Automatic recovery from delayed startup synchronization under #141 is now installed
 and verified; see the [qualification record](STARTUP-TIME-QUALIFICATION-2026-09-09.md).
-#150 reception status is implemented and undergoing final verification; #148
-resource policy is next. The earliest likely complete closure is #139's physical offline-map
+#150 reception status is also installed and verified; #148 resource policy is next.
+See the [SDR qualification record](SDR-RECEPTION-QUALIFICATION-2026-09-09.md). The earliest likely complete closure is #139's physical offline-map
 check. Prepare the longer exercises while doing these smaller tasks, then freeze
 one candidate for the seven-day and thirty-day gates.
 
@@ -19,7 +19,7 @@ one candidate for the seven-day and thirty-day gates.
 | --- | --- | --- | --- |
 | [#141 — Offline time (P1)](https://github.com/baal-bot/Outpost-Meshtastic/issues/141) | Native safeguards, trusted-peer checks and automatic startup correction recovery are installed; exact-source CI and live checks pass. | Observe an actual delayed-sync boot. Measure continuously powered UTC error and availability through a multi-day WAN/time-source outage, including beyond six-hour estimated holdover. Exercise fresh authenticated peer evidence, missing/disagreeing/stale sources and recovery on two stations. Separately measure RTC retention after complete main-power loss and no-WAN cold boot. Record any needed source/policy follow-up instead of extending confidence without measurements. | Two updated stations, independent trusted clock/reference, sustained station power; RTC/battery inventory for the separate complete-power-loss test. |
 | [#139 — Offline maps (P2)](https://github.com/baal-bot/Outpost-Meshtastic/issues/139) | Regional detail and overview are installed and verified. Map observations now preserve measured PASS. | Keep the local LAN, physically remove WAN access and disable client cellular fallback; use a fresh browser without cached map assets. Render the selected region across supported zooms, verify labels and list/incident fallback, and record release, pack digest and results. Review the operator observation after the actual check. Existing browser request blocking does not close this field criterion. | Current station and phone/laptop; local access while WAN is disconnected. |
-| [#150 — SDR reception (P2)](https://github.com/baal-bot/Outpost-Meshtastic/issues/150) | Distinct audio, pipeline, decode and dated station evidence is implemented; final CI/install verification is pending. Audio alone does not qualify decoding. | Finish verified installation of the reception indicators and recorded/synthetic interruption evidence. Observe a legitimate broadcast test on the installed SDR/antenna, then verify repeated USB/process recovery without duplicate actionable alerts or unintended sends. Document dependence on a receivable broadcast station. | SDR/antenna, receivable station and its actual test schedule; an operator for the reception/interruption session. |
+| [#150 — SDR reception (P2)](https://github.com/baal-bot/Outpost-Meshtastic/issues/150) | Distinct audio, pipeline, decode and dated station evidence is installed; exact-source CI, recorded-fixture and live checks pass. Audio alone does not qualify decoding. | Record a dated station/antenna and speech-intelligibility qualification. Observe a legitimate broadcast test on the installed SDR/antenna, then verify repeated USB/process recovery without duplicate actionable alerts or unintended sends. Document dependence on a receivable broadcast station. | SDR/antenna, receivable station and its actual test schedule; an operator for the reception/interruption session. |
 | [#148 — Energy/storage/thermal policy (P2)](https://github.com/baal-bot/Outpost-Meshtastic/issues/148) | Radio external power is correctly recognized. Whole-station telemetry and operating envelope remain unqualified. | Inventory the actual supply/telemetry interface, implement and test explicit reversible low-energy/storage/thermal behavior, and preserve urgent intake and authoritative records. Measure idle/typical/burst watts, energy/day, autonomy, charging assumptions, temperature and memory with AI off/on. Missing UPS telemetry stays unknown. Reuse #44's controlled shutdown/interruption evidence. | Existing shared Pi/SDR/LoRa battery and solar supply; suitable energy measurement and any supported UPS telemetry. Battery runtime is currently owner-reported. |
 | [#145 — Encrypted recovery (P2)](https://github.com/baal-bot/Outpost-Meshtastic/issues/145) | Encryption, validation, fenced restore, real copied-runtime smoke and browser access tests pass. Encrypted USB copies exist. | Secure recovery-key custody outside the original Pi and prepare a current compatible off-device generation. A second operator restores on a fresh compatible offline target, authenticates, compares retained records and historical identity/provenance, and records timing/missing assets. Exercise the documented return-to-service identity procedure; a historical clone remains fenced and must not reuse active signing authority. Resolve any unmet field identity criterion explicitly. | Separate target/boot media, verified current kit and encrypted archive, independently held key/digest, second authorized operator. |
 | [#147 — Replacement kit/local access (P2)](https://github.com/baal-bot/Outpost-Meshtastic/issues/147) | Kit builder/verifier, locked runtime and isolated copied-kit smoke exist. A complete field replacement remains open. | Refresh the kit for the chosen green candidate; inventory boot OS, vendor/model/device assets, regional maps, client installers, hashes, schema, storage and redistribution rights. Have a second operator install/restore service using only prepared media. Demonstrate phone/radio/dashboard access after temporary hotspot expiry and reboot, without public DNS/cloud/cellular. Record elapsed recovery and repeatable refresh instructions. | Fresh target/boot media, powered permanent local LAN, offline clients, second operator; coordinate with #139/#145. |
@@ -36,11 +36,11 @@ one candidate for the seven-day and thirty-day gates.
 
 ## Work sequence and shared sessions
 
-1. **Next software: #150 reception status, then #148 resource policy.** The #141
-   startup fix is installed with all required exact-source CI jobs passing. Use
-   synthetic receiver and resource-pressure faults in development and retain that
-   CI requirement for each update. Keep whole-station energy choices tied to the
-   actual supply and storage inventory.
+1. **Next software: #148 resource policy.** The #141 startup fix and #150 reception
+   indicators are installed with all required exact-source CI jobs passing. Use
+   synthetic resource-pressure faults in development and retain that CI requirement
+   for each update. Keep whole-station energy choices tied to the actual supply and
+   storage inventory; finish the separate receiver field witness in step 4.
 2. **Close the smallest field gap: #139.** Prepare permanent local access first,
    then schedule a fresh-browser WAN-disconnected map session. Capture #147 local
    access evidence in the same session when the hotspot-expiry/reboot checks are

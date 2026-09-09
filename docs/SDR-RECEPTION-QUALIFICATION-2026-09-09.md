@@ -45,11 +45,34 @@ live application records and sent nothing. The hardware observation helper now
 labels its default result as a pipeline check; requiring a test decode also checks
 current, relevant test evidence and emits a timestamped summary for retention.
 
-## CI, installation and remaining field gates
+## Exact-source CI and installed station
 
-Exact-source CI and normal verified installation are pending. This record does not
-yet claim the new source is installed; the final release and live preservation
-checks will be added after completion.
+Source **`2d53fcff88c564a69c63600b2c1d31b7c66e7e8d`** passed all four jobs in
+[CI 34381137053](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34381137053).
+Each full-suite job passed **2,480 tests**, with one skipped, across Python 3.12
+and 3.13 and their locked-runtime environments. Each production-path rerun passed
+**1,372 tests**. All required coverage, static and package checks passed.
+
+The normal updater installed **`20260909T180927Z-2d53fcff88c5`** at
+**18:10:33 UTC**, using exact-source CI verification, a verified pre-upgrade backup
+and the native HailoRT wheel. Database schema remains **186**.
+
+Live checks at **18:10:36–18:10:40 UTC** passed service/web, radio, native AI, core
+tasks, synchronized UTC, peer-time supervision, database integrity and same-package
+boot readiness. The SDR process pair was running with fresh, above-threshold
+audio and **zero receiver restarts**. The new current-process decode state was
+**never verified**, correctly distinct from audio activity. RF quality was not
+certified. Served Environment and readiness assets matched source/package.
+
+All tracked record IDs survived, including **32 historical SAME events**, **1,668
+outbound-work records** and **2,208 power samples**. No alert records were present
+after the update. Operator observation values and their audit count survived
+unchanged. Offline maps remained **PASS**, absent from unresolved checks, with the
+same verified **65,884,160 bytes / 6,176 tiles**. Overall readiness remains degraded
+for outstanding physical qualification checks. The host did not reboot, peer-time
+permissions remain disabled and clock-setting capability remains excluded.
+
+## Remaining field gates
 
 The synthetic subprocess exercise is not a physical USB-disconnection test. No
 legitimate antenna-received broadcast test, station speech/intelligibility check
@@ -58,5 +81,6 @@ criteria remain open and the capability remains **hardware-gated**. No GitHub is
 state or live operator observation was changed.
 
 Private evidence is retained under `.data/sdr-reception-2026-09-09/`; installed
-preservation evidence will use
+preservation evidence is under
 `/var/lib/outpost-qualification/150-20260909/sdr-reception-update/`.
+Later documentation commits do not change the installed release's CI identity.

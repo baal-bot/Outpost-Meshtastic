@@ -1,30 +1,49 @@
 # Session resume point — 2026-09-09 (America/New_York)
 
-## In progress: #150 SDR reception evidence
+## Installed: #150 SDR reception evidence
 
-The user authorized the next software task from the closeout plan. The Environment
-console now separates the process pair, fresh PCM, current audio level, dated
+The user authorized the next software task from the closeout plan. The selected,
+running release is **`20260909T180927Z-2d53fcff88c5`**, source
+`2d53fcff88c564a69c63600b2c1d31b7c66e7e8d`, schema **186**. Exact-source
+[CI 34381137053](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34381137053)
+passed all four jobs: 2,480 full-suite cases per job, one skipped, and 1,372
+production-path cases per Python version. Local verification passed 195 receiver,
+SAME, readiness and configuration cases; 33 API/browser cases; and four existing
+Environment/web compatibility cases. Static/typing/debt and repository gates pass.
+The installed decoder also passed the pinned public NPT audio fixture offline.
+
+Environment now separates the process pair, fresh PCM, current audio level, dated
 station/antenna observation and verified decoder header. Audio/noise and direct
 fixture ingestion cannot qualify reception. Decoder evidence uses elapsed age,
-loaded receiver context and current-process/pipeline provenance; full restarts
-preserve durable events but require new reception evidence. Station observations
-use their existing one-day expiry and process/policy/clock checks without renewal.
+receiver context, clock confidence and pipeline/process provenance. Historical
+records survive restart without becoming current reception evidence. Station
+statements retain their one-day expiry and process/policy/clock checks; reads do
+not renew them. Tests/demos are visibly DRILL / TEST and remain non-broadcastable.
+The receiver panel remains useful when weather/forecast fails, and clears current
+claims after a receiver-fetch failure. The hardware helper distinguishes pipeline
+checks from required test decodes and provides a timestamped summary.
 
-Tests/demos are explicitly DRILL / TEST and remain non-broadcastable. The console
-continues to show receiver results when weather/forecast fails, and clears current
-receiver claims on receiver-fetch failure. Hardware tooling distinguishes a
-pipeline check from a required decoded test; the pinned public NPT fixture now
-supports an offline file. Read [SDR reception](docs/SDR-RECEPTION.md).
+The normal updater completed at **18:10:33 UTC** with a verified backup and native
+HailoRT wheel. At 18:10:36–18:10:40 UTC, live service/web/radio/native AI, time, tasks,
+database and boot-package checks passed. SDR was running with fresh above-threshold
+audio, zero restarts, RF quality unverified and decode state **never** for this new
+process. Served Environment/readiness assets matched source/package. All tracked
+IDs survived, including 32 SAME events, 1,668 outbound-work records and 2,208 power
+samples; no alert records were present. Operator observation values/audit count
+were unchanged. Maps remained PASS and absent from unresolved checks.
 
-Local verification passed 195 receiver/readiness/configuration cases, 33
-API/browser cases and four Environment/web compatibility cases. Formatting, typing,
-requirements, command, capability and static-markup checks passed. Read the
-[qualification record](docs/SDR-RECEPTION-QUALIFICATION-2026-09-09.md). Exact-source CI
-and installation remain pending; the installed startup-clock release below is
-still active. Private evidence and prepared normal-updater checks are in
-`.data/sdr-reception-2026-09-09/`. No physical receiver interruption or legitimate
-broadcast witness has been performed in this session. #150 remains hardware-gated
-and no GitHub issue state or operator observation has been changed.
+Read [the qualification record](docs/SDR-RECEPTION-QUALIFICATION-2026-09-09.md),
+[the station procedure](docs/SDR-RECEPTION.md) and
+[the closeout plan](docs/ISSUE-CLOSEOUT-PLAN-2026-09-09.md). #150 remains hardware-gated
+for the legitimate broadcast/intelligibility/antenna witness and physical repeated
+interruption campaign. No GitHub issue was closed, no operator statement was
+recorded and no physical USB cut or host reboot was performed. Next software is
+**#148 whole-station energy/storage/thermal policy**; #139 remains the quickest
+likely field closure. Other field/equipment prerequisites are in the plan.
+
+Private evidence and updater checks are in `.data/sdr-reception-2026-09-09/` and
+`/var/lib/outpost-qualification/150-20260909/sdr-reception-update/`.
+Later documentation commits do not change the installed release's CI identity.
 
 ## Installed: startup time recovery and open-issue closeout plan
 
