@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -230,3 +231,43 @@ async def test_single_worker_uses_retrieval_without_waiting_for_model(tmp_path):
     assert result["passed"]
     assert result["model_calls"] == 0
     assert result["answer"]["outcome"] == "deterministic_retrieval"
+
+
+@pytest.mark.parametrize("kind", ["observation", "near_term_forecast"])
+async def test_weather_fetch_does_not_erase_validity_or_source_kind(tmp_path, kind):
+    database = Database(tmp_path / "weather.db")
+    await database.open()
+    try:
+        case = next(case for case in CASES if case["id"] == "H21")
+        member = await seed(database, case)
+        valid_at = datetime.fromtimestamp(NOW - 86400, UTC).isoformat()
+        await database.write(
+            "UPDATE env_cache SET payload=?",
+            (
+                json.dumps(
+                    {
+                        "temperature_c": 12,
+                        "summary": "older source",
+                        "source_kind": kind,
+                        "observed_at": valid_at,
+                    }
+                ),
+            ),
+        )
+        provider = ScriptedProvider()
+        provider.content = "[AI] Weather now is clear. src: wx:synthetic@1799999940"
+        service = AIService(
+            Config(),
+            provider,
+            RetrievalEngine(database, now=lambda: NOW),
+            AIStore(database),
+            now=lambda: NOW,
+        )
+        await service.initialize()
+        answer = await service.answer("What is the weather?", member, -1, Registry())
+        assert "fetched 1m" in answer.text
+        assert valid_at in answer.text
+        assert kind.replace("_", " ") in answer.text
+        assert "Weather now is clear" not in answer.text
+    finally:
+        await database.close()

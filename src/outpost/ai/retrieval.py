@@ -355,11 +355,19 @@ class RetrievalEngine:
                     if isinstance(day, dict)
                 )
             text = " · ".join(field for field in fields if "None" not in field and field.strip())
+            # Fetch age is not observation age. Preserve the provider's validity
+            # time and observation/forecast distinction in the evidence itself.
+            kind = str(
+                value.get("source_kind")
+                or ("forecast" if str(row["cache_key"]).startswith("forecast:") else "weather")
+            ).replace("_", " ")
+            valid_at = value.get("observed_at") or value.get("valid_at")
+            timing = f"valid {valid_at}" if valid_at else "valid time unknown"
             chunks.append(
                 EvidenceChunk(
                     f"wx:{row['provider']}@{row['fetched_at']}",
                     "weather",
-                    f"{_age(int(row['fetched_at']), now)} {text}",
+                    f"fetched {_age(int(row['fetched_at']), now)} · {kind} · {timing} · {text}",
                     18 * _decay(int(row["fetched_at"]), now, 0.25),
                     revision=_revision(row),
                 )

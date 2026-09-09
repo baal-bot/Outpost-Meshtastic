@@ -20,7 +20,9 @@ battery setup, a physical outage or a thermal/energy campaign.
   Normal progression of the displayed record age does not invalidate an unchanged
   source. Imported board/incident evidence retains origin and unverified-report
   context. Weather older than the configured cache limit or fetched in the future
-  is excluded before reaching the provider.
+  is excluded before reaching the provider. Observation/forecast kind and provider
+  validity time remain in the evidence, so a recent fetch cannot make an older
+  observation appear current. Two additional regressions cover those labels.
 - A reproduced busy-provider regression occupied all four inbound workers and
   prevented a normal PING from completing. Generation admission now reserves one
   worker for non-AI requests. With one configured worker the service uses
