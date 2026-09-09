@@ -574,6 +574,7 @@ def test_release_update_verifies_artifacts_before_checkout_and_install() -> None
     workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "ci.yml").read_text()
     expected_scope = (
         "src tests tools/build_release_metadata.py tools/benchmark_commit_policy.py "
+        "tools/eval_ai.py tools/bench_inference.py "
         "tools/check_capabilities.py "
         "tools/check_commands.py tools/check_ci_evidence.py tools/check_dependency_lock.py "
         "tools/check_requirements.py "
