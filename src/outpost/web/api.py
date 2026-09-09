@@ -44,6 +44,7 @@ from outpost.fed.bundles import FederationBundleService
 from outpost.fed.incident_delivery import IncidentDelivery
 from outpost.fed.item_failures import CURSOR as ENCODING_FAILURE_CURSOR
 from outpost.fed.item_failures import LIMIT as ENCODING_FAILURE_LIMIT
+from outpost.fed.time import FederationTime
 from outpost.maps.packs import vector_tile
 from outpost.maps.setup import MapSetupService
 from outpost.member_data import MemberDataService, retention_statement
@@ -375,6 +376,11 @@ class IncidentLocationBody(BaseModel):
 
 class IncidentMergeBody(BaseModel):
     target_id: int = Field(gt=0)
+
+
+class FederationTimeBody(BaseModel):
+    trust: bool = Field(strict=True)
+    serve: bool = Field(strict=True)
 
 
 class AlertCreateBody(BaseModel):
@@ -767,6 +773,7 @@ def create_web_app(
     member_data: MemberDataService | None = None,
     incident_delivery: IncidentDelivery | None = None,
     recovery_fence: RecoveryFence | None = None,
+    federation_time: FederationTime | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Outpost API",
@@ -1795,7 +1802,37 @@ def create_web_app(
             return {
                 "items": [{**peer.__dict__, **federation.liveness(peer)} for peer in peers],
                 "count": len(peers),
+                "peer_time": await federation_time.status()
+                if federation_time is not None
+                else None,
             }
+
+        if federation_time is not None:
+
+            @app.put("/api/v1/federation/peers/{mesh_id}/time-policy", response_model=None)
+            async def federation_time_policy(
+                mesh_id: str, body: FederationTimeBody
+            ) -> dict[str, object] | Response:
+                try:
+                    await federation_time.configure(
+                        mesh_id, trust=body.trust, serve=body.serve, actor=current_actor()
+                    )
+                    return await federation_time.status()
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "time_policy_failed", "message": str(error)}},
+                        status_code=409,
+                    )
+
+            @app.post("/api/v1/federation/peers/{mesh_id}/time-check", response_model=None)
+            async def federation_time_check(mesh_id: str) -> dict[str, object] | Response:
+                try:
+                    return await federation_time.request(mesh_id)
+                except ValueError as error:
+                    return JSONResponse(
+                        {"error": {"code": "time_check_failed", "message": str(error)}},
+                        status_code=409,
+                    )
 
         @app.patch("/api/v1/federation/peers/{mesh_id}", response_model=None)
         async def federation_peer_state(

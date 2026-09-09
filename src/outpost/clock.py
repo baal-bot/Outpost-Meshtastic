@@ -25,6 +25,10 @@ class SystemClock:
     def monotonic(self) -> float:
         return asyncio.get_running_loop().time()
 
+    def time_evidence_monotonic(self) -> float:
+        """Read clock evidence during synchronous diagnostics/CLI construction."""
+        return time.monotonic()
+
     def now(self) -> datetime:
         return datetime.now(UTC)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -64,6 +64,11 @@ class FederationPeerService:
     ) -> None:
         self.database, self.clock, self.local_mesh_id = database, clock, local_mesh_id
         self.peer_stale_seconds = max(1, peer_stale_hours) * 3_600
+        self.trust_listeners: list[Callable[[str], None]] = []
+
+    def _invalidate_trust(self, mesh_id: str) -> None:
+        for listener in self.trust_listeners:
+            listener(mesh_id)
 
     def is_online_at(
         self,
@@ -170,6 +175,7 @@ class FederationPeerService:
             raise ValueError("active peer requires explicit key replacement")
         if peer.state == "rejected":
             raise ValueError("rejected peer must be returned to pending before pairing")
+        self._invalidate_trust(mesh_id)
         private = X25519PrivateKey.generate()
         private_raw = private.private_bytes(
             serialization.Encoding.Raw,
@@ -186,6 +192,7 @@ class FederationPeerService:
             "WHERE id=?",
             (private_raw, nonce, peer.id),
         )
+        self._invalidate_trust(mesh_id)
         return await self.by_mesh_id(mesh_id), {
             "mesh_id": self.local_mesh_id,
             "target_mesh_id": mesh_id,
@@ -201,6 +208,7 @@ class FederationPeerService:
             raise ValueError("active peer requires operator-authorized key replacement")
         if peer.state == "rejected":
             raise ValueError("rejected peer cannot initiate pairing")
+        self._invalidate_trust(mesh_id)
         private = X25519PrivateKey.generate()
         public_raw = private.public_key().public_bytes(
             serialization.Encoding.Raw, serialization.PublicFormat.Raw
@@ -213,6 +221,7 @@ class FederationPeerService:
             "WHERE id=?",
             (secret, nonce, peer.id),
         )
+        self._invalidate_trust(mesh_id)
         updated = await self.by_mesh_id(mesh_id)
         return (
             updated,
@@ -342,6 +351,7 @@ class FederationPeerService:
     async def set_state(self, mesh_id: str, state: str) -> Peer:
         if state not in {"pending", "paused", "rejected"}:
             raise ValueError("unsupported operator peer state")
+        self._invalidate_trust(mesh_id)
         peer = await self.by_mesh_id(mesh_id)
         revoke_trust = peer.state == "active" and state == "pending"
         await self.database.write(
@@ -373,6 +383,7 @@ class FederationPeerService:
                 peer.id,
             ),
         )
+        self._invalidate_trust(mesh_id)
         return await self.by_mesh_id(mesh_id)
 
     async def forget(self, mesh_id: str, actor: str = "system") -> None:

@@ -372,7 +372,7 @@ class SelfCheckService:
             self._initial_wall = self.clock.now().timestamp()
             self._initial_mono = self.clock.monotonic()
             return False
-        if status.source == "linux_kernel":
+        if status.source in {"linux_kernel", "federation_peer"}:
             # The monitor distinguishes discontinuities from normal OS slew.
             # Comparing lifetime wall/monotonic drift would eventually invent a step.
             return False

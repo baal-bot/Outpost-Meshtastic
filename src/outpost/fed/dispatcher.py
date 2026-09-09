@@ -85,6 +85,9 @@ class FederationDispatcher:
     _handle_service_query: HandleValue
     _handle_service_response: HandleValue
     _handle_sync_manifest: HandleValue
+    _handle_time: (
+        Callable[[str, MessageType, dict[str, object], bytes | None], Awaitable[None]] | None
+    ) = None
 
     async def receive(self, message: object) -> None:
         payload = getattr(message, "payload", None)
@@ -125,9 +128,16 @@ class FederationDispatcher:
                 MessageType.RELAY_PUT,
                 MessageType.RELAY_ACK,
                 MessageType.TOPOLOGY_UPDATE,
+                MessageType.TIME_REQUEST,
+                MessageType.TIME_RESPONSE,
             }:
                 secret = await self.federation.secret(sender)
             fragment = self.federation_codec.decode_fragment(payload, secret)
+            if (
+                msg_type in {MessageType.TIME_REQUEST, MessageType.TIME_RESPONSE}
+                and fragment.total != 1
+            ):
+                raise FrameError("Peer time must use a single frame")
             value = self.federation_reassembler.add(sender, fragment)
             if value is None:
                 return
@@ -149,6 +159,14 @@ class FederationDispatcher:
                 raise FrameError("federation identity does not match packet sender")
             target = value.get("target_mesh_id")
             if target is not None and target != self.radio.local_node_id:
+                return
+            if msg_type in {MessageType.TIME_REQUEST, MessageType.TIME_RESPONSE}:
+                if target != self.radio.local_node_id:
+                    raise FrameError("Peer time requires an explicit target")
+                if self._handle_time is not None:
+                    await self._handle_time(
+                        sender, msg_type, value, fragment.authentication_context
+                    )
                 return
             if authenticated:
                 await self.federation.touch(sender)

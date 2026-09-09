@@ -2,6 +2,7 @@ import "/nav.js";
 import {byId as $, createApiClient, escapeHtml as safe, relativeAge} from "/ui-primitives.js";
 let csrf = "";
 let policyWizardOpen = false;
+let peerTimeDialog = null;
 let topologyMap = null;
 let topologyItems = [];
 let topologyIncidents = [];
@@ -91,7 +92,12 @@ async function refreshServices() {
   if (!history) return;
   const response = await api("/api/v1/federation/services");
   if (!response.ok) return;
-  const items = (await response.json()).items;
+  const peerResult = await response.json();
+  const items = peerResult.items;
+  if (peerTimeDialog) {
+    const policy = peerResult.peer_time?.peers?.[peerTimeDialog.peer];
+    if (["checked", "timeout"].includes(policy?.result?.state)) peerTimeDialog.dialog.querySelector("#peer-time-result").textContent = timeCheckDescription(policy, peerResult.peer_time?.clock);
+  }
   history.innerHTML = items.map(item => `<article><div><strong>${safe(item.service)} · ${safe(item.status)}</strong><code>${safe(item.peer_mesh_id)}</code></div><p>${item.status === "complete" ? safe(JSON.stringify(item.result)) : safe(item.error || "Awaiting peer response")}</p><small>${safe(serviceProvenance(item))}</small></article>`).join("") || `<p class="ui-empty empty">No peer requests yet.</p>`;
 }
 async function loadInbox() {
@@ -107,7 +113,12 @@ async function loadInbox() {
 async function refreshInbox() {
   const target = $("fed-inbox"); if (!target) return;
   const response = await api("/api/v1/federation/inbox"); if (!response.ok) return;
-  const items = (await response.json()).items;
+  const peerResult = await response.json();
+  const items = peerResult.items;
+  if (peerTimeDialog) {
+    const policy = peerResult.peer_time?.peers?.[peerTimeDialog.peer];
+    if (["checked", "timeout"].includes(policy?.result?.state)) peerTimeDialog.dialog.querySelector("#peer-time-result").textContent = timeCheckDescription(policy, peerResult.peer_time?.clock);
+  }
   const hasReviewToken = item => /^[0-9a-f]{64}$/.test(item.review_token || "");
   target.innerHTML = items.map(item => `<article class="inbox-card"><div><strong>${safe(item.stream)}</strong><code>${safe(item.node_name || item.mesh_id)} · ${safe(item.uid)}</code></div><p>${safe(item.payload.headline || item.payload.title || item.payload.subject || item.payload.body || "Federated record")}</p><details><summary>Full quarantined record</summary><pre>${safe(JSON.stringify(item.payload, null, 2))}</pre></details>${hasReviewToken(item) ? "" : "<p>Safe review unavailable: matching backend update required.</p>"}<div><button data-import="${item.id}" ${hasReviewToken(item) ? "" : "disabled"}>Approve import</button><button class="danger" data-reject="${item.id}" ${hasReviewToken(item) ? "" : "disabled"}>Reject</button></div></article>`).join("") || `<p class="ui-empty empty">No records awaiting review.</p>`;
   target.querySelectorAll("[data-import], [data-reject]").forEach(button => button.addEventListener("click", async () => {
@@ -332,11 +343,49 @@ async function refreshOriginHistory() {
     }
   }));
 }
+function timeCheckDescription(policy, clock) {
+  const result = policy?.result;
+  if (result?.state === "checked") return `Reply received · measured offset ${Number(result.offset_seconds).toFixed(2)}s · round trip ${Number(result.rtt_seconds).toFixed(2)}s. ${clock?.timestamp_safe ? "UTC confidence is usable." : `UTC confidence remains uncertain: ${String(clock?.reason || "source unavailable").replaceAll("_", " ")}.`}`;
+  if (result?.state === "waiting") return "Waiting for a fresh reply; this request has not verified time.";
+  if (result?.state === "timeout") return "No fresh reply arrived within 30 seconds. Time was not verified by this request.";
+  return (result?.state || "No time check yet").replaceAll("_", " ");
+}
+function openPeerTime(peer, status, trigger) {
+  const policy = status?.peers?.[peer] || {};
+  const dialog = document.createElement("dialog");
+  dialog.setAttribute("aria-labelledby", "peer-time-title");
+  dialog.innerHTML = `<form id="peer-time-form"><h2 id="peer-time-title">Time backup</h2><p>Use a paired Outpost with a reliable time source to check this station’s UTC clock during an outage.</p><p><code>${safe(peer)}</code></p><label><input name="trust" type="checkbox" ${policy.trust ? "checked" : ""}> Trust this peer’s time</label><label><input name="serve" type="checkbox" ${policy.serve ? "checked" : ""}> Share this station’s time with this peer</label><p>Checks include radio delay and expire if no fresh reply arrives within 30 seconds. A large disagreement holds affected work and shows the offset. Checks do not adjust the Pi clock.</p><p>A restart retains recent probe costs. If UTC is uncertain at startup, radio recovery waits one silent hour before probing.</p><p id="peer-time-result" role="status">${safe(timeCheckDescription(policy, status?.clock))}${status?.cooldown_seconds ? ` · Recovery airtime wait: ${Math.ceil(status.cooldown_seconds / 60)} minutes` : ""}</p><div class="ui-action-bar dialog-actions"><button type="button" data-time-close>Close</button><button type="button" data-time-check>Check time</button><button type="submit">Save permissions</button></div></form>`;
+  document.body.append(dialog);
+  peerTimeDialog = {peer, dialog};
+  const form = dialog.querySelector("form"), result = dialog.querySelector("#peer-time-result");
+  const run = async (path, method, body) => {
+    const buttons = [...form.querySelectorAll("button")];
+    buttons.forEach(button => button.disabled = true);
+    try {
+      const response = await api(`/api/v1/federation/peers/${encodeURIComponent(peer)}/${path}`, {method, ...(body ? {body: JSON.stringify(body)} : {})});
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.error?.message || `Request failed · HTTP ${response.status}`);
+      result.textContent = path === "time-policy" ? "Time permissions saved." : value.state === "waiting" ? "Probe queued. Waiting for a fresh reply; time is not yet verified." : "The radio queue could not accept the probe.";
+    } catch (error) {
+      result.textContent = error.message || "Time check unavailable.";
+    } finally { buttons.forEach(button => button.disabled = false); }
+  };
+  form.addEventListener("submit", event => { event.preventDefault(); run("time-policy", "PUT", {trust: form.elements.trust.checked, serve: form.elements.serve.checked}); });
+  dialog.querySelector("[data-time-check]").addEventListener("click", () => run("time-check", "POST"));
+  dialog.querySelector("[data-time-close]").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("close", () => { peerTimeDialog = null; dialog.remove(); if (trigger.isConnected) trigger.focus(); });
+  dialog.showModal();
+}
 async function refresh() {
   const filter = $("peer-filter").value;
   const response = await api(`/api/v1/federation/peers${filter ? `?state=${filter}` : ""}`);
   if (!response.ok) {$("fed-state").className="ui-pill status down";$("fed-state").innerHTML=`<i></i>Peer data unavailable · HTTP ${response.status}`;$("peer-list").innerHTML='<p class="ui-empty empty">Federation peers unavailable.</p>';return;}
-  const items = (await response.json()).items;
+  const peerResult = await response.json();
+  const items = peerResult.items;
+  if (peerTimeDialog) {
+    const policy = peerResult.peer_time?.peers?.[peerTimeDialog.peer];
+    if (["checked", "timeout"].includes(policy?.result?.state)) peerTimeDialog.dialog.querySelector("#peer-time-result").textContent = timeCheckDescription(policy, peerResult.peer_time?.clock);
+  }
   const runtimeResponse=await api("/api/v1/status");
   if(!runtimeResponse.ok){$("fed-state").className="ui-pill status down";$("fed-state").innerHTML=`<i></i>Status unavailable · HTTP ${runtimeResponse.status}`;return;}
   const runtime=await runtimeResponse.json();
@@ -353,8 +402,9 @@ async function refresh() {
     radioPolicy.textContent = radioUp ? "Connected" : "Disconnected";
     radioPolicy.classList.toggle("live", radioUp);
   }
-  $("peer-list").innerHTML = items.map(peer => { const visibleState=peer.state==="active"?(peer.connectivity||"active"):peer.state; const liveness=peer.state==="active"?(peer.sync_paused?`<p class="peer-connectivity offline"><strong>Paired · automatic sync paused</strong><span>Trust is retained. Sync resumes after a HELLO or authenticated message.</span></p>`:`<p class="peer-connectivity online"><strong>Paired · online</strong><span>Automatic federation sync is enabled.</span></p>`):""; return `<article class="peer-card ${peer.sync_paused?"offline":""}"><div class="peer-head"><div><strong>${safe(peer.node_name || "Unnamed Outpost")}</strong><br><code>${safe(peer.mesh_id)}</code></div><span class="chip ${safe(visibleState)}">${safe(visibleState)}</span></div>${liveness}<div class="peer-transports">${transportBadges(peer)}</div>${policyMeta(peer)}<div class="peer-meta">${Object.entries(peer.capabilities).filter(([, enabled]) => enabled).map(([name]) => `<span class="chip">${safe(name)}</span>`).join("")}</div><p>Last heard ${age(peer.last_seen_at)} <span class="protocol-label">Federation protocol v${safe(peer.protocol_version)}</span></p>${peer.state === "pairing" ? `<div class="pair-box" data-code-for="${safe(peer.mesh_id)}">Waiting for key exchange…</div>` : ""}<div class="peer-actions">${peer.state === "pending" ? `<button data-pair="${safe(peer.mesh_id)}">Pair securely</button>` : ""}${peer.state === "paused" ? `<button data-state="pending" data-id="${safe(peer.mesh_id)}">Resume review</button>` : peer.state !== "active" && peer.state !== "rejected" ? `<button data-state="paused" data-id="${safe(peer.mesh_id)}">Pause</button>` : ""}${peer.state === "active" ? `<button data-sharing="${safe(peer.mesh_id)}">Sharing setup</button><button class="danger" data-state="pending" data-id="${safe(peer.mesh_id)}">Unpair</button>` : peer.state === "rejected" ? `<button class="danger" data-forget="${safe(peer.mesh_id)}">Forget</button>` : `<button class="danger" data-state="rejected" data-id="${safe(peer.mesh_id)}">Reject</button>`}</div></article>`; }).join("") || `<p class="ui-empty empty">No Outposts match this view. Discovery announcements are intentionally infrequent to conserve airtime.</p>`;
+  $("peer-list").innerHTML = items.map(peer => { const visibleState=peer.state==="active"?(peer.connectivity||"active"):peer.state; const liveness=peer.state==="active"?(peer.sync_paused?`<p class="peer-connectivity offline"><strong>Paired · automatic sync paused</strong><span>Trust is retained. Sync resumes after a HELLO or authenticated message.</span></p>`:`<p class="peer-connectivity online"><strong>Paired · online</strong><span>Automatic federation sync is enabled.</span></p>`):""; return `<article class="peer-card ${peer.sync_paused?"offline":""}"><div class="peer-head"><div><strong>${safe(peer.node_name || "Unnamed Outpost")}</strong><br><code>${safe(peer.mesh_id)}</code></div><span class="chip ${safe(visibleState)}">${safe(visibleState)}</span></div>${liveness}<div class="peer-transports">${transportBadges(peer)}</div>${policyMeta(peer)}<div class="peer-meta">${Object.entries(peer.capabilities).filter(([, enabled]) => enabled).map(([name]) => `<span class="chip">${safe(name)}</span>`).join("")}</div><p>Last heard ${age(peer.last_seen_at)} <span class="protocol-label">Federation protocol v${safe(peer.protocol_version)}</span></p>${peer.state === "pairing" ? `<div class="pair-box" data-code-for="${safe(peer.mesh_id)}">Waiting for key exchange…</div>` : ""}<div class="peer-actions">${peer.state === "pending" ? `<button data-pair="${safe(peer.mesh_id)}">Pair securely</button>` : ""}${peer.state === "paused" ? `<button data-state="pending" data-id="${safe(peer.mesh_id)}">Resume review</button>` : peer.state !== "active" && peer.state !== "rejected" ? `<button data-state="paused" data-id="${safe(peer.mesh_id)}">Pause</button>` : ""}${peer.state === "active" ? `<button data-sharing="${safe(peer.mesh_id)}">Sharing setup</button><button data-time-setup="${safe(peer.mesh_id)}">Time backup</button><button class="danger" data-state="pending" data-id="${safe(peer.mesh_id)}">Unpair</button>` : peer.state === "rejected" ? `<button class="danger" data-forget="${safe(peer.mesh_id)}">Forget</button>` : `<button class="danger" data-state="rejected" data-id="${safe(peer.mesh_id)}">Reject</button>`}</div></article>`; }).join("") || `<p class="ui-empty empty">No Outposts match this view. Discovery announcements are intentionally infrequent to conserve airtime.</p>`;
   document.querySelectorAll("[data-sharing]").forEach(button => button.addEventListener("click", () => showPolicyWizard(all.find(peer => peer.mesh_id === button.dataset.sharing))));
+  document.querySelectorAll("[data-time-setup]").forEach(button => button.addEventListener("click", () => openPeerTime(button.dataset.timeSetup, peerResult.peer_time, button)));
   document.querySelectorAll("[data-state]").forEach(button => button.addEventListener("click", async () => { await api(`/api/v1/federation/peers/${encodeURIComponent(button.dataset.id)}`, {method:"PATCH", body:JSON.stringify({state:button.dataset.state})}); await refresh(); }));
   document.querySelectorAll("[data-forget]").forEach(button => button.addEventListener("click", async () => { if (!await window.OutpostUI.confirm({title:"Forget rejected Outpost?",message:"The rejected peer record and its federation history will be permanently removed. Retained imported community content is not deleted.",confirmLabel:"Forget Outpost",danger:true})) return; await api(`/api/v1/federation/peers/${encodeURIComponent(button.dataset.forget)}`, {method:"DELETE"}); await refresh(); }));
   document.querySelectorAll("[data-pair]").forEach(button => button.addEventListener("click", async () => { button.disabled = true; await api(`/api/v1/federation/peers/${encodeURIComponent(button.dataset.pair)}/pair`, {method:"POST"}); await refresh(); }));

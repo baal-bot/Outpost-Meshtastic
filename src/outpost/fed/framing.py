@@ -41,6 +41,8 @@ class MessageType(IntEnum):
     INCIDENT_RECEIPT = 0x32
     PING = 0x40
     PONG = 0x41
+    TIME_REQUEST = 0x42
+    TIME_RESPONSE = 0x43
     SERVICE_QUERY = 0x50
     SERVICE_RESPONSE = 0x51
     RELAY_PUT = 0x60

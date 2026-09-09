@@ -1,5 +1,23 @@
 # Session resume point — 2026-09-08 (America/New_York)
 
+## Source ready for CI: trusted-peer UTC checks under #141
+
+The user said to continue and asked whether offline maps closed #130. #130 remains
+an open umbrella tracker. Map software is complete and installed under #139; its
+selected-region checkbox is now corrected, while physical WAN-disconnected browser
+acceptance remains open. Do not close either issue for software evidence alone.
+
+Peer-time implementation is in the working tree: optional current-key permissions,
+one-frame live challenges, 30-second elapsed deadlines, source-age/error bounds,
+actual UTC comparison, no peer-derived re-export, governor-only recovery and durable
+restart airtime fencing, plus authenticated API/dashboard controls. It does not set
+the host clock or authorize any physical network/power experiment. Local qualification passed: 110 final clock/peer/governor cases, 185 compatibility
+cases, 101 queue/worker/maintenance cases, and seven operator/browser cases.
+Exact-source CI/deployment are pending. Healthy restarts retain probe costs; only
+unknown historical airtime requires the full silent hour. See the
+[peer-time qualification record](docs/PEER-TIME-QUALIFICATION-2026-09-09.md).
+No peer is approved on the running appliance. See [OFFLINE-TIME.md](docs/OFFLINE-TIME.md).
+
 ## Installed: #141 clock safeguards; physical acceptance remains open
 
 The owner clarified that the Pi, SDR and LoRa radio share an external backup
@@ -14,8 +32,8 @@ is met. This clarification did not change the installed runtime or run a field t
 The owner also proposed pulling time from peer Outposts when needed. The next #141
 extension is an authenticated, fresh peer-time exchange with source age/uncertainty,
 delay bounds, loop prevention and a bounded recovery path through time-uncertain
-egress. Existing pairing/HMAC/counters provide a foundation, but peer time is not
-implemented. See the planned fallback in [OFFLINE-TIME.md](docs/OFFLINE-TIME.md).
+egress. This was planned at the installed checkpoint below; the implementation
+is now in progress as described above.
 
 The owner authorized #141. The selected, running release is
 **`20260908T235451Z-5a7de3241e4c`**, source

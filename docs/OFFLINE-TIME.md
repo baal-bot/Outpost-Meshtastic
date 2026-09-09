@@ -9,7 +9,8 @@ gate remains open until it has dated measurements on the intended hardware.
 
 The packaged `SystemClock` reads Linux's `adjtimex` status with `modes=0`. This is an
 unprivileged query; it cannot adjust time. Outpost never sets the OS clock, enables
-battery charging, connects to a time server, or takes time from a remote radio.
+battery charging, or connects to a time server. The optional trusted-peer exchange
+below checks the running UTC clock without changing it.
 The administrator remains responsible for choosing the OS time source.
 
 The packaged systemd unit admits `adjtimex` and `clock_adjtime` queries while
@@ -37,8 +38,10 @@ time. Clock changes cannot replenish airtime or renew their lifetimes. Scheduled
 traffic waits rather than guessing whether quiet hours apply.
 
 At an uncertain cold start, retained queue deadlines and prior airtime cannot safely
-be reconstructed. Radio egress remains held until the source becomes usable; work
-is preserved without claiming a send. New durable admissions return `time_uncertain`.
+be reconstructed. Ordinary radio egress remains held until the source becomes usable; work
+is preserved without claiming a send. New ordinary durable admissions return
+`time_uncertain`. Explicitly approved peer time probes can bootstrap confidence
+after one full silent airtime hour; see the recovery accounting below.
 The dashboard and local authoritative records remain available. UTC labels created
 while the source is uncertain remain historical claims; they are not silently
 rewritten after correction. This release does not add per-record clock provenance.
@@ -68,8 +71,8 @@ transactions. Disk headroom remains a separate readiness check. Authentication,
 certificate validity, event labels and remote source timestamps retain their existing
 time dependencies; this change is not a claim that every feature is clock-independent.
 
-No wire-format change, schema migration, new radio message, GPS write, or additional
-radio airtime is introduced. Existing peers retain their validity checks. The OS
+The peer-time extension adds two optional authenticated control messages. It needs
+no schema migration, GPS write, or change to existing signed validity checks. The OS
 synchronization flag is local administrative evidence, not cryptographic proof of UTC.
 
 ## Inspect a station
@@ -128,51 +131,94 @@ whole-station energy and solar performance remain under #148.
 This clarification changes the next acceptance scenario. No WAN isolation, power
 interruption, clock adjustment or runtime-policy change was performed for it.
 
-## Planned trusted-peer time fallback
+## Trusted-peer time fallback
 
-The owner proposed obtaining time from federated Outposts when needed. This is a
-planned #141 extension; the installed release has no peer time synchronization.
-A paired, explicitly trusted time provider with a usable reference could help an
-Outpost that has lost its own time source. That reference may be NTP, GNSS or
-qualified powered holdover. Ordinary message creation times are unsuitable as
-fresh clock samples because radio queues and custody can delay delivery.
+In Federation, open **Time backup** on a paired peer. **Trust this peer’s time**
+allows that peer to check the local running UTC clock. The peer operator must
+separately enable **Share this station’s time with this peer**. Both permissions
+start disabled, bind to the current pairing credential, and need review after
+re-pairing. At most four peers may have time permissions. Save permissions before
+using **Check time**. The UI distinguishes queue admission, a fresh reply, timeout,
+measured offset, and the current station-wide confidence decision.
 
-The extension should use a small authenticated live request/response carrying an
-unpredictable challenge, UTC sample, source identity, reference age and uncertainty.
-Use the existing peer credential and durable replay-counter boundaries, plus a
-monotonic request deadline. Include queue/radio delay in the uncertainty estimate;
-reject excessively delayed replies and corroborate independent sources when
-available. Authentication establishes the peer identity; source-quality policy
-establishes whether its time is useful. Conflicting evidence stays explicit.
+The automatic worker checks approved peers when the local OS stops reporting
+synchronized time. Each process requests at most once per peer per hour and once
+globally per 15 minutes; replies have the same separate limits. The existing
+rolling federation share, total airtime, radio region, channel-utilization limit,
+quiet hours and radio availability still apply. Nothing is transmitted when no
+peer has explicit time permissions. This feature is a UTC check, not a time setter.
+A station six hours wrong stays held and reports the disagreement; the operator
+or configured OS time service must correct the clock.
 
-Preserve the original reference age and uncertainty through any future propagation.
-A and B must not reset each other's holdover by exchanging the same aging reference.
-An initial implementation can restrict providers to independent qualified sources
-and decline re-export of peer-derived time. A group of peers can agree while sharing
-an inaccurate reference; agreement alone cannot establish UTC accuracy.
+A useful provider must report its own usable native Linux kernel synchronization
+or bounded same-process holdover. Outpost does not re-export a peer-derived check,
+simulated clocks, or unqualified RTC retention as a native reference. Providers
+need a working configured OS source, such as WAN NTP or a local GNSS-disciplined
+service. If every station loses all independent references, exchanging the same
+aging evidence cannot extend the six-hour source lifetime indefinitely. The
+exchange validates the provider's claim and delay bound; a compromised approved
+provider can still lie about UTC. Pairing authentication is not proof of accuracy.
 
-Two integration constraints need explicit implementation and tests:
+The `time_v1: true` HELLO capability advertises support. `TIME_REQUEST` (`0x42`) and
+`TIME_RESPONSE` (`0x43`) each fit one frame under the existing 188-byte ceiling,
+using the paired HMAC, durable replay counter and explicit sender/target IDs. The
+request carries `n`, a fresh random 32-byte challenge. The response echoes `n` and
+carries `u` (UTC milliseconds), `e` (error milliseconds rounded upward), `a`
+(native reference age in seconds rounded upward), and `s: "kernel"`. Unknown
+fields, multiple fragments, wrong targets, changed keys, expired or used challenges,
+unsupported references and malformed values are rejected. Ordinary signed-message
+timestamps never serve as clock samples. Older peers are not probed until they
+advertise support.
 
-- The current governor blocks federation during time uncertainty, and the normal
-  send path evaluates peer liveness using wall time. A bounded time-recovery path
-  must work before UTC is trusted, with authentication, monotonic deadlines and
-  conservative airtime accounting. It must not unlock arbitrary federation traffic.
-- Validating a peer sample must connect to the actual clock used for UTC checks.
-  Merely changing a confidence flag while leaving an incorrect clock in use is
-  insufficient. Keep clock-setting authority separate from the Outpost process;
-  the installed service's capability restrictions remain in force.
+A challenge expires 30 monotonic seconds after creation, including local admission,
+radio queue delay, peer processing/queue delay and the return path. If round-trip
+time is `r`, the UTC interval on receipt is conservatively bounded by
+`[provider_utc - provider_error, provider_utc + r + provider_error]`, with an added
+500 ppm delay allowance. Confidence requires the midpoint's distance from the
+**actual local UTC**, plus the interval half-width, to remain at most 30 seconds.
+Fresh peer intervals must overlap; disagreement holds affected work. A good native
+OS synchronization observation remains authoritative. Accepted evidence ages by
+500 ppm, expires within the provider's remaining six-hour lifetime, disappears on
+restart or revocation, and is invalidated by a later wall-clock step. A new valid
+challenge can independently verify a corrected clock even if the native step latch
+remains set. RTC retention is never certified by this check.
 
-Acceptance should cover late/replayed replies, revoked peers, conflicting sources,
-reference loops, six-hour offsets, multi-day source loss, restarts, radio budgets,
-unsupported older peers and recovery without false delivery or renewed signed
-lifetimes. The continuously powered Pi remains the normal clock; peer requests
-provide bounded checks/corrections when needed, not continuous radio chatter.
+### Recovery accounting
+
+Only broker-owned time frames with current exact-payload and credential checks may
+pass the UTC uncertainty hold. They use the same sole-egress governor and federation
+budget as other federation traffic, and bypass the wall-time peer-online heuristic.
+No ordinary custody, synchronization, scheduled work or cleanup is released merely
+because a probe is queued. Valid UTC evidence is required before rebuilding the
+retained ordinary queue.
+
+An uncertain cold process first waits a full rolling airtime hour, since old UTC
+labels cannot reconstruct recent radio cost. A native source that recovers before
+any time frame was reserved can reconstruct history normally and avoid that wait.
+Every time-frame reservation records its airtime cost before RF, in the same
+transaction as the durable send reservation. On restart, those costs are charged
+for a full hour using elapsed time, independently of UTC. Healthy restarts can
+therefore preserve their budget without holding unrelated traffic for an hour.
+Unknown or corrupt recovery accounting still requires the full silent hour. An
+interrupted reservation is charged conservatively because RF completion is unknown.
+Same-process recovery preserves elapsed costs and may count overlapping durable
+costs twice for their remaining hour. The recovery cost list is refreshed from the
+bounded rolling history; old costs do not accumulate indefinitely. Quiet hours can
+delay recovery and are never bypassed.
+
+Software tests exercise three simulated days of reference loss, cold startup,
+positive/negative six-hour errors, delay/expiry, replay, revocation/key replacement,
+conflicting references, source age, restart accounting, quotas/region limits,
+older peers and operator controls in three themes at mobile/desktop sizes.
+Physical two-station and multi-day powered qualification remain open under #141.
+No host time adjustment, WAN isolation or power interruption is part of automated
+qualification. Deployment evidence is recorded separately from source tests.
 
 Design references: NTP's offset/delay model in
 [RFC 5905, section 8](https://www.rfc-editor.org/rfc/rfc5905.html#section-8), and
 fresh authenticated responses and delay limits in
 [RFC 8915, sections 5.3 and 8.6](https://www.rfc-editor.org/rfc/rfc8915.html#section-5.3).
-These inform the design; a custom LoRa exchange would not itself be NTP or NTS.
+These inform this custom LoRa protocol; it is not NTP or NTS.
 
 ## Complete power loss: RTC acceptance and recovery
 
@@ -191,8 +237,8 @@ and acceptable error. Keep private configuration and exact locations out of evid
 4. Confirm the dashboard describes cold-start uncertainty truthfully. Verify that
    retained work has not been falsely sent, acknowledged, purged or assigned to a
    responder. Qualifying RTC retention does not by itself unlock the runtime source
-   gate in this release; use the configured verified local time source to supply OS
-   synchronization during offline cold starts.
+   gate in this release; use a configured verified local OS time source or a fresh, approved peer
+   check that agrees with actual UTC during offline cold starts.
 5. Restore the selected verified source. If a wall step was latched, restart Outpost
    after the OS reports synchronized time. Review waiting/expired/failed work and
    retry only the intended unexpired operations. Verify web/radio recovery and a

@@ -103,12 +103,25 @@ class TimeStatus:
     holdover_age_seconds: float | None = None
     wall_step_seconds: float | None = None
     holdover_verified: bool = False
+    peer_count: int = 0
+    peer_offset_seconds: float | None = None
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
 
     @property
     def detail(self) -> str:
+        if self.source == "federation_peer":
+            if self.timestamp_safe:
+                return (
+                    "Fresh trusted peer evidence agrees with the running UTC clock. "
+                    "The host clock has not been adjusted; RTC retention is unqualified."
+                )
+            return (
+                f"Peer time check: {self.reason.replace('_', ' ')}. "
+                f"Measured peer-minus-local offset: {self.peer_offset_seconds or 0:+.2f}s. "
+                + TIME_REMEDIATION
+            )
         if self.state == "synchronized":
             return "The OS reports synchronized time; offline RTC retention is unqualified."
         if self.state == "holdover":
@@ -181,8 +194,116 @@ def time_status(clock: Clock) -> TimeStatus:
     if callable(reader):
         value = reader()
         if isinstance(value, TimeStatus):
+            evidence = getattr(clock, "_peer_time_evidence", None)
+            if isinstance(evidence, PeerTimeEvidence):
+                elapsed = getattr(clock, "time_evidence_monotonic", clock.monotonic)
+                return evidence.sample(value, clock.now().timestamp(), elapsed())
             return value
     return TimeStatus("uncertain", "unmonitored_clock", False, source="unavailable")
+
+
+@dataclass(frozen=True)
+class PeerReference:
+    midpoint: float
+    error: float
+    received: float
+    remaining: float
+
+
+class PeerTimeEvidence:
+    """Bound actual UTC error from direct, live peer samples; never adjust a clock.
+
+    Callers authenticate and approve each source before recording a sample. Peer
+    evidence is process-local, expires using elapsed time, and cannot be re-exported
+    as a station's own kernel reference.
+    """
+
+    def __init__(self) -> None:
+        self.references: dict[str, PeerReference] = {}
+        self._previous: tuple[float, float] | None = None
+        self.enabled: Callable[[], bool] = lambda: True
+
+    def revoke(self, peer: str) -> None:
+        self.references.pop(peer, None)
+
+    def observe(
+        self,
+        peer: str,
+        *,
+        utc: float,
+        error: float,
+        age: float,
+        started: float,
+        received: float,
+        wall: float,
+    ) -> None:
+        rtt = received - started
+        values = (utc, error, age, started, received, wall)
+        if not all(math.isfinite(v) for v in values) or not (
+            utc >= MIN_EPOCH
+            and 0 <= error <= MAX_ERROR_SECONDS
+            and 0 <= age < HOLDOVER_SECONDS
+            and 0 <= rtt <= 30
+        ):
+            raise ValueError("invalid or delayed peer time sample")
+        if peer not in self.references and len(self.references) >= 4:
+            raise ValueError("at most four peer time sources are supported")
+        self._check_step(wall, received)
+        # The provider sampled sometime after our request and before our receipt.
+        # Include all local/remote queue delay, RF delay, and possible oscillator drift.
+        self.references[peer] = PeerReference(
+            utc + rtt / 2,
+            error + rtt / 2 + rtt * DRIFT_PER_SECOND,
+            received,
+            max(0, HOLDOVER_SECONDS - age - rtt),
+        )
+
+    def _check_step(self, wall: float, mono: float) -> None:
+        if self._previous is not None:
+            old_wall, old_mono = self._previous
+            elapsed = mono - old_mono
+            if elapsed < 0 or abs(wall - old_wall - elapsed) > STEP_SECONDS + elapsed * 0.001:
+                self.references.clear()
+        self._previous = (wall, mono)
+
+    def sample(self, native: TimeStatus, wall: float, mono: float) -> TimeStatus:
+        if not self.enabled():
+            self.references.clear()
+        self._check_step(wall, mono)
+        intervals: list[tuple[float, float, float]] = []
+        for peer, ref in tuple(self.references.items()):
+            age = mono - ref.received
+            if age < 0 or age >= ref.remaining:
+                self.revoke(peer)
+                continue
+            offset = ref.midpoint + age - wall
+            error = ref.error + age * DRIFT_PER_SECOND
+            intervals.append((offset, error, age))
+        if not intervals or native.state == "synchronized" or native.reason == "kernel_clock_fault":
+            return native
+        offset, error, age = min(intervals, key=lambda item: item[1])
+        conflict = max(o - e for o, e, _ in intervals) > min(o + e for o, e, _ in intervals)
+        bound = abs(offset) + error
+        safe = (
+            not conflict
+            and math.isfinite(wall)
+            and wall >= MIN_EPOCH
+            and bound <= MAX_ERROR_SECONDS
+        )
+        return TimeStatus(
+            "peer_verified" if safe else "uncertain",
+            "peer_sources_disagree"
+            if conflict
+            else "peer_verified"
+            if safe
+            else "peer_offset_exceeds_limit",
+            safe,
+            source="federation_peer",
+            error_seconds=bound,
+            holdover_age_seconds=age,
+            peer_count=len(intervals),
+            peer_offset_seconds=offset,
+        )
 
 
 class TimeUncertain(ValueError):

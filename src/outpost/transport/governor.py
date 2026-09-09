@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import uuid
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable, Iterator
@@ -158,11 +159,16 @@ class AirtimeGovernor:
             cls: deque() for cls in TrafficClass
         }
         self.history: deque[tuple[float, float, TrafficClass, Severity]] = deque()
+        self._time_airtime: deque[tuple[float, float, TrafficClass, Severity]] = deque()
         self._recent: dict[tuple[str, int, str], float] = {}
         self._held_ids: set[int] = set()
         self._publication_failed = False
         self._time_recovery_pending = False
         self._time_started_safe = time_status(clock).timestamp_safe
+        self.time_recovery_guard: Callable[[OutboundItem], bool] = lambda item: False
+        self._recovery_loaded = False
+        self._startup_not_before = 0.0
+        self._recovery_silence_until = 0.0
         self._dispatch_lock = asyncio.Lock()
         self._next_id = 1
         self._next_tx_at = 0.0
@@ -441,7 +447,7 @@ class AirtimeGovernor:
         transaction.check_owner(self.outbox.database)
         if not items:
             return AdmissionResult()
-        if any(self._time_blocked(item.traffic_class) for item in items):
+        if any(self._time_blocked(item) for item in items):
             return AdmissionResult(rejection_reason="time_uncertain")
         oversized = [item for item in items if item.payload_size > MAX_PAYLOAD_BYTES]
         if oversized:
@@ -545,9 +551,12 @@ class AirtimeGovernor:
         """Rebuild the committed mirror with egress and admissions quiesced."""
         if self.outbox is None:
             return 0
+        await self._load_time_recovery()
         if not time_status(self.clock).timestamp_safe:
             self._time_recovery_pending = True
             return 0
+        if not self._recovery_silence_until:
+            self._startup_not_before = 0
         self._publication_failed = True
         self._elapsed.reset()
         now_epoch = self._elapsed.now()
@@ -559,6 +568,9 @@ class AirtimeGovernor:
             return 0
         self.queues = {cls: deque() for cls in TrafficClass}
         self._held_ids.clear()
+        # UTC can have changed while recovery probes were in flight. Preserve
+        # their elapsed-time costs even if the durable UTC history no longer agrees.
+        retained_history = list(self._time_airtime)
         self.history.clear()
         airtime = await self.outbox.recent_airtime(self._elapsed.now())
         now_epoch = self._elapsed.now()
@@ -573,6 +585,10 @@ class AirtimeGovernor:
             self._next_tx_at = max(
                 self._next_tx_at, sent_at + self._attempt_gap(cost, bool(record["multipart"]))
             )
+        self.history.extend(retained_history)
+        self.history = deque(sorted(self.history))
+        for sent_at, cost, _, _ in retained_history:
+            self._next_tx_at = max(self._next_tx_at, sent_at + self._attempt_gap(cost, True))
         for row in rows:
             item = OutboundItem(
                 text=str(row["text"]),
@@ -771,6 +787,8 @@ class AirtimeGovernor:
     def _prune_history(self, now: float) -> None:
         while self.history and self.history[0][0] <= now - 3_600:
             self.history.popleft()
+        while self._time_airtime and self._time_airtime[0][0] <= now - 3_600:
+            self._time_airtime.popleft()
         self._recent = {
             key: timestamp
             for key, timestamp in self._recent.items()
@@ -831,28 +849,34 @@ class AirtimeGovernor:
             )
 
     def _expired(self, item: OutboundItem) -> bool:
-        if self._time_blocked(item.traffic_class):
+        if item.guard_kind == "federation-time-v1":
+            return self.clock.monotonic() > item.created_at + 30
+        if self._time_blocked(item):
             return False
         return item.expires_at <= self.clock.monotonic() or (
             self.outbox is not None and item.expires_at_epoch <= self._elapsed.now()
         )
 
-    def _time_blocked(self, traffic_class: TrafficClass) -> bool:
+    def _time_blocked(self, item: OutboundItem) -> bool:
+        if self.time_recovery_guard(item):
+            return False
         if time_status(self.clock).timestamp_safe:
             self._time_started_safe = True
-            return False
+            return self._time_recovery_pending
         return (
             not self._time_started_safe
             or self._time_recovery_pending
-            or traffic_class not in {TrafficClass.REPLY, TrafficClass.ALERT}
+            or item.traffic_class not in {TrafficClass.REPLY, TrafficClass.ALERT}
         )
 
     def _dispatch_policy(self, item: OutboundItem, cost: float) -> str | None:
         """Current, synchronous eligibility evidence at selection/reservation."""
         self._check_publication()
-        if self._time_blocked(item.traffic_class):
+        if self._time_blocked(item):
             return "time_uncertain"
         now = self.clock.monotonic()
+        if now < self._startup_not_before:
+            return "time_recovery_cooldown"
         if self._expired(item):
             return "expired"
         if (
@@ -894,6 +918,9 @@ class AirtimeGovernor:
         # RF may happen anywhere inside the awaited call, even if it raises or is
         # cancelled. Retain the cost for a full hour after the latest known end.
         now = self.clock.monotonic()
+        if item.guard_kind == "federation-time-v1":
+            self._recovery_silence_until = now + 3_600
+            self._time_airtime.append((now, cost, item.traffic_class, item.severity))
         self.history.append((now, cost, item.traffic_class, item.severity))
         AIRTIME_USED.set(self.used_airtime / 3_600)
         self._last_toa, self._next_tx_at = cost, now + self._attempt_gap(cost, item.multipart)
@@ -912,16 +939,22 @@ class AirtimeGovernor:
 
     async def _tick(self) -> OutboundItem | None:
         self._check_publication()
-        if not time_status(self.clock).timestamp_safe and (
-            not self._time_started_safe or self._time_recovery_pending
-        ):
-            self.metrics.throttled["time_uncertain"] += 1
-            return None
-        if self._time_recovery_pending:
+        await self._load_time_recovery()
+        if self._time_recovery_pending and time_status(self.clock).timestamp_safe:
             await self.recover()
-            if self._time_recovery_pending:
-                return None
+        if self.clock.monotonic() < self._startup_not_before:
+            self.metrics.throttled["time_recovery_cooldown"] += 1
+            return None
         now = self.clock.monotonic()
+        if (
+            self.outbox is not None
+            and self._recovery_silence_until
+            and now >= self._recovery_silence_until
+        ):
+            await self.outbox.database.write(
+                "DELETE FROM runtime_setting WHERE key='airtime.time_recovery'"
+            )
+            self._recovery_silence_until = 0
         self._prune_history(now)
         for traffic_class, pending in self.queues.items():
             for expired in tuple(item for item in pending if self._expired(item)):
@@ -934,7 +967,11 @@ class AirtimeGovernor:
                 if self.outbox is not None:
                     await self.outbox.expire(expired.item_id, self._elapsed.now())
             QUEUE_DEPTH.labels(traffic_class.value).set(len(pending))
-        if self.outbox is not None and now >= self._next_outbox_sweep_at:
+        if (
+            self.outbox is not None
+            and not self._time_recovery_pending
+            and now >= self._next_outbox_sweep_at
+        ):
             await self.outbox.expire_ack_waits(
                 self._elapsed.now(),
                 current_time=lambda: self._elapsed.now(),
@@ -1113,6 +1150,53 @@ class AirtimeGovernor:
                 wait_for_ack=dispatch.want_ack and dispatch.dest != "^all",
             )
         return item
+
+    async def _load_time_recovery(self) -> None:
+        if self._recovery_loaded or self.outbox is None:
+            return
+        rows = await self.outbox.database.read(
+            "SELECT value FROM runtime_setting WHERE key='airtime.time_recovery'"
+        )
+        now = self.clock.monotonic()
+        if not self._time_started_safe:
+            self._startup_not_before = self.clock.monotonic() + 3_600
+        if rows:
+            # Unknown completion time after a crash: charge every reserved probe
+            # for a full hour from this process. No UTC labels are needed.
+            try:
+                costs = json.loads(rows[0]["value"])
+                valid = (
+                    isinstance(costs, list)
+                    and 0 < len(costs) <= 512
+                    and all(type(c) in {int, float} and 0 < c <= 3_600 for c in costs)
+                    and sum(costs) <= 3_600
+                )
+            except (TypeError, ValueError):
+                valid = False
+            if valid:
+                for cost in costs:
+                    entry = (now, float(cost), TrafficClass.FEDERATION, Severity.INFO)
+                    self._time_airtime.append(entry)
+                    self.history.append(entry)
+            else:
+                # An older marker or corrupt accounting cannot waive unknown RF.
+                self._startup_not_before = now + 3_600
+            self._recovery_silence_until = now + 3_600
+        self._recovery_loaded = True
+
+    async def reserve_time_airtime(self, transaction: Transaction, cost: float) -> None:
+        """Persist conservative probe costs in the same transaction as reservation."""
+        self._prune_history(self.clock.monotonic())
+        costs = [entry[1] for entry in self._time_airtime] + [cost]
+        await transaction.write(
+            "INSERT INTO runtime_setting(key,value,updated_at) VALUES('airtime.time_recovery',?,0) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps(costs),),
+        )
+
+    @property
+    def time_recovery_wait(self) -> float:
+        return max(0, self._startup_not_before - self.clock.monotonic())
 
     def queue_depths(self) -> dict[str, int]:
         return {cls.value: len(queue) for cls, queue in self.queues.items()}

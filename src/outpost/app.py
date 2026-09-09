@@ -82,6 +82,7 @@ from outpost.fed.reconciliation import Reconciliation
 from outpost.fed.review import FederationReviewService
 from outpost.fed.revisions import CAPABILITY as RECONCILIATION_CAPABILITY
 from outpost.fed.revisions import MODE as RECONCILIATION_MODE
+from outpost.fed.time import FederationTime
 from outpost.maps.regions import MapError, position_suggestion
 from outpost.maps.setup import MapSetupService
 from outpost.member_data import MemberDataService
@@ -326,6 +327,16 @@ class OutpostApp:
             self.database, self.federation, self.clock
         )
         self.federation_codec = FrameCodec(self.config.fed.max_fragments)
+        self.federation_time = FederationTime(
+            self.federation,
+            self.clock,
+            self.governor,
+            self.federation_codec,
+            lambda: self.radio.local_node_id,
+            lambda: channel_slot(self.config, "outpost", 0),
+            self.config.radio.federation_portnum,
+            lambda: self.config.modules.fed.enabled and not self.recovery_fence.active,
+        )
         self.incident_sender = IncidentSender(
             self.federation_sync,
             self.federation,
@@ -457,6 +468,7 @@ class OutpostApp:
             self.restore_coordinator,
             self.maintenance,
             self_check=self.self_check,
+            federation_time=self.federation_time,
             module_provider=self.config.modules.enabled_map,
             federation_mail_reply=self.reply_federation_mail,
             same_events=self.same_events,
@@ -1147,6 +1159,11 @@ class OutpostApp:
                         TaskFailureDomain.OPTIONAL_PROVIDER,
                     ),
                     self._start_background_task(
+                        "federation-time",
+                        self._federation_time_loop,
+                        TaskFailureDomain.OPTIONAL_PROVIDER,
+                    ),
+                    self._start_background_task(
                         "federation-services",
                         self._federation_service_loop,
                         TaskFailureDomain.OPTIONAL_PROVIDER,
@@ -1195,6 +1212,12 @@ class OutpostApp:
                 self._task_progress("federation-discovery")
                 await self.clock.sleep(30)
 
+    async def _federation_time_loop(self) -> None:
+        while True:
+            await self.federation_time.tick()
+            self._task_progress("federation-time")
+            await self.clock.sleep(60)
+
     async def _queue_federation_hello(
         self, destination: str, *, target_mesh_id: str | None = None
     ) -> bool:
@@ -1203,6 +1226,7 @@ class OutpostApp:
             return False
         self.federation.local_mesh_id = local_id
         capabilities = {
+            "time_v1": True,
             "internet": True,
             "weather": self.config.modules.env.enabled,
             "alerts": self.config.modules.env.enabled,
@@ -2492,6 +2516,7 @@ class OutpostApp:
             _handle_service_query=self._handle_service_query,
             _handle_service_response=self._handle_service_response,
             _handle_sync_manifest=self._handle_sync_manifest,
+            _handle_time=self.federation_time.receive,
         ).receive(message)
 
     async def _queue_service_response(
