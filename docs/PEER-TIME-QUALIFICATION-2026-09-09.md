@@ -1,5 +1,10 @@
 # Trusted-peer UTC checks: software qualification (#141)
 
+Installed release **`20260909T024744Z-7113902e7793`**, source
+`7113902e7793ff217644662d9c21ec1a55ccb2d0`, passed all four exact-source CI jobs
+and the live post-update checks. The normal updater completed at 02:48:50 UTC on
+September 9. Database schema remains **186**. Peer-time permissions remain off.
+
 This extends the [September 8 clock safeguards](OFFLINE-TIME-QUALIFICATION-2026-09-08.md).
 The primary field scenario remains continuous Pi/SDR/LoRa operation on the owner's
 shared external battery with solar charging backup. No WAN isolation, power cut,
@@ -51,10 +56,11 @@ The overlapping local regression groups passed:
 - 101 governor, durable queue, incident worker and maintenance cases.
 - 185 compatibility cases covering queue publication, readiness, peer management,
   governor eligibility, time warning UI and peer-time exchanges.
-- 110 final clock, peer-time and governor timing cases after restart accounting was
+- 113 final clock, peer-time and governor timing cases after restart accounting was
   changed to preserve known costs rather than impose a healthy-restart radio hold.
 - Seven operator/API/browser cases, including CSRF/role enforcement, strict explicit
   permissions, truthful queue status and three themes at 320/1280-pixel widths.
+- 577 unit and peer-time operator/browser cases after the final shared-audit fix.
 
 Tests use real application/store/governor/dispatcher wiring with simulated radio and
 clock sources. Scenarios include three simulated days, cold recovery of a retained
@@ -64,12 +70,46 @@ restart/corrupt accounting and prevention of peer-derived re-export. Synthetic t
 tests do not adjust the host. Lint, formatting, strict type ratchet, requirement
 ledger, generated capability/command documentation and static markup checks passed.
 
-## Deployment and remaining evidence
+## Exact-source CI and live deployment
 
-Exact-source CI and local deployment are pending at this source checkpoint. The
-running release remains `20260908T235451Z-5a7de3241e4c`. Peer time permissions have
-not been enabled on the live station. Private test/CI/deployment records are under
-`.data/peer-time-141-2026-09-09/`.
+[CI run 34300732257](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34300732257)
+passed for the installed source:
+
+| Job | Full suite | Production-wiring rerun | Minutes |
+| --- | --- | --- | --- |
+| Python 3.12 | 2,410 passed, 1 skipped | 1,302 passed | 57.15 |
+| Python 3.13 | 2,410 passed, 1 skipped | 1,302 passed | 51.57 |
+| Locked runtime, Python 3.12 | 2,410 passed, 1 skipped | — | 27.23 |
+| Locked runtime, Python 3.13 | 2,410 passed, 1 skipped | — | 28.95 |
+
+Production coverage was **92.0%** for `fed/time.py` and **94.5%** for
+`timekeeping.py` on both Python versions, above their individual 90% floors.
+The remaining coverage, package, dependency-audit and repository checks passed.
+The production reruns and local groups overlap the full suite; these are not
+counts of distinct additional tests.
+
+The normal updater retained a verified pre-upgrade backup and used the native
+HailoRT wheel. At 02:49:22 UTC, the packaged service, web, radio, required native AI,
+database integrity/foreign keys, and same-package boot readiness passed. All
+protected pre-update record IDs survived. The post-update store held 1,625 outbound
+work records and 2,036 power samples. The host did not reboot.
+
+The service reports usable synchronized native UTC, excludes `CAP_SYS_TIME`, and
+retains `NoNewPrivileges`. The `federation-time` task was running with recent
+progress, zero failures/restarts, and healthy core/optional tasks at 02:49:58 UTC.
+Its peer API requires authentication; no live peer-time permission was enabled.
+Served Federation assets match both the installed package and source.
+
+USB external power passes without a battery percentage. The selected regional map
+and world overview remain verified: **65,884,160 bytes and 6,176 tiles**. The served
+world tile and map assets match the verified pack/package. The prior map operator
+observation remains stale; no replacement field attestation was recorded.
+
+Private test/CI/deployment records are under `.data/peer-time-141-2026-09-09/` and
+`/var/lib/outpost-qualification/141-20260909/peer-time-update/`. Later documentation
+commits do not change the installed runtime's source/CI identity.
+
+## Remaining physical evidence
 
 #141 stays open for physical two-station and multi-day powered qualification, plus
 the separate RTC complete-power-loss scenario. A group with no remaining independent

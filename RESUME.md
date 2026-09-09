@@ -1,24 +1,52 @@
 # Session resume point — 2026-09-08 (America/New_York)
 
-## Source ready for CI: trusted-peer UTC checks under #141
+## Installed: trusted-peer UTC checks under #141
 
 The user said to continue and asked whether offline maps closed #130. #130 remains
 an open umbrella tracker. Map software is complete and installed under #139; its
 selected-region checkbox is now corrected, while physical WAN-disconnected browser
 acceptance remains open. Do not close either issue for software evidence alone.
 
-Peer-time implementation is in the working tree: optional current-key permissions,
-one-frame live challenges, 30-second elapsed deadlines, source-age/error bounds,
-actual UTC comparison, no peer-derived re-export, governor-only recovery and durable
-restart airtime fencing, plus authenticated API/dashboard controls. It does not set
-the host clock or authorize any physical network/power experiment. Local qualification passed: 110 final clock/peer/governor cases, 185 compatibility
-cases, 101 queue/worker/maintenance cases, and seven operator/browser cases.
-Exact-source CI/deployment are pending. Healthy restarts retain probe costs; only
-unknown historical airtime requires the full silent hour. See the
-[peer-time qualification record](docs/PEER-TIME-QUALIFICATION-2026-09-09.md).
-No peer is approved on the running appliance. See [OFFLINE-TIME.md](docs/OFFLINE-TIME.md).
+The selected, running release is **`20260909T024744Z-7113902e7793`**, source
+`7113902e7793ff217644662d9c21ec1a55ccb2d0`, database schema **186**. Exact-source
+[CI 34300732257](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34300732257)
+passed all four jobs: 2,410 full-suite tests per job and 1,302 production-wiring tests
+per Python version. The normal updater completed at 02:48:50 UTC with the native
+HailoRT wheel and a verified pre-upgrade backup.
 
-## Installed: #141 clock safeguards; physical acceptance remains open
+Peer-time checks use optional current-key permissions, one-frame live challenges,
+30-second elapsed deadlines, source-age/error bounds, actual UTC comparison,
+no peer-derived re-export, governor-only recovery and durable restart accounting.
+Federation → Time backup exposes authenticated operator controls. A fresh agreeing
+reference can restore confidence in actual UTC; a large offset stays held. This
+does not set the host clock. A detected wall step remains latched until Outpost is
+restarted after clock correction. Healthy restarts retain probe costs; only unknown
+historical airtime requires the full silent hour.
+
+At 02:49:22–02:49:58 UTC, web, radio, native AI, database integrity, same-package boot
+readiness and all protected-record retention checks passed. The new optional
+`federation-time` task is healthy with no failures/restarts. Native UTC is synchronized,
+the peer API requires authentication, and all peer-time permissions remain disabled.
+The service still excludes `CAP_SYS_TIME` and retains `NoNewPrivileges`. The host did
+not reboot. Served Federation assets match the installed package/source. USB power
+passes without a radio battery percentage. Regional maps plus the overview remain
+verified at 65,884,160 bytes and 6,176 tiles; the old map operator observation is stale.
+
+Local overlapping groups passed: 113 final clock/peer/governor cases, 185 compatibility
+cases, 101 queue/worker/maintenance cases, seven operator/browser cases, and 577 final
+unit/operator cases. CI production coverage is 92.0% for the peer broker and 94.5%
+for clock evidence, both above their 90% floors. See the
+[peer-time qualification record](docs/PEER-TIME-QUALIFICATION-2026-09-09.md) and
+[OFFLINE-TIME.md](docs/OFFLINE-TIME.md).
+
+#141 remains open for physical two-station and multi-day powered qualification and
+the separate RTC complete-power-loss scenario. No WAN isolation, power interruption,
+host clock write, RTC charging change, second-node change or replacement operator
+attestation was performed. Private evidence is in `.data/peer-time-141-2026-09-09/`
+and `/var/lib/outpost-qualification/141-20260909/peer-time-update/`. Documentation
+commits after the installed source do not require another runtime update.
+
+## Prior installation: #141 native clock safeguards
 
 The owner clarified that the Pi, SDR and LoRa radio share an external backup
 battery with days of runtime and solar charging backup, and expects the powered
@@ -29,13 +57,11 @@ The installed six-hour/30-second estimated holdover policy is conservative and
 can pause timestamp-sensitive functions before the station battery is depleted.
 Qualify actual drift and multi-day availability before claiming that requirement
 is met. This clarification did not change the installed runtime or run a field test.
-The owner also proposed pulling time from peer Outposts when needed. The next #141
-extension is an authenticated, fresh peer-time exchange with source age/uncertainty,
-delay bounds, loop prevention and a bounded recovery path through time-uncertain
-egress. This was planned at the installed checkpoint below; the implementation
-is now in progress as described above.
+The owner also proposed pulling time from peer Outposts when needed. The authenticated
+peer-time extension was planned at the prior checkpoint below and is now installed
+as described above. Physical peer and multi-day powered evidence remains outstanding.
 
-The owner authorized #141. The selected, running release is
+The owner authorized #141. The previous installed release was
 **`20260908T235451Z-5a7de3241e4c`**, source
 `5a7de3241e4cfaa7cb4829ae6fbb01fe714455ef`, database schema **186**.
 Exact-source CI `34288628754` passed all four jobs: 2,371 full-suite tests per job
