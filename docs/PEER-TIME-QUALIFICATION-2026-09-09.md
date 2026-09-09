@@ -109,6 +109,56 @@ Private test/CI/deployment records are under `.data/peer-time-141-2026-09-09/` a
 `/var/lib/outpost-qualification/141-20260909/peer-time-update/`. Later documentation
 commits do not change the installed runtime's source/CI identity.
 
+## September 9 reboot follow-up and clock-hold recovery
+
+The owner returned after a reboot of the installed appliance. The boot ID changed
+from the installation witness, and the same enabled packaged release started
+automatically. Its process began **52.02 seconds** into boot. The OS time service
+reported initial synchronization at **72.96 seconds**, before Outpost completed
+startup at **95.92 seconds**. These timings use the monotonic boot journal because
+wall-clock labels crossed a time correction.
+
+At **11:59:51 UTC**, Outpost reported a latched **259.806-second forward clock step**
+and unsafe timestamp confidence, while the OS independently reported synchronized
+time. Radio, required native AI, core and optional tasks remained healthy, with
+zero automatic service restarts or supervised task failures. All tracked records
+from the installation witness were retained, including all 1,625 outbound-work
+records and 2,036 power samples. The configured regional map was unchanged.
+
+After preserving that evidence and checking the OS source, an Outpost service
+restart ran at **12:00:08–12:00:20 UTC**. The host was not rebooted again, and the
+clock, release and configuration were not manually changed. At **12:02:20 UTC**,
+the recovered process still had synchronized, usable UTC with no clock-step latch.
+Web, radio, native AI, all supervised tasks, schema-186 database integrity and
+foreign keys, and a fresh same-package boot readiness check passed. The service
+retained its privilege restrictions; peer-time permissions remained disabled and
+the peer API still required authentication. Map and Federation assets matched the
+installed package; the regional map and overview still verified at 65,884,160 bytes
+and 6,176 tiles.
+
+Recovery also released scheduled maintenance. It created a pre-cleanup snapshot
+and removed **two expired mail records** at 12:00:20 UTC. Their expiry metadata in
+that integrity-checked snapshot, absence of pending data requests, and the exact
+maintenance audit count establish policy-driven expiry. The original strict
+retention comparison remains preserved with its two missing mail IDs; a separate
+assessment accounts for them. All other tracked records were retained. One pending
+outbound item expired with its durable row retained. Three new normal sends were
+recorded after recovery, leaving no pending or held work at the final observation;
+remote receipt or acknowledgement was not tested.
+
+Final counts were 9 incidents, 11 incident updates, 5 mail, 1,629 outbound-work
+records and 2,134 power samples. Private observations and the separate retention
+assessment are in `/var/lib/outpost-qualification/141-20260909/post-reboot/`, with
+a local checkpoint in `.data/post-reboot-2026-09-09/`. Earlier installation evidence
+was not overwritten.
+
+This reboot exposed a remaining startup limitation: the service can start before
+the OS time source synchronizes, and a subsequent clock step requires an operator
+restart to clear the deliberate latch. This observation establishes recovery after
+that intervention, not unattended recovery of usable time. Overall readiness still
+has outstanding field checks; this follow-up does not qualify offline holdover,
+two-station time exchange, RTC retention or physical WAN-disconnected map access.
+
 ## Remaining physical evidence
 
 #141 stays open for physical two-station and multi-day powered qualification, plus

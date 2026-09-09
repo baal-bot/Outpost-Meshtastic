@@ -1,4 +1,36 @@
-# Session resume point — 2026-09-08 (America/New_York)
+# Session resume point — 2026-09-09 (America/New_York)
+
+## Post-reboot: startup clock hold recovered
+
+The user returned after reboot. The selected release remains
+**`20260909T024744Z-7113902e7793`**, schema **186**. The enabled service started
+automatically, but OS time synchronization during startup moved UTC forward by
+**259.806 seconds** and latched Outpost's time-confidence hold. The process began
+52.02 seconds into boot, the OS time service synchronized at 72.96 seconds, and
+Outpost became active at 95.92 seconds. All tracked installation records survived
+the reboot; radio, native AI and supervised tasks were healthy before recovery.
+
+After confirming synchronized OS time and preserving the original evidence, Outpost
+was restarted at **12:00:08–12:00:20 UTC** on September 9. No host clock write or
+runtime/configuration update was made. At 12:02:20 UTC, the same recovered process
+had usable synchronized UTC, healthy radio/native AI/tasks, passing schema/integrity
+and boot-package checks, and verified regional maps/assets. Three new normal sends
+were recorded; no work was pending or held. Remote delivery was not measured.
+
+Scheduled maintenance resumed and removed two expired mail records. Their metadata
+in its pre-cleanup backup and the maintenance audit establish expected expiry;
+all other tracked records survived. One pending work item expired with its durable
+record retained. The store then held 9 incidents, 11 incident updates, 5 mail,
+1,629 outbound-work records and 2,134 power samples.
+
+This exposes a remaining #141 startup limitation: a time correction after process
+start can require an operator restart even when the OS subsequently synchronizes.
+Do not claim unattended time recovery or close the physical offline qualification
+gates. Peer-time permissions remain disabled. See the updated
+[qualification record](docs/PEER-TIME-QUALIFICATION-2026-09-09.md).
+Private evidence is under `.data/post-reboot-2026-09-09/` and
+`/var/lib/outpost-qualification/141-20260909/post-reboot/`. Original installation,
+pre-recovery and strict retention observations remain preserved.
 
 ## Installed: trusted-peer UTC checks under #141
 
