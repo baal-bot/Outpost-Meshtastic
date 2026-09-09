@@ -315,9 +315,17 @@ class SelfCheckService:
             or self._clock_changed()
         )
         for check in report["checks"]:
+            evidence = check["evidence"]
+            observation_until = evidence.get("observation_valid_until")
+            observation_expired = type(observation_until) is int and now >= observation_until
+            if "observation_state" in evidence and (stale or observation_expired):
+                evidence["observation_state"] = "stale"
+                evidence["observation_detail"] = (
+                    "The operator observation needs review; it does not replace the local check."
+                )
             deadlines = [
-                check["evidence"].get(name)
-                for name in ("observation_valid_until", "measurement_valid_until")
+                evidence.get("measurement_valid_until"),
+                observation_until if check["state"] == "attested" else None,
             ]
             expired = any(type(deadline) is int and now >= deadline for deadline in deadlines)
             if check["state"] in {"pass", "attested"} and (stale or expired):
@@ -872,6 +880,11 @@ class SelfCheckService:
                 )
         except (ValueError, TypeError):
             pass
+        evidence.update(observation_state=state, observation_detail=detail)
+        # A successful or outdated statement must not downgrade an independently
+        # measured pass. A current failed observation still needs attention.
+        if result.state == "pass" and state != "fail":
+            return replace(result, evidence=evidence, review_token=token)
         # An operator statement can never override a measured local failure.
         if result.state == "fail":
             state = "fail"

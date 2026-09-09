@@ -1,6 +1,8 @@
 """Actual authenticated ASGI and browser operator observations, no hardware exercise."""
 
+import asyncio
 from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
 
 import httpx
 import pytest
@@ -10,6 +12,7 @@ from outpost.self_check import MAX_REPORT_AGE
 from tests.browser.test_incident_g6 import Dashboard, operator_client
 from tests.integration.test_outage_readiness import appliance as appliance
 from tests.integration.test_outage_readiness import checks, observe
+from tests.integration.test_outage_readiness import verified_maps as verified_maps
 
 pytestmark = pytest.mark.production_wiring
 
@@ -62,7 +65,7 @@ async def test_observation_api_requires_operator_csrf_current_version_and_strict
 
 
 @asynccontextmanager
-async def evidence_page(app, width=1280, *, run=True):
+async def evidence_page(app, width=1280, *, run=True, theme="dark"):
     if run:
         await app.self_check.run("test")
     async with AsyncExitStack() as stack:
@@ -88,6 +91,7 @@ async def evidence_page(app, width=1280, *, run=True):
         )
         await context.add_init_script(
             "localStorage.setItem('outpost.map.basemap-mode', 'offline-only');"
+            f"localStorage.setItem('outpost.appearance.theme', '{theme}');"
         )
         dashboard = Dashboard(context, client)
         await context.route("**/*", dashboard.route)
@@ -109,12 +113,75 @@ async def test_operator_can_review_all_evidence_and_record_an_explicit_observati
         await station.get_by_role("button", name="Record passed observation").click(force=True)
         await expect(station).to_contain_text("ATTESTED:")
         await expect(station).to_contain_text("not independently measured proof")
+        await expect(station.get_by_role("status")).to_have_text("Passed observation recorded.")
+        await expect(station.locator("form")).to_be_hidden()
+        await expect(station.get_by_role("button", name="Update observation")).to_be_visible()
         assert await page.locator(".readiness-details").evaluate("element => element.open")
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
         assert not dashboard.errors and not dashboard.external
         assert checks(await app.self_check.latest())["station_power"]["passed"] is False
         assert (await app.self_check.latest())["status"] != "ready"
         assert not app.radio.sent and not await app.database.read("SELECT * FROM alert")
+
+
+@pytest.mark.parametrize("width", [320, 1280])
+@pytest.mark.parametrize("theme", ["dark", "daylight", "night"])
+async def test_verified_map_observation_finishes_and_can_be_explicitly_updated(
+    verified_maps, width, theme
+):
+    app = verified_maps
+    async with evidence_page(app, width, theme=theme) as (dashboard, page, _):
+        await page.locator(".readiness-details > summary").click(force=True)
+        maps = page.locator('.readiness-check[data-check="offline_maps"]')
+        await expect(maps.locator("strong")).to_have_text(
+            "PASS: Selected regional offline map is verified"
+        )
+        await maps.locator('input[type="checkbox"]').check(force=True)
+        await maps.get_by_role("button", name="Record passed observation").click(force=True)
+        await expect(maps.get_by_role("status")).to_have_text("Passed observation recorded.")
+        await expect(maps.locator("form")).to_be_hidden()
+        await expect(maps.locator("strong")).to_contain_text("PASS:")
+        await page.reload(wait_until="networkidle")
+        await page.locator(".readiness-details > summary").click(force=True)
+        await expect(maps.get_by_role("status")).to_have_text("Passed observation recorded.")
+        await expect(maps.locator("form")).to_be_hidden()
+        assert "offline_maps" not in (await app.self_check.latest())["failed_checks"]
+        output = Path(".data/readiness-observation-ui-review")
+        await asyncio.to_thread(output.mkdir, parents=True, exist_ok=True)
+        await maps.screenshot(path=str(output / f"map-observation-{theme}-{width}.png"))
+        await maps.get_by_role("button", name="Update observation").click(force=True)
+        await expect(maps.locator("form")).to_be_visible()
+        await maps.locator('input[type="checkbox"]').check(force=True)
+        await maps.get_by_role("button", name="Record failed observation").click(force=True)
+        await expect(maps.get_by_role("status")).to_have_text("Failed observation recorded.")
+        await expect(maps.locator("strong")).to_contain_text("FAIL:")
+        await expect(maps.locator("form")).to_be_hidden()
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+        assert not dashboard.errors and not dashboard.external
+        assert (
+            len(
+                await app.database.read(
+                    "SELECT * FROM audit_log WHERE action='readiness.observation' "
+                    "AND target='offline_maps'"
+                )
+            )
+            == 2
+        )
+        assert not app.radio.sent and not await app.database.read("SELECT * FROM outbound_work")
+
+
+async def test_old_map_observation_is_shown_separately_with_explicit_update(verified_maps):
+    app = verified_maps
+    await observe(app, "offline_maps", observed_at=int(app.clock.now().timestamp()) - 86_340)
+    app.clock.advance(61)
+    async with evidence_page(app) as (_, page, _):
+        await page.locator(".readiness-details > summary").click(force=True)
+        maps = page.locator('.readiness-check[data-check="offline_maps"]')
+        await expect(maps.locator("strong")).to_contain_text("PASS:")
+        await expect(maps.get_by_role("status")).to_have_text("Passed observation needs review.")
+        await expect(maps.locator("form")).to_be_hidden()
+        await maps.get_by_role("button", name="Update observation").click(force=True)
+        await expect(maps.locator("form")).to_be_visible()
 
 
 @pytest.mark.parametrize("fault", ["conflict", "lost_response"])

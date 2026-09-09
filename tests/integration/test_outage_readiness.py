@@ -13,11 +13,14 @@ from outpost import readiness_probes, self_check
 from outpost.app import OutpostApp
 from outpost.clock import SystemClock, VirtualClock
 from outpost.config import Config
+from outpost.maps.regions import Region
 from outpost.router.intents import IntentResolver
 from outpost.self_check import ATTESTABLE, MAX_REPORT_AGE, OBSERVATION_PREFIX, SelfCheckService
 from outpost.store.backups import BackupService
 from outpost.store.members import MemberRepo
 from outpost.transport.simulated import SimulatedRadioLink
+from tests.support.maps import source_factory
+from tests.unit.test_regional_maps import install
 
 pytestmark = pytest.mark.production_wiring
 
@@ -85,6 +88,67 @@ async def observe(app, name="station_power", outcome="pass", observed_at=None, t
         token or checks(report)[name]["review_token"],
         "web:synthetic-operator",
     )
+
+
+@pytest.fixture
+async def verified_maps(appliance, monkeypatch):
+    factory = source_factory()
+    monkeypatch.setattr("outpost.maps.setup.RangeSource", factory)
+    monkeypatch.setattr(appliance.map_setup, "_source", factory)
+    install(appliance.map_setup, Region(-1.2864, 36.8172, 2, 12))
+    try:
+        yield appliance
+    finally:
+        appliance.map_setup.close()
+
+
+@pytest.mark.parametrize("change", ["none", "restart", "expiry", "invalid"])
+async def test_verified_map_pass_is_independent_of_a_successful_observation(verified_maps, change):
+    app = verified_maps
+    report = await observe(app, "offline_maps")
+    row = checks(report)["offline_maps"]
+    assert row["state"] == "pass" and row["passed"]
+    assert row["evidence"]["observation_state"] == "attested"
+    if change == "restart":
+        app.self_check = SelfCheckService(
+            app.database, app.config, app.clock, app.backups, app.router.intents
+        )
+    elif change == "expiry":
+        app.clock.advance(86_400)
+    elif change == "invalid":
+        await app.database.write(
+            "UPDATE runtime_setting SET value='broken' WHERE key=?",
+            (OBSERVATION_PREFIX + "offline_maps",),
+        )
+    report = await app.self_check.run("test")
+    row = checks(report)["offline_maps"]
+    assert row["state"] == "pass" and row["passed"]
+    assert row["evidence"]["observation_state"] == (
+        "attested" if change == "none" else "unknown" if change == "invalid" else "stale"
+    )
+    assert "offline_maps" not in report["failed_checks"]
+    assert row["evidence"]["wan_disconnection_tested"] is False
+    assert not app.radio.sent
+
+
+async def test_expiring_map_observation_does_not_expire_a_fresh_measurement(verified_maps):
+    app = verified_maps
+    await observe(app, "offline_maps", observed_at=int(app.clock.now().timestamp()) - 86_340)
+    app.clock.advance(61)
+    report = await app.self_check.latest()
+    row = checks(report)["offline_maps"]
+    assert not report["cached_evidence_stale"]
+    assert row["state"] == "pass" and row["passed"]
+    assert row["evidence"]["observation_state"] == "stale"
+
+
+async def test_current_failed_map_observation_still_requires_attention(verified_maps):
+    report = await observe(verified_maps, "offline_maps", outcome="fail")
+    row = checks(report)["offline_maps"]
+    assert row["state"] == "fail" and not row["passed"]
+    assert row["evidence"]["state"] == "pass"
+    assert row["evidence"]["observation_state"] == "fail"
+    assert "offline_maps" in report["failed_checks"]
 
 
 async def test_healthy_local_checks_do_not_certify_unknown_outage_prerequisites(appliance):

@@ -26,7 +26,7 @@ and operator-attested evidence; none of the latter three means all-ready.
 | check: `configured_keys_effective` | Configuration | Explicitly configured keys are not among settings known to have no runtime consumer. |
 | check: `timezone` | Configuration | `node.timezone` resolves through the installed IANA timezone database. |
 | check: `storage_reserve` | Operations | Current unprivileged byte and inode headroom meet the diagnostic floor: at least the larger of 1 GiB or 5% free bytes, and 5% free inodes. Not write endurance or outage-duration proof. |
-| check: `offline_maps` | Operations | Missing/invalid/bounded-file violations fail. A readable manifest is only availability metadata; regional bounds, zooms, integrity and geographic coverage remain unqualified. |
+| check: `offline_maps` | Operations | A verified regional vector pack and world overview pass the installed-map check, including coverage of a configured station location. Missing or invalid packs fail; an overview alone or legacy metadata leaves regional detail unknown. Physical WAN-disconnected browser acceptance remains separate. |
 | check: `time_confidence` | Operations | An observed in-process wall step fails. Read-only OS evidence reports synchronization, bounded process holdover or uncertainty, plus RTC hints. Physical RTC retention remains unknown; see [offline time policy](OFFLINE-TIME.md). |
 | check: `backup_restore` | Operations | Off-device encrypted recovery and an isolated replacement-node restore remain unknown without qualification. Local rotation cannot pass this check. |
 | check: `station_power` | Operations | Whole-station usable energy and measured load remain unknown without qualification; one radio's battery is not the host/AP/storage reserve. |
@@ -91,6 +91,19 @@ grant permission to activate held hardware. Observations are valid for at most
 measured passes, and cannot override a measured local failure. Rerunning readiness
 does not extend that observation window. Expired/prior-process/prior-policy
 observations stay stale; clock uncertainty stays unknown.
+
+An observation is separate from an existing measured pass. For example, a verified
+regional map remains **PASS** when a passed observation is recorded, expires or
+belongs to an earlier process. Its observation status is shown separately. A current
+failed observation still makes the check **FAIL**, and a passed observation cannot
+clear a measured failure. Expiry of an observation does not expire a fresh independent
+map measurement; the usual report and measurement freshness limits still apply.
+
+After a current observation is saved, the dropdown shows **Passed observation
+recorded** or **Failed observation recorded** and closes the date/confirmation form.
+Choose **Update observation** to open it for a new explicit decision. Checks without
+an independent measurement still show **ATTESTED** after a passed observation, and
+other unresolved checks continue to keep overall readiness degraded.
 
 `POST /api/v1/readiness/observations` requires an authenticated operator, CSRF,
 check name, `pass`/`fail` outcome, strict integer UTC `observed_at`, and the current

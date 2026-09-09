@@ -19,8 +19,18 @@ export function readinessDetails(report, refresh) {
     article.append(node("p", `Impact: ${check.impact}`));
     article.append(node("p", `Next step: ${check.remediation}`));
     const observed = check.evidence?.observed_at;
-    if (Number.isFinite(observed)) {
-      article.append(node("p", `Operator observation: ${new Date(observed * 1000).toISOString()}; ${check.evidence.observation_outcome}. Not independently verified.`));
+    const observationState = check.evidence?.observation_state || state;
+    const hasObservation = Number.isFinite(observed);
+    const savedObservation = hasObservation && ["attested", "fail"].includes(observationState);
+    let saved = null;
+    if (hasObservation) {
+      const outcome = check.evidence.observation_outcome === "pass" ? "Passed" : "Failed";
+      saved = node("p", savedObservation
+        ? `${outcome} observation recorded.`
+        : `${outcome} observation needs review.`, "readiness-observation-result");
+      saved.setAttribute("role", "status");
+      article.append(saved);
+      article.append(node("p", `Observed at ${new Date(observed * 1000).toISOString()}. ${check.evidence.observation_detail || "Not independently verified."}`));
     }
     if (/^[a-f0-9]{64}$/.test(check.review_token || "")) {
       const form = node("form", "", "readiness-observation");
@@ -44,6 +54,16 @@ export function readinessDetails(report, refresh) {
       const message = node("p", "", "readiness-observation-result");
       message.setAttribute("role", "status");
       form.append(label, confirmation, pass, fail, message);
+      const edit = node("button", "Update observation", "readiness-observation-edit");
+      edit.type = "button";
+      edit.hidden = !hasObservation;
+      form.hidden = hasObservation;
+      edit.addEventListener("click", () => {
+        edit.hidden = true;
+        if (saved) saved.hidden = true;
+        form.hidden = false;
+        timestamp.focus();
+      });
       form.addEventListener("submit", async event => {
         event.preventDefault();
         if (!form.reportValidity() || !event.submitter) return;
@@ -71,13 +91,15 @@ export function readinessDetails(report, refresh) {
           }
           if (!response.ok) throw new Error("observation unconfirmed");
           refresh(await response.json(), true);
+          document.querySelector(`.readiness-check[data-check="${CSS.escape(check.name)}"] .readiness-observation-edit`)
+            ?.focus({preventScroll: true});
         } catch (_) {
           message.textContent = "The observation outcome is unconfirmed. Refresh before trying again; it may already be recorded.";
         } finally {
           pass.disabled = fail.disabled = false;
         }
       });
-      article.append(form);
+      article.append(edit, form);
     }
     details.append(article);
   }
