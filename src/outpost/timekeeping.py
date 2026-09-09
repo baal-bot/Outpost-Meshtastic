@@ -279,7 +279,11 @@ class PeerTimeEvidence:
             offset = ref.midpoint + age - wall
             error = ref.error + age * DRIFT_PER_SECOND
             intervals.append((offset, error, age))
-        if not intervals or native.state == "synchronized" or native.reason == "kernel_clock_fault":
+        if (
+            not intervals
+            or native.state in {"synchronized", "stepped"}
+            or native.reason == "kernel_clock_fault"
+        ):
             return native
         offset, error, age = min(intervals, key=lambda item: item[1])
         conflict = max(o - e for o, e, _ in intervals) > min(o + e for o, e, _ in intervals)

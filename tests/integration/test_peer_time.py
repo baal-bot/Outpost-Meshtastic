@@ -206,6 +206,7 @@ async def test_invalid_recovery_costs_require_a_silent_hour(nodes, monkeypatch, 
         "INSERT INTO runtime_setting(key,value,updated_at) VALUES('airtime.time_recovery',?,0)",
         (value,),
     )
+    await local.runtime_settings.load()
     restarted = production_governor(local.database, local.clock, link=local.radio)
     await restarted.recover()
     assert restarted.time_recovery_wait == 3600
@@ -392,3 +393,14 @@ async def test_governor_delay_consumes_the_live_challenge_budget(nodes, monkeypa
     await transmit(remote, local)
     assert not time_status(local.clock).timestamp_safe
     assert local.federation_time.results["!remote"]["state"] == "timeout"
+
+
+async def test_fresh_peer_reply_cannot_clear_a_latched_clock_step(nodes, monkeypatch):
+    local, remote, _ = await pair(nodes, monkeypatch)
+    local.clock.epoch += timedelta(hours=6)
+    assert time_status(local.clock).state == "stepped"
+    local.clock.epoch -= timedelta(hours=6)
+    await exchange(local, remote)
+    assert time_status(local.clock).state == "stepped"
+    assert not time_status(local.clock).timestamp_safe
+    assert local.federation_time.results["!remote"]["state"] == "checked"

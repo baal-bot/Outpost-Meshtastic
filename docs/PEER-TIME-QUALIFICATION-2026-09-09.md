@@ -25,6 +25,12 @@ host-clock adjustment, RTC charging change or second-node configuration was perf
   hold. Unknown/corrupt accounting retains the silent-hour fallback. Retained
   ordinary work stays untouched until time permits normal recovery.
 
+Final review retained the original wall-step latch: correcting a stepped clock still
+requires restarting Outpost before a new peer check may restore confidence. It also
+keeps malformed recovery metadata under its owning validator, so the operator
+settings/dashboard can start while the governor enforces the conservative hold.
+Seven focused corruption, pairing and wall-step regressions passed.
+
 The protocol and operator procedure are in [OFFLINE-TIME.md](OFFLINE-TIME.md).
 Database schema remains 186; the new settings use the existing runtime-setting store.
 The packaged service still excludes `CAP_SYS_TIME` and retains `NoNewPrivileges`.

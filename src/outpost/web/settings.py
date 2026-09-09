@@ -32,7 +32,13 @@ class RuntimeSettings:
 
     async def load(self) -> None:
         rows = await self.database.read("SELECT key,value FROM runtime_setting")
-        values = {row["key"]: json.loads(row["value"]) for row in rows}
+        # Other owners validate their own recovery/accounting metadata. An opaque
+        # malformed value must not prevent the operator dashboard from starting.
+        values = {
+            row["key"]: json.loads(row["value"])
+            for row in rows
+            if row["key"].startswith(("node.", "watch.")) or row["key"] == CHANNEL_BINDINGS_SETTING
+        }
         node_values = {
             key.removeprefix("node."): value
             for key, value in values.items()

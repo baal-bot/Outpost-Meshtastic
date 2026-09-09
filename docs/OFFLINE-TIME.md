@@ -145,7 +145,9 @@ The automatic worker checks approved peers when the local OS stops reporting
 synchronized time. Each process requests at most once per peer per hour and once
 globally per 15 minutes; replies have the same separate limits. The existing
 rolling federation share, total airtime, radio region, channel-utilization limit,
-quiet hours and radio availability still apply. Nothing is transmitted when no
+quiet hours and radio availability still apply. The quiet-hour check uses the
+Pi’s displayed local time; elapsed airtime limits are independent of UTC.
+Nothing is transmitted when no
 peer has explicit time permissions. This feature is a UTC check, not a time setter.
 A station six hours wrong stays held and reports the disagreement; the operator
 or configured OS time service must correct the clock.
@@ -179,9 +181,9 @@ time is `r`, the UTC interval on receipt is conservatively bounded by
 Fresh peer intervals must overlap; disagreement holds affected work. A good native
 OS synchronization observation remains authoritative. Accepted evidence ages by
 500 ppm, expires within the provider's remaining six-hour lifetime, disappears on
-restart or revocation, and is invalidated by a later wall-clock step. A new valid
-challenge can independently verify a corrected clock even if the native step latch
-remains set. RTC retention is never certified by this check.
+restart or revocation, and is invalidated by a later wall-clock step. The native wall-step latch remains authoritative: after correcting a stepped clock,
+restart Outpost before validating it again. This also reconstructs the durable queue
+against the corrected UTC epoch. RTC retention is never certified by this check.
 
 ### Recovery accounting
 
