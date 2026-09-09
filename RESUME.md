@@ -1,6 +1,6 @@
 # Session resume point — 2026-09-09 (America/New_York)
 
-## In progress: startup time recovery and open-issue closeout plan
+## Installed: startup time recovery and open-issue closeout plan
 
 The user authorized the startup clock fix under #141 and requested a plan for
 closing every open GitHub issue. The implementation allows automatic recovery
@@ -8,19 +8,41 @@ only before this process has ever trusted native or peer UTC, after two fresh
 stable native synchronization probes 30–60 seconds apart. Later steps remain
 latched. Existing governed recovery preserves expiry, replay checks and airtime.
 
-Local clock/queue/governor verification passed 208 cases and operator/browser
-verification passed eight cases. Read
+The selected, running release is **`20260909T160408Z-46d2b4b04ed7`**, source
+`46d2b4b04ed7a34de54e9c9ace24da55c314eeec`, database schema **186**. Exact-source
+[CI 34368070215](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34368070215)
+passed all four jobs: 2,449 full-suite tests per job with one skipped, and 1,341
+production-wiring tests per Python version. Production coverage passed at 95.2%
+for the clock monitor and 92.0% for peer-time handling.
+
+Local clock/queue/governor verification passed 208 cases. The cached startup-hold
+report now refreshes through the existing navigation poll without renewing
+observations; 73 readiness/API/browser cases passed, including eight browser cases.
+Read
 [the qualification record](docs/STARTUP-TIME-QUALIFICATION-2026-09-09.md) and
 [the 16-issue closeout plan](docs/ISSUE-CLOSEOUT-PLAN-2026-09-09.md).
-The broader compatibility run passed 695 unit/readiness/maintenance/worker/outbox
-cases before the final cached-report refresh follow-up. That follow-up refreshes
-the old startup-hold report through the existing navigation poll without renewing
-observations; 73 readiness/API/browser cases passed. Exact-source CI and the normal
-verified updater remain in progress; the
-installed release below has not yet been replaced. Private state
-and prepared installation/preservation checks are in
-`.data/startup-time-2026-09-09/STATE.json`. No GitHub issue was closed, no operator
-attestation was recorded and no physical reboot/time-source test was performed.
+
+The normal updater completed at **16:05:16 UTC** with a verified backup and native
+HailoRT wheel. At 16:05:20–16:05:28 UTC, live service/web/radio/native AI, synchronized
+UTC, peer-time task, database integrity and same-package boot checks passed. All
+tracked record IDs survived, including 1,654 outbound-work records and 2,183 power
+samples. Maps/assets remain verified, offline maps is PASS and absent from the
+unresolved list, and operator observation values/audit count remain unchanged.
+Overall readiness still reflects the remaining physical qualification gaps.
+
+No GitHub issue was closed, no operator attestation was recorded and no physical
+reboot/time-source test was performed. Peer-time permissions remain disabled.
+Private evidence is in `.data/startup-time-2026-09-09/STATE.json` and
+`/var/lib/outpost-qualification/141-20260909/startup-time-update/`.
+Later documentation commits do not change the installed release's CI identity.
+
+The live GitHub inventory still has 16 open issues. Next software is #150 SDR
+reception status, then #148 resource policy; the quickest likely field closure is
+#139 maps. Share #145/#147 recovery/access setup and #135/#157 multi-station work,
+then run the seven-day #142 and thirty-day #158 gates on a qualified fixed candidate.
+The plan details every issue, prerequisite and closing witness. Third-station,
+separate restore-target and second-operator availability remain unconfirmed; no
+field dates are assigned. #61 stays parked until core qualification is complete.
 
 ## Installed: readiness observation status and completed forms
 
@@ -51,7 +73,8 @@ button and closed form. A browser refresh loads the new controls.
 All tracked record IDs were retained, including 1,636 outbound-work records and
 2,149 power samples. Regional maps and overview remain verified at 65,884,160 bytes
 and 6,176 tiles. Physical WAN/time/peer gates remain open; peer-time permissions
-remain disabled. The reboot clock-hold finding below still applies.
+remain disabled. The startup clock-hold finding is addressed by the installation
+above; its physical qualification gates remain open.
 See [the readiness guide](docs/SAFETY-READINESS.md). Private evidence is under
 `.data/readiness-observation-2026-09-09/` and
 `/var/lib/outpost-qualification/149-20260909/readiness-observation-update/`.
@@ -80,10 +103,11 @@ all other tracked records survived. One pending work item expired with its durab
 record retained. The store then held 9 incidents, 11 incident updates, 5 mail,
 1,629 outbound-work records and 2,134 power samples.
 
-This exposes a remaining #141 startup limitation: a time correction after process
-start can require an operator restart even when the OS subsequently synchronizes.
-Do not claim unattended time recovery or close the physical offline qualification
-gates. Peer-time permissions remain disabled. See the updated
+This exposed a #141 startup limitation: a time correction after process start
+required an operator restart even when the OS subsequently synchronized. The
+September 9 startup-recovery installation above addresses that software limitation;
+physical offline qualification gates remain open. Peer-time permissions remain
+disabled. See the updated
 [qualification record](docs/PEER-TIME-QUALIFICATION-2026-09-09.md).
 Private evidence is under `.data/post-reboot-2026-09-09/` and
 `/var/lib/outpost-qualification/141-20260909/post-reboot/`. Original installation,

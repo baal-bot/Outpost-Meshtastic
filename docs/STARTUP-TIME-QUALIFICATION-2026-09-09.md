@@ -60,6 +60,35 @@ Source and evidence:
 [operator browser checks](../tests/browser/test_time_confidence_ui.py), and
 [runtime policy](OFFLINE-TIME.md).
 
+## Exact-source CI and installed station
+
+Source **`46d2b4b04ed7a34de54e9c9ace24da55c314eeec`** passed all four jobs in
+[CI 34368070215](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34368070215).
+Each full-suite job passed **2,449 tests**, with one skipped, on Python 3.12 and
+3.13, including the locked-runtime jobs. Each production-wiring rerun passed
+**1,341 tests**. Production coverage was **95.2%** for `timekeeping.py` and **92.0%**
+for peer-time handling, both above their 90% floors. All required static and
+coverage gates passed.
+
+The normal updater installed **`20260909T160408Z-46d2b4b04ed7`** at
+**16:05:16 UTC**, using exact-source CI verification, a verified pre-upgrade
+backup and the native HailoRT wheel. Database schema remains **186**.
+
+Live checks at **16:05:20–16:05:28 UTC** passed service/web, radio, required native
+AI, core tasks, usable synchronized UTC, peer-time supervision, database integrity
+and same-package boot readiness. The new startup-recovery status is available.
+The host did not reboot. All tracked record IDs survived, including **1,654
+outbound-work records** and **2,183 power samples**; none required a retention
+exception. Clock-setting capability remains excluded and peer-time permissions
+remain disabled.
+
+Regional maps and overview remain verified at **65,884,160 bytes / 6,176 tiles**.
+Offline maps is **PASS** and absent from unresolved checks. Operator observation
+values and their audit count survived unchanged; the prior observation is
+classified separately as historical after the service restart. Served readiness
+code matches the source and installed package. Overall readiness remains degraded
+for the outstanding qualification checks; RTC retention is not certified.
+
 ## Remaining qualification
 
 These are synthetic clock/source tests through production software. They do not
@@ -72,5 +101,4 @@ evidence for all 16 currently open GitHub issues. It changes no GitHub issue sta
 Private regression and installation evidence is retained under
 `.data/startup-time-2026-09-09/` and
 `/var/lib/outpost-qualification/141-20260909/startup-time-update/`.
-Exact-source CI and installed-release evidence will be recorded after they pass;
-this local verification record alone does not claim deployment.
+Later documentation commits do not change the installed release's CI identity.
