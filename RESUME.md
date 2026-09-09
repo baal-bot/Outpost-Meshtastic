@@ -9,18 +9,40 @@ arrangement as the baseline; the earlier shared-battery description omitted the
 radio's independent battery. Do not propose installing backup power again.
 
 The owner authorized **#156 guarded-AI evaluation and service isolation** and
-explicitly directed software completion before physical tests. The implementation
-and 116 focused tests pass locally: frozen 28-case real-service evaluation in two
-modes, separate original G4 score, blinded review exports, strict local-fact
-grounding, refreshed/revalidated permissions and revisions, bounded weather age,
-and reserved non-AI worker capacity. The busy-provider test reproduced all four
-workers blocked; the fix preserves PING, board posts, mail and urgent intake.
-Single-worker configurations use deterministic retrieval. Full exact-source CI
-and installation are the next steps; do not wait for physical qualification.
-Details are in `docs/AI-EVALUATION-2026-09-09.md` and private
-`.data/ai-evaluation-156-2026-09-09/`. #148 is deferred in the work order, with
-its existing resource-policy and measurement criteria retained. #150 is ready to
-close using the evidence below. No new power/reception exercise is requested.
+explicitly directed software completion before physical tests. That software is
+now installed as **`20260909T214947Z-a68baa8f0adb`**, source
+`a68baa8f0adb965afbef9b493e9ef8d91d2897fd`, schema **186**.
+[CI 34402429284](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34402429284)
+passed all four jobs: 2,551 passing tests and one skip per full suite, plus 1,439
+production-path tests per Python version. Local focused, compatibility, weather
+and deployment regressions pass.
+
+The change adds frozen 28-case real-service evaluation in two modes, a separate
+original G4 score and blinded review exports. It strengthens local-fact grounding,
+permission/revision revalidation and weather context, and reserves capacity for
+non-AI commands. The reproduced all-four-worker blockage is fixed; installed
+generation capacity is three with four inbound workers. Single-worker
+configurations use deterministic retrieval. Scripted controls pass 28/28 in each
+mode and 60/60 in the separate legacy harness; they are not raw-model quality or
+independent human usefulness measurements.
+
+The normal updater completed at **21:50:54 UTC** with a verified backup. Live
+checks at 21:51:38–21:51:49 UTC passed for service/web/radio/native AI, clock, tasks,
+database, boot package, maps/assets and installed AI guards. All tracked IDs
+survived, including 1,691 existing outbound-work records, 2,252 power samples,
+33 SAME events, 8 knowledge documents, 8 chunks and 2 AI interactions. Maps remained
+PASS; operator observation values/audit count were unchanged. No host reboot or
+physical qualification was performed.
+
+Details are in `docs/AI-EVALUATION-2026-09-09.md`, its public benchmark summary,
+private `.data/ai-evaluation-156-2026-09-09/`, and
+`/var/lib/outpost-qualification/156-20260909/ai-software-update/`.
+Native-provider comparative measurements and independent blinded scoring remain
+later evaluation work, without blocking software completion. #148 stays deferred;
+#150 is ready to close using existing evidence. Continue software work before
+scheduling the later field sessions. No new power/reception exercise is requested.
+No GitHub issue was closed. Later documentation commits retain the installed
+release's source and CI identity. The sections below record prior installations.
 
 ## Installed: #150 SDR reception evidence
 

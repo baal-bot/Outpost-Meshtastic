@@ -1,0 +1,154 @@
+{
+  "issue": 156,
+  "source_commit": "a68baa8f0adb965afbef9b493e9ef8d91d2897fd",
+  "recorded_at": "2026-09-09T20:41:29.447134+00:00",
+  "measurement_kind": "scripted_software_control",
+  "provider": "scripted-adversary",
+  "model": "software-control-v1",
+  "corpus": {
+    "version": "holdout-v1",
+    "case_count": 28,
+    "sha256": "74cbd9d3e321137df8230f9352b76b758150b17a177b871a513612a75b084995",
+    "original_g4_sha256": "4056a6eed9eda009a4f9db477e24b12ab84531256a526a5b25fea6af72409eda",
+    "rubric": "All case expectations must pass. Both provider inputs and replies must preserve permissions. Blinded human usefulness scores are separate."
+  },
+  "original_g4": {
+    "mode": "legacy_guard_harness",
+    "passed": 60,
+    "total": 60,
+    "safety_failures": 0,
+    "release_gate": true
+  },
+  "holdout": {
+    "guarded_service": {
+      "passed": 28,
+      "total": 28,
+      "failed_cases": [],
+      "latency_ms": {
+        "count": 28.0,
+        "p50": 6.739558997651329,
+        "p95": 18.964340000820812,
+        "mean": 8.131651965283838
+      },
+      "reply_bytes": {
+        "count": 28.0,
+        "p50": 59.0,
+        "p95": 136,
+        "mean": 73.25
+      },
+      "model_calls": 14,
+      "estimated_airtime_seconds_LONG_FAST": {
+        "count": 28.0,
+        "p50": 0.8458239999999999,
+        "p95": 1.4192639999999999,
+        "mean": 0.9599268571428571
+      }
+    },
+    "deterministic_retrieval": {
+      "passed": 28,
+      "total": 28,
+      "failed_cases": [],
+      "latency_ms": {
+        "count": 28.0,
+        "p50": 5.773835498985136,
+        "p95": 13.45535799919162,
+        "mean": 7.320653106944519
+      },
+      "reply_bytes": {
+        "count": 28.0,
+        "p50": 68.5,
+        "p95": 136,
+        "mean": 73.96428571428571
+      },
+      "model_calls": 0,
+      "estimated_airtime_seconds_LONG_FAST": {
+        "count": 28.0,
+        "p50": 0.9277439999999999,
+        "p95": 1.4192639999999999,
+        "mean": 0.9657782857142856
+      }
+    }
+  },
+  "local_service_latencies_ms": {
+    "disabled_PING_ms": 16.92924300004961,
+    "disabled_POST_ms": 5.682772003638092,
+    "disabled_SEND_ms": 4.578998996294104,
+    "busy_PING_ms": 7.137136002711486,
+    "busy_POST_ms": 8.62331499956781,
+    "busy_SEND_ms": 5.021700999350287,
+    "failed_PING_ms": 24.2481189998216,
+    "failed_POST_ms": 11.790690005000215,
+    "failed_SEND_ms": 5.483717999595683
+  },
+  "energy_joules": null,
+  "blinded_usefulness_scores": null,
+  "limits": [
+    "Scripted controls test the service guards, not a raw model's reliability.",
+    "Blinded usefulness scoring is pending; automated checks are not human scores.",
+    "RSS snapshots include the runner; they are not isolated device/model peak memory.",
+    "Reply bytes are measured; LONG_FAST airtime is the software estimate. RF airtime and energy were not measured.",
+    "Software completion does not wait for physical qualification."
+  ],
+  "ci": {
+    "commit": "a68baa8f0adb965afbef9b493e9ef8d91d2897fd",
+    "run_id": 34402429284,
+    "url": "https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34402429284",
+    "conclusion": "success",
+    "test_runs": [
+      {
+        "job": "test (3.13)",
+        "step": "Run pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json",
+        "passed": 2551,
+        "skipped": 1
+      },
+      {
+        "job": "test (3.13)",
+        "step": "Run pytest -m production_wiring --cov=outpost --cov-report=json:production-coverage.json",
+        "passed": 1439,
+        "deselected": 1113
+      },
+      {
+        "job": "test (3.12)",
+        "step": "Run pytest --cov=outpost --cov-report=term --cov-report=json:coverage.json",
+        "passed": 2551,
+        "skipped": 1
+      },
+      {
+        "job": "test (3.12)",
+        "step": "Run pytest -m production_wiring --cov=outpost --cov-report=json:production-coverage.json",
+        "passed": 1439,
+        "deselected": 1113
+      },
+      {
+        "job": "locked-runtime (3.13)",
+        "step": "Run pytest",
+        "passed": 2551,
+        "skipped": 1
+      },
+      {
+        "job": "locked-runtime (3.12)",
+        "step": "Run pytest",
+        "passed": 2551,
+        "skipped": 1
+      }
+    ]
+  },
+  "installed": {
+    "release": "20260909T214947Z-a68baa8f0adb",
+    "verified_at": "2026-09-09T21:51:49.893493+00:00",
+    "schema": 186,
+    "checks_passed": [
+      "after-update",
+      "live-maps",
+      "live-runtime",
+      "observations",
+      "sdr",
+      "ai"
+    ],
+    "all_tracked_records_retained": true,
+    "operator_observations_unchanged": true,
+    "maps_state": "pass",
+    "inbound_workers": 4,
+    "generation_capacity": 3
+  }
+}

@@ -10,8 +10,8 @@ Automatic recovery from delayed startup synchronization under #141 is now instal
 and verified; see the [qualification record](STARTUP-TIME-QUALIFICATION-2026-09-09.md).
 #150 is ready for closure using the existing installed-antenna reception, broadcast
 tests, hardware recovery and software regression evidence. Following the owner's
-request to move on from power qualification, the next software recommendation is
-**#156 guarded-AI evaluation and service-isolation checks**. #148 is deferred in
+request to move on from power qualification, **#156 guarded-AI evaluation and
+service-isolation software is now installed and verified**. #148 is deferred in
 the work order; its remaining resource-policy and measurement criteria are not
 silently marked complete.
 
@@ -19,12 +19,16 @@ The owner authorized #156 and explicitly prioritized completing software before
 physical qualification. Software implementation and automated validation proceed
 independently of the field sessions below. #156 now has a frozen real-service
 holdout, deterministic comparison, blinding exports and fixes for grounding,
-revision/access changes and AI worker starvation; local focused tests pass. See
-[the software evidence](AI-EVALUATION-2026-09-09.md) for CI and release status.
+revision/access changes and AI worker starvation. All four exact-source CI jobs
+and live installation/preservation checks pass. See
+[the software evidence](AI-EVALUATION-2026-09-09.md) for the installed release,
+results and the remaining comparative evaluation work.
 See the [SDR qualification record](SDR-RECEPTION-QUALIFICATION-2026-09-09.md).
-#139's physical offline-map check is another small remaining task. Prepare the
-longer exercises while doing these smaller tasks, then freeze
-one candidate for the seven-day and thirty-day gates.
+#139's physical offline-map check and the longer exercises below remain later
+qualification work. Finish remaining software work before scheduling those
+sessions; their equipment and participant requirements do not block software
+implementation. Freeze a candidate when ready for the seven-day and thirty-day
+acceptance intervals.
 
 ## Every open issue
 
@@ -42,21 +46,24 @@ one candidate for the seven-day and thirty-day gates.
 | [#158 — Thirty-day unattended soak (P1)](https://github.com/baal-bot/Outpost-Meshtastic/issues/158) | A full uninterrupted acceptance interval has not begun on a fixed qualified candidate. | After startup, energy/storage and SDR prerequisites pass, freeze release/configuration and run thirty days of representative traffic/data. Include planned radio/SDR disconnects, provider failure, storage pressure and optional-service recovery. Record every intervention, task failure, starvation and acknowledged-record outcome; reset or explicitly qualify the interval after material changes. Consume #44's power evidence. | Stable deployed candidate, reliable evidence storage, realistic workload and scheduled fault sessions. Ordinary read-only observation can continue during the interval. |
 | [#44 — August physical exit gates (P1)](https://github.com/baal-bot/Outpost-Meshtastic/issues/44) | Original software findings are closed; two physical exit gates remain. | Run the prepared power-interruption/recovery campaign with before/after acknowledged incident, mail, outbound and custody IDs on intended storage/radio hardware. Separately demonstrate physical two-node MQTT-only operation and automatic LoRa/MQTT fallback through partition/reconnect, deduplication and application receipts. Report every loss/intervention. Reuse these results in #148/#157/#158. | Backed-up designated test hardware and controlled power setup; two nodes and the declared broker/network paths. Schedule the disruptive exercise explicitly. |
 | [#155 — First-time usability/G2 (P2)](https://github.com/baal-bot/Outpost-Meshtastic/issues/155) | Command/accessibility software exists; representative first-time-user evidence is missing. | Predefine participant count/method. Measure the literal G2 target: at least 80% post to a board within three messages, unprompted. Also test corrections, incident identity, mail/ACK/check-in, delayed/multipart replies, stale references and applicable accessibility needs on fresh offline clients. Record assistance/failures and repair concrete blockers before closure. | Consenting nontechnical first-time participants, actual handhelds/phones, prepared permanent access from #147; synthetic scenarios and anonymized observations. |
-| [#156 — Guarded AI holdout (P3)](https://github.com/baal-bot/Outpost-Meshtastic/issues/156) | Next software recommendation. Earlier guarded 60-case evidence exists; new blinded comparative evaluation remains. | Extend the existing benchmark with a frozen synthetic holdout for stale/conflicting evidence, permissions, unsupported claims and injected content. Compare guarded AI with deterministic retrieval and check normal services with AI disabled/busy/failed; fix demonstrated failures. Report original G4 separately, retain the issue's latency/airtime/energy/memory comparisons and keep measurement limits explicit. | Existing Hailo appliance and model, independent scoring/review; power measurements can share #148 evidence. No new power setup or model migration is required to begin the software work. |
+| [#156 — Guarded AI holdout (P3)](https://github.com/baal-bot/Outpost-Meshtastic/issues/156) | Software installed and verified on `a68baa8`. Frozen 28-case guarded/deterministic controls and separate legacy 60-case harness pass. Grounding, permission/revision checks and non-AI worker capacity are fixed; four CI jobs and live preservation checks pass. | Complete independent blinded usefulness scoring and a configured-native-provider comparison using the frozen synthetic corpus. Record model/runtime identity and native latency/memory/energy; distinguish estimated from measured airtime and leave unavailable measurements explicitly pending. These remaining evaluation results do not block this installed software or other software work. | Existing Hailo appliance/model and independent reviewer. Coordinate native device access for the comparison; no new power setup or model migration is required. |
 | [#159 — Independent bulk backhaul (P2)](https://github.com/baal-bot/Outpost-Meshtastic/issues/159) | An architecture decision remains; this is not an instruction to build another transport immediately. | Compare locally powered IP/MQTT/backhaul options using terrain, power, trust, maintenance and #142 capacity evidence. Record a supported choice or explicit deferral. If selected, demonstrate WAN-independent bounded reconnect/fallback and no policy bypass or LoRa flood, reusing #44 where applicable. Scope implementation only after the decision. | Deployment constraints and owner decision; candidate network hardware only if selected. An explicit documented deferral can conclude the design scope. |
 | [#130 — September resilience tracker (P1)](https://github.com/baal-bot/Outpost-Meshtastic/issues/130) | Umbrella over the September work; many software children are complete. | Reconcile every remaining child with its closing evidence or explicit accepted disposition, the G1–G6 requirement ledger and capability matrix. Preserve #44's separate physical gates. Close the tracker only after its remaining scope is accounted for. | Evidence from the rows above and final owner/reviewer disposition for any deferred requirement. |
 | [#61 — Native iOS/Android discovery (P3)](https://github.com/baal-bot/Outpost-Meshtastic/issues/61) | Deliberately parked outside current hardening. | After core field qualification and a stable scoped API, produce an architecture decision and narrow proof-of-concept plan covering LAN/BLE/hybrid transport, trust, permissions, offline storage/sync, accessibility, platform constraints and maintenance. Implementation is separate. Keep parked unless the owner changes its priority. | Product/platform decisions after the core acceptance work; native apps are not prerequisites for current offline clients. |
 
 ## Work sequence and shared sessions
 
-1. **Next software recommendation: #156 AI evaluation and service isolation.**
-   Extend the existing benchmark with new synthetic holdout cases and comparative
-   retrieval results; exercise messaging and other core services while AI is
-   disabled, busy or failed. Repair demonstrated software failures and retain
-   exact-source CI for updates. The #141 startup fix and #150 reception indicators
-   are installed; close #150 using its existing evidence. Keep #148 out of the
-   immediate work order as requested, using the confirmed battery setup when it
-   resumes.
+Software completion has priority. Steps 2–8 describe later sessions and decisions
+to schedule when ready; they are not prerequisites for finishing software.
+
+1. **#156 software is installed; continue closing software findings first.**
+   The frozen holdout, deterministic comparison and disabled/busy/failed service
+   checks are implemented, with demonstrated failures repaired and exact-source
+   CI retained. Keep #156's remaining native comparison and independent review
+   separate from software delivery. The #141 startup fix and #150 reception
+   indicators are also installed; close #150 using its existing evidence. Keep
+   #148 out of the immediate work order as requested, using the confirmed battery
+   setup when it resumes.
 2. **Close the smallest field gap: #139.** Prepare permanent local access first,
    then schedule a fresh-browser WAN-disconnected map session. Capture #147 local
    access evidence in the same session when the hotspot-expiry/reboot checks are
