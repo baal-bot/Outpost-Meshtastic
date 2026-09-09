@@ -1547,6 +1547,17 @@ def create_web_app(
                 if key
                 in {
                     "state",
+                    "status",
+                    "runtime_state",
+                    "pipeline_state",
+                    "audio_state",
+                    "audio_age_seconds",
+                    "signal_state",
+                    "signal_age_seconds",
+                    "signal_quality_verified",
+                    "decode_state",
+                    "decode_age_seconds",
+                    "decode_freshness_seconds",
                     "restart_count",
                     "last_audio_at",
                     "last_signal_at",
@@ -3651,9 +3662,12 @@ def create_web_app(
                         if same_receiver_health is not None
                         else same_events.health()
                     )
+                    qualification: dict[str, Any] = {"state": "not_recorded"}
+                    if self_check is not None:
+                        qualification = await self_check.observation_status("same_reception")
                     return {
                         "items": await same_events.list(include_expired=include_expired),
-                        "health": health,
+                        "health": {**health, "station_qualification": qualification},
                     }
 
                 @app.post("/api/v1/environment/same/{same_id}/approve", response_model=None)

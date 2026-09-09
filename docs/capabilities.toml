@@ -498,15 +498,15 @@ description = "CAP expiry parsing compares instants correctly across supported I
 [[capabilities]]
 id = "same_receiver"
 area = "NOAA SAME / RTL-SDR"
-present = "Supervised receive-only rtl_fm/samedec pipeline, county and review gates, CAP dedupe, health, and bounded restart."
+present = "Supervised receive-only rtl_fm/samedec pipeline, distinct fresh audio/decode and dated station evidence, drill labeling, county/review gates, CAP dedupe and bounded restart."
 maturity = "hardware_gated"
 introduced_commit = "764516a"
-limitations = ["Extended antenna observation and receipt of a real local test/warning remain open."]
+limitations = ["Intelligible station/antenna qualification and receipt of a legitimate broadcast test remain physical gates; PCM level and recorded-fixture decoding cannot certify them.", "Decoder evidence is bounded, context-bound and current-process only; older durable message records do not establish present reception. Operator station observations remain finite statements, not automatic certification."]
 roadmap = []
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-08-26"
+date = "2026-09-09"
 [[capabilities.evidence]]
 kind = "hardware"
 path = "docs/PHASE4-ACCEPTANCE.md"
@@ -515,6 +515,18 @@ description = "Pi carrier, forced USB loss, backoff, recovery, and audio-fixture
 kind = "automated"
 path = "tests/unit/test_same_receiver.py::test_receiver_restarts_with_bounded_backoff_and_stops_cleanly"
 description = "Process supervision and parser failure boundaries."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_same_reception.py::test_repeated_process_loss_recovers_without_duplicate_actionable_warnings"
+description = "Repeated real subprocess receiver/decoder failures recover with deduplicated events, non-broadcastable drills and preserved approval gates."
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/browser/test_same_reception_ui.py::test_operator_can_distinguish_audio_drill_decode_and_station_observation"
+description = "Authenticated production API and Chromium show distinct evidence at phone/desktop widths in all themes, independently of forecast availability."
+[[capabilities.evidence]]
+kind = "operations"
+path = "docs/SDR-RECEPTION.md"
+description = "Dated station/antenna and legitimate broadcast-test procedure, freshness limits, pinned offline fixture and interruption witnesses."
 
 [[capabilities]]
 id = "dashboard_access"

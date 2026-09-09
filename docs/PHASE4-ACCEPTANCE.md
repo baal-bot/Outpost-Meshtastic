@@ -1,8 +1,11 @@
 # Phase 4 — Environment acceptance evidence
 
-Status: **automated reliability and RTL-SDR hardware gates passed; extended field items pending**
+Status: **automated reliability and SDR pipeline checks passed; station/test-decode field gates pending**
 
-RTL-SDR/SAME hardware validated on 2026-08-26 with a Nooelec NESDR SMArt v5 on a Raspberry Pi.
+RTL-SDR process/audio/recovery checks were recorded on 2026-08-26 with a Nooelec
+NESDR SMArt v5 on a Raspberry Pi. That evidence does not qualify intelligible
+station reception or a legitimate over-antenna SAME test decode. Follow
+[the station qualification procedure](SDR-RECEPTION.md) for #150.
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|

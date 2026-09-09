@@ -223,11 +223,19 @@ them as selectable event and drill audiences.
 
 ## SAME receiver operations
 
-The Environment page is the normal receiver console. `listening` means both decoder processes are
-running. `up` additionally means audio crossed the signal threshold. `no_signal` means the silence
-window was exceeded; `backoff` means a failed or stalled pipeline is waiting for its bounded
-restart. The status API includes `same_receiver`, with last audio/signal/decode times, last process
-error, restart count, next restart, and a bounded stderr tail.
+The Environment page is the normal receiver console. It shows the running process
+pair, fresh audio, current audio level, dated station/antenna observation and last
+verified decoder header separately. Audio above the threshold may be noise; it
+does not qualify the station. Tests are visibly **DRILL / TEST · log only**. Receiver
+updates remain available when WAN weather/forecast requests fail.
+
+The API retains legacy `up` / `no_signal` audio/silence status for compatibility;
+use `pipeline_state`, `audio_state`, `signal_state` and `decode_state` for the
+separate evidence. `backoff` remains a failed/stalled pipeline waiting for bounded
+restart. The operator API also carries elapsed ages, decode review limit, dated
+station observation, process error and restart details. See
+[SDR reception and station qualification](SDR-RECEPTION.md) for freshness rules,
+expected broadcast-test preparation and the physical closing witness.
 
 ```sh
 curl -fsS http://127.0.0.1:8080/api/v1/status

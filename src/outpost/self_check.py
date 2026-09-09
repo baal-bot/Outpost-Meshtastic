@@ -192,6 +192,7 @@ CHECK_DEFINITIONS = (
         "SAME reception is qualified for the installed receiver",
         "A connected SDR or an audio buffer does not prove weather-alert decoding and handling.",
         "Review receiver configuration and an approved independent SAME qualification record. "
+        "The Environment page separates pipeline, audio level and decoded-test evidence. "
         "This check does not tune, restart, transmit or inject an alert.",
     ),
     CheckDefinition(
@@ -415,6 +416,7 @@ class SelfCheckService:
             self.config.radio.transport,
             self.config.radio.federation_portnum,
             self.config.modules.model_dump(),
+            self.config.env.same.model_dump(),
         ]
         return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
@@ -914,6 +916,24 @@ class SelfCheckService:
             evidence=evidence,
             review_token=token,
         )
+
+    async def observation_status(self, name: str) -> dict[str, object]:
+        """Read a dated statement without rerunning or relying on a cached assessment."""
+        if name not in ATTESTABLE:
+            raise ValueError("Unknown readiness observation")
+        rows = await self.database.read(
+            "SELECT value FROM runtime_setting WHERE key=?", (OBSERVATION_PREFIX + name,)
+        )
+        result = self._with_observation(
+            self._result(name, False, "", {}, state="unknown"),
+            rows[0]["value"] if rows else None,
+            int(self.clock.now().timestamp()),
+        )
+        return {
+            "state": result.evidence.get("observation_state", "not_recorded"),
+            "observed_at": result.evidence.get("observed_at"),
+            "valid_until": result.evidence.get("observation_valid_until"),
+        }
 
     async def record_observation(
         self, name: str, outcome: str, observed_at: int, review_token: str, actor: str

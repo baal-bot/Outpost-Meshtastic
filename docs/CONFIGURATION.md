@@ -147,15 +147,18 @@ radius, and review magnitude are bounded.
 | `oversampling` | `rtl_fm` demodulation oversampling; 4 is the tested default. |
 | `gain_db` | `null` uses automatic gain. Set measured dB only when field testing requires it. |
 | `ppm` | Tuner frequency correction, from -200 to 200. |
-| `signal_rms_threshold` | Audio level that counts as a received signal. |
+| `signal_rms_threshold` | Positive PCM RMS compared with the audio threshold; noise can exceed it, so this never certifies RF quality. |
 | `audio_stall_seconds` | Restarts a hung pipeline after this many seconds without PCM audio. |
 | `silence_alarm_minutes` | Marks health `no_signal` after sustained below-threshold audio. |
+| `decode_stale_hours` | Review limit for verified decoder evidence: 192 hours (eight days) by default, bounded to 1–720. A station test schedule is still required. |
 | `restart_initial_seconds`, `restart_max_seconds` | Bounded exponential restart backoff. |
 | `rtl_fm_path`, `samedec_path` | Decoder executable names or explicit paths. |
 
 The installer supplies `rtl_fm` and a checksum-pinned `samedec` when SAME is enabled. Required
 tests and demo messages are log-only. A live county-matched warning remains pending until an
 operator approves it in Environment; approval then uses the normal alert policy and airtime gate.
+Read [SDR reception and station qualification](SDR-RECEPTION.md) for the separate
+pipeline, audio, decoder and dated station/antenna indicators and field procedure.
 
 ### `watch`
 

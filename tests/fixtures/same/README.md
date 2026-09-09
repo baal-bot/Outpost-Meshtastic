@@ -14,5 +14,11 @@ to `samedec`. Expected decoder output is:
 ZCZC-PEP-NPT-000000+0030-2771820-TEST    -
 ```
 
+For an offline repeat, retain a copy while connected and pass it with
+`--fixture /path/to/npt.22050.s16le.bin`; the same size and checksum limits apply.
+This verifies the installed decoder against a recording without opening the SDR
+or ingesting anything into the running station. Antenna/broadcast qualification is
+separate; see [the field procedure](../../../docs/SDR-RECEPTION.md).
+
 The upstream project is dual-licensed Apache-2.0/MIT. The test message is a National
 Periodic Test and Outpost's policy always records it as log-only.

@@ -1,5 +1,31 @@
 # Session resume point — 2026-09-09 (America/New_York)
 
+## In progress: #150 SDR reception evidence
+
+The user authorized the next software task from the closeout plan. The Environment
+console now separates the process pair, fresh PCM, current audio level, dated
+station/antenna observation and verified decoder header. Audio/noise and direct
+fixture ingestion cannot qualify reception. Decoder evidence uses elapsed age,
+loaded receiver context and current-process/pipeline provenance; full restarts
+preserve durable events but require new reception evidence. Station observations
+use their existing one-day expiry and process/policy/clock checks without renewal.
+
+Tests/demos are explicitly DRILL / TEST and remain non-broadcastable. The console
+continues to show receiver results when weather/forecast fails, and clears current
+receiver claims on receiver-fetch failure. Hardware tooling distinguishes a
+pipeline check from a required decoded test; the pinned public NPT fixture now
+supports an offline file. Read [SDR reception](docs/SDR-RECEPTION.md).
+
+Local verification passed 195 receiver/readiness/configuration cases, 33
+API/browser cases and four Environment/web compatibility cases. Formatting, typing,
+requirements, command, capability and static-markup checks passed. Read the
+[qualification record](docs/SDR-RECEPTION-QUALIFICATION-2026-09-09.md). Exact-source CI
+and installation remain pending; the installed startup-clock release below is
+still active. Private evidence and prepared normal-updater checks are in
+`.data/sdr-reception-2026-09-09/`. No physical receiver interruption or legitimate
+broadcast witness has been performed in this session. #150 remains hardware-gated
+and no GitHub issue state or operator observation has been changed.
+
 ## Installed: startup time recovery and open-issue closeout plan
 
 The user authorized the startup clock fix under #141 and requested a plan for

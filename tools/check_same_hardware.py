@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Run a receive-only RTL-SDR/SAME hardware acceptance check."""
+"""Observe a receive-only SDR pipeline or require an actual decoded broadcast test."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import tempfile
 from pathlib import Path
 
@@ -34,23 +35,57 @@ async def check(args: argparse.Namespace) -> None:
         try:
             while clock.monotonic() < deadline:
                 health = receiver.health()
-                if receiver.state == "listening" and health["last_signal_at"] is not None:
+                if (
+                    health["pipeline_state"] == "running"
+                    and health["audio_state"] == "fresh"
+                    and health["signal_state"] == "above_threshold"
+                ):
                     if not first_listening:
                         first_listening = True
                         print(
                             f"SAME receiver listening at {args.frequency:.3f} MHz "
-                            f"on SDR {args.device}; signal present",
+                            f"on SDR {args.device}; audio above threshold, RF quality unverified",
                             flush=True,
                         )
-                    if not args.require_restart or receiver.restart_count > 0:
+                    decode = health["last_verified_decode"]
+                    test_received = (
+                        health["decode_state"] == "fresh"
+                        and decode is not None
+                        and decode["is_test"]
+                        and decode["relevant"]
+                    )
+                    if (not args.require_restart or receiver.restart_count > 0) and (
+                        not args.require_test_decode or test_received
+                    ):
                         print(
-                            f"SAME hardware acceptance passed; restarts={receiver.restart_count}",
+                            (
+                                "SAME test decoded in the current pipeline; "
+                                "retain the station/antenna qualification witness"
+                                if args.require_test_decode
+                                else "SDR pipeline check passed; station/test decode unqualified"
+                            )
+                            + f"; restarts={receiver.restart_count}",
+                            flush=True,
+                        )
+                        print(
+                            json.dumps(
+                                {
+                                    "observed_at": int(clock.now().timestamp()),
+                                    "pipeline_state": health["pipeline_state"],
+                                    "audio_state": health["audio_state"],
+                                    "decode_state": health["decode_state"],
+                                    "last_verified_decode": decode,
+                                    "receiver_restarts": receiver.restart_count,
+                                    "station_qualification_verified": False,
+                                },
+                                sort_keys=True,
+                            ),
                             flush=True,
                         )
                         return
                 await asyncio.sleep(0.25)
             raise SystemExit(
-                "SAME hardware acceptance timed out: "
+                "SAME observation timed out without the requested evidence: "
                 f"state={receiver.state}, restarts={receiver.restart_count}, "
                 f"error={receiver.last_error!r}"
             )
@@ -68,11 +103,19 @@ def main() -> None:
     parser.add_argument("--signal-threshold", type=int, default=300)
     parser.add_argument("--timeout", type=int, default=30)
     parser.add_argument(
+        "--require-test-decode",
+        action="store_true",
+        help="Require a current, relevant RWT/RMT/NPT/DMO header from the receiver",
+    )
+    parser.add_argument(
         "--require-restart",
         action="store_true",
         help="Wait for a decoder restart, for use while intentionally resetting the SDR",
     )
-    asyncio.run(check(parser.parse_args()))
+    args = parser.parse_args()
+    if not 1 <= args.timeout <= 86_400:
+        parser.error("--timeout must be between 1 and 86400 seconds")
+    asyncio.run(check(args))
 
 
 if __name__ == "__main__":

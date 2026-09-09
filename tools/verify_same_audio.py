@@ -22,14 +22,19 @@ MAX_FIXTURE_BYTES = 400_000
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--decoder", default="samedec")
+    parser.add_argument("--fixture", type=Path, help="Use an offline copy of the pinned fixture")
     args = parser.parse_args()
     decoder = shutil.which(args.decoder) if "/" not in args.decoder else args.decoder
     if not decoder or not Path(decoder).is_file():
         raise SystemExit(f"decoder is unavailable: {args.decoder}")
 
-    request = urllib.request.Request(FIXTURE_URL, headers={"User-Agent": "Outpost acceptance"})
-    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
-        payload = response.read(MAX_FIXTURE_BYTES + 1)
+    if args.fixture is not None:
+        with args.fixture.open("rb") as source:
+            payload = source.read(MAX_FIXTURE_BYTES + 1)
+    else:
+        request = urllib.request.Request(FIXTURE_URL, headers={"User-Agent": "Outpost acceptance"})
+        with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+            payload = response.read(MAX_FIXTURE_BYTES + 1)
     if len(payload) > MAX_FIXTURE_BYTES:
         raise SystemExit("fixture exceeds the bounded download size")
     digest = hashlib.sha256(payload).hexdigest()

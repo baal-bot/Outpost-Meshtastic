@@ -147,6 +147,7 @@ class SameReceiver:
                     raise
 
     async def _run_once(self) -> None:
+        self.service.reset_pipeline_evidence()
         rtl_command, decoder_command = self.commands()
         self._rtl = await self._process_factory(
             *rtl_command,
@@ -259,7 +260,7 @@ class SameReceiver:
             text = line.decode("ascii", errors="replace").strip()
             if text.startswith("ZCZC-"):
                 try:
-                    message, created = await self.service.ingest(text)
+                    message, created = await self.service.ingest(text, from_receiver=True)
                 except ValueError as error:
                     self._stderr_tail.append(f"samedec: rejected output: {error}")
                     continue
@@ -304,6 +305,7 @@ class SameReceiver:
         return {
             **signal,
             "status": status,
+            "pipeline_state": "running" if self.state == "listening" else self.state,
             "runtime_state": self.state,
             "frequency_mhz": self.config.frequency_mhz,
             "device": self.config.device,

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -10,6 +12,7 @@ from outpost.clock import Clock
 from outpost.config import SameConfig
 from outpost.operator_context import current_actor
 from outpost.store import Database
+from outpost.timekeeping import time_status
 from outpost.watch import AlertService
 
 HEADER = re.compile(
@@ -77,6 +80,14 @@ class SameService:
         self.last_signal_at: int | None = None
         self.last_audio_at: int | None = None
         self.monitor_started_at: int | None = None
+        self._audio_mono: float | None = None
+        self._signal_mono: float | None = None
+        self._decode_mono: float | None = None
+        self._last_rms: float | None = None
+        self._pipeline_generation = 0
+        self._decode_generation: int | None = None
+        self._decode_context: str | None = None
+        self._verified_decode: dict[str, Any] | None = None
 
     @staticmethod
     def _significance(event: str) -> str:
@@ -252,7 +263,9 @@ class SameService:
             return "duplicate", state, [f"matched NWS CAP record {cap['id']}", *match_reasons]
         return "accepted", "pending", match_reasons
 
-    async def ingest(self, text: str) -> tuple[SameMessage, bool]:
+    async def ingest(self, text: str, *, from_receiver: bool = False) -> tuple[SameMessage, bool]:
+        if from_receiver and HEADER.fullmatch(text.upper()) is None:
+            raise ValueError("invalid receiver SAME header")
         value = self.parse(text)
         now = int(self.clock.now().timestamp())
         cap = await self._matching_cap(value)
@@ -291,6 +304,20 @@ class SameService:
                     ),
                 )
         self.last_decode_at = self.last_signal_at = self.last_audio_at = now
+        if from_receiver:
+            # Only the supervised decoder can establish reception evidence.
+            # Direct fixture/import ingestion still follows the normal review gates.
+            self._decode_mono = self.clock.monotonic()
+            self._decode_generation = self._pipeline_generation
+            self._decode_context = self._receiver_context()
+            self._verified_decode = {
+                "received_at": now,
+                "event_code": value.event_code,
+                "is_test": value.is_test,
+                "relevant": value.relevant,
+                "message_current": value.issued_at <= now + 300 and value.expires_at > now,
+                "clock_trusted_at_receive": time_status(self.clock).timestamp_safe,
+            }
         return value, not existing
 
     async def list(self, *, include_expired: bool = False) -> list[dict[str, Any]]:
@@ -509,15 +536,92 @@ class SameService:
     def start_monitoring(self) -> None:
         self.monitor_started_at = int(self.clock.now().timestamp())
 
+    def _receiver_context(self) -> str:
+        return hashlib.sha256(self.config.model_dump_json().encode()).hexdigest()
+
+    def reset_pipeline_evidence(self) -> None:
+        """Do not reuse old audio as evidence that a restarted process is receiving."""
+        self._pipeline_generation += 1
+        self._audio_mono = self._signal_mono = self._last_rms = None
+        self.last_audio_at = self.last_signal_at = None
+
     def record_audio(self, rms: float) -> None:
         now = int(self.clock.now().timestamp())
         self.last_audio_at = now
-        if rms >= self.config.signal_rms_threshold:
+        self._audio_mono = self.clock.monotonic()
+        self._last_rms = rms if math.isfinite(rms) and rms >= 0 else None
+        if self._last_rms is not None and rms > 0 and rms >= self.config.signal_rms_threshold:
             self.last_signal_at = now
+            self._signal_mono = self._audio_mono
 
     def record_signal(self) -> None:
         now = int(self.clock.now().timestamp())
         self.last_signal_at = self.last_audio_at = now
+
+    def reception_evidence(self) -> dict[str, Any]:
+        try:
+            elapsed = self.clock.monotonic()
+        except RuntimeError:
+            # Synchronous CLI inventory can run without an asyncio event loop.
+            elapsed = math.nan
+
+        def age(stamp: float | None) -> float | None:
+            if stamp is None or not math.isfinite(elapsed):
+                return None
+            delta = elapsed - stamp
+            return delta if math.isfinite(delta) and delta >= 0 else None
+
+        audio_age, signal_age, decode_age = (
+            age(self._audio_mono),
+            age(self._signal_mono),
+            age(self._decode_mono),
+        )
+        audio_state = (
+            "never"
+            if self._audio_mono is None
+            else "fresh"
+            if audio_age is not None and audio_age < self.config.audio_stall_seconds
+            else "stale"
+        )
+        signal_state = (
+            "unknown"
+            if audio_state != "fresh" or self._last_rms is None
+            else "above_threshold"
+            if self._last_rms > 0 and self._last_rms >= self.config.signal_rms_threshold
+            else "below_threshold"
+        )
+        decode_state = (
+            "never"
+            if self._verified_decode is None
+            else "configuration_changed"
+            if self._decode_context != self._receiver_context()
+            else "clock_uncertain"
+            if (
+                decode_age is None
+                or not self._verified_decode["clock_trusted_at_receive"]
+                or not time_status(self.clock).timestamp_safe
+            )
+            else "stale"
+            if decode_age >= self.config.decode_stale_hours * 3600
+            else "prior_pipeline"
+            if self._decode_generation != self._pipeline_generation
+            else "message_not_current"
+            if not self._verified_decode["message_current"]
+            else "fresh"
+        )
+        return {
+            "audio_state": audio_state,
+            "audio_age_seconds": audio_age,
+            "signal_state": signal_state,
+            "signal_age_seconds": signal_age,
+            "audio_rms": self._last_rms,
+            "signal_rms_threshold": self.config.signal_rms_threshold,
+            "signal_quality_verified": False,
+            "decode_state": decode_state,
+            "decode_age_seconds": decode_age,
+            "decode_freshness_seconds": self.config.decode_stale_hours * 3600,
+            "last_verified_decode": dict(self._verified_decode) if self._verified_decode else None,
+        }
 
     def health(self) -> dict[str, Any]:
         now = int(self.clock.now().timestamp())
@@ -541,4 +645,5 @@ class SameService:
             "last_audio_at": self.last_audio_at,
             "monitor_started_at": self.monitor_started_at,
             "silence_alarm_seconds": alarm_seconds,
+            **self.reception_evidence(),
         }

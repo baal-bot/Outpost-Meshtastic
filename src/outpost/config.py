@@ -315,6 +315,7 @@ class SameConfig(StrictModel):
     frequency_mhz: float = Field(default=162.55, ge=162.4, le=162.55)
     county_codes: list[str] = Field(default_factory=list)
     silence_alarm_minutes: int = Field(default=720, ge=5)
+    decode_stale_hours: int = Field(default=192, ge=1, le=720)
     device: str = Field(default="0", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
     sample_rate: Literal[22050, 24000, 32000, 44100, 48000] = 48000
     oversampling: int = Field(default=4, ge=1, le=16)
