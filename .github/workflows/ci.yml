@@ -9,9 +9,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    # #143's full Python 3.12 coverage run alone took 28 minutes. Preserve the
-    # production rerun/package/audit gates as #145 adds real recovery/browser cases.
-    timeout-minutes: 60
+    # #150's full + production-path Python 3.12 job took 59.82 minutes.
+    # Preserve both suites and package/audit gates as #156 adds real-service cases.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
