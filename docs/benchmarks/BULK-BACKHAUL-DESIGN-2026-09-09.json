@@ -1,0 +1,39 @@
+{
+  "issue": 159,
+  "kind": "synthetic_architecture_probe",
+  "recorded_at": "2026-09-09T22:41:37.619242+00:00",
+  "audited_commit": "620a5dba41ab66af25cd181bfebcc0a2f02cf2f4",
+  "source_sha256": {
+    "src/outpost/app.py": "128af4daed53c10a0a49d98f542d4851ead1da1da15fda0744ab3e19b571f8dd",
+    "src/outpost/fed/peers.py": "0075ff5e1307e1c884636a4ddc9d95003f1f5476a58fe590b3d4b3a6450a4474",
+    "src/outpost/fed/framing.py": "f5431204cbe537586dc9aa438f2341b86bd610ec21dd81e79d424d233066e5c9",
+    "src/outpost/fed/reconciliation.py": "8079261182e449aca8fbd8f2c237edcb686bdb69c46e4d0ed48771eb792dbe7d",
+    "src/outpost/fed/revisions.py": "0a1e44d19769a002f6a026ccd89b5c6c96787716d61ac2a028b397b5ac373036",
+    "src/outpost/fed/sync.py": "1dc133a97b8c8b726f5a04ed567d3f72be7d6fea79cf3f479fcdb6b301dc95f1",
+    "src/outpost/transport/radio_link.py": "6694bc0c10e8a05a8a36b52c8d67b21f764c5fb82b0e607f8657a8f109bf2baa",
+    "src/outpost/transport/toa.py": "9ec484f6bc98c1d3ffb6b712694e3239eb0150ab9ea8d1ab837c3802f7520f0f",
+    "src/outpost/config.py": "e622e1d4cc09b1df19b929e062e03281c5d401c80743440e429492daf0e29402"
+  },
+  "counter_probe": {
+    "counter_2_accepted": true,
+    "later_counter_1_accepted": false,
+    "duplicate_counter_2_accepted": false,
+    "meaning": "Separate future IP replay state is required; existing radio anti-replay behavior is expected."
+  },
+  "oversize_probe": {
+    "incompressible_2048_byte_value_rejected_by_existing_codec": true
+  },
+  "default_airtime_model": {
+    "preset": "LONG_FAST",
+    "application_bytes": 188,
+    "portnum": 260,
+    "estimated_frame_seconds": 1.8288639999999998,
+    "federation_share_seconds_per_hour": 28.8,
+    "whole_frames_before_control_retry_hops": 15,
+    "max_items_per_cycle": 20,
+    "measured_RF_capacity": false
+  },
+  "live_store_accessed": false,
+  "radio_opened": false,
+  "network_link_tested": false
+}

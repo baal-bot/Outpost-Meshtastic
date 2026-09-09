@@ -35,6 +35,7 @@ detailed intended product design.
 - [Federation topology, health, and location privacy](FEDERATION-TOPOLOGY.md)
 - [Federation acceptance backlog](FEDERATION-ACCEPTANCE-BACKLOG.md)
 - [Phase 5 architecture notes](PHASE5-ARCHITECTURE.md)
+- [Local bulk synchronization design and implementation sequence — proposed](BULK-BACKHAUL-DECISION-2026-09-09.md)
 
 ## Contributors
 

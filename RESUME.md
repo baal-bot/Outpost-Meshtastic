@@ -1,6 +1,36 @@
 # Session resume point — 2026-09-09 (America/New_York)
 
-## Current direction: software work and corrected power inventory
+## Current: #159 bulk synchronization design and coding scope
+
+The owner accepted the recommendation to handle #159 next, starting with a
+concrete design and implementation scope. Read
+[the architecture decision](docs/BULK-BACKHAUL-DECISION-2026-09-09.md) and
+[updated closeout plan](docs/ISSUE-CLOSEOUT-PLAN-2026-09-09.md). The design recommends
+optional direct peer HTTPS over an explicitly configured local IP link, sharing
+existing content policy and review with separate IP replay state, durable work
+and bounded retries. Bulk failure waits for IP and cannot become LoRa queue work.
+
+An async question about inter-station connectivity has not yet received a reply.
+The working assumption is **only LoRa is confirmed**, so operational IP selection
+is deferred. Incorporate any later clarification without asking the owner to
+repeat the confirmed antenna, reception or battery setup. Software development
+and isolated local-peer qualification do not depend on new physical tests.
+
+Source review and temporary SQLite/codec probes confirm why the future IP path
+must not share radio counters or RF framing. The public synthetic summary is
+`docs/benchmarks/BULK-BACKHAUL-DESIGN-2026-09-09.json`; private reproduction is under
+`.data/bulk-backhaul-159-2026-09-09/`. These are architecture evidence, not network
+or RF capacity measurements. The proposed coding order is **B1 protocol/trust →
+B2 shared ingress → B3 HTTPS → B4 durable reconciliation → B5 operator UI →
+B6 software qualification**. B1 is the next scoped coding task. Runtime transport
+implementation is separate from this completed design deliverable.
+
+This documentation change does not alter the installed #156 release below.
+#159 stays open; no GitHub issues/comments or new implementation issues were
+published. No runtime deployment, broker/radio change or physical qualification
+was performed. Continue software work before scheduling field sessions.
+
+## Installed: #156 software and confirmed power inventory
 
 The owner asked for the next software issue and reiterated that the Pi runs from
 a solar battery capable of powering it for many days. The LoRa radio has its own

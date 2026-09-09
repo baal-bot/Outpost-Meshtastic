@@ -383,6 +383,7 @@ Evidence:
 Known limitations:
 
 - MQTT-only traffic/fallback and destructive quota exhaustion remain open.
+- Independent IP bulk synchronization is not implemented. #159 proposes optional direct peer HTTPS with separate replay/work state and no bulk fallback onto LoRa; deployment selection remains deferred while a local inter-station route is unconfirmed. See docs/BULK-BACKHAUL-DECISION-2026-09-09.md for the B1–B6 implementation scope.
 - Physical-transfer bundles are software/browser-tested, not field-media qualified: eight records per signed but unencrypted file, explicit public-text/label/location review, prepared mutually paired stations and trusted pins, 4,096 retained bundle receipts. Private data streams and node adoption are unsupported; old-backup rollback remains #145/#146.
 - Version-bound review is software-tested; deploy matching backend/assets. Handheld review is metadata-only, and automatic board imports remain a separate policy path.
 - Plain incident notes require incident_updates:1 plus reconciliation:2 on both peers, current parent storage for event sending and prior original-parent import for human note import. Oversized notes and multi-hop note relay are not qualified.

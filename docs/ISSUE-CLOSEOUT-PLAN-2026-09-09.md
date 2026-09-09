@@ -24,6 +24,18 @@ and live installation/preservation checks pass. See
 [the software evidence](AI-EVALUATION-2026-09-09.md) for the installed release,
 results and the remaining comparative evaluation work.
 See the [SDR qualification record](SDR-RECEPTION-QUALIFICATION-2026-09-09.md).
+
+The next authorized deliverable, **#159's bulk-synchronization design and coding
+scope**, is documented in the
+[architecture decision](BULK-BACKHAUL-DECISION-2026-09-09.md). The recommended
+software candidate is optional direct peer HTTPS over a configured local network.
+Its six implementation tasks begin with the IP protocol, trust and storage
+contract (B1), then shared ingress, HTTPS, durable reconciliation, operator controls
+and software qualification. Operational selection is deferred while the actual
+local inter-station IP route is unconfirmed; only LoRa is confirmed for this
+design. This does not block development using isolated software peers. The new
+transport is not implemented and #159 remains open.
+
 #139's physical offline-map check and the longer exercises below remain later
 qualification work. Finish remaining software work before scheduling those
 sessions; their equipment and participant requirements do not block software
@@ -47,7 +59,7 @@ acceptance intervals.
 | [#44 — August physical exit gates (P1)](https://github.com/baal-bot/Outpost-Meshtastic/issues/44) | Original software findings are closed; two physical exit gates remain. | Run the prepared power-interruption/recovery campaign with before/after acknowledged incident, mail, outbound and custody IDs on intended storage/radio hardware. Separately demonstrate physical two-node MQTT-only operation and automatic LoRa/MQTT fallback through partition/reconnect, deduplication and application receipts. Report every loss/intervention. Reuse these results in #148/#157/#158. | Backed-up designated test hardware and controlled power setup; two nodes and the declared broker/network paths. Schedule the disruptive exercise explicitly. |
 | [#155 — First-time usability/G2 (P2)](https://github.com/baal-bot/Outpost-Meshtastic/issues/155) | Command/accessibility software exists; representative first-time-user evidence is missing. | Predefine participant count/method. Measure the literal G2 target: at least 80% post to a board within three messages, unprompted. Also test corrections, incident identity, mail/ACK/check-in, delayed/multipart replies, stale references and applicable accessibility needs on fresh offline clients. Record assistance/failures and repair concrete blockers before closure. | Consenting nontechnical first-time participants, actual handhelds/phones, prepared permanent access from #147; synthetic scenarios and anonymized observations. |
 | [#156 — Guarded AI holdout (P3)](https://github.com/baal-bot/Outpost-Meshtastic/issues/156) | Software installed and verified on `a68baa8`. Frozen 28-case guarded/deterministic controls and separate legacy 60-case harness pass. Grounding, permission/revision checks and non-AI worker capacity are fixed; four CI jobs and live preservation checks pass. | Complete independent blinded usefulness scoring and a configured-native-provider comparison using the frozen synthetic corpus. Record model/runtime identity and native latency/memory/energy; distinguish estimated from measured airtime and leave unavailable measurements explicitly pending. These remaining evaluation results do not block this installed software or other software work. | Existing Hailo appliance/model and independent reviewer. Coordinate native device access for the comparison; no new power setup or model migration is required. |
-| [#159 — Independent bulk backhaul (P2)](https://github.com/baal-bot/Outpost-Meshtastic/issues/159) | An architecture decision remains; this is not an instruction to build another transport immediately. | Compare locally powered IP/MQTT/backhaul options using terrain, power, trust, maintenance and #142 capacity evidence. Record a supported choice or explicit deferral. If selected, demonstrate WAN-independent bounded reconnect/fallback and no policy bypass or LoRa flood, reusing #44 where applicable. Scope implementation only after the decision. | Deployment constraints and owner decision; candidate network hardware only if selected. An explicit documented deferral can conclude the design scope. |
+| [#159 — Independent bulk backhaul (P2)](https://github.com/baal-bot/Outpost-Meshtastic/issues/159) | [Design and coding scope recorded](BULK-BACKHAUL-DECISION-2026-09-09.md): optional direct peer HTTPS is the software candidate; deployment selection is explicitly deferred while the local IP route and shared-capacity envelope are unconfirmed. Source audit and synthetic replay/codec probes are complete; transport is not implemented. | Review the decision and separate B1–B6 implementation scope. B1 freezes protocol/trust/storage contracts; subsequent tasks preserve shared policy, independent replay state, finite reconnect and zero bulk fallback onto LoRa. Qualify in software before later deployment checks, reusing #44 where applicable. Retain a supported-path demonstration or explicit accepted deployment deferral for closure. | Isolated software peers suffice for development. Actual inter-station LAN/routing remains unconfirmed; no new power or antenna exercise is required. Network equipment is a later deployment decision. |
 | [#130 — September resilience tracker (P1)](https://github.com/baal-bot/Outpost-Meshtastic/issues/130) | Umbrella over the September work; many software children are complete. | Reconcile every remaining child with its closing evidence or explicit accepted disposition, the G1–G6 requirement ledger and capability matrix. Preserve #44's separate physical gates. Close the tracker only after its remaining scope is accounted for. | Evidence from the rows above and final owner/reviewer disposition for any deferred requirement. |
 | [#61 — Native iOS/Android discovery (P3)](https://github.com/baal-bot/Outpost-Meshtastic/issues/61) | Deliberately parked outside current hardening. | After core field qualification and a stable scoped API, produce an architecture decision and narrow proof-of-concept plan covering LAN/BLE/hybrid transport, trust, permissions, offline storage/sync, accessibility, platform constraints and maintenance. Implementation is separate. Keep parked unless the owner changes its priority. | Product/platform decisions after the core acceptance work; native apps are not prerequisites for current offline clients. |
 
@@ -56,14 +68,15 @@ acceptance intervals.
 Software completion has priority. Steps 2–8 describe later sessions and decisions
 to schedule when ready; they are not prerequisites for finishing software.
 
-1. **#156 software is installed; continue closing software findings first.**
-   The frozen holdout, deterministic comparison and disabled/busy/failed service
-   checks are implemented, with demonstrated failures repaired and exact-source
-   CI retained. Keep #156's remaining native comparison and independent review
-   separate from software delivery. The #141 startup fix and #150 reception
-   indicators are also installed; close #150 using its existing evidence. Keep
-   #148 out of the immediate work order as requested, using the confirmed battery
-   setup when it resumes.
+1. **Use #159's completed design to scope the next software work.**
+   Start with B1's versioned IP protocol, active-peer trust, independent replay
+   state and finite durable storage contract. Follow B2–B6 in the architecture
+   decision; a local test network can exercise them before field deployment.
+   #156's software is installed with exact-source CI and preservation checks;
+   keep its remaining native comparison and independent review separate. The
+   #141 startup fix and #150 reception indicators are also installed; close #150
+   using its existing evidence. Keep #148 out of the immediate work order as
+   requested, using the confirmed battery setup when it resumes.
 2. **Close the smallest field gap: #139.** Prepare permanent local access first,
    then schedule a fresh-browser WAN-disconnected map session. Capture #147 local
    access evidence in the same session when the hotspot-expiry/reboot checks are
@@ -96,8 +109,9 @@ to schedule when ready; they are not prerequisites for finishing software.
    timestamps, observations and failures through the complete intervals.
 8. **Schedule usability and comparative AI work alongside available field access.**
    #155 needs first-time participants; #156 needs a blinded scoring method. Resolve
-   #159 from measured capacity and deployment constraints. Reconcile #130 after
-   the child decisions; #61 remains outside this milestone.
+   #159's deployment selection from the actual local route, measured capacity and
+   completed software evidence, or retain an explicitly accepted deferral.
+   Reconcile #130 after the child decisions; #61 remains outside this milestone.
 
 An afternoon of successful checks cannot substitute for the seven-day or thirty-day
 interval. The schedule is relative to a prepared candidate and available equipment;

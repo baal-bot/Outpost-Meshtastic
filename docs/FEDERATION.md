@@ -100,6 +100,16 @@ The limited controls on this page and the full configurator on **Radio** share l
 changes made in either view are reflected in the other without clearing advanced settings or stored
 credentials.
 
+### Independent bulk synchronization design
+
+The [#159 design and implementation sequence](BULK-BACKHAUL-DECISION-2026-09-09.md)
+proposes optional direct peer HTTPS over a configured local IP network. It has not
+been implemented. The current MQTT controls configure the Meshtastic bridge;
+they do not create an independent application bulk path. The proposed path shares
+existing content policy and review, uses separate replay state and durable work,
+and waits when IP is unavailable without moving bulk work onto LoRa. Deployment
+selection remains deferred until a usable local inter-station route is confirmed.
+
 ## Peer services and mail
 
 An offline node may request a bounded allowlisted service such as weather or public alerts from a
