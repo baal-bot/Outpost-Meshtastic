@@ -1,5 +1,40 @@
 # Session resume point — 2026-09-09 (America/New_York)
 
+## Installed: readiness observation status and completed forms
+
+The user reported that recording a passed offline-map observation left the check
+unresolved and its date, checkbox and save buttons active. The fix keeps independent
+map verification at **PASS**, records observation status separately, and collapses
+recorded observations to a summary with **Update observation**. Current failed
+observations and measured failures still require attention. A previous observation
+can need review after restart without downgrading freshly verified maps. Other
+unresolved checks continue to keep the overall readiness banner degraded.
+
+The selected, running release is **`20260909T131238Z-693cbf3cc04b`**, source
+`693cbf3cc04b2cf2a7276d9bae00654f084794aa`, database schema **186**. Exact-source
+[CI 34349701170](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34349701170)
+passed all four jobs: 2,423 tests per full-suite run and 1,315 production-wiring tests
+per Python version. Local verification passed 140 readiness/map regression cases
+and 14 authenticated API/browser cases, including phone/desktop and all three themes.
+
+The normal updater completed at **13:13:50 UTC** with a verified backup and native
+HailoRT wheel. At 13:14:00–13:14:07 UTC, service/web/radio/native AI, synchronized UTC,
+peer-time task, database integrity, same-package boot readiness, map tiles and assets
+passed. Offline maps is **PASS** and absent from the unresolved-check list. Served
+readiness code matches source/package. All operator observation values and their
+audit count survived unchanged; no new operator attestation was recorded. Existing
+observations remain historical after the service restart, with an explicit update
+button and closed form. A browser refresh loads the new controls.
+
+All tracked record IDs were retained, including 1,636 outbound-work records and
+2,149 power samples. Regional maps and overview remain verified at 65,884,160 bytes
+and 6,176 tiles. Physical WAN/time/peer gates remain open; peer-time permissions
+remain disabled. The reboot clock-hold finding below still applies.
+See [the readiness guide](docs/SAFETY-READINESS.md). Private evidence is under
+`.data/readiness-observation-2026-09-09/` and
+`/var/lib/outpost-qualification/149-20260909/readiness-observation-update/`.
+Later documentation commits do not change the installed release's CI identity.
+
 ## Post-reboot: startup clock hold recovered
 
 The user returned after reboot. The selected release remains
