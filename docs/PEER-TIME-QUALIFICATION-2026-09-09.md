@@ -34,6 +34,10 @@ recovery also rechecks source confidence at the actual recovery boundary: losing
 UTC after construction or during the store transaction cannot waive the silent
 airtime hour. Eight focused startup/corrupt-cost/restart cases passed.
 
+Policy changes write their audit event through the shared audit helper inside the
+same transaction as the permission change. The initial full CI run caught a direct
+audit-table write; that repository convention is now preserved.
+
 The protocol and operator procedure are in [OFFLINE-TIME.md](OFFLINE-TIME.md).
 Database schema remains 186; the new settings use the existing runtime-setting store.
 The packaged service still excludes `CAP_SYS_TIME` and retains `NoNewPrivileges`.

@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from outpost.audit import write_audit
 from outpost.clock import Clock
 from outpost.fed.framing import FrameCodec, MessageType, wire_bytes, wire_int
 from outpost.fed.peers import FederationPeerService
@@ -143,15 +144,14 @@ class FederationTime:
                     )
                 else:
                     await tx.write("DELETE FROM runtime_setting WHERE key=?", (PREFIX + peer,))
-                await tx.write(
-                    "INSERT INTO audit_log(actor_kind,actor_ref,action,target,detail,created_at) "
-                    "VALUES('web',?,'federation.time_policy',?,?,?)",
-                    (
-                        actor,
-                        peer,
-                        json.dumps({"trust": trust, "serve": serve}),
-                        int(self.clock.now().timestamp()),
-                    ),
+                await write_audit(
+                    tx,
+                    actor_kind="web",
+                    actor_ref=actor,
+                    action="federation.time_policy",
+                    target=peer,
+                    detail={"trust": trust, "serve": serve},
+                    created_at=int(self.clock.now().timestamp()),
                 )
 
                 def publish() -> None:
