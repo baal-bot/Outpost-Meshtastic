@@ -29,7 +29,10 @@ Final review retained the original wall-step latch: correcting a stepped clock s
 requires restarting Outpost before a new peer check may restore confidence. It also
 keeps malformed recovery metadata under its owning validator, so the operator
 settings/dashboard can start while the governor enforces the conservative hold.
-Seven focused corruption, pairing and wall-step regressions passed.
+Seven focused corruption, pairing and wall-step regressions passed. Startup
+recovery also rechecks source confidence at the actual recovery boundary: losing
+UTC after construction or during the store transaction cannot waive the silent
+airtime hour. Eight focused startup/corrupt-cost/restart cases passed.
 
 The protocol and operator procedure are in [OFFLINE-TIME.md](OFFLINE-TIME.md).
 Database schema remains 186; the new settings use the existing runtime-setting store.

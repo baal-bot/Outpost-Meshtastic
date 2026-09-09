@@ -404,3 +404,27 @@ async def test_fresh_peer_reply_cannot_clear_a_latched_clock_step(nodes, monkeyp
     assert time_status(local.clock).state == "stepped"
     assert not time_status(local.clock).timestamp_safe
     assert local.federation_time.results["!remote"]["state"] == "checked"
+
+
+@pytest.mark.parametrize("phase", ["before_recovery", "during_recovery"])
+async def test_losing_time_during_startup_cannot_waive_unknown_airtime(nodes, monkeypatch, phase):
+    local, _, _ = await pair(nodes, monkeypatch)
+    governor = production_governor(local.database, local.clock, link=local.radio)
+    assert governor._time_started_safe
+    if phase == "before_recovery":
+        monitor(monkeypatch, local.clock, synchronized=False)
+    else:
+        original = governor.outbox.recover
+
+        async def lose_source(*args, **kwargs):
+            monitor(monkeypatch, local.clock, synchronized=False)
+            return await original(*args, **kwargs)
+
+        monkeypatch.setattr(governor.outbox, "recover", lose_source)
+    assert await governor.recover() == 0
+    assert governor.time_recovery_wait == 3600
+    assert await governor.tick() is None
+    assert not local.radio.sent
+    local.clock.advance(10)
+    assert await governor.recover() == 0
+    assert governor.time_recovery_wait == 3590

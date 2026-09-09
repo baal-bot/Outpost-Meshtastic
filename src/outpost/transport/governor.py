@@ -169,6 +169,7 @@ class AirtimeGovernor:
         self._recovery_loaded = False
         self._startup_not_before = 0.0
         self._recovery_silence_until = 0.0
+        self._recovery_costs_unknown = False
         self._dispatch_lock = asyncio.Lock()
         self._next_id = 1
         self._next_tx_at = 0.0
@@ -553,17 +554,15 @@ class AirtimeGovernor:
             return 0
         await self._load_time_recovery()
         if not time_status(self.clock).timestamp_safe:
-            self._time_recovery_pending = True
+            self._defer_time_recovery()
             return 0
-        if not self._recovery_silence_until:
-            self._startup_not_before = 0
         self._publication_failed = True
         self._elapsed.reset()
         now_epoch = self._elapsed.now()
         try:
             rows = await self.outbox.recover(now_epoch, time_guard=lambda: require_time(self.clock))
         except TimeUncertain:
-            self._time_recovery_pending = True
+            self._defer_time_recovery()
             self._publication_failed = False
             return 0
         self.queues = {cls: deque() for cls in TrafficClass}
@@ -626,7 +625,14 @@ class AirtimeGovernor:
         self._publication_failed = False
         self._time_recovery_pending = False
         self._time_started_safe = True
+        if not self._recovery_costs_unknown:
+            self._startup_not_before = 0
         return len(rows)
+
+    def _defer_time_recovery(self) -> None:
+        if not self._time_recovery_pending:
+            self._startup_not_before = max(self._startup_not_before, self.clock.monotonic() + 3_600)
+        self._time_recovery_pending = True
 
     def enqueue_many(self, items: list[OutboundItem], *, hold: bool = False) -> list[int] | None:
         """Atomically admit a complete multi-part response (REQ-TRANSPORT-035)."""
@@ -955,6 +961,7 @@ class AirtimeGovernor:
                 "DELETE FROM runtime_setting WHERE key='airtime.time_recovery'"
             )
             self._recovery_silence_until = 0
+            self._recovery_costs_unknown = False
         self._prune_history(now)
         for traffic_class, pending in self.queues.items():
             for expired in tuple(item for item in pending if self._expired(item)):
@@ -1180,6 +1187,7 @@ class AirtimeGovernor:
                     self.history.append(entry)
             else:
                 # An older marker or corrupt accounting cannot waive unknown RF.
+                self._recovery_costs_unknown = True
                 self._startup_not_before = now + 3_600
             self._recovery_silence_until = now + 3_600
         self._recovery_loaded = True
