@@ -24,12 +24,26 @@ grant clock-setting capability.
 | OS reports synchronization, no clock fault, maximum error at most 30 seconds | Timestamp-sensitive operations may proceed. RTC retention remains unqualified. |
 | Source disappears during the same process | Estimated holdover lasts at most six hours from the last good observation, allowing 500 ppm drift and at most 30 seconds estimated error. This is a conservative software bound, not measured oscillator accuracy. |
 | Source missing at cold boot, implausible date, unsupported probe, clock fault, or exhausted holdover | Signed custody, federation egress, scheduled traffic and retention cleanup wait. Readiness and Federation explain the time-confidence reason. |
-| Wall time jumps relative to elapsed time by over five seconds, allowing normal slew | Timestamp confidence latches as uncertain. Correct and verify the OS time source, then restart Outpost. Simply moving the clock back does not clear the latch. |
+| Wall time jumps before this process has ever trusted native or peer time | Work stays held until two fresh, good OS synchronization probes 30–60 elapsed seconds apart confirm a stable, plausible clock. The ordinary queue then recovers automatically against corrected UTC. |
+| Wall time jumps after this process has trusted time, or elapsed time goes backward | Timestamp confidence latches as uncertain. Correct and verify the OS time source, then restart Outpost. Simply moving the clock back does not clear the latch. |
 
 Clock-source probes are cached for 30 seconds; discontinuity checks run at operation
 boundaries. The Linux probe currently supports the 64-bit Linux ABI used by the
 qualified ARM64 appliance and x86-64 CI runners. An unavailable probe yields unknown
 confidence. Operator readiness observations never unlock time-sensitive operations.
+
+Startup source evidence is sampled when the system clock is constructed, before
+slow application initialization. A delayed OS synchronization correction does not
+require a manual service restart if the process has never used trusted UTC. During
+confirmation, another jump, an invalid date, a failed synchronization probe or a gap
+longer than 60 seconds between probes starts confirmation over. Cached probe results
+cannot supply the second observation. No usable source means the hold continues;
+the service does not wait for WAN before bringing up local access.
+
+Native or accepted peer confidence permanently closes this startup exception for
+the process. Steps during normal operation still require controlled recovery. The
+diagnostic `startup_recovered` field records automatic startup recovery for the
+current process; it does not prove hardware time accuracy or an actual reboot test.
 
 Local replies and alerts continue during **in-process** uncertainty if the governor
 started with usable time and has recovered its airtime history. Their deadlines,
@@ -181,9 +195,12 @@ time is `r`, the UTC interval on receipt is conservatively bounded by
 Fresh peer intervals must overlap; disagreement holds affected work. A good native
 OS synchronization observation remains authoritative. Accepted evidence ages by
 500 ppm, expires within the provider's remaining six-hour lifetime, disappears on
-restart or revocation, and is invalidated by a later wall-clock step. The native wall-step latch remains authoritative: after correcting a stepped clock,
-restart Outpost before validating it again. This also reconstructs the durable queue
-against the corrected UTC epoch. RTC retention is never certified by this check.
+restart or revocation, and is invalidated by a later wall-clock step. Peer evidence
+cannot clear a wall-step hold. After the process has trusted native or peer time,
+correcting a stepped clock requires an Outpost restart before validation. This also
+reconstructs the durable queue against the corrected UTC epoch. Only the never-trusted
+startup case above can recover automatically through fresh native OS evidence.
+RTC retention is never certified by this check.
 
 ### Recovery accounting
 

@@ -1,5 +1,24 @@
 # Session resume point — 2026-09-09 (America/New_York)
 
+## In progress: startup time recovery and open-issue closeout plan
+
+The user authorized the startup clock fix under #141 and requested a plan for
+closing every open GitHub issue. The implementation allows automatic recovery
+only before this process has ever trusted native or peer UTC, after two fresh
+stable native synchronization probes 30–60 seconds apart. Later steps remain
+latched. Existing governed recovery preserves expiry, replay checks and airtime.
+
+Local clock/queue/governor verification passed 207 cases and operator/browser
+verification passed eight cases. Read
+[the qualification record](docs/STARTUP-TIME-QUALIFICATION-2026-09-09.md) and
+[the 16-issue closeout plan](docs/ISSUE-CLOSEOUT-PLAN-2026-09-09.md).
+The broader compatibility run passed 695 unit/readiness/maintenance/worker/outbox
+cases. Exact-source CI and the normal verified updater remain in progress; the
+installed release below has not yet been replaced. Private state
+and prepared installation/preservation checks are in
+`.data/startup-time-2026-09-09/STATE.json`. No GitHub issue was closed, no operator
+attestation was recorded and no physical reboot/time-source test was performed.
+
 ## Installed: readiness observation status and completed forms
 
 The user reported that recording a passed offline-map observation left the check

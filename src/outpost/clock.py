@@ -18,6 +18,7 @@ class Clock(Protocol):
 class SystemClock:
     def __init__(self) -> None:
         self._time_monitor = TimeMonitor(self.now().timestamp(), time.monotonic())
+        self.time_status()  # Capture source evidence before slow application construction.
 
     def time_status(self) -> TimeStatus:
         return self._time_monitor.sample(self.now().timestamp(), time.monotonic())

@@ -29,7 +29,8 @@ MAX_ERROR_SECONDS = 30.0
 MIN_EPOCH = 1_735_689_600  # 2025-01-01: conservative pre-release plausibility floor.
 TIME_REMEDIATION = (
     "Time confidence is uncertain. Verify the station's UTC time and configured time source; "
-    "after a clock step, restart Outpost once the OS reports synchronized time. "
+    "startup corrections are checked automatically. After a clock step during normal operation, "
+    "restart Outpost once the OS reports synchronized time. "
     "Retained work has not been delivered by this check."
 )
 
@@ -105,12 +106,19 @@ class TimeStatus:
     holdover_verified: bool = False
     peer_count: int = 0
     peer_offset_seconds: float | None = None
+    startup_recovered: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
 
     @property
     def detail(self) -> str:
+        if self.reason == "startup_clock_settling":
+            return (
+                "A startup clock correction is awaiting two fresh OS synchronization checks "
+                "30 seconds apart with stable elapsed time. Recovery is automatic once these "
+                "checks pass; timestamp-sensitive work remains held. RTC retention is unqualified."
+            )
         if self.source == "federation_peer":
             if self.timestamp_safe:
                 return (
@@ -123,6 +131,11 @@ class TimeStatus:
                 + TIME_REMEDIATION
             )
         if self.state == "synchronized":
+            if self.startup_recovered:
+                return (
+                    "The OS reports synchronized time after automatic startup clock recovery; "
+                    "offline RTC retention is unqualified."
+                )
             return "The OS reports synchronized time; offline RTC retention is unqualified."
         if self.state == "holdover":
             return "Using bounded in-process time holdover; offline RTC retention is unqualified."
@@ -132,7 +145,7 @@ class TimeStatus:
 
 
 class TimeMonitor:
-    """Track source confidence and latch discontinuities until controlled restart."""
+    """Allow initial OS synchronization; latch steps after any trusted-time use."""
 
     def __init__(self, wall: float, mono: float, probe: Callable[[], TimeSource] | None = None):
         self._wall, self._mono = wall, mono
@@ -142,26 +155,62 @@ class TimeMonitor:
         self._last_good: float | None = None
         self._last_error = 0.0
         self._step: float | None = None
+        self._startup_recovery_allowed = True
+        self._settling_since: float | None = None
+        self._startup_recovered = False
+
+    def mark_trusted(self) -> None:
+        """Close startup recovery once native or peer evidence can authorize work."""
+        self._startup_recovery_allowed = False
 
     def sample(self, wall: float, mono: float) -> TimeStatus:
         elapsed = mono - self._mono
         step = wall - self._wall - elapsed
+        if not math.isfinite(mono) or not math.isfinite(elapsed) or elapsed < 0:
+            # Recovery needs an intact elapsed-time basis for queue and RF limits.
+            self._startup_recovery_allowed = False
+            self._step = step
         # Allow normal oscillator error/slewing and a leap second; detect both signs.
         if elapsed < 0 or abs(step) > STEP_SECONDS + max(0, elapsed) * 0.001:
             self._step = step
+            self._settling_since = None
+            self._next_probe = float("-inf")
         self._wall, self._mono = wall, mono
-        if self._step is not None:
+        if self._step is not None and not self._startup_recovery_allowed:
             return TimeStatus("stepped", "wall_clock_step", False, wall_step_seconds=self._step)
         if not math.isfinite(wall) or wall < MIN_EPOCH:
+            self._settling_since = None
             return TimeStatus("uncertain", "implausible_wall_time", False)
         if mono >= self._next_probe:
             self._source = (self._probe or kernel_time)()
             self._next_probe = mono + SOURCE_POLL_SECONDS
             error = self._source.error_seconds
-            if self._source.synchronized and error is not None and 0 <= error <= MAX_ERROR_SECONDS:
-                self._last_good, self._last_error = mono, error
-            else:
+            if not (
+                self._source.synchronized
+                and self._source.reason != "kernel_clock_fault"
+                and error is not None
+                and 0 <= error <= MAX_ERROR_SECONDS
+            ):
                 self._source = TimeSource(False, error, self._source.reason)
+                self._settling_since = None
+            else:
+                if self._step is not None:
+                    if (
+                        self._settling_since is not None
+                        and self._settling_since + SOURCE_POLL_SECONDS
+                        <= mono
+                        <= self._settling_since + 2 * SOURCE_POLL_SECONDS
+                    ):
+                        self._step = None
+                        self._startup_recovered = True
+                    else:
+                        self._settling_since = mono
+                if self._step is None:
+                    self._last_good, self._last_error = mono, error
+        if self._step is not None:
+            return TimeStatus(
+                "stepped", "startup_clock_settling", False, wall_step_seconds=self._step
+            )
         if self._source.reason == "kernel_clock_fault":
             return TimeStatus("uncertain", "kernel_clock_fault", False)
         age = mono - self._last_good if self._last_good is not None else None
@@ -173,12 +222,14 @@ class TimeMonitor:
             and error <= MAX_ERROR_SECONDS
         ):
             state = "synchronized" if self._source.synchronized else "holdover"
+            self.mark_trusted()
             return TimeStatus(
                 state,
                 "kernel_synchronized" if state == "synchronized" else "bounded_process_holdover",
                 True,
                 error_seconds=error,
                 holdover_age_seconds=age,
+                startup_recovered=self._startup_recovered,
             )
         return TimeStatus(
             "uncertain",
@@ -197,7 +248,10 @@ def time_status(clock: Clock) -> TimeStatus:
             evidence = getattr(clock, "_peer_time_evidence", None)
             if isinstance(evidence, PeerTimeEvidence):
                 elapsed = getattr(clock, "time_evidence_monotonic", clock.monotonic)
-                return evidence.sample(value, clock.now().timestamp(), elapsed())
+                value = evidence.sample(value, clock.now().timestamp(), elapsed())
+            observer = getattr(clock, "_time_monitor", None)
+            if value.timestamp_safe and isinstance(observer, TimeMonitor):
+                observer.mark_trusted()
             return value
     return TimeStatus("uncertain", "unmonitored_clock", False, source="unavailable")
 

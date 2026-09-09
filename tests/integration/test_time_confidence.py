@@ -42,6 +42,7 @@ def monitor(monkeypatch, clock, *, synchronized=True):
         )
     ]
     observer = TimeMonitor(clock.now().timestamp(), clock.monotonic(), lambda: source[0])
+    monkeypatch.setattr(clock, "_time_monitor", observer, raising=False)
     monkeypatch.setattr(
         clock, "time_status", lambda: observer.sample(clock.now().timestamp(), clock.monotonic())
     )

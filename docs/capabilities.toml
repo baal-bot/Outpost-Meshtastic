@@ -957,7 +957,7 @@ description = "Opt-in hardware release-gate assertion for the full guarded corpu
 [[capabilities]]
 id = "installation_operations"
 area = "Installation and diagnostics"
-present = "Resumable field checklist, GPS-assisted regional map setup and bounded overview downloads with verified USB import/export, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, explicit forward recovery from incompatible boot releases, installed-store ownership guards, health-gated Hailo handoff, and hardened service tooling. Read-only OS/RTC time diagnostics distinguish synchronization, bounded process holdover and clock steps; uncertain time gates destructive retention and timestamp-sensitive work."
+present = "Resumable field checklist, GPS-assisted regional map setup and bounded overview downloads with verified USB import/export, mDNS and expiring isolated hotspot access, distinct wallboard accounts, live redacted diagnostics, 18 scoped readiness checks with pass/fail/stale/unknown/operator-attested evidence, independent static boot-schema inspection, authenticated releases, explicit forward recovery from incompatible boot releases, installed-store ownership guards, health-gated Hailo handoff, and hardened service tooling. Read-only OS/RTC time diagnostics distinguish synchronization, bounded process holdover and clock steps; uncertain time gates destructive retention and timestamp-sensitive work. A startup correction before any trusted native or peer time recovers automatically after two fresh stable OS synchronization checks."
 maturity = "automated_tested"
 introduced_commit = "d614d85"
 limitations = ["A recorded fresh-Pi mDNS/hotspot onboarding drill and extended unattended wallboard soak remain field gates.", "Boot-schema evidence compares static package capacity with the inspected database; it does not prove configuration, import integrity, migration success, or unattended reboot/radio recovery. Custom or unavailable selections remain unknown.", "Outage assessment cannot certify missing regional maps, clock holdover, off-device restoration, station energy, replacement-client access, radio-only peer paths or SAME reception. Operator observations remain unverified, finite and context-bound; no qualification exercise runs automatically."]
@@ -965,7 +965,7 @@ roadmap = ["Complete station service-path and physical WAN-down field qualificat
 [capabilities.verification]
 release = "unreleased"
 commit = "HEAD"
-date = "2026-09-08"
+date = "2026-09-09"
 [[capabilities.evidence]]
 kind = "automated"
 path = "tests/unit/test_deploy_install.py::test_installer_harness_rejects_safety_mutants"
@@ -1035,6 +1035,11 @@ description = "Real authenticated ASGI/Chromium supports all-check review and ex
 kind = "automated"
 path = "tests/integration/test_time_confidence.py::test_queue_wall_steps_do_not_expire_or_dispatch_retained_work"
 description = "Synthetic OS clock evidence, six-hour offsets/steps, guarded recovery/custody, retained intents, elapsed local reply/alert operation and unchanged lifetime rejection through production stores."
+
+[[capabilities.evidence]]
+kind = "automated"
+path = "tests/integration/test_startup_time.py::test_boot_correction_recovers_queue_expiry_and_airtime_without_restart"
+description = "Delayed native startup synchronization with forward/backward six-hour and observed 259.806-second corrections recovers the production queue while preserving expiry, prior airtime and unknown-history silence; later trusted-time steps remain latched. Synthetic clocks, not a physical reboot qualification."
 
 [[capabilities.evidence]]
 kind = "automated"
