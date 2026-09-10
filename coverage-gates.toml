@@ -75,6 +75,11 @@ files = [
 minimum = 80
 files = ["src/outpost/web/auth.py"]
 
+[groups.bulk_contract]
+minimum = 90
+per_file_minimum = 90
+files = ["src/outpost/fed/bulk_format.py", "src/outpost/fed/bulk_policy.py"]
+
 [groups.backup_restore]
 minimum = 80
 files = ["src/outpost/store/backups.py"]

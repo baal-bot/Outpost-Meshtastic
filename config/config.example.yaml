@@ -105,6 +105,9 @@ fed:
   mqtt:
     enabled: false
     use_radio_module: true
+  # B1 contract only: no bulk listener/worker exists yet. See docs/BULK-PROTOCOL-V1.md.
+  bulk:
+    enabled: false
 security:
   require_approval: false
   coarse_precision_m: 500

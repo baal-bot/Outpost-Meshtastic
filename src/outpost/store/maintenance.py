@@ -287,6 +287,14 @@ TABLE_POLICIES = (
         True,
     ),
     TablePolicy(
+        "fed_bulk_state",
+        "federation",
+        "preserve",
+        "32 peer states/8 MiB messages; same-key replay and pending work never age out. "
+        "Retired keys or peer deletion remove unusable state.",
+        True,
+    ),
+    TablePolicy(
         "fed_bundle_receipt",
         "federation",
         "preserve",

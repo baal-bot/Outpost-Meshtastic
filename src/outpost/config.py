@@ -4,7 +4,7 @@ import json
 import os
 import re
 from datetime import time
-from ipaddress import ip_network
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 from typing import Annotated, Literal, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
@@ -359,6 +359,78 @@ class FedMqttConfig(StrictModel):
     use_radio_module: bool = True
 
 
+class FedBulkPeerConfig(StrictModel):
+    mesh_id: str = Field(pattern=r"^![0-9a-f]{8}$")
+    address: str
+    port: int = Field(default=8444, strict=True, ge=1, le=65535)
+    certificate_identity: str = Field(min_length=1, max_length=253)
+    public_key_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("certificate_identity")
+    @classmethod
+    def validate_certificate_identity(cls, value: str) -> str:
+        try:
+            return str(ip_address(value))
+        except ValueError:
+            if not all(
+                re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                for label in value.split(".")
+            ):
+                raise ValueError(
+                    "bulk certificate identity must be an IP or exact lowercase DNS name"
+                ) from None
+        return value
+
+
+class FedBulkConfig(StrictModel):
+    # B1 reserves/validates these settings; no listener or worker exists yet.
+    enabled: bool = Field(default=False, strict=True)
+    listen_address: str | None = None
+    listen_port: int = Field(default=8444, strict=True, ge=1, le=65535)
+    certificate_file: Path | None = None
+    private_key_file: Path | None = None
+    trust_root_file: Path | None = None
+    peers: list[FedBulkPeerConfig] = Field(default_factory=list, max_length=32)
+    test_only_loopback: bool = Field(default=False, strict=True)
+
+    @model_validator(mode="after")
+    def validate_bulk(self) -> FedBulkConfig:
+        paths = (self.certificate_file, self.private_key_file, self.trust_root_file)
+        if any(path is not None and not path.is_absolute() for path in paths):
+            raise ValueError("bulk TLS paths must be absolute")
+        if self.enabled and (
+            self.listen_address is None or any(path is None for path in paths) or not self.peers
+        ):
+            raise ValueError("bulk requires an explicit listener, TLS files and pinned peers")
+        if len({peer.mesh_id for peer in self.peers}) != len(self.peers):
+            raise ValueError("bulk peer identities must be unique")
+        private_networks = tuple(
+            ip_network(value)
+            for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
+        )
+        addresses = [peer.address for peer in self.peers]
+        if self.listen_address is not None:
+            addresses.append(self.listen_address)
+        for value in addresses:
+            try:
+                address = ip_address(value)
+            except ValueError:
+                raise ValueError("bulk addresses must be explicit IP literals") from None
+            if (
+                "%" in value
+                or (self.test_only_loopback and not address.is_loopback)
+                or (
+                    not self.test_only_loopback
+                    and not any(address in network for network in private_networks)
+                )
+            ):
+                raise ValueError(
+                    "bulk requires private local IPs, or exclusively loopback "
+                    "in its isolated test configuration"
+                )
+        return self
+
+
 class FedConfig(StrictModel):
     max_fragments: int = Field(default=8, ge=1, le=8)
     reassembly_timeout_s: int = Field(default=300, ge=30)
@@ -369,6 +441,7 @@ class FedConfig(StrictModel):
     peer_stale_hours: int = Field(default=72, ge=1)
     incident_radius_km: float = Field(default=25, ge=1, le=500)
     mqtt: FedMqttConfig = Field(default_factory=FedMqttConfig)
+    bulk: FedBulkConfig = Field(default_factory=FedBulkConfig)
 
 
 class WebAuth(StrictModel):

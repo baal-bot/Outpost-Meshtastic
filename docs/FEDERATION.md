@@ -104,7 +104,9 @@ credentials.
 
 The [#159 design and implementation sequence](BULK-BACKHAUL-DECISION-2026-09-09.md)
 proposes optional direct peer HTTPS over a configured local IP network. It has not
-been implemented. The current MQTT controls configure the Meshtastic bridge;
+been implemented. The [B1 message/trust/storage contract](BULK-PROTOCOL-V1.md) is implemented
+and tested independently; shared domain ingress and the HTTPS listener/worker remain.
+The current MQTT controls configure the Meshtastic bridge;
 they do not create an independent application bulk path. The proposed path shares
 existing content policy and review, uses separate replay state and durable work,
 and waits when IP is unavailable without moving bulk work onto LoRa. Deployment

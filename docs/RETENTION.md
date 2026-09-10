@@ -126,6 +126,7 @@ an explicit deadline. `Compact` combines time/row limits or maintains an index.
 | Federation | `fed_peer`, `fed_peer_successor` | Preserve trust, pairing, and identity-adoption evidence until operator action. |
 | Federation | `fed_peer_tombstone` | Preserve explicit forget evidence. Discovery can recreate a pending peer, never automatically restore its former trust. |
 | Federation | `fed_cursor`, `fed_service_circuit` | Preserve bounded state per peer/stream/service. |
+| Federation | `fed_bulk_state` | Preserve current-key replay/pending work; never age-prune. B1 bounds it to 32 peers and 8 MiB of message blobs. A next contiguous request replaces the prior response; retiring the key or deleting its peer removes unusable state. See [the bulk contract](BULK-PROTOCOL-V1.md). |
 | Federation | `fed_topology_policy`, `fed_topology_peer` | Cascade current topology preferences/state with their peer. |
 | Federation | `fed_seen` | Retain replay/deduplication history for `federation_history_days`. |
 | Federation | `fed_outbox` | Retain sent or long-expired frames; live frames are protected. |

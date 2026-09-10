@@ -177,6 +177,12 @@ whether the Meshtastic radio's MQTT module may be used. Broker, topic, and MQTT 
 are managed on the radio rather than duplicated in Outpost YAML. Discovery never grants trust.
 See [Federation](FEDERATION.md).
 
+`fed.bulk` reserves the disabled-by-default configuration for independent IP transfer.
+Its [B1 contract](BULK-PROTOCOL-V1.md) validates explicit local IP endpoints, peer identities,
+private TLS file paths and public-key pins. The listener and worker are not implemented;
+setting `enabled: true` currently activates neither. Configuration acceptance does not
+verify certificates or establish a connection. Keep it disabled while B2–B6 are completed.
+
 ### `web`
 
 Named-account password authentication is always enabled; account roles, MFA, and sessions are

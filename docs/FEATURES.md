@@ -332,6 +332,9 @@ Maturity: **Two-node field-tested**.
 Evidence:
 
 - Field: [docs/FEDERATION-ACCEPTANCE-BACKLOG.md](FEDERATION-ACCEPTANCE-BACKLOG.md) — Recorded two-Outpost pairing, radio sync, recovery, mail, privacy, and rejection probes.
+- Automated: [tests/integration/test_federation_bulk_contract.py::test_ip_counter_two_leaves_delayed_radio_counter_one_valid](../tests/integration/test_federation_bulk_contract.py) — Isolated B1 ledger/codec: IP sequence two and restart preserve delayed radio sequence one; no radio queue work. This is not an operational HTTPS path.
+- Automated: [tests/integration/test_federation_bulk_contract.py::test_full_ledger_refuses_new_work_without_evicting_replay_state](../tests/integration/test_federation_bulk_contract.py) — Row and aggregate-byte admission limits preserve prior replay state and create no fallback radio work.
+- Automated: [tests/integration/test_federation_bulk_contract.py::test_forward_migration_preserves_every_existing_table_and_record](../tests/integration/test_federation_bulk_contract.py) — Schema-186 upgrade preserves existing synthetic records and passes integrity/foreign-key checks.
 - Automated: [tests/integration/test_federation_sync.py::test_manifest_keyset_pages_recover_long_outage_without_skips](../tests/integration/test_federation_sync.py) — Legacy keyset pagination control; this timestamp path is not clock-skew qualified.
 - Automated: [tests/integration/test_federation_review.py::test_two_reviewers_commit_only_one_decision_and_audit](../tests/integration/test_federation_review.py) — Concurrent human decisions check the reviewed version and commit exactly one local mutation/audit; this is not exactly-once network delivery.
 - Automated: [tests/integration/test_federation_review.py::test_review_audit_failure_rolls_back_domain_and_decision](../tests/integration/test_federation_review.py) — Failed or cancelled human audit rolls back imported domain content and the inbox decision together.
@@ -383,7 +386,7 @@ Evidence:
 Known limitations:
 
 - MQTT-only traffic/fallback and destructive quota exhaustion remain open.
-- Independent IP bulk synchronization is not implemented. #159 proposes optional direct peer HTTPS with separate replay/work state and no bulk fallback onto LoRa; deployment selection remains deferred while a local inter-station route is unconfirmed. See docs/BULK-BACKHAUL-DECISION-2026-09-09.md for the B1–B6 implementation scope.
+- Independent IP bulk synchronization is not operational. #159 B1 implements the bounded message/authentication contract, explicit endpoint validation and separate replay/work ledger (32 peers, 8 MiB retained messages, five attempts). Domain integration, HTTPS, scheduling and UI remain B2–B6; configuration creates no listener. Local-route selection remains deferred. See docs/BULK-PROTOCOL-V1.md.
 - Physical-transfer bundles are software/browser-tested, not field-media qualified: eight records per signed but unencrypted file, explicit public-text/label/location review, prepared mutually paired stations and trusted pins, 4,096 retained bundle receipts. Private data streams and node adoption are unsupported; old-backup rollback remains #145/#146.
 - Version-bound review is software-tested; deploy matching backend/assets. Handheld review is metadata-only, and automatic board imports remain a separate policy path.
 - Plain incident notes require incident_updates:1 plus reconciliation:2 on both peers, current parent storage for event sending and prior original-parent import for human note import. Oversized notes and multi-hop note relay are not qualified.

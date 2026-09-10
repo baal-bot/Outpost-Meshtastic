@@ -1,6 +1,41 @@
 # Session resume point — 2026-09-09 (America/New_York)
 
-## Current: #159 bulk synchronization design and coding scope
+## Current: #159 B1 protocol, trust and bounded storage
+
+The owner said "proceed" after the design deliverable, authorizing B1. The implementation
+adds `fed/bulk_format.py`, `fed/bulk_policy.py`, disabled-by-default `fed.bulk` configuration
+and forward migration 187. Read [the frozen contract](docs/BULK-PROTOCOL-V1.md).
+There is no bulk listener, worker, domain importer or advertised capability yet.
+The installed #156 release remains `a68baa8f0adb965afbef9b493e9ef8d91d2897fd`, schema 186;
+this foundation is not a reason to restart the working appliance.
+
+The new protocol binds current pairing, direction, operation and exact request/result bytes
+with HKDF/HMAC. Its SQL ledger is separate from radio counters and outbox: 32 peer states,
+8 MiB retained message cap, one pending request/last committed response per peer, five
+persistent attempts. A next contiguous request permits replacing the prior response.
+Same-key pauses/approval holds preserve replay history; key retirement purges unusable work.
+Transient busy/full/unavailable responses retain both the request and its attempt allowance.
+Current commissioned identity and restore fencing are checked in the owned transaction.
+Endpoint/TLS settings are bound into each row; changes require an explicit future B5 rebind
+and preserve existing counters. The maintenance policy protects this state from age pruning.
+
+Tests use synthetic identities/keys and real temporary stores/pairing methods. Golden
+wire vectors were independently constructed using stdlib HKDF/HMAC. Evidence logs are
+under `.data/bulk-contract-159-2026-09-09/`. This is contract evidence, not actual TLS,
+shared domain import, network capacity or physical qualification.
+Local verification passed 570 compatibility tests; codec/ledger coverage is 93%/96%,
+with new 90% per-file CI floors. Lint, strict mypy, pre-push repository gates,
+capability generation and the locked-runtime package smoke passed. Full GitHub CI is
+separate from these local Python 3.13 results; deployment has not been requested for B1.
+
+**Next is B2 shared transaction-owned ingress**, preserving RF/IP/file deduplication,
+live policy/quotas/parent/review and atomic domain/operation receipts. B3 owns actual TLS
+and endpoint/pin/clock revalidation; B4 owns scheduling/checkpoints and B5 operator controls.
+Only LoRa remains confirmed between stations; network deployment is deferred. Continue
+software work before physical tests. No issue closure/comment, radio configuration,
+operator attestation or appliance update is part of this B1 work.
+
+## Design baseline: #159 bulk synchronization
 
 The owner accepted the recommendation to handle #159 next, starting with a
 concrete design and implementation scope. Read

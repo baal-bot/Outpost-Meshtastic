@@ -54,6 +54,9 @@ required = {
     "outpost/commands/responsibility.py",
     "outpost/store/migrations/0183_incident_responsibility.sql",
     "outpost/store/migrations/0184_federation_bundles.sql",
+    "outpost/store/migrations/0187_federation_bulk_contract.sql",
+    "outpost/fed/bulk_format.py",
+    "outpost/fed/bulk_policy.py",
     "outpost/fed/bundle_format.py",
     "outpost/fed/bundles.py",
     "outpost/fed/adoption.py",
@@ -100,16 +103,19 @@ import sys
 from pathlib import Path
 
 import outpost
+from outpost.config import Config
 from outpost.store import Database
 from outpost.store.database import StoreError
 
 root = Path(sys.argv[1])
 assert Path(outpost.__file__).is_relative_to(root / "venv")
+assert Config().fed.bulk.enabled is False
 
 async def verify_owner():
     database = Database(root / "owned.db")
     await database.open()
     try:
+        assert (await database.read("SELECT count(*) FROM fed_bulk_state"))[0][0] == 0
         await database.write("CREATE TABLE package_probe(id TEXT PRIMARY KEY)")
         await database.write("INSERT INTO package_probe VALUES('retained')")
         async with database.transaction() as transaction:

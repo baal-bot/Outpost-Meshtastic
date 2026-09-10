@@ -1,6 +1,9 @@
 # Local bulk synchronization: #159 design decision
 
-Status: **design recommendation and implementation scope; transport not implemented**.
+Status: **B1 contract implemented; operational transport remains B2–B6**.
+The owner authorized B1 after the design review. The frozen wire, trust, configuration
+and storage contract is documented in [Bulk IP protocol v1](BULK-PROTOCOL-V1.md).
+The architecture below still defines the requirements for the complete transport.
 Reviewed source: `620a5dba41ab66af25cd181bfebcc0a2f02cf2f4`.
 The installed application remains `a68baa8f0adb965afbef9b493e9ef8d91d2897fd`.
 
@@ -83,7 +86,8 @@ rate. The configured cycle allowance of 20 items is not a promise to transmit
 
 ## Proposed transport contract
 
-Everything in this section is a requirement for the future implementation.
+This section defines requirements for the complete transport. B1 now supplies the
+message and storage primitives; shared domain ingress, TLS, scheduling and UI remain.
 
 ```mermaid
 flowchart LR
@@ -195,7 +199,7 @@ software evidence before publishing supported operating limits:
 | Throughput | Initial aggregate 64 KiB/s application limit per direction, with at most one message-sized burst; this is a throttle, not measured throughput. |
 | Timeouts | Three-second connect, ten-second inactivity and thirty-second absolute operation deadline; monotonic scheduling. |
 | Retry | Five attempts per persisted operation with capped exponential backoff and jitter; then a visible paused state and explicit retry. Restart must not replenish attempts. |
-| Durable work/receipts | Bound metadata and bytes globally and per peer. Define admission and safe compaction in B1; until compaction is proven, fail visibly at the cap rather than delete replay protection. |
+| Durable work/receipts | B1 fixes 32 peer states, one pending request and last response per peer, and an 8 MiB aggregate message cap. Only a subsequent contiguous request permits replacement of the prior response; same-key pauses retain replay history. Additional B4 queue/checkpoint metadata must also be finite. |
 | Resource denial | Pause optional bulk work promptly on configured resource denial; keep the writer lock short and preserve ordinary intake. |
 
 When IP fails, the bulk worker stops its attempt and persists `waiting_for_ip`,
@@ -214,8 +218,8 @@ network/location details out of public summaries. UI labels must not report
 
 ## Implementation sequence
 
-These are local task specifications, not newly published GitHub issues. Runtime
-implementation is a separately scoped next step after review of this design.
+These are local task specifications, not newly published GitHub issues. **B1 is
+implemented and B2 is next.** Runtime transport integration remains separately scoped.
 All tasks use synthetic stores and local software peers before later field checks.
 
 | Task | Concrete change and likely ownership | Required acceptance evidence |
@@ -237,7 +241,7 @@ purchase are outside these tasks.
 The current source audit and isolated probes establish implementation constraints,
 not a working IP transport. Existing exact-source CI for the installed application
 is [34402429284](https://github.com/baal-bot/Outpost-Meshtastic/actions/runs/34402429284).
-This design changes no application code or live service. The audit used temporary
+The original design commit changed no application code or live service. Its audit used temporary
 synthetic SQLite data, real replay/codec code and the repository airtime model;
 its [summary](benchmarks/BULK-BACKHAUL-DESIGN-2026-09-09.json) records source hashes.
 The matching counter behavior is also covered by

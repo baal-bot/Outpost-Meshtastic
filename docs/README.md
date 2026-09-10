@@ -36,6 +36,7 @@ detailed intended product design.
 - [Federation acceptance backlog](FEDERATION-ACCEPTANCE-BACKLOG.md)
 - [Phase 5 architecture notes](PHASE5-ARCHITECTURE.md)
 - [Local bulk synchronization design and implementation sequence — proposed](BULK-BACKHAUL-DECISION-2026-09-09.md)
+- [Bulk IP protocol v1 — implemented contract, transport pending](BULK-PROTOCOL-V1.md)
 
 ## Contributors
 
